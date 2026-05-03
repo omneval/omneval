@@ -42,95 +42,108 @@ A minimal deployment requires only a single `docker compose up`. A production Ku
 7. As a platform engineer, I want the ingest API to authenticate requests using project-scoped API keys, so that only authorized services can write traces to a project.
 8. As a platform engineer, I want to create service-scoped API keys that carry a service name label, so that I can audit which specific service or agent produced which traces.
 9. As a platform engineer, I want API keys to follow a predictable format (`ltn_proj_` and `ltn_svc_` prefixes), so that keys are easily identifiable in logs and secret scanners.
+10. As a platform engineer, I want the Ingest API to return `503 Service Unavailable` when Redis is unreachable, so that OTel SDK retry logic handles recovery automatically without losing spans.
+11. As a platform engineer, I want duplicate spans arriving from SDK retries to be deduplicated automatically, so that a transient 503 does not produce duplicate rows in the trace waterfall.
+12. As a developer building browser-based agents, I want CORS enabled on the Ingest API by default, so that I can send spans directly from the browser without a server-side proxy.
 
 ### Trace Visualization
 
-10. As an ML engineer, I want to view a paginated, filterable list of traces for my project, so that I can quickly find traces of interest.
-11. As an ML engineer, I want to filter traces by time range, model, span type, cost, duration, and score, so that I can narrow down to relevant traces efficiently.
-12. As an ML engineer, I want to view a waterfall visualization of a trace's full span tree, so that I can understand the sequence and nesting of operations within an agent run.
-13. As an ML engineer, I want to view the input and output of each span within a trace, so that I can inspect what was sent to and received from each model or tool.
-14. As an ML engineer, I want to see token usage and cost broken down per span, so that I can identify which parts of my agent are most expensive.
-15. As an ML engineer, I want to see which prompt version was used to generate each span, so that I can correlate trace quality with prompt changes.
-16. As an ML engineer, I want to see all scores attached to a span inline in the trace detail view, so that I can understand how evaluations judged that specific invocation.
-17. As an ML engineer, I want recent traces to appear in the UI within 30 seconds of ingestion, so that I can observe agent behavior in near real-time.
+13. As an ML engineer, I want to view a paginated, filterable list of traces for my project, so that I can quickly find traces of interest.
+14. As an ML engineer, I want to filter traces by time range, model, span type, cost, duration, and score, so that I can narrow down to relevant traces efficiently.
+15. As an ML engineer, I want stable pagination that does not drift as new spans are ingested, so that I can page through a long trace list without missing or repeating entries.
+16. As an ML engineer, I want to view a waterfall visualization of a trace's full span tree, so that I can understand the sequence and nesting of operations within an agent run.
+17. As an ML engineer, I want to view the input and output of each span within a trace, so that I can inspect what was sent to and received from each model or tool.
+18. As an ML engineer, I want to see token usage and cost broken down per span, so that I can identify which parts of my agent are most expensive.
+19. As an ML engineer, I want to see which prompt version was used to generate each span, so that I can correlate trace quality with prompt changes.
+20. As an ML engineer, I want to see all scores attached to a span inline in the trace detail view, so that I can understand how evaluations judged that specific invocation.
+21. As an ML engineer, I want recent traces to appear in the UI within 30 seconds of ingestion, so that I can observe agent behavior in near real-time.
 
 ### Dashboard and Analytics
 
-18. As an ML engineer, I want a dashboard showing cost over time broken down by model, so that I can track spending trends and identify regressions.
-19. As an ML engineer, I want to see token usage trends over time, so that I can understand how my agents' consumption is growing.
-20. As an ML engineer, I want to see latency percentiles (p50, p95, p99) per model and span type, so that I can identify performance bottlenecks.
-21. As an ML engineer, I want to see error rates over time, so that I can detect degradations in model reliability.
-22. As an ML engineer, I want to see score distributions over time per evaluation name, so that I can track quality trends across deployments.
-23. As a platform engineer, I want Lantern to expose a Prometheus `/metrics` endpoint, so that I can scrape operational metrics into my existing Grafana stack.
-24. As a platform engineer, I want Prometheus metrics scoped per project, so that I can build per-team cost and quality dashboards.
-25. As a platform engineer, I want metrics covering ingest queue depth, Writer flush health, S3 sync timestamps, and DuckDB file size, so that I can alert on Lantern's own operational health.
+22. As an ML engineer, I want a dashboard showing cost over time broken down by model, so that I can track spending trends and identify regressions.
+23. As an ML engineer, I want to see token usage trends over time, so that I can understand how my agents' consumption is growing.
+24. As an ML engineer, I want to see latency percentiles (p50, p95, p99) per model and span type, so that I can identify performance bottlenecks.
+25. As an ML engineer, I want to see error rates over time, so that I can detect degradations in model reliability.
+26. As an ML engineer, I want to see score distributions over time per evaluation name, so that I can track quality trends across deployments.
+27. As a platform engineer, I want Lantern to expose a Prometheus `/metrics` endpoint, so that I can scrape operational metrics into my existing Grafana stack.
+28. As a platform engineer, I want Prometheus metrics scoped per project, so that I can build per-team cost and quality dashboards.
+29. As a platform engineer, I want metrics covering ingest queue depth, Writer flush health, S3 sync timestamps, and DuckDB file size, so that I can alert on Lantern's own operational health.
 
 ### Prompt Registry
 
-26. As an ML engineer, I want to store prompt templates in Lantern's prompt registry with versioning, so that I have a single source of truth for all prompts used by my agents and judges.
-27. As an ML engineer, I want to assign labels (`production`, `staging`, `dev`) to specific prompt versions, so that I can promote prompts through environments without changing code.
-28. As a backend engineer, I want my production agent to fetch its prompt at runtime via `GET /api/v1/prompts/{name}?label=production`, so that prompt changes can be deployed without redeploying the agent.
-29. As an ML engineer, I want to view the full version history of a prompt, so that I can understand how it has evolved over time.
-30. As an ML engineer, I want to diff two prompt versions side by side, so that I can understand exactly what changed between versions.
-31. As an ML engineer, I want to run a prompt version in a playground against a live model, so that I can evaluate its output before promoting it to production.
-32. As an engineer, I want prompt versions to be immutable once created, so that I can trust that a version number always refers to the exact same template.
-33. As an engineer, I want prompt templates to support variable interpolation using `{{variable}}` syntax, so that I can reuse templates with different inputs.
-34. As an engineer, I want prompt versions to store model configuration (model name, temperature, max tokens) alongside the template, so that the full generation config is captured per version.
+30. As an ML engineer, I want to store prompt templates in Lantern's prompt registry with versioning, so that I have a single source of truth for all prompts used by my agents and judges.
+31. As an ML engineer, I want to assign labels (`production`, `staging`, `dev`) to specific prompt versions, so that I can promote prompts through environments without changing code.
+32. As a backend engineer, I want my production agent to fetch its prompt at runtime via `GET /api/v1/prompts/{name}?label=production`, so that prompt changes can be deployed without redeploying the agent.
+33. As an ML engineer, I want prompt label reassignments to be visible to production agents within 30 seconds, so that I can hot-swap prompts quickly during incidents.
+34. As an ML engineer, I want to view the full version history of a prompt, so that I can understand how it has evolved over time.
+35. As an ML engineer, I want to diff two prompt versions side by side, so that I can understand exactly what changed between versions.
+36. As an engineer, I want prompt versions to be immutable once created, so that I can trust that a version number always refers to the exact same template.
+37. As an engineer, I want prompt templates to support variable interpolation using `{{variable}}` syntax, so that I can reuse templates with different inputs.
+38. As an engineer, I want prompt versions to store model configuration (model name, temperature, max tokens) alongside the template, so that the full generation config is captured per version.
 
 ### Evaluation — LLM-as-a-Judge
 
-35. As an ML engineer, I want to define evaluation rules in the UI that specify a judge model, a judge prompt template, and a scoring rubric, so that non-engineers can configure evaluations without writing code.
-36. As an engineer, I want to define evaluation rules in code or config files, so that eval configurations are version-controlled alongside my application.
-37. As an ML engineer, I want evaluation rules to trigger automatically on every new trace that matches a filter condition, so that I get continuous quality signals without manual intervention.
-38. As an ML engineer, I want evaluation rules to support sampling (e.g. score 10% of traces), so that I can control evaluation cost for high-volume projects.
-39. As an ML engineer, I want eval scores to appear on traces within 30 seconds of the trace being ingested, so that the feedback loop is tight enough to be useful.
-40. As an ML engineer, I want each score to include the judge's reasoning alongside the numeric value, so that I can understand why a trace received a particular score.
-41. As an ML engineer, I want scores to record which judge model and prompt version produced them, so that I can audit and reproduce evaluation results.
-42. As an ML engineer, I want to write scores manually via the REST API, so that I can integrate human feedback or rule-based scoring alongside LLM judges.
-43. As an ML engineer, I want to see score trends over time per evaluation name in the dashboard, so that I can track quality improvements from prompt changes.
+39. As an ML engineer, I want to define evaluation rules that specify a judge model, a judge prompt template, a filter, and a sample rate, so that I can configure automatic evaluations without writing code.
+40. As an ML engineer, I want evaluation rules to trigger automatically on every new span that matches a filter condition, so that I get continuous quality signals without manual intervention.
+41. As an ML engineer, I want evaluation rules to support sampling (e.g. score 10% of matching spans), so that I can control evaluation cost for high-volume projects.
+42. As an ML engineer, I want new evaluation rules to start firing within one minute of creation, so that I do not need to restart any service to activate them.
+43. As an ML engineer, I want eval scores to appear on traces within 30 seconds of the span being ingested, so that the feedback loop is tight enough to be useful.
+44. As an ML engineer, I want each score to include the judge's reasoning alongside the numeric value, so that I can understand why a span received a particular score.
+45. As an ML engineer, I want scores to record which judge model and prompt version produced them, so that I can audit and reproduce evaluation results.
+46. As an ML engineer, I want to write scores manually via the REST API, so that I can integrate human feedback or rule-based scoring alongside LLM judges.
+47. As an ML engineer, I want to see score trends over time per evaluation name in the dashboard, so that I can track quality improvements from prompt changes.
+48. As a platform engineer, I want Eval Workers to retry score write-back with exponential backoff for up to 5 minutes, so that transient Writer Service restarts do not cause scores to be silently lost.
 
 ### Datasets
 
-44. As an ML engineer, I want to create a dataset by curating spans from the trace explorer, so that I can build evaluation datasets from real production traffic.
-45. As an ML engineer, I want to upload a manually curated dataset of input/expected output pairs, so that I can use golden datasets created outside of production traffic.
-46. As an ML engineer, I want to browse dataset items and see their source span, input, expected output, and any scores, so that I can inspect and curate dataset quality.
-47. As an ML engineer, I want to run a dataset against an evaluation rule, so that I can score a set of examples in batch.
-48. As an ML engineer, I want to run a dataset through a prompt version in the playground, so that I can compare prompt versions against a held-out evaluation set.
-49. As an ML engineer, I want to view dataset run history with aggregate scores, so that I can compare runs across prompt versions and judge configurations.
-50. As an ML engineer, I want cold dataset items (older than 48 hours) to remain queryable for dataset building, even if they are slower to retrieve, so that I can curate datasets from historical traffic.
+49. As an ML engineer, I want to create a dataset by curating spans from the trace explorer, so that I can build evaluation datasets from real production traffic.
+50. As an ML engineer, I want to upload a manually curated dataset of input/expected output pairs, so that I can use golden datasets created outside of production traffic.
+51. As an ML engineer, I want to browse dataset items and see their source span, input, expected output, and any scores, so that I can inspect and curate dataset quality.
+52. As an ML engineer, I want to run a dataset against an evaluation rule, so that I can score a set of examples in batch.
+53. As an ML engineer, I want to view dataset run history with aggregate scores, so that I can compare runs across prompt versions and judge configurations.
+54. As an ML engineer, I want cold dataset items (older than the hot window) to remain queryable for dataset building, even if they are slower to retrieve, so that I can curate datasets from historical traffic.
 
 ### Deployment and Operations
 
-51. As a platform engineer, I want to run Lantern with a single `docker compose up` command for a proof-of-concept deployment, so that I can evaluate it without provisioning cloud infrastructure.
-52. As a platform engineer, I want the demo deployment to use SQLite and MinIO, so that there are zero external dependencies for evaluation.
-53. As a platform engineer, I want a production Helm chart for Kubernetes deployment, so that I can deploy Lantern using standard GitOps workflows.
-54. As a platform engineer, I want a Kustomize base configuration, so that I can manage Lantern deployments with Flux CD or ArgoCD.
-55. As a platform engineer, I want the Query API pods to be fully stateless, so that they can be scheduled on any node and scaled horizontally without volume constraints.
-56. As a platform engineer, I want DuckDB snapshots synced to S3 every 30 seconds, so that Query API replicas always serve data no older than 30 seconds.
-57. As a platform engineer, I want trace data older than 48 hours automatically flushed to S3 as Parquet files partitioned by project and date, so that the hot DuckDB file stays small and historical data is retained cheaply.
-58. As a platform engineer, I want to use any S3-compatible storage (AWS S3, GCS, Azure Blob, MinIO), so that I am not locked into a specific cloud provider.
-59. As a platform engineer, I want the Writer Service to recover automatically after a crash by draining Redis, so that no traces are lost during Writer restarts.
-60. As a platform engineer, I want Lantern's configuration to be driven by a YAML file with environment variable overrides, so that I can manage base config in version control and inject secrets via Kubernetes Secrets.
+55. As a platform engineer, I want to run Lantern with a single `docker compose up` command for a proof-of-concept deployment, so that I can evaluate it without provisioning cloud infrastructure.
+56. As a platform engineer, I want the demo deployment to use SQLite and MinIO, so that there are zero external dependencies for evaluation.
+57. As a platform engineer, I want a production Helm chart for Kubernetes deployment, so that I can deploy Lantern using standard GitOps workflows.
+58. As a platform engineer, I want a Kustomize base configuration, so that I can manage Lantern deployments with Flux CD or ArgoCD.
+59. As a platform engineer, I want the Query API pods to be fully stateless, so that they can be scheduled on any node and scaled horizontally without volume constraints.
+60. As a platform engineer, I want DuckDB snapshots synced to S3 at a configurable interval (default 30 seconds), so that Query API replicas always serve data within one sync interval of the latest writes.
+61. As a platform engineer, I want trace data older than the hot window automatically flushed to S3 as Parquet files partitioned by project and date, so that the hot DuckDB file stays small and historical data is retained cheaply.
+62. As a platform engineer, I want spans and their scores to be archived together in the same partition sweep, so that there is never a state where cold spans exist without their cold scores.
+63. As a platform engineer, I want to use any S3-compatible storage (AWS S3, GCS, Azure Blob, MinIO), so that I am not locked into a specific cloud provider.
+64. As a platform engineer, I want the Writer Service to recover automatically after a crash by draining Redis, so that no traces are lost during Writer restarts.
+65. As a platform engineer, I want Lantern's configuration to be driven by a YAML file with environment variable overrides, so that I can manage base config in version control and inject secrets via Kubernetes Secrets.
+66. As a platform engineer, I want Kubernetes liveness (`/healthz`) and readiness (`/readyz`) probes on every service, so that unhealthy pods are automatically restarted or removed from load balancer rotation.
+67. As a platform engineer, I want all services to handle `SIGTERM` gracefully, finishing in-flight requests and final flushes before exiting, so that rolling deployments do not drop data.
+68. As a platform engineer, I want the hot window threshold to be configurable, so that I can tune DuckDB file size versus cold storage access frequency for my deployment's query patterns.
 
 ### Multi-tenancy and Access Control
 
-61. As an organization admin, I want to create multiple projects within my organization, so that I can separate traces from different applications or teams.
-62. As an organization admin, I want to manage team members and their access to projects, so that I can control who can view and configure each project.
-63. As a project admin, I want to create and revoke API keys for my project, so that I can manage service access without organization-level privileges.
-64. As a project admin, I want to see which service name label each API key is associated with, so that I can audit ingestion sources.
+69. As an organization admin, I want to bootstrap the first admin user via environment variables on initial startup, so that I can deploy Lantern in automated environments without manual setup steps.
+70. As an organization admin, I want to invite team members by generating a one-time temporary password, so that I can onboard users without an email sending infrastructure.
+71. As a user, I want to change my own password after using a temporary invite password, so that I can rotate credentials without contacting an admin.
+72. As an organization admin, I want to create multiple projects within my organization, so that I can separate traces from different applications or teams.
+73. As an organization admin, I want to manage team members and their access to projects, so that I can control who can view and configure each project.
+74. As a project admin, I want to create and revoke API keys for my project, so that I can manage service access without organization-level privileges.
+75. As a project admin, I want to see which service name label each API key is associated with, so that I can audit ingestion sources.
 
 ### SDK and Developer Experience
 
-65. As a Python developer, I want a `@lantern.trace` decorator, so that I can instrument my agent functions with two lines of code.
-66. As a Python developer, I want the Lantern Python SDK to configure an OTel exporter pointing at Lantern automatically, so that I can use it alongside existing OTel instrumentation.
-67. As a TypeScript developer, I want a TypeScript SDK with equivalent tracing primitives, so that I can instrument Node.js agents.
-68. As a developer, I want prompt fetch to be cached client-side in the SDK, so that fetching a production prompt does not add latency to every agent invocation.
+76. As a Go developer, I want a Go SDK with `StartSpan`/`EndSpan` helpers and context propagation, so that I can instrument Go agents with minimal boilerplate.
+77. As a Python developer, I want a `@lantern.trace` decorator, so that I can instrument my agent functions with two lines of code.
+78. As a Python developer, I want the Lantern Python SDK to configure an OTel exporter pointing at Lantern automatically, so that I can use it alongside existing OTel instrumentation.
+79. As a developer, I want prompt fetch to be cached client-side in the SDK, so that fetching a production prompt does not add latency to every agent invocation.
+80. As a developer, I want to write scores manually from the SDK, so that I can submit human feedback or rule-based scores programmatically.
 
 ### Cost Tracking
 
-69. As an ML engineer, I want Lantern to automatically compute the USD cost of each LLM span from the model name and token counts, so that I do not have to instrument cost tracking myself.
-70. As a platform engineer, I want Lantern to pull model pricing from LiteLLM's pricing database at startup, so that cost calculations are kept current without manual updates.
-71. As a platform engineer, I want to override pricing for specific models in the Lantern config, so that I can account for fine-tuned models or enterprise pricing agreements.
+81. As an ML engineer, I want Lantern to automatically compute the USD cost of each LLM span from the model name and token counts, so that I do not have to instrument cost tracking myself.
+82. As a platform engineer, I want Lantern to pull model pricing from LiteLLM's pricing database at startup, so that cost calculations are kept current without manual updates.
+83. As a platform engineer, I want Lantern to fall back to a bundled pricing snapshot if the LiteLLM fetch fails, so that the Writer Service starts successfully in air-gapped environments.
+84. As a platform engineer, I want to override pricing for specific models in the Lantern config, so that I can account for fine-tuned models or enterprise pricing agreements.
 
 ---
 
@@ -140,70 +153,97 @@ A minimal deployment requires only a single `docker compose up`. A production Ku
 
 Lantern is composed of five independently deployable services:
 
-- **Ingest API** — accepts OTLP (protobuf and JSON) and native REST trace payloads, validates API keys against the metadata store, and enqueues span batches to a Redis ingest queue. Written in Go.
-- **Writer Service** — single-replica service that drains the Redis ingest queue, batches writes to a local DuckDB file, syncs DuckDB snapshots to S3 every 30 seconds, flushes aged partitions (>48 hours) to S3 as Hive-partitioned Parquet files every 30 minutes, and enqueues eval jobs to a Redis eval queue. Written in Go.
-- **Query API** — stateless read service that pulls the latest DuckDB snapshot from S3 on startup and polls for updates every 30 seconds, queries the local snapshot for hot data, and queries S3 Parquet via DuckDB's httpfs extension for cold data. Exposes REST, analytics DSL, and Prometheus metrics endpoints. Written in Go.
-- **Eval Workers** — horizontally scalable worker pool that drains the Redis eval queue, executes LLM-as-a-Judge evaluations, and writes scores back to the Writer Service via its REST API. Written in Go.
-- **UI** — static single-page application built with Vite, React, shadcn/ui, and Recharts. Served via Nginx. Communicates exclusively with the Query API.
+- **Ingest API** — accepts OTLP (protobuf and JSON) and native REST span payloads, validates API keys, translates OTLP to the internal domain format, and enqueues span batches to a Redis ingest queue. CORS enabled for browser SDK use. Written in Go.
+- **Writer Service** — single-replica StatefulSet that drains the Redis ingest queue, batches writes to a local DuckDB file on a PVC, syncs DuckDB snapshots to S3, flushes aged partitions to S3 as Hive-partitioned Parquet files, and enqueues eval jobs to a Redis eval queue. Also exposes `POST /internal/v1/scores` for Eval Worker score write-back. Written in Go.
+- **Query API** — stateless read service that downloads the latest DuckDB snapshot from S3 on startup and polls S3 for updates. Queries combine the hot snapshot and cold Parquet via a DuckDB UNION — always, regardless of time range. Serves the REST API, analytics DSL, prompt registry, auth, and the embedded React SPA. Written in Go.
+- **Eval Workers** — horizontally scalable workers that drain the Redis eval queue, call a configurable OpenAI-compatible judge LLM, and write scores back to the Writer Service via REST with exponential backoff. Written in Go.
+- **UI** — React SPA built with Vite, shadcn/ui, and Recharts. Compiled to static assets and embedded directly into the Query API binary via Go's `embed.FS`. Served by the Query API — no separate Nginx process.
 
 ### Storage Architecture
 
-- **Hot store:** DuckDB file owned exclusively by the Writer Service in read-write mode. Query API opens the same snapshot (pulled from S3) in read-only mode. Single-writer guarantee maintained by Writer Service's single-replica constraint.
-- **Cold store:** Hive-partitioned Parquet files on S3 at `s3://bucket/archive/project_id={id}/date={date}/`. Queried via DuckDB's httpfs extension with partition pruning.
-- **Snapshot store:** Live DuckDB file synced to `s3://bucket/snapshots/traces.duckdb` every 30 seconds. Query API pods pull this on startup and poll for updates.
-- **Metadata store:** Postgres (production) or SQLite (demo) for all transactional, relational data. Abstracted behind a `MetadataStore` interface with implementations for each dialect. Migrations managed with golang-migrate using separate SQL files per dialect.
+- **Hot store:** DuckDB file on the Writer Service's StatefulSet PVC. Owned exclusively in read-write mode by the Writer. Schema: `PRIMARY KEY (trace_id, span_id)` on spans for idempotent upsert; ART index on `(project_id, start_time)` for the dominant filter pattern; `input`/`output` columns as native DuckDB JSON type. The Writer syncs a snapshot to S3 solely for Query API consumption — Query API pods are stateless and never mount the PVC.
+- **Cold store:** Hive-partitioned Parquet files on S3 at `s3://bucket/archive/project_id={id}/date={date}/spans/` and `.../scores/`. Both partitioned by the span's `StartTime` date so scores always co-locate with their span. Written via DuckDB's `COPY ... TO 's3://...' (FORMAT PARQUET)` using the `httpfs` extension — no separate Parquet library.
+- **Snapshot store:** Live DuckDB file synced to S3 by the Writer on a configurable `writer.sync_interval` (default `30s`). Query API pods download on startup to a configurable local path (`query.duckdb_path`, default `/tmp/lantern-snapshot.duckdb`) and poll S3 on the same interval for updates.
+- **Metadata store:** Postgres (production) or SQLite (demo) for all transactional data: orgs, projects, users, API keys, prompt versions, eval rules, datasets. Abstracted behind a `MetadataStore` interface. Migrations managed with golang-migrate, with separate SQL files per dialect.
 
-### Core Domain Model
+### Hot/Cold Query Strategy
 
-The central fact table is `spans` — a wide, denormalized columnar table. High-cardinality analytical fields (model, token counts, cost, duration) are extracted as typed columns. Arbitrary OTel attributes are stored in a JSON overflow column. Key tables:
+The Query API always issues a UNION of the hot DuckDB snapshot and `read_parquet(...)` with `hive_partitioning=true` against cold S3 Parquet, regardless of the query's time range. DuckDB's Hive partition pruning restricts S3 scans to the relevant date partitions. No manifest table. The analytics DSL compiler and span list handler never branch on time range to choose between hot-only, cold-only, or UNION paths.
 
-- `spans` — primary fact table in DuckDB (hot) and Parquet (cold)
-- `scores` — eval scores keyed to span and trace IDs, stored in DuckDB
-- `prompt_versions` — immutable versioned prompt templates with label assignments, stored in metadata store
-- `datasets`, `dataset_items`, `dataset_runs`, `dataset_run_items` — dataset and eval run metadata, stored in metadata store
-- `eval_rules` — evaluation trigger configurations, stored in metadata store
-- `organizations`, `projects`, `users`, `api_keys` — access control, stored in metadata store
+### OTLP Translation
 
-### OTel Compatibility
+OTLP translation is a two-step pipeline in the Ingest API: (1) decode wire format (protobuf or JSON) into an intermediate `[]ResourceSpans` struct; (2) translate `ResourceSpans` into `[]*domain.Span`. Both steps happen in the Ingest API before the Redis enqueue, so the queue payload is always in the internal domain format regardless of input encoding. The translator is a pure function with no external dependencies. Key attribute mappings: `gen_ai.request.model`→`Model`; `gen_ai.usage.input_tokens`→`InputTokens`; `gen_ai.usage.output_tokens`→`OutputTokens`; `gen_ai.prompt.N.{role,content}`→`Input`; `gen_ai.completion.N.{role,content}`→`Output`. `Kind` is derived from attribute presence. All unmapped attributes land in the overflow `Attributes` map.
 
-The Ingest API acts as an OTel Collector replacement. It accepts `POST /v1/traces` with `ExportTraceServiceRequest` payloads in both protobuf and JSON encoding. A translation layer maps OTel GenAI semantic convention attributes (`gen_ai.request.model`, `gen_ai.usage.input_tokens`, etc.) to Lantern's internal span model. Remaining attributes are stored in the JSON overflow column. The native REST API (`POST /api/v1/spans`) accepts Lantern's internal span format directly for SDK use.
+### Ingest Durability
 
-### Write Buffer and Durability
+The native REST endpoint (`POST /api/v1/spans`) returns `202 Accepted` — the span is enqueued, not yet written. The OTLP endpoint (`POST /v1/traces`) returns a standard empty `ExportTraceServiceResponse`. If Redis is unreachable, both endpoints return `503 Service Unavailable` immediately — OTel SDK retry handles recovery. Duplicate span arrivals are handled by `INSERT OR REPLACE` on the `PRIMARY KEY (trace_id, span_id)` — idempotent, no duplicate rows.
 
-Redis serves as the durability buffer between the Ingest API and the Writer Service. If the Writer Service crashes, traces accumulate in Redis and are drained when the Writer recovers. Redis is also used as the eval job queue with separate queue keys for ingest and eval workloads. A single Redis instance serves both queues.
+### Queues
 
-### Authentication
+Ingest queue: Redis List at `lantern:ingest:spans`. Ingest API `RPUSH`es one JSON-encoded `[]*domain.Span` batch per request. Writer `BLPOP`s batches. Eval queue: Redis List at `lantern:eval:jobs`. Writer `RPUSH`es one `domain.EvalJob` per matching span after writing. Eval Workers `BLPOP` jobs. Both queues share a single Redis instance.
 
-API keys are validated on every ingest request. Project-scoped keys (`ltn_proj_{random}`) grant write access to all resources within a project. Service-scoped keys (`ltn_svc_{random}`) are also project-scoped but carry a `service_name` label that is attached to every span they produce, enabling per-service audit trails. Key validation is performed against the metadata store with an in-memory cache to minimize latency on the ingest hot path.
+### Span List Pagination
 
-### Configuration
+Keyset pagination on `(start_time DESC, span_id ASC)`. Cursor is a base64-encoded JSON blob of the last row's `start_time` and `span_id`. Stable under concurrent ingestion — no offset drift. The ART index on `(project_id, start_time)` covers the cursor predicate.
 
-All services are configured via Viper, which reads a `lantern.yaml` file with environment variable overrides. Docker Compose ships with a default `lantern.yaml`. Kubernetes deployments use ConfigMaps for base config and Secrets for sensitive values injected as environment variables.
+### Score Write-back
+
+Eval Workers write scores to the Writer Service via `POST /internal/v1/scores` — an internal-only endpoint not exposed externally. Workers retry with exponential backoff for up to 5 minutes on failure. Scores that exhaust retries are logged at `Error` and dropped — losing an occasional score is acceptable; blocking the eval pipeline is not.
+
+### Authentication and Session
+
+API key validation uses a `CachingValidator` with a 60-second TTL — a revoked key may be accepted for up to 60 seconds after revocation. Session cookies: `lantern_session`, `HttpOnly`, `Secure` (disable via `auth.secure_cookie: false` for local dev), `SameSite=Lax`, TTL via `auth.session_ttl` (default `168h`). Admin bootstrap: if no users exist at startup and `LANTERN_AUTH_ADMIN_EMAIL` / `LANTERN_AUTH_ADMIN_PASSWORD` are set, the Query API creates the first admin user automatically. User invites generate a one-time temporary password shown to the inviter — no email infrastructure required.
+
+### Prompt Cache
+
+Two independent in-process caches in the Query API. Version lookups use an LRU with no TTL (versions are immutable). Label lookups use a 30-second TTL matching the snapshot staleness window.
+
+### CORS
+
+CORS is enabled on the Ingest API only. Configurable via `ingest.cors_allowed_origins` (default `*`). Allowed methods: `POST, OPTIONS`. Allowed headers: `Content-Type, Authorization`. Preflight `OPTIONS` returns `204`.
+
+### Graceful Shutdown
+
+All services listen for `SIGTERM` and `SIGINT`. On signal: stop accepting connections via `http.Server.Shutdown(ctx)`; drain in-flight HTTP requests within a 30-second timeout. Additional teardown: Writer finishes the current DuckDB write batch and performs a final snapshot sync before exiting; Eval Workers use a 120-second drain to finish any in-progress LLM call and do not `BLPOP` a new job after signal.
+
+### Health and Readiness Probes
+
+All services expose `GET /healthz` (liveness — `200` if process is alive, no external checks) and `GET /readyz` (readiness — `200` only when ready, `503` otherwise). Readiness gates: Ingest API requires Redis `PING`; Writer requires DuckDB open and writable plus Redis `PING`; Query API requires snapshot file on disk and metadata store reachable; Eval Workers require Redis `PING`.
 
 ### Pricing
 
-At startup, the Writer Service fetches LiteLLM's model pricing JSON from its published URL and caches it in memory. Cost per span is computed from model name and token counts using this table. Users can override specific model prices in `lantern.yaml` to account for fine-tuned models or enterprise pricing.
+Writer Service fetches LiteLLM's `model_prices_and_context_window.json` at startup; falls back to a bundled binary-embedded snapshot on fetch failure. `CostUSD` is pre-computed at write time — query-time aggregations need no re-computation. Unknown models store `CostUSD = 0`. Config overrides expressed in USD per million tokens, converted to per-token at load time.
 
-### Prompt Fetch Caching
+### Disaster Recovery
 
-The `GET /api/v1/prompts/{name}` endpoint returns prompt versions by label or version number. Prompt versions are immutable once created, making them safe to cache aggressively. The Query API caches prompt responses in memory with a short TTL. The Python and TypeScript SDKs implement client-side caching so that prompt fetches do not add latency to production agent invocations.
+Cold Parquet on S3 is the DR story in Phase 1. A PVC loss is bounded to the hot window (default 2 days). No additional PVC backup in Phase 1. Future: Kubernetes `VolumeSnapshot` support for point-in-time hot store backups.
 
-### Deployment Profiles
+### Logging
 
-- **Demo:** `docker compose up` with SQLite metadata store, local DuckDB file, and MinIO for S3-compatible object storage. Zero cloud dependencies.
-- **Production:** Separate Kubernetes services for each component. Postgres via CloudNativePG operator. Redis via standard K8s deployment. DuckDB snapshot and Parquet archive on S3-compatible storage. Helm chart and Kustomize base provided.
+All Go services use `log/slog` (stdlib) for structured logging: `Info` for normal operations, `Warn` for recoverable anomalies, `Error` for failures needing attention. Every log call includes relevant context as key-value pairs. No `log.Printf` or `fmt.Println` in production code.
 
-### Metadata Store Abstraction
+### Configuration
 
-All services that access the metadata store do so through a `MetadataStore` interface. Concrete implementations exist for Postgres and SQLite. The active implementation is selected at startup based on the configured `database.driver` value. This allows Docker Compose and Kubernetes deployments to share identical service code with different database backends.
+All services are configured via Viper: `lantern.yaml` with environment variable overrides (e.g. `LANTERN_AUTH_ADMIN_EMAIL`). Docker Compose ships a default `lantern.yaml`. Kubernetes deployments use ConfigMaps for base config and Secrets for sensitive values.
 
-### Prometheus Metrics
+### Phase 1 Implementation Order
 
-The Query API exposes a `/metrics` endpoint using `prometheus/client_golang`. Metrics are labeled by `project_id` where applicable, with a config option to disable per-project labels for deployments with high project cardinality. Key metric families: ingest counters, token and cost counters, score histograms, eval latency histograms, Writer flush and S3 sync gauges, DuckDB file size gauge.
+Vertical TDD slices, each with a failing test before any implementation:
 
-### Analytics Query DSL
+1. Metadata Store + Config
+2. Ingest API → Redis (REST span ingest, enqueue)
+3. Writer Service → DuckDB (dequeue, write, snapshot sync)
+4. Query API → span list + trace waterfall
+5. Auth (login, session cookie, admin bootstrap)
+6. React UI shell + `/traces`
+7. Analytics DSL + `/dashboard`
+8. OTLP ingest (proto+JSON decode, two-step translation)
+9. Eval pipeline (rule cache, eval queue, Eval Workers, score write-back)
+10. Prompt Registry (version create, label assign, caching client)
+11. SDK (Go + Python)
+12. Archival sweep (hot→cold Parquet flush via DuckDB httpfs)
 
-The Query API exposes `POST /api/v1/analytics/spans` which accepts a structured query DSL (filters, aggregations, group-by, order-by, limit). This is compiled server-side into parameterized DuckDB SQL with `project_id` always enforced from the authenticated session. Raw SQL is never accepted from clients.
+Slices 8–12 are independent of each other once slices 1–4 are done.
 
 ---
 
@@ -211,55 +251,62 @@ The Query API exposes `POST /api/v1/analytics/spans` which accepts a structured 
 
 ### What Makes a Good Test
 
-Tests should verify external behavior through public interfaces, not implementation details. A good test for Lantern asserts what a service returns or what it writes given a specific input — not how it internally transforms data. Tests should be runnable without external dependencies wherever possible by using interfaces and fakes rather than real Redis, DuckDB, or S3 connections.
+Tests verify external behavior through public interfaces, not implementation details. A good test asserts what a service returns or writes given a specific input — not how it internally transforms data. Hand-written fakes (named `Fake<InterfaceName>`) are used throughout; no mock-generation tools. Integration tests that require a real database use `testcontainers-go` to spin up instances in Docker.
 
 ### Modules to Test
 
-**MetadataStore interface implementations (Postgres and SQLite)**
-Both implementations must be tested against the same behavioral test suite by parameterizing tests over the interface. Tests verify that CRUD operations, API key validation, prompt version immutability, and migration application behave identically across both dialects. These are integration tests run against real database instances spun up in Docker.
+**MetadataStore implementations (Postgres and SQLite)**
+Both implementations run against the same behavioral test suite, parameterized over the interface. Covers CRUD, API key validation, prompt version immutability, and migration application. Integration tests via `testcontainers-go`.
 
 **OTLP translation layer**
-The translator that maps `ExportTraceServiceRequest` protobuf payloads to Lantern's internal span model is a pure function with no external dependencies. It should have exhaustive unit tests covering GenAI semantic convention attribute extraction, span type derivation, JSON overflow behavior for unknown attributes, and handling of malformed or incomplete payloads.
+Pure function, no external dependencies. Exhaustive unit tests: GenAI attribute extraction, span kind derivation, JSON overflow for unknown attributes, malformed/incomplete payloads, both proto and JSON input encodings.
 
 **Analytics DSL compiler**
-The component that compiles the analytics query DSL into parameterized DuckDB SQL is a pure function. Unit tests should verify that all filter operators, aggregation functions, group-by clauses, and ordering produce correct SQL, and that `project_id` is always injected regardless of client input.
+Pure function. Unit tests verify all filter operators, aggregation functions (including percentile compilation), group-by truncation, order-by, limit, `project_id` injection, and that the output is always a hot+cold UNION.
+
+**Ingest queue enqueue/dequeue**
+Unit tests with a fake Redis client. Covers batch serialization, error propagation, and idempotent upsert behavior.
 
 **Writer Service ingest pipeline**
-The pipeline from Redis queue drain through DuckDB write should be tested with a fake Redis client and an in-memory DuckDB instance. Tests verify batch sizing, error handling on malformed spans, and that the DuckDB schema is correctly populated.
+Fake Redis client and real in-memory DuckDB instance. Tests verify batch sizing, error handling on malformed spans, schema correctness, idempotent upsert on duplicate `(trace_id, span_id)`, and cost pre-computation.
 
 **S3 sync and Parquet flush**
-The snapshot sync and hot-to-cold flush logic should be tested against a fake S3 interface. Tests verify sync frequency, partition naming conventions, that aged data is correctly identified and flushed, and that the hot DuckDB file is pruned after successful flush.
+Fake S3 interface. Tests verify sync frequency, partition naming, that spans and scores flush atomically, that aged data is correctly identified, and that DuckDB is pruned only after successful Parquet write.
 
 **Eval Worker judge pipeline**
-The LLM judge execution pipeline should be tested with a fake LLM client. Tests verify that judge prompt templates are correctly rendered with span data, that scores are correctly structured and written back, and that sampling rules are respected.
+Fake LLM client. Tests verify judge prompt rendering, score structuring, sampling rule application, and retry/backoff on score write-back failure.
 
 **API key validation and caching**
-The auth middleware should be tested as a unit with a fake MetadataStore. Tests verify that valid project and service keys are accepted, invalid keys are rejected, and that the in-memory cache correctly serves repeated validations without hitting the store.
+Unit tests with a `FakeMetadataStore`. Covers valid project and service keys, invalid key rejection, cache hit behavior, and the 60-second revocation window.
 
-**Prometheus metrics**
-Tests verify that ingesting a known set of spans produces the expected metric counter and histogram values on the `/metrics` endpoint.
+**Span list cursor**
+Unit tests verify cursor encoding/decoding, stable ordering under concurrent inserts, and correct page boundaries.
 
 ---
 
 ## Out of Scope
 
-- **Writer Service high availability / active-passive failover** — the Writer Service runs as a single replica. Redis provides durability during Writer restarts. HA is a known limitation to be addressed in a future phase.
-- **Cross-node DuckDB file sharing via networked filesystem** — the Writer Service's local DuckDB file is not shared via NFS or ReadWriteMany PVC. S3 snapshot sync is the mechanism for cross-node Query API access.
-- **Raw SQL query endpoint** — no endpoint accepts raw DuckDB SQL from clients. The analytics DSL covers external query needs.
-- **Grafana datasource plugin** — Prometheus `/metrics` is the Grafana integration path. A native Grafana JSON datasource is not in scope.
-- **SSO / SAML / OIDC authentication** — user authentication in Phase 1 uses username/password. SSO is a future concern.
+- **Writer Service high availability / active-passive failover** — the Writer Service runs as a single replica. Redis provides durability during Writer restarts. HA is a known limitation for a future phase.
+- **Cross-node DuckDB file sharing via networked filesystem** — the hot store is not shared via NFS or ReadWriteMany PVC. S3 snapshot sync is the mechanism for cross-node Query API access.
+- **Raw SQL query endpoint** — no endpoint accepts raw DuckDB SQL from clients.
+- **Grafana datasource plugin** — Prometheus `/metrics` is the Grafana integration path.
+- **SSO / SAML / OIDC authentication** — Phase 1 uses email + password only.
 - **Kafka / Redpanda as an ingest buffer** — Redis is the only supported queue backend.
 - **MotherDuck or networked DuckDB** — DuckDB is used exclusively in embedded mode.
-- **Phase 2+ features** — Prompt Registry UI, Playground, Dataset curation UI, Eval Worker service, and hot/cold Parquet flush are out of scope for the Phase 1 MVP.
+- **PVC backup via VolumeSnapshot** — deferred; cold Parquet on S3 is the DR story in Phase 1.
+- **Phase 2+ UI features** — Eval rules UI, Prompt Registry UI, Playground, and Dataset curation UI are Phase 2+.
+- **TypeScript SDK** — Go and Python SDKs are Phase 1. TypeScript deferred.
+- **OR / NOT eval filter conditions** — EvalFilter is AND-only in Phase 1.
+- **Token-range eval filters** — `MinInputTokens`, `MaxOutputTokens`, etc. deferred.
 
 ---
 
 ## Further Notes
 
-- The project is named **Lantern**. Go module path: `github.com/{org}/lantern`. Docker Hub: `lantern/ingest`, `lantern/writer`, `lantern/query`, `lantern/eval`, `lantern/ui`.
-- The repo is a Go workspace monorepo. Each service has its own `go.mod`. Shared domain types, the MetadataStore interface, Redis client, S3 client, auth middleware, and config loading live in a root-level `internal/` package imported via the Go workspace.
-- The Python SDK is a first-class citizen of the monorepo from day one, located at `sdk/python/`. It provides a `@lantern.trace` decorator and an OTel exporter configuration helper.
+- The project is named **Lantern**. Go module path: `github.com/zbloss/lantern`. Docker Hub: `lantern/ingest`, `lantern/writer`, `lantern/query`, `lantern/eval`, `lantern/ui`.
+- The repo is a Go workspace monorepo. Each service has its own `go.mod`. Shared domain types, interfaces, Redis client, S3 client, auth middleware, config loading, DuckDB schema, pricing table, and OTLP translator live in a root-level `internal/` package imported via the Go workspace.
 - OTel compatibility is a hard requirement. Any LLM framework that emits OTel spans — LangChain, LlamaIndex, CrewAI, Smolagents, OpenLLMetry, OpenInference — must work against Lantern's ingest endpoint with zero SDK changes.
-- DuckDB's single-writer constraint is the central architectural constraint. All design decisions around the Writer Service (single replica, S3 snapshot sync, read-only Query API connections) flow from this constraint.
+- DuckDB's single-writer constraint is the central architectural constraint. All design decisions around the Writer Service (StatefulSet, PVC, S3 snapshot sync, read-only Query API connections) flow from this constraint.
 - The 30-second staleness window for hot data is acceptable for the primary use case. Users viewing live eval scores on recent traces will see data no older than 30 seconds.
-- LiteLLM's pricing JSON is fetched at Writer Service startup and cached in memory. If the fetch fails, Lantern falls back to a bundled pricing snapshot included in the binary.
+- The React SPA is served from the Query API binary via `embed.FS` — no separate Nginx container is required. This simplifies the deployment footprint and means the Query API is the single ingress point for all UI traffic.
+- All Go services use `go-chi/chi/v5` as the HTTP router — a thin wrapper around `net/http` with no framework magic, integrating cleanly with `httptest`.

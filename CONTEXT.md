@@ -25,7 +25,7 @@ Hive-partitioned Parquet files on S3. Spans land at `s3://bucket/archive/project
 ### Hot Window
 The age threshold separating hot (DuckDB) from cold (Parquet on S3) storage. Spans older than this threshold are archived from DuckDB to cold storage. Configured globally at startup via `writer.flush_age_days` in `lantern.yaml` (default: 2 days / 48 hours). Not configurable per project. The Writer Service uses this value to schedule archival sweeps; the Query API always issues a hot+cold UNION and relies on Hive partition pruning to avoid unnecessary S3 scans.
 
-Archival sweeps process spans and scores together for each `(project_id, date)` partition in a single operation — both Parquet files are written before either is deleted from DuckDB. A partition is never in a state where cold spans exist without cold scores.
+Archival sweeps process spans and scores together for each `(project_id, date)` partition in a single operation — both Parquet files are written before either is deleted from DuckDB. A partition is never in a state where cold spans exist without cold scores. Parquet files are written via DuckDB's `COPY (SELECT ...) TO 's3://...' (FORMAT PARQUET)` using the `httpfs` extension — no separate Parquet library. S3 credentials come from `storage` config.
 
 ### Snapshot
 The live DuckDB file synced to S3 by the Writer Service at an interval configured by `writer.sync_interval` in `lantern.yaml` (default: `30s`). Query API pods download the snapshot to a local path (`query.duckdb_path`, default `/tmp/lantern-snapshot.duckdb`) on startup, then poll S3 on the `query.sync_interval` cadence (default `30s`) to detect a newer object and re-download. No Redis pub-sub or push notification — S3 polling is sufficient given the staleness budget. Staleness for hot data is at most one sync interval. **Kubernetes note:** the snapshot path must not be on a ReadWriteOnce PVC shared with another pod — use an emptyDir or the pod's local ephemeral storage.
@@ -34,7 +34,18 @@ The live DuckDB file synced to S3 by the Writer Service at an interval configure
 `/login` (email+password), `/traces` (paginated filterable list), `/traces/:traceId` (span waterfall + detail panel with inline scores), `/dashboard` (cost/token/latency/error-rate charts), `/settings/project` (API key create/revoke), `/settings/team` (user invite). A project switcher dropdown in the nav covers multi-project deployments. Eval rules UI, Prompt Registry UI, Playground, and Dataset UI are Phase 2+.
 
 ### Query API Endpoints
-`POST /api/v1/spans/query` — paginated span list. Accepts a structured JSON body (`SpanQueryRequest`) with absolute `from`/`to`, optional field filters, an opaque cursor, and a limit. Returns a page of spans and the next cursor. `GET /api/v1/traces/:traceId` — full waterfall for a single trace (all spans sharing the trace ID, ordered by start time). `POST /api/v1/analytics/spans` — Analytics DSL query. `GET /api/v1/prompts/:name` — prompt version/label lookup. `POST /api/v1/scores` — manual score write.
+- `POST /api/v1/spans/query` — paginated span list (`SpanQueryRequest`, keyset cursor)
+- `GET /api/v1/traces/:traceId` — full waterfall for a single trace
+- `POST /api/v1/analytics/spans` — Analytics DSL query
+- `POST /api/v1/prompts` — create prompt version
+- `GET /api/v1/prompts/:name` — resolve by `?version=N` or `?label=<label>`
+- `PUT /api/v1/prompts/:name/labels/:label` — reassign label to a version
+- `POST /api/v1/scores` — manual score write
+- `POST /api/v1/users/invite` — create user with one-time temp password (admin only)
+- `PUT /api/v1/users/me/password` — change own password (validates current password first)
+- `POST /login`, `POST /logout` — session management
+- `GET /api/v1/projects` — list projects for org (drives project switcher)
+- Static files: all unmatched routes serve the embedded React SPA
 
 ### Span List Cursor
 Keyset pagination on `(start_time DESC, span_id ASC)`. The cursor is a base64-encoded JSON blob of `{"start_time": "<RFC3339nano>", "span_id": "<hex>"}` representing the last row of the previous page. The next query appends `WHERE (start_time, span_id) < ($last_time, $last_id)`. Stable under concurrent span ingestion — no offset drift. The existing ART index on `(project_id, start_time)` covers the cursor predicate. The cursor is opaque to clients.
@@ -73,7 +84,7 @@ The `internal/otlp` package translates `ResourceSpans` into `domain.Span` values
 The structured query language accepted by `POST /api/v1/analytics/spans`. Compiled server-side into parameterized DuckDB SQL; `project_id` is always injected. Supports `from`/`to` (absolute UTC `time.Time` — the client resolves any relative shortcuts before sending), `filters` (field + allowlisted op + value), `aggregations` (allowlisted function + field + alias), `group_by` (structured objects with optional `truncate` enum: `hour|day|week|month`), `order_by`, and `limit`. `duration_ms` is a virtual field compiled to `EPOCH_MS(end_time) - EPOCH_MS(start_time)`. Percentile aggregations (`p50`, `p95`, `p99`) compile to `approx_quantile(field, 0.X)`. Raw SQL strings are never accepted from clients. The compiler always emits a hot+cold UNION regardless of the time range.
 
 ### Eval Rule
-A configuration that specifies a judge model, a judge prompt, an `EvalFilter`, and a sample rate. Triggers automatically on ingested spans that match the filter. Stored in the metadata store. The filter is evaluated in-process by the Writer Service against the `domain.Span` struct — no DuckDB query on the ingest hot path.
+A configuration that specifies a judge model, a judge prompt, an `EvalFilter`, and a sample rate. Triggers automatically on ingested spans that match the filter. Stored in the metadata store. The filter is evaluated in-process by the Writer Service against the `domain.Span` struct — no DuckDB query on the ingest hot path. The Writer loads all active rules at startup and refreshes them every 60 seconds via a background ticker — new rules start firing within one minute of creation. Sampling: `rand.Float64() < rule.SampleRate` per matching span per rule; `1.0` = score every match, `0.0` = effectively disabled.
 
 ### Eval Worker LLM Endpoint
 Eval Workers call a judge LLM via a configurable OpenAI-compatible endpoint: `eval.llm_base_url` and `eval.llm_api_key` in `lantern.yaml`. Compatible with OpenAI, Anthropic (via LiteLLM proxy), Ollama, or any OpenAI-compatible server. The specific judge model is specified per `EvalRule`, not in global config.
@@ -89,6 +100,52 @@ The versioned store of prompt templates. Each `PromptVersion` is immutable once 
 
 ### Metadata Store
 The transactional, relational database (Postgres in production, SQLite in demo) holding all non-trace data: orgs, projects, users, API keys, prompt versions, eval rules, datasets. Schema in `internal/metadata/{postgres,sqlite}/migrations/0001_init.up.sql`. Users authenticate with email + bcrypt password hash. Sessions are server-side: a `sessions` table holds `session_id → user_id + expires_at`. The UI receives a session cookie (`lantern_session`, `HttpOnly`, `Secure` — disable via `auth.secure_cookie: false` for local dev, `SameSite=Lax`, TTL configured via `auth.session_ttl`, default `168h` / 7 days). The Query API validates the session cookie on every UI-facing request. OAuth/OIDC is out of scope until a future phase. The React UI is served as embedded static files from the Query API binary via Go's `embed.FS`.
+
+### User Bootstrap and Invite
+On startup, if no users exist and `auth.admin_email` / `auth.admin_password` are set (typically via `LANTERN_AUTH_ADMIN_EMAIL` / `LANTERN_AUTH_ADMIN_PASSWORD` environment variables), the Query API creates the initial admin user automatically. For subsequent team members: an admin invites by email via `POST /api/v1/users/invite`, which creates the user record with a randomly-generated temporary password returned once in the response. The inviter shares the temporary password out-of-band. No email infrastructure required in Phase 1.
+
+### SDK
+Two SDKs live in `sdk/`: `sdk/go` (Go module `github.com/zbloss/lantern/sdk/go`) and `sdk/python`. Both provide: (1) an OTLP HTTP exporter configured via `Configure(endpoint, apiKey)` that sends spans to the Lantern Ingest API; (2) span lifecycle helpers (`StartSpan`/`EndSpan` in Go, `@trace` decorator in Python) with context propagation (Go: `context.Context`; Python: `contextvars`); (3) a `Client` / `LanternClient` for prompt fetch with client-side caching and manual score writes. The SDK is a client library only — no HTTP server.
+
+### HTTP Router
+All Go HTTP services use `github.com/go-chi/chi/v5` — a thin wrapper around `net/http` that uses standard `http.Handler` throughout and integrates cleanly with `httptest`. No framework magic.
+
+### Logging
+All Go services use `log/slog` (stdlib) for structured logging. Log levels: `Info` for normal operations, `Warn` for recoverable anomalies, `Error` for failures that need attention. Every log call includes relevant context as key-value pairs (e.g., `slog.Error("failed to flush", "project_id", pid, "err", err)`). `log.Printf` and `fmt.Println` are never used in production code paths.
+
+### Phase 1 Vertical Slice Order
+Implementation proceeds as vertical TDD slices — each slice has a failing test first, then code to make it pass, then refactor. Dependency-ordered:
+
+1. **Metadata Store + Config** — foundation, no deps
+2. **Ingest API → Redis** — REST span ingest, enqueue to Redis
+3. **Writer Service → DuckDB** — dequeue, write to DuckDB, snapshot to S3
+4. **Query API → span list + trace** — read snapshot, serve `/api/v1/spans/query` and `/api/v1/traces/:id`
+5. **Auth** — login, session cookie, admin bootstrap
+6. **React UI shell + /traces** — SPA served from embed.FS, paginated trace list
+7. **Analytics DSL + /dashboard** — compiler, hot+cold UNION, cost/latency charts
+8. **OTLP ingest** — proto+JSON decode, two-step translation, same Redis enqueue as slice 2
+9. **Eval pipeline** — rule cache, eval queue, Eval Workers, score write-back
+10. **Prompt Registry** — version create, label assign, caching client
+11. **SDK (Go + Python)** — tracer + client wired to Ingest API
+12. **Archival sweep** — hot→cold Parquet flush, S3 COPY via httpfs
+
+Slices 8–12 are independent of each other once slices 1–4 are done.
+
+### Disaster Recovery
+Cold Parquet on S3 is the DR story in Phase 1. The hot window is intentionally short (`writer.flush_age_days`, default 2 days), so a PVC loss is bounded to at most 2 days of recent spans. No additional PVC backup mechanism in Phase 1. Future: Kubernetes `VolumeSnapshot` support will be added to enable point-in-time PVC backups of the hot store.
+
+### CORS
+CORS is enabled on the Ingest API only — the Query API (same-origin with the UI) and Writer Service (internal-only) do not need it. Configurable via `ingest.cors_allowed_origins` in `lantern.yaml`; defaults to `*` (the API key is the auth mechanism). Allowed methods: `POST, OPTIONS`. Allowed headers: `Content-Type, Authorization`. Preflight `OPTIONS` requests return `204`.
+
+### Graceful Shutdown
+All services listen for `SIGTERM` (Kubernetes pod termination) and `SIGINT` (dev Ctrl-C). On signal: (1) stop accepting new connections via `http.Server.Shutdown(ctx)`; (2) drain in-flight HTTP requests with a 30-second timeout; (3) service-specific teardown. **Ingest API**: no extra teardown — Redis enqueue completes within the drain. **Writer Service**: finish the current DuckDB write batch; perform a final snapshot sync to S3; do not start a new archival sweep after signal. **Query API**: no extra teardown beyond HTTP drain. **Eval Workers**: finish the current eval job (LLM call may take tens of seconds) with a 120-second drain; do not `BLPOP` a new job after signal.
+
+### Health and Readiness Probes
+Each service exposes two routes. `GET /healthz` — liveness; returns `200 OK` if the process is alive, no external checks. `GET /readyz` — readiness; returns `200 OK` only when the service is ready for traffic, `503` otherwise. Kubernetes removes a pod from load balancer rotation while `/readyz` returns 503. Readiness gates per service:
+- **Ingest API**: Redis `PING` succeeds
+- **Writer Service**: DuckDB file open and writable; Redis `PING` succeeds
+- **Query API**: snapshot file exists on disk (initial download complete); metadata store reachable
+- **Eval Workers**: Redis `PING` succeeds
 
 ---
 

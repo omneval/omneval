@@ -40,6 +40,11 @@ type AuthConfig struct {
 	// SecureCookie sets the Secure flag on the session cookie.
 	// Disable for local HTTP development only.
 	SecureCookie bool `mapstructure:"secure_cookie"`
+	// Bootstrap admin credentials. If set and no users exist, the Query API
+	// creates this admin user on startup. Typically set via environment
+	// variables: LANTERN_AUTH_ADMIN_EMAIL / LANTERN_AUTH_ADMIN_PASSWORD.
+	AdminEmail    string `mapstructure:"admin_email"`
+	AdminPassword string `mapstructure:"admin_password"`
 }
 
 type IngestConfig struct {
