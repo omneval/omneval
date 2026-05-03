@@ -1,0 +1,1 @@
+-- Rollback for initial Postgres schema.

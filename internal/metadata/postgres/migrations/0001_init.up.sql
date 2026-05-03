@@ -1,0 +1,2 @@
+-- Initial schema for Postgres metadata store.
+-- Managed with golang-migrate.

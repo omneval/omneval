@@ -1,0 +1,2 @@
+-- Initial schema for SQLite metadata store.
+-- Managed with golang-migrate.
