@@ -1,0 +1,12 @@
+{
+  "providers": {
+    "local": {
+      "baseUrl": "http://host.docker.internal:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "not-needed",
+      "models": [
+        { "id": "unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_M" }
+      ]
+    }
+  }
+}
