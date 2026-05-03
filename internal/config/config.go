@@ -1,5 +1,12 @@
 package config
 
+import (
+	"fmt"
+	"strings"
+
+	"github.com/spf13/viper"
+)
+
 // Config is the top-level configuration structure populated by Viper from
 // lantern.yaml and environment variable overrides.
 type Config struct {
@@ -101,6 +108,62 @@ type MetricsConfig struct {
 // Load reads lantern.yaml and applies environment variable overrides.
 // Environment variables use the LANTERN_ prefix with _ as the key separator.
 func Load(path string) (*Config, error) {
-	// TODO: implement using github.com/spf13/viper
-	panic("not implemented")
+	v := viper.New()
+
+	// database
+	v.SetDefault("database.driver", "")
+	v.SetDefault("database.dsn", "")
+	// redis
+	v.SetDefault("redis.addr", "localhost:6379")
+	v.SetDefault("redis.password", "")
+	v.SetDefault("redis.db", 0)
+	// storage
+	v.SetDefault("storage.endpoint", "")
+	v.SetDefault("storage.bucket", "")
+	v.SetDefault("storage.region", "")
+	v.SetDefault("storage.access_key", "")
+	v.SetDefault("storage.secret_key", "")
+	// auth
+	v.SetDefault("auth.session_ttl", "168h")
+	v.SetDefault("auth.secure_cookie", false)
+	v.SetDefault("auth.admin_email", "")
+	v.SetDefault("auth.admin_password", "")
+	// ingest
+	v.SetDefault("ingest.addr", ":8000")
+	v.SetDefault("ingest.log_system_prompt", true)
+	// writer
+	v.SetDefault("writer.addr", ":8001")
+	v.SetDefault("writer.duckdb_path", "")
+	v.SetDefault("writer.sync_interval", "30s")
+	v.SetDefault("writer.flush_interval", "30m")
+	v.SetDefault("writer.flush_age_days", 2)
+	// query
+	v.SetDefault("query.addr", ":8002")
+	v.SetDefault("query.duckdb_path", "")
+	v.SetDefault("query.sync_interval", "30s")
+	// eval
+	v.SetDefault("eval.addr", ":8003")
+	v.SetDefault("eval.concurrency", 4)
+	v.SetDefault("eval.llm_base_url", "")
+	v.SetDefault("eval.llm_api_key", "")
+	// metrics
+	v.SetDefault("metrics.addr", ":9090")
+	v.SetDefault("metrics.disable_project_labels", false)
+
+	v.SetEnvPrefix("LANTERN")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	if path != "" {
+		v.SetConfigFile(path)
+		if err := v.ReadInConfig(); err != nil {
+			return nil, fmt.Errorf("reading config %q: %w", path, err)
+		}
+	}
+
+	var cfg Config
+	if err := v.Unmarshal(&cfg); err != nil {
+		return nil, fmt.Errorf("unmarshalling config: %w", err)
+	}
+	return &cfg, nil
 }
