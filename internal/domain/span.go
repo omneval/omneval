@@ -27,10 +27,12 @@ type Span struct {
 	EndTime   time.Time
 
 	// LLM-specific fields extracted from OTel GenAI conventions.
-	Model           string
-	InputTokens     int64
-	OutputTokens    int64
-	CostUSD         float64
+	Model        string
+	Input        string // serialized JSON of gen_ai.prompt messages (or raw text)
+	Output       string // serialized JSON of gen_ai.completion
+	InputTokens  int64
+	OutputTokens int64
+	CostUSD      float64
 
 	// Prompt linkage.
 	PromptName    string

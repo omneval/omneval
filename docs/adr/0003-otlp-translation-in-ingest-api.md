@@ -1,0 +1,3 @@
+# OTLP-to-domain translation happens in the Ingest API, not the Writer Service
+
+The Ingest API accepts both OTLP and the native REST Span API. We chose to translate OTLP `ResourceSpans` into `domain.Span` values inside the Ingest API before enqueuing, so the Redis queue always carries the internal domain format regardless of how spans arrived. The alternative — enqueuing raw OTLP bytes and translating in the Writer — would require the Writer to understand OTLP, couple it to the ingest protocol, and complicate the queue contract. Translating at the boundary keeps the Writer simple (it only understands `domain.Span`) and means future ingest protocols only need a translator in the Ingest API, not a corresponding change in the Writer.

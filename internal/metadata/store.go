@@ -21,6 +21,12 @@ type Store interface {
 	// Users
 	CreateUser(ctx context.Context, user *domain.User) error
 	GetUserByEmail(ctx context.Context, email string) (*domain.User, error)
+	ListUsers(ctx context.Context, orgID string) ([]*domain.User, error)
+
+	// Sessions
+	CreateSession(ctx context.Context, session *domain.Session) error
+	GetSession(ctx context.Context, sessionID string) (*domain.Session, error)
+	DeleteSession(ctx context.Context, sessionID string) error
 
 	// API Keys
 	CreateAPIKey(ctx context.Context, key *domain.APIKey) error

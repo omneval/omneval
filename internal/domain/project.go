@@ -16,9 +16,17 @@ type Project struct {
 }
 
 type User struct {
+	UserID       string
+	OrgID        string
+	Email        string
+	PasswordHash string
+	CreatedAt    time.Time
+}
+
+type Session struct {
+	SessionID string
 	UserID    string
-	OrgID     string
-	Email     string
+	ExpiresAt time.Time
 	CreatedAt time.Time
 }
 

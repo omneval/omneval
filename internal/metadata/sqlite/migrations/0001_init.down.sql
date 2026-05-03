@@ -1,1 +1,12 @@
--- Rollback for initial SQLite schema.
+DROP TABLE IF EXISTS dataset_run_items;
+DROP TABLE IF EXISTS dataset_runs;
+DROP TABLE IF EXISTS dataset_items;
+DROP TABLE IF EXISTS datasets;
+DROP TABLE IF EXISTS eval_rules;
+DROP TABLE IF EXISTS prompt_labels;
+DROP TABLE IF EXISTS prompt_versions;
+DROP TABLE IF EXISTS api_keys;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS projects;
+DROP TABLE IF EXISTS organizations;
