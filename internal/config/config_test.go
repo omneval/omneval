@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/zbloss/lantern/internal/config"
@@ -39,6 +40,14 @@ func TestLoad_Defaults(t *testing.T) {
 		if c.got != c.want {
 			t.Errorf("%s: got %v, want %v", c.name, c.got, c.want)
 		}
+	}
+
+	// CORS allowed origins defaults to ["*"]
+	if len(cfg.Ingest.CORSAllowedOrigins) != 1 {
+		t.Errorf("CORSAllowedOrigins length: got %d, want 1", len(cfg.Ingest.CORSAllowedOrigins))
+	}
+	if !slices.Contains(cfg.Ingest.CORSAllowedOrigins, "*") {
+		t.Errorf("CORSAllowedOrigins: got %v, want [\"*\"]", cfg.Ingest.CORSAllowedOrigins)
 	}
 }
 
@@ -128,5 +137,49 @@ func TestLoad_EnvOverrides(t *testing.T) {
 	}
 	if cfg.Eval.LLMAPIKey != "env-key" {
 		t.Errorf("LANTERN_EVAL_LLM_API_KEY: got %q", cfg.Eval.LLMAPIKey)
+	}
+}
+
+func TestLoad_CORSFromFile(t *testing.T) {
+	yaml := `
+ingest:
+  cors_allowed_origins:
+    - http://localhost:3000
+    - https://app.example.com
+`
+	f := filepath.Join(t.TempDir(), "lantern.yaml")
+	if err := os.WriteFile(f, []byte(yaml), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(f)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if len(cfg.Ingest.CORSAllowedOrigins) != 2 {
+		t.Fatalf("CORSAllowedOrigins length: got %d, want 2", len(cfg.Ingest.CORSAllowedOrigins))
+	}
+	if cfg.Ingest.CORSAllowedOrigins[0] != "http://localhost:3000" {
+		t.Errorf("CORSAllowedOrigins[0]: got %q, want %q", cfg.Ingest.CORSAllowedOrigins[0], "http://localhost:3000")
+	}
+	if cfg.Ingest.CORSAllowedOrigins[1] != "https://app.example.com" {
+		t.Errorf("CORSAllowedOrigins[1]: got %q, want %q", cfg.Ingest.CORSAllowedOrigins[1], "https://app.example.com")
+	}
+}
+
+func TestLoad_CORS_EnvOverride(t *testing.T) {
+	t.Setenv("LANTERN_INGEST_CORS_ALLOWED_ORIGINS", "http://override.com")
+
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if len(cfg.Ingest.CORSAllowedOrigins) != 1 {
+		t.Fatalf("CORSAllowedOrigins length: got %d, want 1", len(cfg.Ingest.CORSAllowedOrigins))
+	}
+	if cfg.Ingest.CORSAllowedOrigins[0] != "http://override.com" {
+		t.Errorf("CORSAllowedOrigins[0]: got %q, want %q", cfg.Ingest.CORSAllowedOrigins[0], "http://override.com")
 	}
 }

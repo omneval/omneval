@@ -550,3 +550,167 @@ func (f *failingQueue) Enqueue(_ context.Context, _ []*domain.Span) error {
 func (f *failingQueue) Dequeue(_ context.Context) ([]*domain.Span, error) {
 	return nil, nil
 }
+
+// --- CORS Tests ---
+
+func TestNativeHandler_CORS_PreflightReturns204(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handler.NewNativeHandlerWithCORS(q, v, []string{"*"})
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("OPTIONS", ts.URL+"/api/v1/spans", nil)
+	req.Header.Set("Origin", "http://example.com")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+}
+
+func TestNativeHandler_CORS_PreflightSetsAllowOrigin(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handler.NewNativeHandlerWithCORS(q, v, []string{"*"})
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("OPTIONS", ts.URL+"/api/v1/spans", nil)
+	req.Header.Set("Origin", "http://example.com")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Errorf("Access-Control-Allow-Origin: got %q, want %q", got, "*")
+	}
+}
+
+func TestNativeHandler_CORS_PostWithWildcardOrigin(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handler.NewNativeHandlerWithCORS(q, v, []string{"*"})
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	spans := []*handler.NativeSpan{
+		{TraceID: "0123456789abcdef0123456789abcdef", SpanID: "0123456789abcdef", Name: "test"},
+	}
+	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
+	req.Header.Set("X-API-Key", "valid_project_key")
+	req.Header.Set("Origin", "http://example.com")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Errorf("Access-Control-Allow-Origin: got %q, want %q", got, "*")
+	}
+}
+
+func TestNativeHandler_CORS_PostWithSpecificOrigin(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handler.NewNativeHandlerWithCORS(q, v, []string{"http://example.com"})
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	spans := []*handler.NativeSpan{
+		{TraceID: "0123456789abcdef0123456789abcdef", SpanID: "0123456789abcdef", Name: "test"},
+	}
+	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
+	req.Header.Set("X-API-Key", "valid_project_key")
+	req.Header.Set("Origin", "http://example.com")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "http://example.com" {
+		t.Errorf("Access-Control-Allow-Origin: got %q, want %q", got, "http://example.com")
+	}
+}
+
+func TestNativeHandler_CORS_PostWithUnmatchedOrigin(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handler.NewNativeHandlerWithCORS(q, v, []string{"http://example.com"})
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	spans := []*handler.NativeSpan{
+		{TraceID: "0123456789abcdef0123456789abcdef", SpanID: "0123456789abcdef", Name: "test"},
+	}
+	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
+	req.Header.Set("X-API-Key", "valid_project_key")
+	req.Header.Set("Origin", "http://unknown.com")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("Access-Control-Allow-Origin: got %q, want empty (unmatched origin)", got)
+	}
+}
+
+func TestNativeHandler_CORS_WithoutOriginHeader(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handler.NewNativeHandlerWithCORS(q, v, []string{"*"})
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	spans := []*handler.NativeSpan{
+		{TraceID: "0123456789abcdef0123456789abcdef", SpanID: "0123456789abcdef", Name: "test"},
+	}
+	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
+	req.Header.Set("X-API-Key", "valid_project_key")
+	// No Origin header
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("Access-Control-Allow-Origin: got %q, want empty (no Origin header)", got)
+	}
+}
