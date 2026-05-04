@@ -1,6 +1,6 @@
 module github.com/zbloss/lantern/internal
 
-go 1.26.2
+go 1.22
 
 require (
 	github.com/redis/go-redis/v9 v9.19.0

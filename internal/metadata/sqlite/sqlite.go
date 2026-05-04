@@ -16,8 +16,7 @@ import (
 
 	"github.com/zbloss/lantern/internal/domain"
 	"github.com/zbloss/lantern/internal/metadata"
-
-	sq "modernc.org/sqlite"
+	_ "modernc.org/sqlite"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -27,7 +26,7 @@ var migrationsFS embed.FS
 // Store is the SQLite implementation of metadata.Store.
 // Used for demo deployments (docker compose) with zero cloud dependencies.
 type Store struct {
-	db      *sq.Conn
+	db       *sql.DB
 	migrated bool
 }
 
@@ -38,28 +37,28 @@ func New(path string) (*Store, error) {
 	dir := filepath.Dir(path)
 	if dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return nil, fmt.Errorf("sqlite: create dir %s: %w", dir, err)
+			return nil, fmt.Errorf("sqlite: create dir %s: %w", path, err)
 		}
 	}
 
-	conn, err := sq.Open(path)
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: open %s: %w", path, err)
 	}
 
 	// Set WAL mode for better concurrency
-	if _, err := conn.ExecContext(context.Background(), "PRAGMA journal_mode=WAL"); err != nil {
-		conn.Close()
+	if _, err := db.ExecContext(context.Background(), "PRAGMA journal_mode=WAL"); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("sqlite: set WAL: %w", err)
 	}
 
 	// Set busy timeout (5 seconds)
-	if _, err := conn.ExecContext(context.Background(), "PRAGMA busy_timeout=5000"); err != nil {
-		conn.Close()
+	if _, err := db.ExecContext(context.Background(), "PRAGMA busy_timeout=5000"); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("sqlite: set busy_timeout: %w", err)
 	}
 
-	s := &Store{db: conn}
+	s := &Store{db: db}
 	return s, nil
 }
 
@@ -206,9 +205,9 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// DB returns the underlying *sq.Conn for testing purposes.
+// DB returns the underlying *sql.DB for testing purposes.
 // It is not part of the public API contract.
-func (s *Store) DB() *sq.Conn {
+func (s *Store) DB() *sql.DB {
 	return s.db
 }
 

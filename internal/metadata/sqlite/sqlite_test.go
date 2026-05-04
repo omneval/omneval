@@ -252,7 +252,6 @@ func TestAPIKey_CreateAndGetByHash(t *testing.T) {
 	s.CreateOrganization(context.Background(), &domain.Organization{OrgID: "org-1", Name: "Test Corp"})
 	s.CreateProject(context.Background(), &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1"})
 
-	now := time.Now().UTC()
 	key := &domain.APIKey{KeyID: "key-1", ProjectID: "proj-1", Kind: domain.APIKeyKindProject, HashedKey: "sha256hash"}
 	if err := s.CreateAPIKey(context.Background(), key); err != nil {
 		t.Fatalf("create api key: %v", err)
