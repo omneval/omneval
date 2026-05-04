@@ -10,6 +10,7 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
 	"github.com/zbloss/lantern/internal/config"
+	"github.com/zbloss/lantern/internal/storage"
 )
 
 // Store is the S3-compatible implementation of storage.ObjectStore.
@@ -115,6 +116,23 @@ func (s *Store) ListPrefix(_ context.Context, prefix string) ([]string, error) {
 		keys = append(keys, object.Key)
 	}
 	return keys, nil
+}
+
+// Stat returns metadata about the object at the given key.
+func (s *Store) Stat(_ context.Context, key string) (*storage.ObjectStat, error) {
+	if s == nil || s.client == nil {
+		return nil, fmt.Errorf("s3: no client configured")
+	}
+
+	info, err := s.client.StatObject(context.Background(), s.getBucket(), key, minio.StatObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("s3: stat %s: %w", key, err)
+	}
+
+	return &storage.ObjectStat{
+		ETag:         info.ETag,
+		LastModified: info.LastModified,
+	}, nil
 }
 
 // EnsureBucket creates the bucket if it does not exist.

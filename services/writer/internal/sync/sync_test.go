@@ -11,6 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/zbloss/lantern/internal/config"
+	"github.com/zbloss/lantern/internal/storage"
 )
 
 // mockStore implements storage.ObjectStore for testing.
@@ -59,6 +60,13 @@ func (m *mockStore) ListPrefix(_ context.Context, prefix string) ([]string, erro
 		return nil, nil
 	}
 	m.lists = append(m.lists, prefix)
+	return nil, nil
+}
+
+func (m *mockStore) Stat(_ context.Context, key string) (*storage.ObjectStat, error) {
+	if m == nil {
+		return nil, io.ErrUnexpectedEOF
+	}
 	return nil, nil
 }
 
@@ -248,5 +256,9 @@ func (f *failingStore) Delete(_ context.Context, key string) error {
 }
 
 func (f *failingStore) ListPrefix(_ context.Context, prefix string) ([]string, error) {
+	return nil, io.ErrUnexpectedEOF
+}
+
+func (f *failingStore) Stat(_ context.Context, key string) (*storage.ObjectStat, error) {
 	return nil, io.ErrUnexpectedEOF
 }
