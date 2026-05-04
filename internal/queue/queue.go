@@ -2,8 +2,14 @@ package queue
 
 import (
 	"context"
+	"errors"
 
 	"github.com/zbloss/lantern/internal/domain"
+)
+
+var (
+	// ErrQueueUnreachable signals that the underlying queue system is unavailable.
+	ErrQueueUnreachable = errors.New("queue: unreachable")
 )
 
 const (
