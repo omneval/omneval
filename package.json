@@ -1,8 +1,10 @@
 {
   "devDependencies": {
-    "@ai-hero/sandcastle": "^0.5.7"
+    "@ai-hero/sandcastle": "^0.5.7",
+    "patch-package": "^8.0.1"
   },
   "scripts": {
+    "postinstall": "patch-package",
     "sandcastle": "npx tsx ./.sandcastle/main.mts"
   }
 }

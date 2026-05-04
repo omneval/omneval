@@ -1,0 +1,36 @@
+diff --git a/node_modules/@ai-hero/sandcastle/dist/createSandbox.js b/node_modules/@ai-hero/sandcastle/dist/createSandbox.js
+index fcb13ed..4b597fa 100644
+--- a/node_modules/@ai-hero/sandcastle/dist/createSandbox.js
++++ b/node_modules/@ai-hero/sandcastle/dist/createSandbox.js
+@@ -18,6 +18,7 @@ import { syncOut } from "./syncOut.js";
+ import * as WorktreeManager from "./WorktreeManager.js";
+ import { copyToWorktree } from "./CopyToWorktree.js";
+ import { resolveCwd } from "./resolveCwd.js";
++import { patchGitMountsForWindows } from "./mountUtils.js";
+ /**
+  * @internal Builds a Sandbox handle with run() and interactive() methods.
+  * The close callback controls teardown behavior — top-level createSandbox()
+@@ -252,7 +253,10 @@ export const createSandboxFromWorktree = async (options) => {
+             });
+         }
+         else {
+-            startEffect = resolveGitMounts(join(hostRepoDir, ".git")).pipe(Effect.provide(NodeFileSystem.layer), Effect.catchAll(() => Effect.succeed([])), Effect.flatMap((gitMounts) => startSandbox({
++            startEffect = resolveGitMounts(join(hostRepoDir, ".git")).pipe(Effect.provide(NodeFileSystem.layer), Effect.catchAll(() => Effect.succeed([])), Effect.flatMap((gitMounts) => Effect.tryPromise({
++                try: () => patchGitMountsForWindows(gitMounts, worktreePath, SANDBOX_REPO_DIR),
++                catch: () => gitMounts,
++            })), Effect.flatMap((gitMounts) => startSandbox({
+                 provider,
+                 hostRepoDir,
+                 env,
+@@ -366,7 +370,10 @@ export const createSandbox = async (options) => {
+             });
+         }
+         else {
+-            startEffect = resolveGitMounts(join(hostRepoDir, ".git")).pipe(Effect.provide(NodeFileSystem.layer), Effect.catchAll(() => Effect.succeed([])), Effect.flatMap((gitMounts) => startSandbox({
++            startEffect = resolveGitMounts(join(hostRepoDir, ".git")).pipe(Effect.provide(NodeFileSystem.layer), Effect.catchAll(() => Effect.succeed([])), Effect.flatMap((gitMounts) => Effect.tryPromise({
++                try: () => patchGitMountsForWindows(gitMounts, worktreePath, SANDBOX_REPO_DIR),
++                catch: () => gitMounts,
++            })), Effect.flatMap((gitMounts) => startSandbox({
+                 provider,
+                 hostRepoDir,
+                 env,
