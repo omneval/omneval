@@ -1,3 +1,22 @@
+diff --git a/node_modules/@ai-hero/sandcastle/dist/WorktreeManager.js b/node_modules/@ai-hero/sandcastle/dist/WorktreeManager.js
+index 61fbc34..b468ed3 100644
+--- a/node_modules/@ai-hero/sandcastle/dist/WorktreeManager.js
++++ b/node_modules/@ai-hero/sandcastle/dist/WorktreeManager.js
+@@ -115,11 +115,12 @@ export const create = (repoDir, opts) => Effect.gen(function* () {
+         // Match by branch first; fall back to target path (covers mid-rebase
+         // detached-HEAD state where the branch field is null).
+         const existing = yield* listWorktrees(repoDir);
++        const normPath = (p) => p.replace(/\\/g, "/");
+         const collision = existing.find((wt) => wt.branch === branch) ??
+-            existing.find((wt) => wt.path === worktreePath);
++            existing.find((wt) => normPath(wt.path) === normPath(worktreePath));
+         if (collision) {
+             // Only reuse worktrees managed by sandcastle (under .sandcastle/worktrees/)
+-            const isManagedWorktree = collision.path.startsWith(worktreesDir);
++            const isManagedWorktree = normPath(collision.path).startsWith(normPath(worktreesDir));
+             if (isManagedWorktree) {
+                 const dirty = yield* hasUncommittedChanges(collision.path);
+                 if (dirty) {
 diff --git a/node_modules/@ai-hero/sandcastle/dist/createSandbox.js b/node_modules/@ai-hero/sandcastle/dist/createSandbox.js
 index fcb13ed..4b597fa 100644
 --- a/node_modules/@ai-hero/sandcastle/dist/createSandbox.js
