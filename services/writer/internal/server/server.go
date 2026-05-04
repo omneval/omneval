@@ -10,12 +10,15 @@ import (
 	"syscall"
 
 	redisgo "github.com/redis/go-redis/v9"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/zbloss/lantern/internal/config"
 	"github.com/zbloss/lantern/internal/duckdb"
 	"github.com/zbloss/lantern/internal/metadata/sqlite"
 	"github.com/zbloss/lantern/internal/pricing"
 	qredis "github.com/zbloss/lantern/internal/queue/redis"
+	"github.com/zbloss/lantern/internal/storage/s3"
 	"github.com/zbloss/lantern/services/writer/internal/handler"
+	"github.com/zbloss/lantern/services/writer/internal/metrics"
 	"github.com/zbloss/lantern/services/writer/internal/pipeline"
 	"github.com/zbloss/lantern/services/writer/internal/sync"
 )
@@ -90,8 +93,28 @@ func Run() error {
 	// Create pipeline.
 	pl := pipeline.New(ingestQ, db, pricingTable, meta, evalQ)
 
+	// Create S3 store (nil if no S3 config).
+	storageCfg := &cfg.Storage
+	if storageCfg.Bucket == "" && storageCfg.Endpoint == "" {
+		storageCfg = nil
+	}
+	var s3store *s3.Store
+	if storageCfg != nil {
+		s3store = s3.New(storageCfg)
+		if s3store != nil {
+			if err := s3store.EnsureBucket(context.Background()); err != nil {
+				slog.Warn("writer: ensure bucket", "err", err)
+			}
+		}
+	}
+
+	// Register Prometheus metrics.
+	if err := metrics.Register(prometheus.NewRegistry()); err != nil {
+		slog.Warn("writer: register metrics", "err", err)
+	}
+
 	// Create syncer (S3 snapshot sync).
-	syncer := sync.New(rc, cfg)
+	syncer := sync.New(s3store, dbPath, cfg, nil)
 
 	// Create score handler.
 	scoreHandler := handler.New(db)
