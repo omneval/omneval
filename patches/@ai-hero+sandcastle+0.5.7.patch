@@ -34,3 +34,33 @@ index fcb13ed..4b597fa 100644
                  provider,
                  hostRepoDir,
                  env,
+diff --git a/node_modules/@ai-hero/sandcastle/dist/sandboxes/docker.js b/node_modules/@ai-hero/sandcastle/dist/sandboxes/docker.js
+index 4c2fc35..1612a50 100644
+--- a/node_modules/@ai-hero/sandcastle/dist/sandboxes/docker.js
++++ b/node_modules/@ai-hero/sandcastle/dist/sandboxes/docker.js
+@@ -98,6 +98,10 @@ export const docker = (options) => {
+                             const rl = createInterface({ input: proc.stdout });
+                             rl.on("line", (line) => {
+                                 stdoutChunks.push(line);
++                                // Keep only the last 500 lines to prevent RangeError on long-running agents
++                                if (stdoutChunks.length > 500) {
++                                    stdoutChunks.shift();
++                                }
+                                 onLine(line);
+                             });
+                         }
+diff --git a/node_modules/@ai-hero/sandcastle/dist/sandboxes/no-sandbox.js b/node_modules/@ai-hero/sandcastle/dist/sandboxes/no-sandbox.js
+index c1a07c4..2352958 100644
+--- a/node_modules/@ai-hero/sandcastle/dist/sandboxes/no-sandbox.js
++++ b/node_modules/@ai-hero/sandcastle/dist/sandboxes/no-sandbox.js
+@@ -50,6 +50,10 @@ export const noSandbox = (options) => ({
+                         const rl = createInterface({ input: proc.stdout });
+                         rl.on("line", (line) => {
+                             stdoutChunks.push(line);
++                            // Keep only the last 500 lines to prevent RangeError on long-running agents
++                            if (stdoutChunks.length > 500) {
++                                stdoutChunks.shift();
++                            }
+                             opts.onLine(line);
+                         });
+                     }
