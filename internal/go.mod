@@ -1,10 +1,12 @@
 module github.com/zbloss/lantern/internal
 
-go 1.26.2
+go 1.22
 
 require (
 	github.com/redis/go-redis/v9 v9.19.0
 	github.com/spf13/viper v1.21.0
+	modernc.org/sqlite v1.38.0
+	golang.org/x/crypto v0.31.0
 )
 
 require (
