@@ -16,6 +16,7 @@ import (
 // Configured via StorageConfig; works with AWS S3, GCS, Azure Blob, and MinIO.
 type Store struct {
 	client *minio.Client
+	bucket string
 }
 
 // New creates a new S3 Store from the given StorageConfig.
@@ -34,7 +35,23 @@ func New(cfg *config.StorageConfig) *Store {
 		return nil
 	}
 
-	return &Store{client: client}
+	return &Store{client: client, bucket: cfg.Bucket}
+}
+
+// bucketName returns the configured bucket name, falling back to "lantern"
+// when no bucket is set in the config. In tests, override via SetBucket.
+var defaultBucket = "lantern"
+
+// SetBucket overrides the default bucket name (for testing only).
+func SetBucket(name string) {
+	defaultBucket = name
+}
+
+func (s *Store) getBucket() string {
+	if s.bucket != "" {
+		return s.bucket
+	}
+	return defaultBucket
 }
 
 // Put uploads the reader's contents to the given key in the configured bucket.
@@ -49,7 +66,7 @@ func (s *Store) Put(_ context.Context, key string, r io.Reader) error {
 		return fmt.Errorf("s3: read body: %w", err)
 	}
 
-	_, err := s.client.PutObject(context.Background(), getBucket(), key,
+	_, err := s.client.PutObject(context.Background(), s.getBucket(), key,
 		&buf, int64(buf.Len()), minio.PutObjectOptions{
 			ContentType: "application/octet-stream",
 		})
@@ -65,7 +82,7 @@ func (s *Store) Get(_ context.Context, key string) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("s3: no client configured")
 	}
 
-	object, err := s.client.GetObject(context.Background(), getBucket(), key, minio.GetObjectOptions{})
+	object, err := s.client.GetObject(context.Background(), s.getBucket(), key, minio.GetObjectOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("s3: get %s: %w", key, err)
 	}
@@ -78,7 +95,7 @@ func (s *Store) Delete(_ context.Context, key string) error {
 		return fmt.Errorf("s3: no client configured")
 	}
 
-	return s.client.RemoveObject(context.Background(), getBucket(), key, minio.RemoveObjectOptions{})
+	return s.client.RemoveObject(context.Background(), s.getBucket(), key, minio.RemoveObjectOptions{})
 }
 
 // ListPrefix returns all object keys with the given prefix.
@@ -88,7 +105,7 @@ func (s *Store) ListPrefix(_ context.Context, prefix string) ([]string, error) {
 	}
 
 	var keys []string
-	for object := range s.client.ListObjects(context.Background(), getBucket(), minio.ListObjectsOptions{
+	for object := range s.client.ListObjects(context.Background(), s.getBucket(), minio.ListObjectsOptions{
 		Recursive: true,
 		Prefix:    prefix,
 	}) {
@@ -106,7 +123,7 @@ func (s *Store) EnsureBucket(ctx context.Context) error {
 		return fmt.Errorf("s3: no client configured")
 	}
 
-	bucket := getBucket()
+	bucket := s.getBucket()
 	exists, err := s.client.BucketExists(ctx, bucket)
 	if err != nil {
 		return fmt.Errorf("s3: bucket exists check: %w", err)
@@ -124,17 +141,4 @@ func (s *Store) EnsureBucket(ctx context.Context) error {
 // hasHTTPPrefix returns true if the endpoint starts with "http://".
 func hasHTTPPrefix(endpoint string) bool {
 	return len(endpoint) > 7 && endpoint[:7] == "http://"
-}
-
-// getBucket returns the configured storage bucket name.
-// In tests, override via SetBucket.
-var bucketName = "lantern"
-
-// SetBucket overrides the bucket name (for testing).
-func SetBucket(name string) {
-	bucketName = name
-}
-
-func getBucket() string {
-	return bucketName
 }

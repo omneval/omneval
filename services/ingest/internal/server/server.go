@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/redis/go-redis/v9"
@@ -59,10 +59,10 @@ func Run() error {
 	validator := auth.NewCachingValidator(store)
 
 	// Initialize handler with CORS middleware
-	h := handler.NewNativeHandlerWithCORS(queue, validator, cfg.Ingest.CORSAllowedOrigins)
+	h := handler.NewNativeHandler(queue, validator, cfg.Ingest.CORSAllowedOrigins)
 
 	// Start server
 	addr := cfg.Ingest.Addr
-	log.Printf("ingest API listening on %s", addr)
+	slog.Info("ingest API listening", "addr", addr)
 	return http.ListenAndServe(addr, h.Router())
 }

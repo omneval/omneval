@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -15,14 +15,14 @@ import (
 // Syncer copies the live DuckDB file to S3 every sync interval so Query API
 // replicas always have a fresh snapshot.
 type Syncer struct {
-	store         storage.ObjectStore
-	dbPath        string
-	cfg           *config.Config
-	syncInterval  time.Duration
-	snapshotKey   string
-	syncDuration  *prometheus.HistogramVec
-	syncTotal     prometheus.Counter
-	syncFailures  prometheus.Counter
+	store        storage.ObjectStore
+	dbPath       string
+	cfg          *config.Config
+	syncInterval time.Duration
+	snapshotKey  string
+	syncDuration *prometheus.HistogramVec
+	syncTotal    prometheus.Counter
+	syncFailures prometheus.Counter
 }
 
 // New creates a new Syncer.
@@ -39,11 +39,11 @@ func New(
 
 	snapshotKey := cfg.Storage.Bucket
 	if cfg.Storage.Bucket != "" {
-		prefix := ""
+		parts := []string{"snapshots", "duckdb.db"}
 		if cfg.Storage.Region != "" {
-			prefix = cfg.Storage.Region + "/"
+			parts = append([]string{cfg.Storage.Region}, parts...)
 		}
-		snapshotKey = filepath.Join(prefix, "snapshots", "duckdb.db")
+		snapshotKey = strings.Join(parts, "/")
 	} else {
 		snapshotKey = "duckdb:snapshot"
 	}

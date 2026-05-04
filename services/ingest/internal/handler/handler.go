@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -19,18 +20,18 @@ type ValidatedKey = auth.ValidatedKey
 
 // NativeSpan is the REST API request body for a single span.
 type NativeSpan struct {
-	SpanID      string `json:"span_id,omitempty"`
-	TraceID     string `json:"trace_id,omitempty"`
-	ParentID    string `json:"parent_id,omitempty"`
-	Name        string `json:"name,omitempty"`
-	Kind        string `json:"kind,omitempty"`
-	Model       string `json:"model,omitempty"`
-	Input       any    `json:"input,omitempty"`       // string or JSON array
-	Output      any    `json:"output,omitempty"`      // string or JSON array
-	InputTokens  int64  `json:"input_tokens,omitempty"`
-	OutputTokens int64  `json:"output_tokens,omitempty"`
-	PromptName    string `json:"prompt_name,omitempty"`
-	PromptVersion int64  `json:"prompt_version,omitempty"`
+	SpanID        string         `json:"span_id,omitempty"`
+	TraceID       string         `json:"trace_id,omitempty"`
+	ParentID      string         `json:"parent_id,omitempty"`
+	Name          string         `json:"name,omitempty"`
+	Kind          string         `json:"kind,omitempty"`
+	Model         string         `json:"model,omitempty"`
+	Input         any            `json:"input,omitempty"`  // string or JSON array
+	Output        any            `json:"output,omitempty"` // string or JSON array
+	InputTokens   int64          `json:"input_tokens,omitempty"`
+	OutputTokens  int64          `json:"output_tokens,omitempty"`
+	PromptName    string         `json:"prompt_name,omitempty"`
+	PromptVersion int64          `json:"prompt_version,omitempty"`
 	Attributes    map[string]any `json:"attributes,omitempty"`
 }
 
@@ -53,17 +54,14 @@ type SpanQueue interface {
 
 // NativeHandler handles POST /api/v1/spans for the native Lantern REST format.
 type NativeHandler struct {
-	queue         SpanQueue
-	validator     Validator
-	corsOrigins   []string
+	queue       SpanQueue
+	validator   Validator
+	corsOrigins []string
 }
 
-func NewNativeHandler(queue SpanQueue, validator Validator) *NativeHandler {
-	return &NativeHandler{queue: queue, validator: validator}
-}
-
-// NewNativeHandlerWithCORS creates a NativeHandler with CORS middleware applied.
-func NewNativeHandlerWithCORS(queue SpanQueue, validator Validator, corsOrigins []string) *NativeHandler {
+// NewNativeHandler creates a NativeHandler with optional CORS origins.
+// Pass a non-empty corsOrigins slice to enable CORS middleware.
+func NewNativeHandler(queue SpanQueue, validator Validator, corsOrigins []string) *NativeHandler {
 	return &NativeHandler{queue: queue, validator: validator, corsOrigins: corsOrigins}
 }
 
@@ -128,7 +126,7 @@ func (h *NativeHandler) validateAndTransform(ns *NativeSpan, vk *auth.ValidatedK
 		if len(ns.SpanID) != 16 {
 			return fmt.Errorf("span_id must be 16 hex characters, got %d", len(ns.SpanID))
 		}
-		if _, err := decodeHex(ns.SpanID); err != nil {
+		if _, err := hex.DecodeString(ns.SpanID); err != nil {
 			return fmt.Errorf("span_id is not valid hex: %v", err)
 		}
 	}
@@ -138,7 +136,7 @@ func (h *NativeHandler) validateAndTransform(ns *NativeSpan, vk *auth.ValidatedK
 		if len(ns.TraceID) != 32 {
 			return fmt.Errorf("trace_id must be 32 hex characters, got %d", len(ns.TraceID))
 		}
-		if _, err := decodeHex(ns.TraceID); err != nil {
+		if _, err := hex.DecodeString(ns.TraceID); err != nil {
 			return fmt.Errorf("trace_id is not valid hex: %v", err)
 		}
 	}
@@ -243,27 +241,4 @@ func nsToDomain(ns *NativeSpan, vk *auth.ValidatedKey) *domain.Span {
 	}
 
 	return span
-}
-
-// decodeHex validates and decodes a hex string.
-func decodeHex(s string) ([]byte, error) {
-	b := make([]byte, len(s)/2)
-	for i := 0; i < len(s); i += 2 {
-		var byteVal byte
-		for j := 0; j < 2; j++ {
-			char := s[i+j]
-			switch {
-			case char >= '0' && char <= '9':
-				byteVal = byteVal<<4 | (char - '0')
-			case char >= 'a' && char <= 'f':
-				byteVal = byteVal<<4 | (char - 'a' + 10)
-			case char >= 'A' && char <= 'F':
-				byteVal = byteVal<<4 | (char - 'A' + 10)
-			default:
-				return nil, fmt.Errorf("invalid hex character %c", char)
-			}
-		}
-		b[i/2] = byteVal
-	}
-	return b, nil
 }

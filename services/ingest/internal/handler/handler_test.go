@@ -24,10 +24,6 @@ func (f *fakeIngestQueue) Enqueue(_ context.Context, spans []*domain.Span) error
 	return nil
 }
 
-func (f *fakeIngestQueue) Dequeue(_ context.Context) ([]*domain.Span, error) {
-	return nil, nil
-}
-
 // fakeValidator is a minimal Validator for testing.
 type fakeValidator struct {
 	key *domain.APIKey
@@ -55,7 +51,7 @@ func (f *fakeValidator) Validate(_ context.Context, rawKey string) (*handler.Val
 func TestNativeHandler_PostSpans_202OnSuccess(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v)
+	h := handler.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -91,7 +87,7 @@ func TestNativeHandler_PostSpans_202OnSuccess(t *testing.T) {
 func TestNativeHandler_PostSpans_401OnMissingKey(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v)
+	h := handler.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -112,7 +108,7 @@ func TestNativeHandler_PostSpans_401OnMissingKey(t *testing.T) {
 func TestNativeHandler_PostSpans_401OnInvalidKey(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v)
+	h := handler.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -134,7 +130,7 @@ func TestNativeHandler_PostSpans_401OnInvalidKey(t *testing.T) {
 func TestNativeHandler_NormalizesStringInput(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v)
+	h := handler.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -184,16 +180,16 @@ func TestNativeHandler_NormalizesStringInput(t *testing.T) {
 func TestNativeHandler_NormalizesStringOutput(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v)
+	h := handler.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
 	spans := []*handler.NativeSpan{
 		{
-			TraceID:  "0123456789abcdef0123456789abcdef",
-			SpanID:   "0123456789abcdef",
-			Name:     "test-span",
-			Output:   "Response text",
+			TraceID: "0123456789abcdef0123456789abcdef",
+			SpanID:  "0123456789abcdef",
+			Name:    "test-span",
+			Output:  "Response text",
 		},
 	}
 	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
@@ -230,7 +226,7 @@ func TestNativeHandler_NormalizesStringOutput(t *testing.T) {
 func TestNativeHandler_ValidatesSpanIDFormat(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v)
+	h := handler.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -261,7 +257,7 @@ func TestNativeHandler_ValidatesSpanIDFormat(t *testing.T) {
 func TestNativeHandler_ValidatesTraceIDFormat(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v)
+	h := handler.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -292,7 +288,7 @@ func TestNativeHandler_ValidatesTraceIDFormat(t *testing.T) {
 func TestNativeHandler_AttachesServiceNameFromServiceKey(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v)
+	h := handler.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -329,7 +325,7 @@ func TestNativeHandler_AttachesServiceNameFromServiceKey(t *testing.T) {
 func TestNativeHandler_PostSpans_503WhenQueueFails(t *testing.T) {
 	q := &failingQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v)
+	h := handler.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -359,7 +355,7 @@ func TestNativeHandler_PostSpans_503WhenQueueFails(t *testing.T) {
 func TestNativeHandler_EmptySpansArray(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v)
+	h := handler.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -385,7 +381,7 @@ func TestNativeHandler_EmptySpansArray(t *testing.T) {
 func TestNativeHandler_MultipleSpansInOneRequest(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v)
+	h := handler.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -426,7 +422,7 @@ func TestNativeHandler_MultipleSpansInOneRequest(t *testing.T) {
 func TestNativeHandler_JSONArrayInput(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v)
+	h := handler.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -469,7 +465,7 @@ func TestNativeHandler_JSONArrayInput(t *testing.T) {
 func TestNativeHandler_SetProjectIDFromKey(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v)
+	h := handler.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -506,7 +502,7 @@ func TestNativeHandler_SetProjectIDFromKey(t *testing.T) {
 func TestNativeHandler_SetProjectIDFromServiceKey(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v)
+	h := handler.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -547,16 +543,12 @@ func (f *failingQueue) Enqueue(_ context.Context, _ []*domain.Span) error {
 	return queue.ErrQueueUnreachable
 }
 
-func (f *failingQueue) Dequeue(_ context.Context) ([]*domain.Span, error) {
-	return nil, nil
-}
-
 // --- CORS Tests ---
 
 func TestNativeHandler_CORS_PreflightReturns204(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandlerWithCORS(q, v, []string{"*"})
+	h := handler.NewNativeHandler(q, v, []string{"*"})
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -577,7 +569,7 @@ func TestNativeHandler_CORS_PreflightReturns204(t *testing.T) {
 func TestNativeHandler_CORS_PreflightSetsAllowOrigin(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandlerWithCORS(q, v, []string{"*"})
+	h := handler.NewNativeHandler(q, v, []string{"*"})
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -598,7 +590,7 @@ func TestNativeHandler_CORS_PreflightSetsAllowOrigin(t *testing.T) {
 func TestNativeHandler_CORS_PostWithWildcardOrigin(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandlerWithCORS(q, v, []string{"*"})
+	h := handler.NewNativeHandler(q, v, []string{"*"})
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -628,7 +620,7 @@ func TestNativeHandler_CORS_PostWithWildcardOrigin(t *testing.T) {
 func TestNativeHandler_CORS_PostWithSpecificOrigin(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandlerWithCORS(q, v, []string{"http://example.com"})
+	h := handler.NewNativeHandler(q, v, []string{"http://example.com"})
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -658,7 +650,7 @@ func TestNativeHandler_CORS_PostWithSpecificOrigin(t *testing.T) {
 func TestNativeHandler_CORS_PostWithUnmatchedOrigin(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandlerWithCORS(q, v, []string{"http://example.com"})
+	h := handler.NewNativeHandler(q, v, []string{"http://example.com"})
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -688,7 +680,7 @@ func TestNativeHandler_CORS_PostWithUnmatchedOrigin(t *testing.T) {
 func TestNativeHandler_CORS_WithoutOriginHeader(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandlerWithCORS(q, v, []string{"*"})
+	h := handler.NewNativeHandler(q, v, []string{"*"})
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
