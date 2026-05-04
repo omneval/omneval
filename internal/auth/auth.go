@@ -2,7 +2,15 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
 
+	"github.com/mr-tron/base58"
 	"github.com/zbloss/lantern/internal/domain"
 	"github.com/zbloss/lantern/internal/metadata"
 )
@@ -32,29 +40,97 @@ type Validator interface {
 // Returns the raw key (shown once) and its SHA-256 hex hash (stored).
 // Keys are 32 bytes of crypto/rand encoded as base58, giving a 43-char suffix.
 func Generate(kind domain.APIKeyKind) (rawKey, hashedKey string, err error) {
-	panic("not implemented")
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", "", fmt.Errorf("auth: generate random bytes: %w", err)
+	}
+	suffix := base58.Encode(bytes)
+	prefix := PrefixProject
+	if kind == domain.APIKeyKindService {
+		prefix = PrefixService
+	}
+	rawKey = prefix + suffix
+	hashedKey = Hash(rawKey)
+	return rawKey, hashedKey, nil
 }
 
 // Hash returns the SHA-256 hex digest of a raw API key.
 func Hash(rawKey string) string {
-	panic("not implemented")
+	hash := sha256.Sum256([]byte(rawKey))
+	return hex.EncodeToString(hash[:])
 }
 
 // KindFromRaw infers the APIKeyKind from the key's prefix.
 func KindFromRaw(rawKey string) (domain.APIKeyKind, bool) {
-	panic("not implemented")
+	switch {
+	case strings.HasPrefix(rawKey, PrefixProject):
+		return domain.APIKeyKindProject, true
+	case strings.HasPrefix(rawKey, PrefixService):
+		return domain.APIKeyKindService, true
+	default:
+		return "", false
+	}
 }
 
 // CachingValidator validates raw API keys against the metadata store with a
 // 60-second in-memory TTL.
 type CachingValidator struct {
-	store metadata.Store
+	store   metadata.Store
+	cache   map[string]*cacheEntry
+	cacheMu sync.RWMutex
+}
+
+type cacheEntry struct {
+	result    *ValidatedKey
+	expiresAt time.Time
 }
 
 func NewCachingValidator(store metadata.Store) *CachingValidator {
-	return &CachingValidator{store: store}
+	return &CachingValidator{
+		store: store,
+		cache: make(map[string]*cacheEntry),
+	}
 }
 
 func (v *CachingValidator) Validate(ctx context.Context, rawKey string) (*ValidatedKey, error) {
-	panic("not implemented")
+	// Check cache first
+	v.cacheMu.RLock()
+	entry, cached := v.cache[rawKey]
+	v.cacheMu.RUnlock()
+
+	if cached && time.Now().Before(entry.expiresAt) {
+		return entry.result, nil
+	}
+
+	// Look up in store
+	hashed := Hash(rawKey)
+	if _, ok := KindFromRaw(rawKey); !ok {
+		return nil, fmt.Errorf("auth: invalid key format")
+	}
+
+	key, err := v.store.GetAPIKeyByHash(ctx, hashed)
+	if err != nil {
+		return nil, fmt.Errorf("auth: invalid API key")
+	}
+
+	// Check if revoked
+	if key.RevokedAt != nil && !key.RevokedAt.IsZero() {
+		return nil, fmt.Errorf("auth: API key revoked")
+	}
+
+	result := &ValidatedKey{
+		ProjectID:   key.ProjectID,
+		Kind:        key.Kind,
+		ServiceName: key.ServiceName,
+	}
+
+	// Write to cache
+	v.cacheMu.Lock()
+	v.cache[rawKey] = &cacheEntry{
+		result:    result,
+		expiresAt: time.Now().Add(time.Duration(CacheTTL) * time.Second),
+	}
+	v.cacheMu.Unlock()
+
+	return result, nil
 }
