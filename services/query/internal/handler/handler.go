@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/zbloss/lantern/internal/domain"
@@ -98,7 +99,7 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleTraceDetail handles GET /api/v1/traces/:traceId.
-// Returns the span tree for a single trace.
+// Returns the span tree for a single trace with inline scores.
 func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -118,7 +119,52 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Build the span query for this trace.
+	// Query all spans for this trace in this project.
+	spans, err := h.querySpansForTrace(projectID, traceID)
+	if err != nil {
+		http.Error(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return 404 if no spans found.
+	if len(spans) == 0 {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	// Load scores for all spans in this trace.
+	scoresBySpan, err := h.queryScoresForTrace(projectID, traceID)
+	if err != nil {
+		http.Error(w, "score query error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Attach scores to spans.
+	for _, s := range spans {
+		if sc, ok := scoresBySpan[s.SpanID]; ok {
+			s.Scores = sc
+		}
+	}
+
+	// Build the trace tree.
+	trace := buildTraceTree(spans)
+
+	resp := domain.TraceResponse{
+		TraceID:   trace.TraceID,
+		ProjectID: trace.ProjectID,
+		RootSpan:  trace.RootSpan,
+		Spans:     trace.Spans,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, "encode error", http.StatusInternalServerError)
+		return
+	}
+}
+
+// querySpansForTrace fetches all spans for a given trace_id and project_id.
+func (h *SpanHandler) querySpansForTrace(projectID, traceID string) ([]*domain.Span, error) {
 	req := query.SpanQueryRequest{
 		From:  time.Time{},
 		To:    time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC),
@@ -130,43 +176,71 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 
 	q, err := query.NewSpanQuery(projectID, req, nil, "")
 	if err != nil {
-		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
-		return
+		return nil, err
 	}
 
 	sqlStr, args, err := q.SQL()
 	if err != nil {
-		http.Error(w, "query compilation error", http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 
 	rows, err := h.DB.Query(sqlStr, args...)
 	if err != nil {
-		http.Error(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
 	spanRows, err := scanAllRows(rows)
 	if err != nil {
-		http.Error(w, "scan error: "+err.Error(), http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 
-	spans, err := query.ScanRows(spanRows)
+	return query.ScanRows(spanRows)
+}
+
+// queryScoresForTrace fetches all scores for spans in a given trace_id and project_id.
+// Returns a map of span_id -> []*domain.SpanScore.
+// Gracefully handles missing scores table (returns empty map).
+func (h *SpanHandler) queryScoresForTrace(projectID, traceID string) (map[string][]*domain.SpanScore, error) {
+	result := make(map[string][]*domain.SpanScore)
+
+	rows, err := h.DB.Query(
+		`SELECT span_id, eval_name, value, reasoning FROM scores WHERE trace_id = ? AND project_id = ?`,
+		traceID, projectID,
+	)
 	if err != nil {
-		http.Error(w, "row scan error: "+err.Error(), http.StatusInternalServerError)
-		return
+		// If the scores table doesn't exist, return empty scores (graceful degradation).
+		// DuckDB error for missing table contains "Table" in the message.
+		if strings.Contains(err.Error(), "Table") {
+			return result, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var spanID string
+		var evalName string
+		var value float64
+		var reasoning *string
+
+		if err := rows.Scan(&spanID, &evalName, &value, &reasoning); err != nil {
+			return nil, err
+		}
+
+		sc := &domain.SpanScore{
+			EvalName:  evalName,
+			Value:     value,
+			Reasoning: "",
+		}
+		if reasoning != nil {
+			sc.Reasoning = *reasoning
+		}
+
+		result[spanID] = append(result[spanID], sc)
 	}
 
-	// Build the trace tree.
-	trace := buildTraceTree(spans)
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(trace); err != nil {
-		http.Error(w, "encode error", http.StatusInternalServerError)
-		return
-	}
+	return result, rows.Err()
 }
 
 // scanAllRows scans all database rows into [][]any, handling the column
@@ -195,34 +269,37 @@ func scanAllRows(rows *sql.Rows) ([][]any, error) {
 }
 
 // buildTraceTree groups spans by trace_id and links parent-child relationships.
+// It sets Span.Children for proper waterfall rendering.
 func buildTraceTree(spans []*domain.Span) domain.Trace {
 	if len(spans) == 0 {
 		return domain.Trace{}
 	}
 
-	// Sort by start_time for deterministic tree building.
-	// Find the root span (no parent).
-	var root *domain.Span
-	trace := domain.Trace{
-		TraceID: spans[0].TraceID,
-	}
-
 	// Build a map of span_id -> span for parent lookup.
 	spanMap := make(map[string]*domain.Span, len(spans))
-	for i := range spans {
-		spanMap[spans[i].SpanID] = spans[i]
-		trace.ProjectID = spans[i].ProjectID
-	}
+	var trace domain.Trace
+	var root *domain.Span
 
-	for i := range spans {
-		s := spans[i]
+	for _, s := range spans {
+		spanMap[s.SpanID] = s
+		trace.TraceID = s.TraceID
+		trace.ProjectID = s.ProjectID
 		if s.ParentID == "" {
 			root = s
 		}
 	}
 
+	// Link children to parents.
+	for _, s := range spans {
+		if s.ParentID != "" {
+			if parent, ok := spanMap[s.ParentID]; ok {
+				parent.Children = append(parent.Children, s)
+			}
+		}
+	}
+
+	// If no span has an empty parent, use the first span (by start_time order) as root.
 	if root == nil && len(spans) > 0 {
-		// No span has an empty parent — use the first one as root.
 		root = spans[0]
 	}
 

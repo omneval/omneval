@@ -327,6 +327,21 @@ func NextCursor(spans []*domain.Span, limit int) string {
 	})
 }
 
+// strVal extracts a string from a column value, handling both []byte and string.
+// DuckDB returns VARCHAR as string, not []byte.
+func strVal(v any) string {
+	switch s := v.(type) {
+	case []byte:
+		return string(s)
+	case string:
+		return s
+	case nil:
+		return ""
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
 // ScanRows converts raw rows from the query result into domain.Span objects.
 // Expected column order: span_id, trace_id, parent_id, project_id, service_name,
 // name, kind, start_time, end_time, model, input, output, input_tokens,
@@ -338,42 +353,22 @@ func ScanRows(rows [][]any) ([]*domain.Span, error) {
 			return nil, fmt.Errorf("scan: expected 19 columns, got %d", len(row))
 		}
 		s := &domain.Span{}
-		if v, ok := row[0].([]byte); ok {
-			s.SpanID = string(v)
-		}
-		if v, ok := row[1].([]byte); ok {
-			s.TraceID = string(v)
-		}
-		if v, ok := row[2].([]byte); ok {
-			s.ParentID = string(v)
-		}
-		if v, ok := row[3].([]byte); ok {
-			s.ProjectID = string(v)
-		}
-		if v, ok := row[4].([]byte); ok {
-			s.ServiceName = string(v)
-		}
-		if v, ok := row[5].([]byte); ok {
-			s.Name = string(v)
-		}
-		if v, ok := row[6].([]byte); ok {
-			s.Kind = domain.SpanKind(v)
-		}
+		s.SpanID = strVal(row[0])
+		s.TraceID = strVal(row[1])
+		s.ParentID = strVal(row[2])
+		s.ProjectID = strVal(row[3])
+		s.ServiceName = strVal(row[4])
+		s.Name = strVal(row[5])
+		s.Kind = domain.SpanKind(strVal(row[6]))
 		if v, ok := row[7].(time.Time); ok {
 			s.StartTime = v
 		}
 		if v, ok := row[8].(time.Time); ok {
 			s.EndTime = v
 		}
-		if v, ok := row[9].([]byte); ok {
-			s.Model = string(v)
-		}
-		if v, ok := row[10].([]byte); ok {
-			s.Input = string(v)
-		}
-		if v, ok := row[11].([]byte); ok {
-			s.Output = string(v)
-		}
+		s.Model = strVal(row[9])
+		s.Input = strVal(row[10])
+		s.Output = strVal(row[11])
 		if v, ok := row[12].(int64); ok {
 			s.InputTokens = v
 		}
@@ -383,18 +378,12 @@ func ScanRows(rows [][]any) ([]*domain.Span, error) {
 		if v, ok := row[14].(float64); ok {
 			s.CostUSD = v
 		}
-		if v, ok := row[15].([]byte); ok {
-			s.PromptName = string(v)
-		}
+		s.PromptName = strVal(row[15])
 		if v, ok := row[16].(int64); ok {
 			s.PromptVersion = v
 		}
-		if v, ok := row[17].([]byte); ok {
-			s.StatusCode = string(v)
-		}
-		if v, ok := row[18].([]byte); ok {
-			s.StatusMessage = string(v)
-		}
+		s.StatusCode = strVal(row[17])
+		s.StatusMessage = strVal(row[18])
 		spans[i] = s
 	}
 	return spans, nil
