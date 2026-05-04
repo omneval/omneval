@@ -54,13 +54,11 @@ func Generate(kind domain.APIKeyKind) (rawKey, hashedKey string, err error) {
 	return rawKey, hashedKey, nil
 }
 
-// Hash returns the SHA-256 hex digest of a raw API key.
 func Hash(rawKey string) string {
 	hash := sha256.Sum256([]byte(rawKey))
 	return hex.EncodeToString(hash[:])
 }
 
-// KindFromRaw infers the APIKeyKind from the key's prefix.
 func KindFromRaw(rawKey string) (domain.APIKeyKind, bool) {
 	switch {
 	case strings.HasPrefix(rawKey, PrefixProject):
@@ -93,16 +91,16 @@ func NewCachingValidator(store metadata.Store) *CachingValidator {
 }
 
 func (v *CachingValidator) Validate(ctx context.Context, rawKey string) (*ValidatedKey, error) {
-	// Check cache first
+	now := time.Now()
+
 	v.cacheMu.RLock()
 	entry, cached := v.cache[rawKey]
 	v.cacheMu.RUnlock()
 
-	if cached && time.Now().Before(entry.expiresAt) {
+	if cached && now.Before(entry.expiresAt) {
 		return entry.result, nil
 	}
 
-	// Look up in store
 	hashed := Hash(rawKey)
 	if _, ok := KindFromRaw(rawKey); !ok {
 		return nil, fmt.Errorf("auth: invalid key format")
@@ -113,7 +111,6 @@ func (v *CachingValidator) Validate(ctx context.Context, rawKey string) (*Valida
 		return nil, fmt.Errorf("auth: invalid API key")
 	}
 
-	// Check if revoked
 	if key.RevokedAt != nil && !key.RevokedAt.IsZero() {
 		return nil, fmt.Errorf("auth: API key revoked")
 	}
@@ -124,11 +121,10 @@ func (v *CachingValidator) Validate(ctx context.Context, rawKey string) (*Valida
 		ServiceName: key.ServiceName,
 	}
 
-	// Write to cache
 	v.cacheMu.Lock()
 	v.cache[rawKey] = &cacheEntry{
 		result:    result,
-		expiresAt: time.Now().Add(time.Duration(CacheTTL) * time.Second),
+		expiresAt: now.Add(time.Duration(CacheTTL) * time.Second),
 	}
 	v.cacheMu.Unlock()
 
