@@ -1,0 +1,636 @@
+package postgres_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/zbloss/lantern/internal/domain"
+	"github.com/zbloss/lantern/internal/metadata"
+	"github.com/zbloss/lantern/internal/metadata/postgres"
+	testpg "github.com/testcontainers/testcontainers-go/modules/postgres"
+	"golang.org/x/crypto/bcrypt"
+)
+
+// helper creates a Postgres container and a Store bound to it.
+// The caller is responsible for cleanup.
+func openTestStore(ctx context.Context, t *testing.T) (*postgres.Store, func()) {
+	t.Helper()
+	pc, err := testpg.RunContainer(ctx,
+		testpg.WithDatabase("lantern"),
+		testpg.WithUsername("postgres"),
+		testpg.WithPassword("postgres"),
+	)
+	if err != nil {
+		t.Fatalf("run postgres container: %v", err)
+	}
+	t.Cleanup(func() { pc.Terminate(ctx) })
+
+	dsn, err := pc.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		t.Fatalf("get dsn: %v", err)
+	}
+
+	s, err := postgres.New(dsn)
+	if err != nil {
+		t.Fatalf("open test store: %v", err)
+	}
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return s, func() {}
+}
+
+func TestMigrate_Clean(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	// Verify key tables exist by querying them
+	tables := []string{
+		"organizations", "projects", "users", "sessions",
+		"api_keys", "prompt_versions", "prompt_labels",
+		"eval_rules", "datasets", "dataset_items",
+		"dataset_runs", "dataset_run_items",
+	}
+	for _, table := range tables {
+		var count int
+		err := s.DB().QueryRowContext(ctx,
+			"SELECT count(*) FROM information_schema.tables WHERE table_name = $1 AND table_schema = 'public'", table,
+		).Scan(&count)
+		if err != nil {
+			t.Errorf("table %s not found: %v", table, err)
+		} else if count == 0 {
+			t.Errorf("table %s not found", table)
+		}
+	}
+}
+
+func TestMigrate_Idempotent(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	// Calling Migrate again should be a no-op
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("second migrate call: %v", err)
+	}
+}
+
+// ---- Organizations ----
+
+func TestOrg_CreateAndGet(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	org := &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}
+	if err := s.CreateOrganization(ctx, org); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+
+	got, err := s.GetOrganization(ctx, "org-1")
+	if err != nil {
+		t.Fatalf("get org: %v", err)
+	}
+	if got.OrgID != "org-1" || got.Name != "Test Corp" {
+		t.Errorf("got %v, want %+v", got, org)
+	}
+}
+
+func TestOrg_NotFound(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	_, err := s.GetOrganization(ctx, "no-such-org")
+	if !errors.Is(err, metadata.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// ---- Projects ----
+
+func TestProject_CreateAndGet(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp"})
+
+	project := &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "My Project", CreatedAt: now}
+	if err := s.CreateProject(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	got, err := s.GetProject(ctx, "proj-1")
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if got.OrgID != "org-1" || got.Name != "My Project" {
+		t.Errorf("got %v, want %+v", got, project)
+	}
+}
+
+func TestProject_ListByOrg(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp"})
+	s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-2", Name: "Other Corp"})
+
+	now := time.Now().UTC()
+	s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now})
+	s.CreateProject(ctx, &domain.Project{ProjectID: "proj-2", OrgID: "org-1", Name: "P2", CreatedAt: now})
+	s.CreateProject(ctx, &domain.Project{ProjectID: "proj-3", OrgID: "org-2", Name: "P3", CreatedAt: now})
+
+	projects, err := s.ListProjects(ctx, "org-1")
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	if len(projects) != 2 {
+		t.Fatalf("expected 2 projects, got %d", len(projects))
+	}
+	if projects[0].ProjectID != "proj-1" || projects[1].ProjectID != "proj-2" {
+		t.Errorf("unexpected project order: %v", projects)
+	}
+}
+
+// ---- Users ----
+
+func TestUser_CreateAndGetByEmail(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	user := &domain.User{UserID: "user-1", OrgID: "org-1", Email: "alice@example.com", PasswordHash: "$2a$10$...", CreatedAt: now}
+	if err := s.CreateUser(ctx, user); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	got, err := s.GetUserByEmail(ctx, "alice@example.com")
+	if err != nil {
+		t.Fatalf("get user by email: %v", err)
+	}
+	if got.Email != "alice@example.com" || got.UserID != "user-1" {
+		t.Errorf("got %v", got)
+	}
+	// Verify password was hashed by bcrypt
+	if len(got.PasswordHash) < 30 {
+		t.Errorf("password hash too short: %q", got.PasswordHash)
+	}
+}
+
+func TestUser_ListByOrg(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp"})
+	now := time.Now().UTC()
+
+	s.CreateUser(ctx, &domain.User{UserID: "user-1", OrgID: "org-1", Email: "a@example.com", PasswordHash: "hash1", CreatedAt: now})
+	s.CreateUser(ctx, &domain.User{UserID: "user-2", OrgID: "org-1", Email: "b@example.com", PasswordHash: "hash2", CreatedAt: now})
+	s.CreateUser(ctx, &domain.User{UserID: "user-3", OrgID: "org-2", Email: "c@example.com", PasswordHash: "hash3", CreatedAt: now})
+
+	users, err := s.ListUsers(ctx, "org-1")
+	if err != nil {
+		t.Fatalf("list users: %v", err)
+	}
+	if len(users) != 2 {
+		t.Fatalf("expected 2 users, got %d", len(users))
+	}
+	emails := []string{users[0].Email, users[1].Email}
+	if emails[0] != "a@example.com" || emails[1] != "b@example.com" {
+		t.Errorf("unexpected emails: %v", emails)
+	}
+}
+
+func TestUser_CheckPassword(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("generate bcrypt: %v", err)
+	}
+
+	if err := s.CheckPassword(string(hash), "correct-password"); err != nil {
+		t.Error("correct password should match")
+	}
+	if err := s.CheckPassword(string(hash), "wrong-password"); err == nil {
+		t.Error("wrong password should not match")
+	}
+}
+
+// ---- Sessions ----
+
+func TestSession_CreateAndGet(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	expiresAt := now.Add(24 * time.Hour)
+	session := &domain.Session{SessionID: "sess-1", UserID: "user-1", ExpiresAt: expiresAt, CreatedAt: now}
+	if err := s.CreateSession(ctx, session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	got, err := s.GetSession(ctx, "sess-1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if got.UserID != "user-1" {
+		t.Errorf("got userID %q, want %q", got.UserID, "user-1")
+	}
+}
+
+func TestSession_Delete(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	expiresAt := now.Add(24 * time.Hour)
+	s.CreateSession(ctx, &domain.Session{SessionID: "sess-1", UserID: "user-1", ExpiresAt: expiresAt, CreatedAt: now})
+
+	if err := s.DeleteSession(ctx, "sess-1"); err != nil {
+		t.Fatalf("delete session: %v", err)
+	}
+
+	_, err := s.GetSession(ctx, "sess-1")
+	if err != metadata.ErrNotFound {
+		t.Errorf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+// ---- API Keys ----
+
+func TestAPIKey_CreateAndGetByHash(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp"})
+	s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1"})
+
+	key := &domain.APIKey{KeyID: "key-1", ProjectID: "proj-1", Kind: domain.APIKeyKindProject, HashedKey: "sha256hash", CreatedAt: now}
+	if err := s.CreateAPIKey(ctx, key); err != nil {
+		t.Fatalf("create api key: %v", err)
+	}
+
+	got, err := s.GetAPIKeyByHash(ctx, "sha256hash")
+	if err != nil {
+		t.Fatalf("get api key by hash: %v", err)
+	}
+	if got.KeyID != "key-1" || got.ProjectID != "proj-1" || got.Kind != domain.APIKeyKindProject {
+		t.Errorf("got %v", got)
+	}
+}
+
+func TestAPIKey_Revoke(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp"})
+	s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1"})
+
+	now := time.Now().UTC()
+	s.CreateAPIKey(ctx, &domain.APIKey{KeyID: "key-1", ProjectID: "proj-1", Kind: domain.APIKeyKindProject, HashedKey: "h1", CreatedAt: now})
+
+	if err := s.RevokeAPIKey(ctx, "key-1"); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+
+	got, err := s.GetAPIKeyByHash(ctx, "h1")
+	if err != nil {
+		t.Fatalf("get revoked key: %v", err)
+	}
+	if got.RevokedAt == nil {
+		t.Error("expected revoked_at to be set")
+	}
+}
+
+func TestAPIKey_ListByProject(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp"})
+	s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1"})
+	s.CreateProject(ctx, &domain.Project{ProjectID: "proj-2", OrgID: "org-1", Name: "P2"})
+
+	s.CreateAPIKey(ctx, &domain.APIKey{KeyID: "k1", ProjectID: "proj-1", Kind: domain.APIKeyKindProject, HashedKey: "h1", CreatedAt: now})
+	s.CreateAPIKey(ctx, &domain.APIKey{KeyID: "k2", ProjectID: "proj-1", Kind: domain.APIKeyKindService, ServiceName: "svc", HashedKey: "h2", CreatedAt: now})
+	s.CreateAPIKey(ctx, &domain.APIKey{KeyID: "k3", ProjectID: "proj-2", Kind: domain.APIKeyKindProject, HashedKey: "h3", CreatedAt: now})
+
+	keys, err := s.ListAPIKeys(ctx, "proj-1")
+	if err != nil {
+		t.Fatalf("list api keys: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 keys for proj-1, got %d", len(keys))
+	}
+}
+
+// ---- Prompt Versions ----
+
+func TestPrompt_CreateAndGet(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	pv := &domain.PromptVersion{
+		VersionID:   "pv-1",
+		ProjectID:   "proj-1",
+		Name:        "greeting",
+		Version:     1,
+		Template:    "Hello {{name}}, welcome!",
+		ModelConfig: domain.PromptModelConfig{Model: "gpt-4", Temperature: 0.7, MaxTokens: 256},
+		CreatedAt:   now,
+	}
+	if err := s.CreatePromptVersion(ctx, pv); err != nil {
+		t.Fatalf("create prompt version: %v", err)
+	}
+
+	got, err := s.GetPromptVersion(ctx, "proj-1", "greeting", 1)
+	if err != nil {
+		t.Fatalf("get prompt version: %v", err)
+	}
+	if got.Template != "Hello {{name}}, welcome!" || got.Version != 1 {
+		t.Errorf("got %v", got)
+	}
+}
+
+func TestPrompt_GetByLabel(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	s.CreatePromptVersion(ctx, &domain.PromptVersion{
+		VersionID:   "pv-1",
+		ProjectID:   "proj-1",
+		Name:        "greeting",
+		Version:     1,
+		Template:    "v1",
+		ModelConfig: domain.PromptModelConfig{Model: "gpt-3.5"},
+		CreatedAt:   now,
+	})
+	s.CreatePromptVersion(ctx, &domain.PromptVersion{
+		VersionID:   "pv-2",
+		ProjectID:   "proj-1",
+		Name:        "greeting",
+		Version:     2,
+		Template:    "v2",
+		ModelConfig: domain.PromptModelConfig{Model: "gpt-4"},
+		CreatedAt:   now,
+	})
+
+	s.SetPromptLabel(ctx, &domain.PromptLabel{
+		ProjectID: "proj-1", Name: "greeting", Label: "production", Version: 2,
+	})
+
+	got, err := s.GetPromptByLabel(ctx, "proj-1", "greeting", "production")
+	if err != nil {
+		t.Fatalf("get prompt by label: %v", err)
+	}
+	if got.Version != 2 || got.Template != "v2" {
+		t.Errorf("got version %d template %q, want version 2 template \"v2\"", got.Version, got.Template)
+	}
+}
+
+func TestPrompt_ListVersions(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	for i := int64(1); i <= 3; i++ {
+		s.CreatePromptVersion(ctx, &domain.PromptVersion{
+			VersionID:   "pv-" + string(rune('0'+i)),
+			ProjectID:   "proj-1",
+			Name:        "greeting",
+			Version:     i,
+			Template:    "v" + string(rune('0'+i)),
+			ModelConfig: domain.PromptModelConfig{Model: "gpt-4"},
+			CreatedAt:   now,
+		})
+	}
+
+	versions, err := s.ListPromptVersions(ctx, "proj-1", "greeting")
+	if err != nil {
+		t.Fatalf("list prompt versions: %v", err)
+	}
+	if len(versions) != 3 {
+		t.Fatalf("expected 3 versions, got %d", len(versions))
+	}
+	if versions[0].Version != 1 || versions[2].Version != 3 {
+		t.Errorf("unexpected version order: %v", versions)
+	}
+}
+
+func TestPrompt_LabelUpsert(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	s.CreatePromptVersion(ctx, &domain.PromptVersion{
+		VersionID:   "pv-1",
+		ProjectID:   "proj-1",
+		Name:        "greeting",
+		Version:     1,
+		Template:    "v1",
+		ModelConfig: domain.PromptModelConfig{},
+		CreatedAt:   now,
+	})
+	s.CreatePromptVersion(ctx, &domain.PromptVersion{
+		VersionID:   "pv-2",
+		ProjectID:   "proj-1",
+		Name:        "greeting",
+		Version:     2,
+		Template:    "v2",
+		ModelConfig: domain.PromptModelConfig{},
+		CreatedAt:   now,
+	})
+
+	// Set initial label
+	s.SetPromptLabel(ctx, &domain.PromptLabel{
+		ProjectID: "proj-1", Name: "greeting", Label: "production", Version: 1,
+	})
+
+	// Update label to point to v2
+	s.SetPromptLabel(ctx, &domain.PromptLabel{
+		ProjectID: "proj-1", Name: "greeting", Label: "production", Version: 2,
+	})
+
+	got, err := s.GetPromptByLabel(ctx, "proj-1", "greeting", "production")
+	if err != nil {
+		t.Fatalf("get prompt by label after upsert: %v", err)
+	}
+	if got.Version != 2 {
+		t.Errorf("expected version 2 after upsert, got %d", got.Version)
+	}
+}
+
+// ---- Eval Rules ----
+
+func TestEvalRule_CreateAndGet(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	filter := domain.EvalFilter{Model: func() *string { s := "gpt-4"; return &s }()}
+	rule := &domain.EvalRule{
+		RuleID:        "rule-1",
+		ProjectID:     "proj-1",
+		Name:          "latency check",
+		JudgeModel:    "gpt-4",
+		PromptName:    "latency-scorer",
+		PromptVersion: 1,
+		Filter:        filter,
+		SampleRate:    1.0,
+		Enabled:       true,
+		CreatedAt:     now,
+	}
+	if err := s.CreateEvalRule(ctx, rule); err != nil {
+		t.Fatalf("create eval rule: %v", err)
+	}
+
+	got, err := s.GetEvalRule(ctx, "rule-1")
+	if err != nil {
+		t.Fatalf("get eval rule: %v", err)
+	}
+	if got.Name != "latency check" || got.Enabled != true || got.SampleRate != 1.0 {
+		t.Errorf("got %v", got)
+	}
+	if got.Filter.Model == nil || *got.Filter.Model != "gpt-4" {
+		t.Errorf("unexpected filter: %v", got.Filter)
+	}
+}
+
+func TestEvalRule_ListByProject(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	s.CreateEvalRule(ctx, &domain.EvalRule{RuleID: "r1", ProjectID: "proj-1", Name: "rule-1", JudgeModel: "gpt-4", PromptName: "p", PromptVersion: 1, Enabled: true, CreatedAt: now})
+	s.CreateEvalRule(ctx, &domain.EvalRule{RuleID: "r2", ProjectID: "proj-1", Name: "rule-2", JudgeModel: "gpt-3.5", PromptName: "p", PromptVersion: 1, Enabled: false, CreatedAt: now})
+	s.CreateEvalRule(ctx, &domain.EvalRule{RuleID: "r3", ProjectID: "proj-2", Name: "rule-3", JudgeModel: "gpt-4", PromptName: "p", PromptVersion: 1, Enabled: true, CreatedAt: now})
+
+	rules, err := s.ListEvalRules(ctx, "proj-1")
+	if err != nil {
+		t.Fatalf("list eval rules: %v", err)
+	}
+	if len(rules) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(rules))
+	}
+}
+
+func TestEvalRule_Update(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	s.CreateEvalRule(ctx, &domain.EvalRule{RuleID: "r1", ProjectID: "proj-1", Name: "original", JudgeModel: "gpt-3.5", PromptName: "p", PromptVersion: 1, Enabled: true, CreatedAt: now})
+
+	s.UpdateEvalRule(ctx, &domain.EvalRule{RuleID: "r1", ProjectID: "proj-1", Name: "updated", JudgeModel: "gpt-4", PromptName: "p", PromptVersion: 2, Enabled: false, CreatedAt: now})
+
+	got, err := s.GetEvalRule(ctx, "r1")
+	if err != nil {
+		t.Fatalf("get updated rule: %v", err)
+	}
+	if got.Name != "updated" || got.Enabled != false || got.PromptVersion != 2 {
+		t.Errorf("got %v", got)
+	}
+}
+
+// ---- Datasets ----
+
+func TestDataset_CreateAndGet(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	ds := &domain.Dataset{DatasetID: "ds-1", ProjectID: "proj-1", Name: "Eval Set", CreatedAt: now}
+	if err := s.CreateDataset(ctx, ds); err != nil {
+		t.Fatalf("create dataset: %v", err)
+	}
+
+	got, err := s.GetDataset(ctx, "ds-1")
+	if err != nil {
+		t.Fatalf("get dataset: %v", err)
+	}
+	if got.Name != "Eval Set" {
+		t.Errorf("got %v", got)
+	}
+}
+
+func TestDatasetItems_CreateAndList(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	s.CreateDataset(ctx, &domain.Dataset{DatasetID: "ds-1", ProjectID: "proj-1", Name: "Set", CreatedAt: now})
+
+	s.CreateDatasetItem(ctx, &domain.DatasetItem{ItemID: "item-1", DatasetID: "ds-1", Input: "hello", ExpectedOutput: "hi", CreatedAt: now})
+	s.CreateDatasetItem(ctx, &domain.DatasetItem{ItemID: "item-2", DatasetID: "ds-1", Input: "bye", ExpectedOutput: "goodbye", CreatedAt: now})
+
+	items, err := s.ListDatasetItems(ctx, "ds-1")
+	if err != nil {
+		t.Fatalf("list dataset items: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if items[0].Input != "hello" || items[1].Input != "bye" {
+		t.Errorf("unexpected items: %v", items)
+	}
+}
+
+func TestDatasetRun_CreateAndGet(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	s.CreateDataset(ctx, &domain.Dataset{DatasetID: "ds-1", ProjectID: "proj-1", Name: "Set", CreatedAt: now})
+
+	run := &domain.DatasetRun{RunID: "run-1", DatasetID: "ds-1", EvalRuleID: "rule-1", PromptVersion: 1, CreatedAt: now}
+	if err := s.CreateDatasetRun(ctx, run); err != nil {
+		t.Fatalf("create dataset run: %v", err)
+	}
+
+	got, err := s.GetDatasetRun(ctx, "run-1")
+	if err != nil {
+		t.Fatalf("get dataset run: %v", err)
+	}
+	if got.EvalRuleID != "rule-1" || got.PromptVersion != 1 {
+		t.Errorf("got %v", got)
+	}
+}
+
+func TestClose_NoError(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(ctx, t)
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
