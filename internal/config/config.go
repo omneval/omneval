@@ -55,11 +55,14 @@ type AuthConfig struct {
 }
 
 type IngestConfig struct {
-	Addr             string `mapstructure:"addr"`
+	Addr             string   `mapstructure:"addr"`
 	// LogSystemPrompt controls whether the system prompt is included as the
 	// first element of a span's Input array. Defaults to true.
 	// Override via LANTERN_INGEST_LOG_SYSTEM_PROMPT=false.
 	LogSystemPrompt bool `mapstructure:"log_system_prompt"`
+	// CORSAllowedOrigins lists allowed origins for CORS requests. Use ["*"] for all origins.
+	// Override via LANTERN_INGEST_CORS_ALLOWED_ORIGINS (comma-separated).
+	CORSAllowedOrigins []string `mapstructure:"cors_allowed_origins"`
 }
 
 type WriterConfig struct {
@@ -131,6 +134,7 @@ func Load(path string) (*Config, error) {
 	// ingest
 	v.SetDefault("ingest.addr", ":8000")
 	v.SetDefault("ingest.log_system_prompt", true)
+	v.SetDefault("ingest.cors_allowed_origins", []string{"*"})
 	// writer
 	v.SetDefault("writer.addr", ":8001")
 	v.SetDefault("writer.duckdb_path", "")

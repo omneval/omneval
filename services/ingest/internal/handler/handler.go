@@ -9,6 +9,7 @@ import (
 
 	"github.com/zbloss/lantern/internal/auth"
 	"github.com/zbloss/lantern/internal/domain"
+	"github.com/zbloss/lantern/services/ingest/internal/cors"
 )
 
 // --- Types ---
@@ -52,17 +53,26 @@ type SpanQueue interface {
 
 // NativeHandler handles POST /api/v1/spans for the native Lantern REST format.
 type NativeHandler struct {
-	queue SpanQueue
-	validator Validator
+	queue         SpanQueue
+	validator     Validator
+	corsOrigins   []string
 }
 
 func NewNativeHandler(queue SpanQueue, validator Validator) *NativeHandler {
 	return &NativeHandler{queue: queue, validator: validator}
 }
 
+// NewNativeHandlerWithCORS creates a NativeHandler with CORS middleware applied.
+func NewNativeHandlerWithCORS(queue SpanQueue, validator Validator, corsOrigins []string) *NativeHandler {
+	return &NativeHandler{queue: queue, validator: validator, corsOrigins: corsOrigins}
+}
+
 func (h *NativeHandler) Router() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/spans", h.handleIngest)
+	if len(h.corsOrigins) > 0 {
+		return cors.New(h.corsOrigins).Handler(mux)
+	}
 	return mux
 }
 

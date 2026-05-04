@@ -58,8 +58,8 @@ func Run() error {
 	// Initialize validator
 	validator := auth.NewCachingValidator(store)
 
-	// Initialize handler
-	h := handler.NewNativeHandler(queue, validator)
+	// Initialize handler with CORS middleware
+	h := handler.NewNativeHandlerWithCORS(queue, validator, cfg.Ingest.CORSAllowedOrigins)
 
 	// Start server
 	addr := cfg.Ingest.Addr
