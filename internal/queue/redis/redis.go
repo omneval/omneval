@@ -15,7 +15,8 @@ import (
 // implementations. This allows injecting a mock in tests.
 type redisClient interface {
 	RPush(ctx context.Context, key string, values ...any) *redis.IntCmd
-	BRPop(ctx context.Context, timeout time.Duration, keys ...string) *redis.StringSliceCmd
+	LPush(ctx context.Context, key string, values ...any) *redis.IntCmd
+	BLPop(ctx context.Context, timeout time.Duration, keys ...string) *redis.StringSliceCmd
 	Ping(ctx context.Context) *redis.StatusCmd
 }
 
@@ -25,17 +26,19 @@ type IngestQueue struct {
 	client redisClient
 }
 
-func NewIngestQueue(client redisClient) *IngestQueue {
+// NewIngestQueue creates a new Redis-backed IngestQueue.
+func NewIngestQueue(client *redis.Client) *IngestQueue {
 	return &IngestQueue{client: client}
 }
 
+// Enqueue pushes one JSON-encoded span batch to the Redis list.
 func (q *IngestQueue) Enqueue(ctx context.Context, spans []*domain.Span) error {
 	data, err := json.Marshal(spans)
 	if err != nil {
-		return fmt.Errorf("marshalling spans: %w", err)
+		return fmt.Errorf("redis ingest: marshal spans: %w", err)
 	}
-	if err := q.client.RPush(ctx, queue.KeyIngestSpans, data).Err(); err != nil {
-		return fmt.Errorf("pushing to ingest queue: %w", err)
+	if err := q.client.LPush(ctx, queue.KeyIngestSpans, data).Err(); err != nil {
+		return fmt.Errorf("redis ingest: rpush %s: %w", queue.KeyIngestSpans, err)
 	}
 	return nil
 }
@@ -43,17 +46,17 @@ func (q *IngestQueue) Enqueue(ctx context.Context, spans []*domain.Span) error {
 // Dequeue blocks for up to 5 seconds waiting for the next span batch.
 // Returns nil, nil when the timeout elapses with no entry available.
 func (q *IngestQueue) Dequeue(ctx context.Context) ([]*domain.Span, error) {
-	results, err := q.client.BRPop(ctx, 5*time.Second, queue.KeyIngestSpans).Result()
+	result, err := q.client.BLPop(ctx, 5*time.Second, queue.KeyIngestSpans).Result()
 	if err != nil {
 		if err == redis.Nil {
-			return nil, nil
+			return nil, nil // timeout, no entry
 		}
-		return nil, fmt.Errorf("blocking pop from ingest queue: %w", err)
+		return nil, fmt.Errorf("redis ingest: blpop %s: %w", queue.KeyIngestSpans, err)
 	}
-	// results[0] is the key, results[1] is the value
+	// result[0] = key, result[1] = value
 	var spans []*domain.Span
-	if err := json.Unmarshal([]byte(results[1]), &spans); err != nil {
-		return nil, fmt.Errorf("unmarshalling spans: %w", err)
+	if err := json.Unmarshal([]byte(result[1]), &spans); err != nil {
+		return nil, fmt.Errorf("redis ingest: unmarshal spans: %w", err)
 	}
 	return spans, nil
 }
@@ -64,17 +67,19 @@ type EvalQueue struct {
 	client redisClient
 }
 
-func NewEvalQueue(client redisClient) *EvalQueue {
+// NewEvalQueue creates a new Redis-backed EvalQueue.
+func NewEvalQueue(client *redis.Client) *EvalQueue {
 	return &EvalQueue{client: client}
 }
 
+// Enqueue pushes one JSON-encoded EvalJob to the Redis list.
 func (q *EvalQueue) Enqueue(ctx context.Context, job *domain.EvalJob) error {
 	data, err := json.Marshal(job)
 	if err != nil {
-		return fmt.Errorf("marshalling eval job: %w", err)
+		return fmt.Errorf("redis eval: marshal job: %w", err)
 	}
 	if err := q.client.RPush(ctx, queue.KeyEvalJobs, data).Err(); err != nil {
-		return fmt.Errorf("pushing to eval queue: %w", err)
+		return fmt.Errorf("redis eval: rpush %s: %w", queue.KeyEvalJobs, err)
 	}
 	return nil
 }
@@ -82,16 +87,16 @@ func (q *EvalQueue) Enqueue(ctx context.Context, job *domain.EvalJob) error {
 // Dequeue blocks for up to 5 seconds waiting for the next eval job.
 // Returns nil, nil when the timeout elapses with no entry available.
 func (q *EvalQueue) Dequeue(ctx context.Context) (*domain.EvalJob, error) {
-	results, err := q.client.BRPop(ctx, 5*time.Second, queue.KeyEvalJobs).Result()
+	result, err := q.client.BLPop(ctx, 5*time.Second, queue.KeyEvalJobs).Result()
 	if err != nil {
 		if err == redis.Nil {
-			return nil, nil
+			return nil, nil // timeout, no entry
 		}
-		return nil, fmt.Errorf("blocking pop from eval queue: %w", err)
+		return nil, fmt.Errorf("redis eval: blpop %s: %w", queue.KeyEvalJobs, err)
 	}
 	var job domain.EvalJob
-	if err := json.Unmarshal([]byte(results[1]), &job); err != nil {
-		return nil, fmt.Errorf("unmarshalling eval job: %w", err)
+	if err := json.Unmarshal([]byte(result[1]), &job); err != nil {
+		return nil, fmt.Errorf("redis eval: unmarshal job: %w", err)
 	}
 	return &job, nil
 }
