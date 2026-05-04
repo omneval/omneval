@@ -14,8 +14,8 @@ import (
 )
 
 // helper creates a Postgres container and a Store bound to it.
-// The caller is responsible for cleanup.
-func openTestStore(ctx context.Context, t *testing.T) (*postgres.Store, func()) {
+// Container cleanup is registered via t.Cleanup so the caller only needs Close().
+func openTestStore(ctx context.Context, t *testing.T) *postgres.Store {
 	t.Helper()
 	pc, err := testpg.RunContainer(ctx,
 		testpg.WithDatabase("lantern"),
@@ -39,12 +39,12 @@ func openTestStore(ctx context.Context, t *testing.T) (*postgres.Store, func()) 
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return s, func() {}
+	return s
 }
 
 func TestMigrate_Clean(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	// Verify key tables exist by querying them
@@ -69,7 +69,7 @@ func TestMigrate_Clean(t *testing.T) {
 
 func TestMigrate_Idempotent(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	// Calling Migrate again should be a no-op
@@ -82,7 +82,7 @@ func TestMigrate_Idempotent(t *testing.T) {
 
 func TestOrg_CreateAndGet(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
@@ -102,7 +102,7 @@ func TestOrg_CreateAndGet(t *testing.T) {
 
 func TestOrg_NotFound(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	_, err := s.GetOrganization(ctx, "no-such-org")
@@ -115,11 +115,13 @@ func TestOrg_NotFound(t *testing.T) {
 
 func TestProject_CreateAndGet(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
-	s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp"})
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp"}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
 
 	project := &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "My Project", CreatedAt: now}
 	if err := s.CreateProject(ctx, project); err != nil {
@@ -137,7 +139,7 @@ func TestProject_CreateAndGet(t *testing.T) {
 
 func TestProject_ListByOrg(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp"})
@@ -164,7 +166,7 @@ func TestProject_ListByOrg(t *testing.T) {
 
 func TestUser_CreateAndGetByEmail(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
@@ -188,7 +190,7 @@ func TestUser_CreateAndGetByEmail(t *testing.T) {
 
 func TestUser_ListByOrg(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp"})
@@ -213,7 +215,7 @@ func TestUser_ListByOrg(t *testing.T) {
 
 func TestUser_CheckPassword(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.DefaultCost)
@@ -233,7 +235,7 @@ func TestUser_CheckPassword(t *testing.T) {
 
 func TestSession_CreateAndGet(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
@@ -254,7 +256,7 @@ func TestSession_CreateAndGet(t *testing.T) {
 
 func TestSession_Delete(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
@@ -275,7 +277,7 @@ func TestSession_Delete(t *testing.T) {
 
 func TestAPIKey_CreateAndGetByHash(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
@@ -298,7 +300,7 @@ func TestAPIKey_CreateAndGetByHash(t *testing.T) {
 
 func TestAPIKey_Revoke(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp"})
@@ -322,7 +324,7 @@ func TestAPIKey_Revoke(t *testing.T) {
 
 func TestAPIKey_ListByProject(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
@@ -347,7 +349,7 @@ func TestAPIKey_ListByProject(t *testing.T) {
 
 func TestPrompt_CreateAndGet(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
@@ -375,7 +377,7 @@ func TestPrompt_CreateAndGet(t *testing.T) {
 
 func TestPrompt_GetByLabel(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
@@ -413,7 +415,7 @@ func TestPrompt_GetByLabel(t *testing.T) {
 
 func TestPrompt_ListVersions(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
@@ -443,7 +445,7 @@ func TestPrompt_ListVersions(t *testing.T) {
 
 func TestPrompt_LabelUpsert(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
@@ -489,7 +491,7 @@ func TestPrompt_LabelUpsert(t *testing.T) {
 
 func TestEvalRule_CreateAndGet(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
@@ -524,7 +526,7 @@ func TestEvalRule_CreateAndGet(t *testing.T) {
 
 func TestEvalRule_ListByProject(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
@@ -543,7 +545,7 @@ func TestEvalRule_ListByProject(t *testing.T) {
 
 func TestEvalRule_Update(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
@@ -564,7 +566,7 @@ func TestEvalRule_Update(t *testing.T) {
 
 func TestDataset_CreateAndGet(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
@@ -584,7 +586,7 @@ func TestDataset_CreateAndGet(t *testing.T) {
 
 func TestDatasetItems_CreateAndList(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
@@ -607,7 +609,7 @@ func TestDatasetItems_CreateAndList(t *testing.T) {
 
 func TestDatasetRun_CreateAndGet(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	defer s.Close()
 
 	now := time.Now().UTC()
@@ -629,7 +631,7 @@ func TestDatasetRun_CreateAndGet(t *testing.T) {
 
 func TestClose_NoError(t *testing.T) {
 	ctx := context.Background()
-	s, _ := openTestStore(ctx, t)
+	s := openTestStore(ctx, t)
 	if err := s.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}

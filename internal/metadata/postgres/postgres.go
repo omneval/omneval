@@ -41,23 +41,6 @@ func New(dsn string) (*Store, error) {
 	return s, nil
 }
 
-// NewWithDriver opens a Postgres connection using the given DSN and driver name.
-// This allows choosing between "pgx" and "lib/pq" drivers.
-func NewWithDriver(dsn, driver string) (*Store, error) {
-	db, err := sql.Open(driver, dsn)
-	if err != nil {
-		return nil, fmt.Errorf("postgres: open (%s): %w", driver, err)
-	}
-
-	if err := db.PingContext(context.Background()); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("postgres: ping: %w", err)
-	}
-
-	s := &Store{db: db}
-	return s, nil
-}
-
 // Migrate applies pending SQL migrations.
 // For the single-file migration, this applies it once and records the version.
 func (s *Store) Migrate(ctx context.Context) error {
@@ -204,6 +187,7 @@ func (s *Store) ListProjects(ctx context.Context, orgID string) ([]*domain.Proje
 
 func (s *Store) CreateUser(ctx context.Context, user *domain.User) error {
 	// Hash the user ID as the password (demo mode: no separate password field).
+	// The stored PasswordHash is overwritten with the bcrypt result.
 	hashed, err := bcrypt.GenerateFromPassword([]byte(user.UserID), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("postgres: bcrypt hash: %w", err)
