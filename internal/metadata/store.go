@@ -2,9 +2,13 @@ package metadata
 
 import (
 	"context"
+	"errors"
 
 	"github.com/zbloss/lantern/internal/domain"
 )
+
+// ErrNotFound is returned when a requested entity does not exist.
+var ErrNotFound = errors.New("metadata: not found")
 
 // Store is the interface all metadata backends must satisfy. Implementations
 // exist for Postgres (production) and SQLite (demo / docker-compose).
