@@ -121,6 +121,9 @@ const agent = sandcastle.pi(MODEL);
 // Main loop
 // ---------------------------------------------------------------------------
 
+let consecutivePlannerFailures = 0;
+const MAX_CONSECUTIVE_PLANNER_FAILURES = 3;
+
 for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
 
@@ -142,10 +145,20 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
 
   const planMatch = plan.stdout.match(/<plan>([\s\S]*?)<\/plan>/);
   if (!planMatch) {
-    throw new Error(
-      "Planning agent did not produce a <plan> tag.\n\n" + plan.stdout,
+    consecutivePlannerFailures++;
+    console.warn(
+      `[iteration ${iteration}] Planner did not produce a <plan> tag ` +
+      `(${consecutivePlannerFailures}/${MAX_CONSECUTIVE_PLANNER_FAILURES} consecutive failures).\n` +
+      plan.stdout.slice(-1000),
     );
+    if (consecutivePlannerFailures >= MAX_CONSECUTIVE_PLANNER_FAILURES) {
+      throw new Error(
+        `Planner failed ${MAX_CONSECUTIVE_PLANNER_FAILURES} consecutive times without a <plan> tag. Aborting.`,
+      );
+    }
+    continue;
   }
+  consecutivePlannerFailures = 0;
 
   const { issues } = JSON.parse(planMatch[1]!) as {
     issues: { id: string; title: string; branch: string }[];
