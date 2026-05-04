@@ -2,6 +2,7 @@ package query
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,22 +143,22 @@ func TestSQL_FirstPage(t *testing.T) {
 	}
 
 	// Should contain UNION ALL.
-	if !containsString(sql, "UNION ALL") {
+	if !strings.Contains(sql, "UNION ALL") {
 		t.Error("expected UNION ALL in SQL")
 	}
 
 	// Should contain ORDER BY start_time DESC.
-	if !containsString(sql, "start_time DESC") {
+	if !strings.Contains(sql, "start_time DESC") {
 		t.Error("expected ORDER BY start_time DESC")
 	}
 
 	// Should contain LIMIT.
-	if !containsString(sql, "LIMIT") {
+	if !strings.Contains(sql, "LIMIT") {
 		t.Error("expected LIMIT in SQL")
 	}
 
 	// Should not contain cursor predicates on first page.
-	if containsString(sql, "cursor") {
+	if strings.Contains(sql, "cursor") {
 		t.Error("should not have cursor predicates on first page")
 	}
 }
@@ -185,7 +186,7 @@ func TestSQL_CursorPage(t *testing.T) {
 		t.Errorf("expected at least 4 args for cursor page, got %d", len(args))
 	}
 
-	if !containsString(sql, "start_time < ?") {
+	if !strings.Contains(sql, "start_time < ?") {
 		t.Error("expected cursor start_time < predicate")
 	}
 }
@@ -208,7 +209,7 @@ func TestSQL_ProjectIDInjected(t *testing.T) {
 
 	// Should contain project_id = ? with proj-secret as arg.
 	expected := "project_id = ?"
-	if !containsString(sql, expected) {
+	if !strings.Contains(sql, expected) {
 		t.Errorf("expected %q in SQL", expected)
 	}
 
@@ -234,10 +235,10 @@ func TestSQL_TimeRangeFilter(t *testing.T) {
 		t.Fatalf("SQL error: %v", err)
 	}
 
-	if !containsString(sql, "start_time >= ?") {
+	if !strings.Contains(sql, "start_time >= ?") {
 		t.Error("expected start_time >= filter")
 	}
-	if !containsString(sql, "start_time <= ?") {
+	if !strings.Contains(sql, "start_time <= ?") {
 		t.Error("expected start_time <= filter")
 	}
 
@@ -266,7 +267,7 @@ func TestSQL_FilterModelEq(t *testing.T) {
 		t.Fatalf("SQL error: %v", err)
 	}
 
-	if !containsString(sql, "model = ?") {
+	if !strings.Contains(sql, "model = ?") {
 		t.Error("expected model = ? filter")
 	}
 
@@ -296,7 +297,7 @@ func TestSQL_FilterModelIn(t *testing.T) {
 		t.Fatalf("SQL error: %v", err)
 	}
 
-	if !containsString(sql, "model IN") {
+	if !strings.Contains(sql, "model IN") {
 		t.Error("expected model IN filter")
 	}
 }
@@ -318,7 +319,7 @@ func TestSQL_ColdSideStub(t *testing.T) {
 	}
 
 	// Cold side stub uses VALUES with CAST(NULL ...).
-	if !containsString(sql, "CAST(NULL AS") {
+	if !strings.Contains(sql, "CAST(NULL AS") {
 		t.Error("expected cold side stub with CAST(NULL AS...)")
 	}
 }
@@ -437,7 +438,7 @@ func TestCompileFilter_StringSliceIn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compileFilter error: %v", err)
 	}
-	if !containsString(sql, "model IN") {
+	if !strings.Contains(sql, "model IN") {
 		t.Error("expected model IN filter")
 	}
 	if len(args) != 2 {
@@ -461,7 +462,7 @@ func TestCountSQL(t *testing.T) {
 		t.Fatalf("CountSQL error: %v", err)
 	}
 
-	if !containsString(sql, "SELECT COUNT(*)") {
+	if !strings.Contains(sql, "SELECT COUNT(*)") {
 		t.Error("expected SELECT COUNT(*)")
 	}
 }
@@ -540,16 +541,3 @@ func TestNextCursor_SameStartTimeDifferentSpanID(t *testing.T) {
 	}
 }
 
-// helper: containsString checks if a string contains a substring.
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && findSubstring(s, substr))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

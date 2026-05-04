@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -66,25 +67,8 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	// Scan rows into domain spans.
-	var spanRows [][]any
-	for rows.Next() {
-		cols, err := rows.ColumnTypes()
-		if err != nil {
-			http.Error(w, "scan error: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		values := make([]any, len(cols))
-		valuePtrs := make([]any, len(cols))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-		if err := rows.Scan(valuePtrs...); err != nil {
-			http.Error(w, "scan error: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		spanRows = append(spanRows, values)
-	}
-	if err := rows.Err(); err != nil {
+	spanRows, err := scanAllRows(rows)
+	if err != nil {
 		http.Error(w, "scan error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -95,20 +79,15 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Compute next cursor.
-	next := query.NextCursor(spans, req.Limit)
-	if next == "" && len(spans) > 0 && req.Limit > 0 {
-		next = query.NextCursor(spans, req.Limit)
-	}
-	if next == "" && len(spans) > 0 && (req.Limit <= 0 || req.Limit >= query.MaxLimit) {
-		// Use the default limit for cursor computation.
-		next = query.NextCursor(spans, query.DefaultLimit)
-	}
+	// Compute next cursor using the effective limit from the query.
+	// This handles the case where req.Limit was 0 (unset) and the
+	// query defaulted to DefaultLimit.
+	next := query.NextCursor(spans, q.EffectiveLimit())
 
 	resp := query.SpanResponse{
 		Spans: spans,
 		Next:  next,
-		Limit: req.Limit,
+		Limit: q.EffectiveLimit(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -168,25 +147,8 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 	}
 	defer rows.Close()
 
-	var spanRows [][]any
-	for rows.Next() {
-		cols, err := rows.ColumnTypes()
-		if err != nil {
-			http.Error(w, "scan error: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		values := make([]any, len(cols))
-		valuePtrs := make([]any, len(cols))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-		if err := rows.Scan(valuePtrs...); err != nil {
-			http.Error(w, "scan error: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		spanRows = append(spanRows, values)
-	}
-	if err := rows.Err(); err != nil {
+	spanRows, err := scanAllRows(rows)
+	if err != nil {
 		http.Error(w, "scan error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -205,6 +167,31 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "encode error", http.StatusInternalServerError)
 		return
 	}
+}
+
+// scanAllRows scans all database rows into [][]any, handling the column
+// types and scanning loop in one step.
+func scanAllRows(rows *sql.Rows) ([][]any, error) {
+	var result [][]any
+	for rows.Next() {
+		cols, err := rows.ColumnTypes()
+		if err != nil {
+			return nil, fmt.Errorf("column types: %w", err)
+		}
+		values := make([]any, len(cols))
+		valuePtrs := make([]any, len(cols))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return nil, fmt.Errorf("scan row: %w", err)
+		}
+		result = append(result, values)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+	return result, nil
 }
 
 // buildTraceTree groups spans by trace_id and links parent-child relationships.

@@ -130,6 +130,12 @@ type SpanQuery struct {
 	snapshotDB string               // local DuckDB snapshot path
 }
 
+// EffectiveLimit returns the limit actually used by this query. This is the
+// validated, bounded value — not the raw client input.
+func (q *SpanQuery) EffectiveLimit() int {
+	return q.limit
+}
+
 // SQL returns the compiled SQL string and positional arguments.
 // The query always emits a hot+cold UNION. The cold side is a no-op stub
 // (always false) in this slice since Parquet archival is not yet implemented.
@@ -363,10 +369,10 @@ func ScanRows(rows [][]any) ([]*domain.Span, error) {
 			s.Model = string(v)
 		}
 		if v, ok := row[10].([]byte); ok {
-			_ = v
+			s.Input = string(v)
 		}
 		if v, ok := row[11].([]byte); ok {
-			_ = v
+			s.Output = string(v)
 		}
 		if v, ok := row[12].(int64); ok {
 			s.InputTokens = v

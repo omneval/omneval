@@ -1,6 +1,8 @@
 package metrics
 
 import (
+	"fmt"
+
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -41,21 +43,20 @@ var (
 	)
 )
 
-// Register initialises and registers all Prometheus metric families.
-// Metrics are labeled by project_id where applicable.
+// Register registers all Prometheus metric families to the global registry
+// so they appear at /metrics via promhttp.Handler().
 func Register() error {
-	reg := prometheus.NewRegistry()
-	if err := reg.Register(QueryDuration); err != nil {
-		return err
+	if err := prometheus.Register(QueryDuration); err != nil {
+		return fmt.Errorf("register query duration: %w", err)
 	}
-	if err := reg.Register(QueryErrors); err != nil {
-		return err
+	if err := prometheus.Register(QueryErrors); err != nil {
+		return fmt.Errorf("register query errors: %w", err)
 	}
-	if err := reg.Register(SnapshotDownloads); err != nil {
-		return err
+	if err := prometheus.Register(SnapshotDownloads); err != nil {
+		return fmt.Errorf("register snapshot downloads: %w", err)
 	}
-	if err := reg.Register(SnapshotDownloadsFailed); err != nil {
-		return err
+	if err := prometheus.Register(SnapshotDownloadsFailed); err != nil {
+		return fmt.Errorf("register snapshot download failures: %w", err)
 	}
 	return nil
 }
