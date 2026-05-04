@@ -67,9 +67,6 @@ type TraceResponse struct {
 	Spans     []*Span `json:"spans"`
 }
 
-// SpanKindJSON is the JSON representation of SpanKind.
-type SpanKindJSON string
-
 // Score is an evaluation result attached to a span (used by eval pipeline).
 type Score struct {
 	ScoreID     string    `json:"score_id"`

@@ -122,7 +122,7 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 	// Query all spans for this trace in this project.
 	spans, err := h.querySpansForTrace(projectID, traceID)
 	if err != nil {
-		http.Error(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -135,7 +135,7 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 	// Load scores for all spans in this trace.
 	scoresBySpan, err := h.queryScoresForTrace(projectID, traceID)
 	if err != nil {
-		http.Error(w, "score query error: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -176,26 +176,31 @@ func (h *SpanHandler) querySpansForTrace(projectID, traceID string) ([]*domain.S
 
 	q, err := query.NewSpanQuery(projectID, req, nil, "")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build span query: %w", err)
 	}
 
 	sqlStr, args, err := q.SQL()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("compile span query: %w", err)
 	}
 
 	rows, err := h.DB.Query(sqlStr, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("execute span query: %w", err)
 	}
 	defer rows.Close()
 
 	spanRows, err := scanAllRows(rows)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("scan span rows: %w", err)
 	}
 
-	return query.ScanRows(spanRows)
+	spans, err := query.ScanRows(spanRows)
+	if err != nil {
+		return nil, fmt.Errorf("convert span rows: %w", err)
+	}
+
+	return spans, nil
 }
 
 // queryScoresForTrace fetches all scores for spans in a given trace_id and project_id.
@@ -210,11 +215,11 @@ func (h *SpanHandler) queryScoresForTrace(projectID, traceID string) (map[string
 	)
 	if err != nil {
 		// If the scores table doesn't exist, return empty scores (graceful degradation).
-		// DuckDB error for missing table contains "Table" in the message.
+		// DuckDB reports missing tables with a message containing "Table".
 		if strings.Contains(err.Error(), "Table") {
 			return result, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("query scores: %w", err)
 	}
 	defer rows.Close()
 
@@ -225,7 +230,7 @@ func (h *SpanHandler) queryScoresForTrace(projectID, traceID string) (map[string
 		var reasoning *string
 
 		if err := rows.Scan(&spanID, &evalName, &value, &reasoning); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan score row: %w", err)
 		}
 
 		sc := &domain.SpanScore{
@@ -240,18 +245,22 @@ func (h *SpanHandler) queryScoresForTrace(projectID, traceID string) (map[string
 		result[spanID] = append(result[spanID], sc)
 	}
 
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate score rows: %w", err)
+	}
+
+	return result, nil
 }
 
-// scanAllRows scans all database rows into [][]any, handling the column
-// types and scanning loop in one step.
+// scanAllRows scans all database rows into [][]any.
 func scanAllRows(rows *sql.Rows) ([][]any, error) {
+	cols, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, fmt.Errorf("column types: %w", err)
+	}
+
 	var result [][]any
 	for rows.Next() {
-		cols, err := rows.ColumnTypes()
-		if err != nil {
-			return nil, fmt.Errorf("column types: %w", err)
-		}
 		values := make([]any, len(cols))
 		valuePtrs := make([]any, len(cols))
 		for i := range values {
