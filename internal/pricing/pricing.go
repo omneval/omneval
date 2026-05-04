@@ -1,7 +1,6 @@
 package pricing
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,9 +32,9 @@ type ModelOverride struct {
 
 // Table holds per-model token pricing. Prices are stored as USD per token.
 type Table struct {
-	mu           sync.RWMutex
-	inputCost    map[string]float64
-	outputCost   map[string]float64
+	mu         sync.RWMutex
+	inputCost  map[string]float64
+	outputCost map[string]float64
 }
 
 // InitBundledPricing loads the bundled pricing snapshot into defaultBundledPricing.
@@ -170,12 +169,6 @@ func (t *Table) Cost(model string, inputTokens, outputTokens int64) float64 {
 		cost += float64(outputTokens) * outputCost
 	}
 	return cost
-}
-
-// CostWithContext is like Cost but can be called with a context (for future extensibility).
-func (t *Table) CostWithContext(ctx context.Context, model string, inputTokens, outputTokens int64) float64 {
-	_ = ctx
-	return t.Cost(model, inputTokens, outputTokens)
 }
 
 // HasModel reports whether the table knows pricing for the given model.

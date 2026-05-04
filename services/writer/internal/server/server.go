@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -109,21 +109,21 @@ func Run() error {
 		Handler: scoreHandler,
 	}
 	go func() {
-		log.Printf("writer: score handler listening on %s", cfg.Writer.Addr)
+		slog.Info("writer: score handler listening", "addr", cfg.Writer.Addr)
 		if err := scoreServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("writer: score handler error: %v", err)
+			slog.Error("writer: score handler error", "err", err)
 		}
 	}()
 
 	// Start syncer (separate goroutine).
 	go func() {
 		if err := syncer.Run(ctx); err != nil {
-			log.Printf("writer: syncer error: %v", err)
+			slog.Error("writer: syncer error", "err", err)
 		}
 	}()
 
 	// Start pipeline (blocks until ctx is canceled).
-	log.Println("writer: pipeline started")
+	slog.Info("writer: pipeline started")
 	if err := pl.Run(ctx); err != nil {
 		cancel()
 		scoreServer.Shutdown(context.Background())

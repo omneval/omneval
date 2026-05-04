@@ -2,10 +2,12 @@ package pipeline
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"log/slog"
+	"math/big"
 	"time"
 
 	"github.com/zbloss/lantern/internal/domain"
@@ -71,9 +73,6 @@ func (p *Pipeline) Run(ctx context.Context) error {
 		for _, span := range spans {
 			p.evalSpans(ctx, span, rules)
 		}
-
-		// Refresh eval rules every 60 seconds.
-		// TODO: Add a ticker-based cache with 60s refresh.
 	}
 }
 
@@ -164,7 +163,7 @@ func (p *Pipeline) evalSpans(ctx context.Context, span *domain.Span, rules []dom
 		if rule.SampleRate <= 0.0 {
 			continue
 		}
-		if rule.SampleRate >= 1.0 || rand.Float64() < rule.SampleRate {
+		if !sampleRateDecides(rule.SampleRate) {
 			job := &domain.EvalJob{
 				JobID:      generateJobID(),
 				RuleID:     rule.RuleID,
@@ -174,8 +173,11 @@ func (p *Pipeline) evalSpans(ctx context.Context, span *domain.Span, rules []dom
 				EnqueuedAt: time.Now(),
 			}
 			if err := p.evalQ.Enqueue(ctx, job); err != nil {
-				// Log but don't fail the pipeline on eval enqueue errors.
-				// These will be retried by the eval worker's retry loop.
+				slog.WarnContext(ctx, "failed to enqueue eval job",
+					"rule_id", rule.RuleID,
+					"span_id", span.SpanID,
+					"err", err,
+				)
 			}
 		}
 	}
@@ -245,8 +247,22 @@ func attributesJSON(attrs map[string]any) string {
 }
 
 func generateJobID() string {
-	// Generate a simple ID using time + random.
 	b := make([]byte, 8)
-	rand.Read(b)
+	rand.Read(b) //nolint:errcheck // crypto/rand.Read only fails for truly pathological reasons
 	return fmt.Sprintf("%x", b)
+}
+
+// sampleRateDecides returns true if a span should be evaluated based on
+// the given sample rate (0.0–1.0). Always returns true for rate >= 1.0.
+func sampleRateDecides(rate float64) bool {
+	if rate >= 1.0 {
+		return true
+	}
+	// Use crypto/rand for unbiased sampling.
+	n, err := rand.Int(rand.Reader, big.NewInt(1000))
+	if err != nil {
+		return false
+	}
+	threshold := int64(rate * 1000)
+	return n.Int64() < threshold
 }

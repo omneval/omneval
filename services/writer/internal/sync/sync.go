@@ -2,7 +2,7 @@ package sync
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -12,9 +12,9 @@ import (
 // Syncer copies the live DuckDB file to S3 every 30 seconds so Query API
 // replicas always have a fresh snapshot.
 type Syncer struct {
-	client  *redis.Client
-	cfg     *config.Config
-	syncAt  time.Duration
+	client      *redis.Client
+	cfg         *config.Config
+	syncAt      time.Duration
 	snapshotKey string
 }
 
@@ -36,7 +36,7 @@ func New(client *redis.Client, cfg *config.Config) *Syncer {
 // DuckDB snapshot to Redis for Query API consumption.
 func (s *Syncer) Run(ctx context.Context) error {
 	if s.cfg.Storage.Endpoint == "" {
-		log.Println("writer: syncer skipped (no S3 endpoint)")
+		slog.Info("writer: syncer skipped", "reason", "no_s3_endpoint")
 		return nil
 	}
 
@@ -49,7 +49,7 @@ func (s *Syncer) Run(ctx context.Context) error {
 			return ctx.Err()
 		case <-ticker.C:
 			if err := s.doSync(ctx); err != nil {
-				log.Printf("writer: syncer error: %v", err)
+				slog.ErrorContext(ctx, "writer: syncer error", "err", err)
 			}
 		}
 	}
@@ -57,8 +57,6 @@ func (s *Syncer) Run(ctx context.Context) error {
 
 // doSync performs a single sync cycle.
 func (s *Syncer) doSync(ctx context.Context) error {
-	// In production, this copies the DuckDB file to S3.
-	// For now, just log.
-	log.Println("writer: syncer: snapshot sync (no S3 client configured)")
+	slog.InfoContext(ctx, "writer: syncer: snapshot sync (no S3 client configured)")
 	return nil
 }

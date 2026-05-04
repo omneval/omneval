@@ -20,16 +20,16 @@ type ScoreHandler struct {
 
 // ScoreRequest is the JSON body for POST /internal/v1/scores.
 type ScoreRequest struct {
-	ScoreID     string  `json:"score_id"`
-	SpanID      string  `json:"span_id"`
-	TraceID     string  `json:"trace_id"`
-	ProjectID   string  `json:"project_id"`
-	EvalName    string  `json:"eval_name"`
-	Value       float64 `json:"value"`
-	Reasoning   string  `json:"reasoning"`
-	JudgeModel  string  `json:"judge_model"`
+	ScoreID       string  `json:"score_id"`
+	SpanID        string  `json:"span_id"`
+	TraceID       string  `json:"trace_id"`
+	ProjectID     string  `json:"project_id"`
+	EvalName      string  `json:"eval_name"`
+	Value         float64 `json:"value"`
+	Reasoning     string  `json:"reasoning"`
+	JudgeModel    string  `json:"judge_model"`
 	PromptName    string  `json:"prompt_name"`
-	PromptVersion int64 `json:"prompt_version"`
+	PromptVersion int64   `json:"prompt_version"`
 }
 
 // New creates a new ScoreHandler.
@@ -40,7 +40,7 @@ func New(db *sql.DB) http.Handler {
 	return mux
 }
 
-// HandleScores writes a batch of scores to DuckDB.
+// HandleScores writes a single score to DuckDB.
 func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
 	var req ScoreRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -49,17 +49,17 @@ func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
 	}
 
 	score := &domain.Score{
-		ScoreID:     req.ScoreID,
-		SpanID:      req.SpanID,
-		TraceID:     req.TraceID,
-		ProjectID:   req.ProjectID,
-		EvalName:    req.EvalName,
-		Value:       req.Value,
-		Reasoning:   req.Reasoning,
-		JudgeModel:  req.JudgeModel,
+		ScoreID:       req.ScoreID,
+		SpanID:        req.SpanID,
+		TraceID:       req.TraceID,
+		ProjectID:     req.ProjectID,
+		EvalName:      req.EvalName,
+		Value:         req.Value,
+		Reasoning:     req.Reasoning,
+		JudgeModel:    req.JudgeModel,
 		PromptName:    req.PromptName,
 		PromptVersion: req.PromptVersion,
-		CreatedAt:   time.Now(),
+		CreatedAt:     time.Now(),
 	}
 
 	if err := h.writeScore(r.Context(), score); err != nil {
@@ -70,7 +70,7 @@ func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-// WriteScore writes a single score to DuckDB.
+// writeScore writes a single score to DuckDB.
 func (h *ScoreHandler) writeScore(ctx context.Context, score *domain.Score) error {
 	_, err := h.db.ExecContext(ctx, `
 		INSERT INTO scores (

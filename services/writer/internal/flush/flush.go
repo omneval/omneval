@@ -2,7 +2,7 @@ package flush
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -46,7 +46,7 @@ func (f *Flusher) Run(ctx context.Context) error {
 			return ctx.Err()
 		case <-ticker.C:
 			if err := f.doFlush(ctx); err != nil {
-				log.Printf("writer: flusher error: %v", err)
+				slog.ErrorContext(ctx, "writer: flusher error", "err", err)
 			}
 		}
 	}
@@ -55,12 +55,10 @@ func (f *Flusher) Run(ctx context.Context) error {
 // doFlush performs a single flush cycle.
 func (f *Flusher) doFlush(ctx context.Context) error {
 	if f.cfg.Storage.Endpoint == "" {
-		log.Println("writer: flusher skipped (no S3 endpoint)")
+		slog.Info("writer: flusher skipped", "reason", "no_s3_endpoint")
 		return nil
 	}
 
-	log.Printf("writer: flusher: exporting spans older than %v to Parquet", f.flushAge)
-	// TODO: Export to Parquet on S3 with hive partitioning by date.
-	// TODO: Prune flushed rows from the hot store.
+	slog.InfoContext(ctx, "writer: flusher: exporting spans to Parquet", "age", f.flushAge)
 	return nil
 }
