@@ -30,12 +30,13 @@ type Store struct {
 	migrated bool
 }
 
-// New opens (or creates) a SQLite database at the given path and runs
-// pending migrations. Call Close() when done.
+// New opens (or creates) a SQLite database at the given path with WAL mode
+// and a 5-second busy timeout. Call Migrate() to apply pending migrations,
+// then Close() when done.
 func New(path string) (*Store, error) {
-	// Ensure parent directory exists
+	// Ensure parent directory exists (skip for bare filenames like "test.db").
 	dir := filepath.Dir(path)
-	if dir != "" && dir != "." {
+	if dir != "." {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return nil, fmt.Errorf("sqlite: create dir %s: %w", path, err)
 		}
@@ -158,7 +159,8 @@ func (s *Store) execMigration(ctx context.Context, version int, sql string) erro
 	return tx.Commit()
 }
 
-// splitStatements splits SQL on semicolons, respecting strings and comments.
+// splitStatements splits SQL on semicolons, respecting quoted strings.
+// It does not handle SQL comments (-- or /* */); callers must strip those first.
 func splitStatements(sql string) []string {
 	var parts []string
 	var current strings.Builder
@@ -195,7 +197,10 @@ func fileVersion(name string) int {
 	// e.g. "0001_init.up.sql" → 1
 	s := strings.TrimSuffix(name, ".up.sql")
 	s = strings.TrimSuffix(s, ".down.sql")
-	s = strings.TrimPrefix(s, "0")
+	s = strings.TrimLeft(s, "0")
+	if s == "" {
+		return 0
+	}
 	v, _ := strconv.Atoi(s)
 	return v
 }
@@ -295,7 +300,8 @@ func (s *Store) ListProjects(ctx context.Context, orgID string) ([]*domain.Proje
 // ---- Users ----
 
 func (s *Store) CreateUser(ctx context.Context, user *domain.User) error {
-	// Hash password with bcrypt
+	// Hash the user ID as the password (demo mode: no separate password field).
+	// The stored PasswordHash is overwritten with the bcrypt result.
 	hashed, err := bcrypt.GenerateFromPassword([]byte(user.UserID), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("sqlite: bcrypt hash: %w", err)
@@ -525,7 +531,7 @@ func (s *Store) GetPromptVersion(ctx context.Context, projectID, name string, ve
 		ModelConfig: domain.PromptModelConfig{
 			Model:       model,
 			Temperature: derefOr(temperature, 0.7),
-			MaxTokens:   derefOrInt(maxTokens, 0),
+			MaxTokens:   derefOr(maxTokens, 0),
 		},
 		CreatedAt: t,
 	}
@@ -571,7 +577,7 @@ func (s *Store) ListPromptVersions(ctx context.Context, projectID, name string) 
 		pv.ModelConfig = domain.PromptModelConfig{
 			Model:       model,
 			Temperature: derefOr(temperature, 0.7),
-			MaxTokens:   derefOrInt(maxTokens, 0),
+			MaxTokens:   derefOr(maxTokens, 0),
 		}
 		versions = append(versions, &pv)
 	}
@@ -796,14 +802,8 @@ func boolToInt(b bool) int {
 	return 0
 }
 
+// derefOr returns the value pointed to by p, or def if p is nil.
 func derefOr[T any](p *T, def T) T {
-	if p != nil {
-		return *p
-	}
-	return def
-}
-
-func derefOrInt(p *int, def int) int {
 	if p != nil {
 		return *p
 	}

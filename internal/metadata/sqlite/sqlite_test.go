@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -91,7 +92,7 @@ func TestOrg_NotFound(t *testing.T) {
 	defer s.Close()
 
 	_, err := s.GetOrganization(context.Background(), "no-such-org")
-	if err != metadata.ErrNotFound {
+	if !errors.Is(err, metadata.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
@@ -103,7 +104,9 @@ func TestProject_CreateAndGet(t *testing.T) {
 	defer s.Close()
 
 	// Create parent org first
-	s.CreateOrganization(context.Background(), &domain.Organization{OrgID: "org-1", Name: "Test Corp"})
+	if err := s.CreateOrganization(context.Background(), &domain.Organization{OrgID: "org-1", Name: "Test Corp"}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
 
 	project := &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "My Project"}
 	if err := s.CreateProject(context.Background(), project); err != nil {
@@ -190,17 +193,18 @@ func TestUser_ListByOrg(t *testing.T) {
 }
 
 func TestUser_CheckPassword(t *testing.T) {
-	_, _ = openTestStore(t) // ensure DB is initialized
+	s, _ := openTestStore(t)
+	defer s.Close()
 
 	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.DefaultCost)
 	if err != nil {
 		t.Fatalf("generate bcrypt: %v", err)
 	}
 
-	if err := bcrypt.CompareHashAndPassword(hash, []byte("correct-password")); err != nil {
+	if err := s.CheckPassword(string(hash), "correct-password"); err != nil {
 		t.Error("correct password should match")
 	}
-	if err := bcrypt.CompareHashAndPassword(hash, []byte("wrong-password")); err == nil {
+	if err := s.CheckPassword(string(hash), "wrong-password"); err == nil {
 		t.Error("wrong password should not match")
 	}
 }
@@ -443,7 +447,7 @@ func TestEvalRule_CreateAndGet(t *testing.T) {
 	s, _ := openTestStore(t)
 	defer s.Close()
 
-	filter := domain.EvalFilter{Model: strPtr("gpt-4")}
+	filter := domain.EvalFilter{Model: func() *string { s := "gpt-4"; return &s }()}
 	rule := &domain.EvalRule{
 		RuleID:        "rule-1",
 		ProjectID:     "proj-1",
@@ -572,6 +576,3 @@ func TestClose_NoError(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 }
-
-// strPtr returns a pointer to the given string.
-func strPtr(s string) *string { return &s }
