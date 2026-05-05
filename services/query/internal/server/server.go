@@ -142,8 +142,7 @@ func Run() error {
 	// Create handlers.
 	sessStore := &noopSessionStore{}
 	spanHandler := &handler.SpanHandler{
-		DB:           db,
-		SessionStore: sessStore,
+		DB: db,
 	}
 
 	var promptHandler *handler.PromptHandler
@@ -151,30 +150,28 @@ func Run() error {
 	if metaStore != nil {
 		promptCache = handler.NewPromptCache(metaStore)
 		promptHandler = &handler.PromptHandler{
-			Store:     metaStore,
-			Cache:     promptCache,
-			StoreImpl: metaStore,
+			Store:        metaStore,
+			Cache:        promptCache,
+			SessionStore: sessStore,
 		}
-		// Wire the session store for auth.
-		promptHandler.SessionStore = sessStore
 	}
 
 	// Build the router.
 	mux := http.NewServeMux()
 
 	// Span list with keyset pagination.
-	mux.HandleFunc("POST /api/v1/spans/query", spanHandler.HandleSpansQuery)
+	mux.HandleFunc("POST /api/v1/spans/query", func(w http.ResponseWriter, r *http.Request) {
+		spanHandler.HandleSpansQuery(w, r, sessStore)
+	})
 
 	// Trace detail waterfall.
-	mux.HandleFunc("GET /api/v1/traces/{traceId}", spanHandler.HandleTraceDetail)
+	mux.HandleFunc("GET /api/v1/traces/{traceId}", func(w http.ResponseWriter, r *http.Request) {
+		spanHandler.HandleTraceDetail(w, r, sessStore)
+	})
 
 	// Prompt Registry endpoints (require metadata store).
 	if promptHandler != nil {
-		// Wrap HandleCreatePrompt to inject the session store.
-		createFn := func(w http.ResponseWriter, r *http.Request) {
-			promptHandler.HandleCreatePrompt(w, r, sessStore)
-		}
-		mux.HandleFunc("POST /api/v1/prompts", createFn)
+		mux.HandleFunc("POST /api/v1/prompts", promptHandler.HandleCreatePrompt)
 		mux.HandleFunc("GET /api/v1/prompts/{name}", promptHandler.HandleGetPrompt)
 		mux.HandleFunc("GET /api/v1/prompts/{name}/versions", promptHandler.HandleListPromptVersions)
 		mux.HandleFunc("PUT /api/v1/prompts/{name}/labels/{label}", promptHandler.HandleSetLabel)

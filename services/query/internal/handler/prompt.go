@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,11 @@ import (
 	"github.com/zbloss/lantern/internal/metadata"
 )
 
+// sessionStore abstracts session lookup for project ID extraction.
+type sessionStore interface {
+	ProjectID(r *http.Request) (string, bool)
+}
+
 // PromptHandler handles prompt registry endpoints:
 //   POST /api/v1/prompts             — create an immutable prompt version
 //   GET  /api/v1/prompts/:name       — resolve by ?version=N or ?label=<label>
@@ -23,26 +29,23 @@ import (
 type PromptHandler struct {
 	Store        metadata.Store
 	Cache        *PromptCache
-	StoreImpl    interface {
-		CreatePromptVersion(context.Context, *domain.PromptVersion) error
-		GetPromptVersion(context.Context, string, string, int64) (*domain.PromptVersion, error)
-		GetPromptByLabel(context.Context, string, string, string) (*domain.PromptVersion, error)
-		ListPromptVersions(context.Context, string, string) ([]*domain.PromptVersion, error)
-		SetPromptLabel(context.Context, *domain.PromptLabel) error
-	}
 	SessionStore sessionStore
 }
 
 // HandleCreatePrompt handles POST /api/v1/prompts.
 // Creates an immutable prompt version. Re-posting the same version returns 409.
-func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Request, ss sessionStore) {
+func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	// Extract project_id from the authenticated session.
-	projectID, ok := ss.ProjectID(r)
+	var projectID string
+	var ok bool
+	if h.SessionStore != nil {
+		projectID, ok = h.SessionStore.ProjectID(r)
+	}
 	if !ok || projectID == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -66,7 +69,7 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Check if version already exists (idempotency).
-	_, err := h.StoreImpl.GetPromptVersion(r.Context(), projectID, req.Name, req.Version)
+	_, err := h.Store.GetPromptVersion(r.Context(), projectID, req.Name, req.Version)
 	if err == nil {
 		http.Error(w, "version already exists", http.StatusConflict)
 		return
@@ -89,7 +92,7 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 		},
 	}
 
-	if err := h.StoreImpl.CreatePromptVersion(r.Context(), pv); err != nil {
+	if err := h.Store.CreatePromptVersion(r.Context(), pv); err != nil {
 		// Duplicate key is also a conflict (409), not a generic error.
 		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "duplicate") {
 			http.Error(w, "version already exists", http.StatusConflict)
@@ -105,7 +108,7 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 }
 
 // HandleGetPrompt handles GET /api/v1/prompts/:name.
-// Resolves by ?version=N (LRU cache, no TTL) or ?label=<label> (30s TTL cache).
+// Resolves by ?version=N (unbounded cache) or ?label=<label> (30s TTL cache).
 func (h *PromptHandler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -167,8 +170,9 @@ func (h *PromptHandler) HandleSetLabel(w http.ResponseWriter, r *http.Request) {
 
 	name := r.PathValue("name")
 	label := r.PathValue("label")
+
+	// Fallback for tests that don't use ServeMux pattern matching.
 	if name == "" || label == "" {
-		// Fallback for tests that don't use ServeMux pattern matching.
 		parts := extractPromptLabelPath(r.URL.Path)
 		if len(parts) == 2 {
 			if name == "" {
@@ -198,7 +202,7 @@ func (h *PromptHandler) HandleSetLabel(w http.ResponseWriter, r *http.Request) {
 
 	// Validate the version exists.
 	projectID := r.URL.Query().Get("project_id")
-	_, err := h.StoreImpl.GetPromptVersion(r.Context(), projectID, name, req.Version)
+	_, err := h.Store.GetPromptVersion(r.Context(), projectID, name, req.Version)
 	if err != nil {
 		if errors.Is(err, metadata.ErrNotFound) {
 			http.Error(w, "prompt version not found", http.StatusNotFound)
@@ -215,7 +219,7 @@ func (h *PromptHandler) HandleSetLabel(w http.ResponseWriter, r *http.Request) {
 		Version:   req.Version,
 	}
 
-	if setErr := h.StoreImpl.SetPromptLabel(r.Context(), pl); setErr != nil {
+	if setErr := h.Store.SetPromptLabel(r.Context(), pl); setErr != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
 	}
@@ -233,39 +237,35 @@ func (h *PromptHandler) HandleSetLabel(w http.ResponseWriter, r *http.Request) {
 
 // ---- In-Process Caches ----
 
-// promptCacheEntry holds a cached prompt version.
-type promptCacheEntry struct {
-	PromptVersion *domain.PromptVersion
-}
-
-// labelCacheEntry holds a cached label resolution with an expiration time.
-type labelCacheEntry struct {
+// cacheEntry holds a cached prompt version with an optional expiration time.
+// A zero ExpiresAt means the entry never expires (used for the version cache).
+type cacheEntry struct {
 	PromptVersion *domain.PromptVersion
 	ExpiresAt     time.Time
 }
 
 // PromptCache provides in-process caching for prompt lookups:
-//   - Version cache: LRU with effectively infinite TTL (Phase 1)
+//   - Version cache: unbounded (no eviction)
 //   - Label cache: 30-second TTL expiry
 type PromptCache struct {
-	mu          sync.RWMutex
-	Store       metadata.Store
-	versionCache map[string]*promptCacheEntry // key: "projectID|name|version"
-	labelCache   map[string]*labelCacheEntry  // key: "projectID|name|label"
+	mu           sync.RWMutex
+	Store        metadata.Store
+	versionCache map[string]*cacheEntry
+	labelCache   map[string]*cacheEntry
 }
 
 // NewPromptCache creates a new PromptCache backed by the given Store.
 func NewPromptCache(store metadata.Store) *PromptCache {
 	return &PromptCache{
 		Store:        store,
-		versionCache: make(map[string]*promptCacheEntry),
-		labelCache:   make(map[string]*labelCacheEntry),
+		versionCache: make(map[string]*cacheEntry),
+		labelCache:   make(map[string]*cacheEntry),
 	}
 }
 
 // versionCacheKey builds the cache key for a prompt version lookup.
 func versionCacheKey(projectID, name string, version int64) string {
-	return projectID + "|" + name + "|" + fmt.Sprintf("%d", version)
+	return projectID + "|" + name + "|" + strconv.FormatInt(version, 10)
 }
 
 // labelCacheKey builds the cache key for a prompt label lookup.
@@ -274,7 +274,7 @@ func labelCacheKey(projectID, name, label string) string {
 }
 
 // GetVersion retrieves a prompt version from the cache or the store.
-// The version cache never evicts (infinite TTL) in Phase 1.
+// The version cache never evicts (unbounded) in Phase 1.
 func (c *PromptCache) GetVersion(ctx context.Context, projectID, name string, version int64) (*domain.PromptVersion, error) {
 	key := versionCacheKey(projectID, name, version)
 
@@ -297,7 +297,7 @@ func (c *PromptCache) GetVersion(ctx context.Context, projectID, name string, ve
 		c.mu.Unlock()
 		return entry.PromptVersion, nil
 	}
-	c.versionCache[key] = &promptCacheEntry{PromptVersion: pv}
+	c.versionCache[key] = &cacheEntry{PromptVersion: pv}
 	c.mu.Unlock()
 
 	return pv, nil
@@ -307,7 +307,6 @@ func (c *PromptCache) GetVersion(ctx context.Context, projectID, name string, ve
 // The label cache expires after 30 seconds.
 func (c *PromptCache) GetLabel(ctx context.Context, projectID, name, label string) (*domain.PromptVersion, error) {
 	key := labelCacheKey(projectID, name, label)
-	ttl := 30 * time.Second
 
 	c.mu.RLock()
 	if entry, ok := c.labelCache[key]; ok {
@@ -331,9 +330,9 @@ func (c *PromptCache) GetLabel(ctx context.Context, projectID, name, label strin
 	if entry, ok := c.labelCache[key]; ok && time.Now().Before(entry.ExpiresAt) {
 		pv = entry.PromptVersion
 	} else {
-		c.labelCache[key] = &labelCacheEntry{
+		c.labelCache[key] = &cacheEntry{
 			PromptVersion: pv,
-			ExpiresAt:     time.Now().Add(ttl),
+			ExpiresAt:     time.Now().Add(30 * time.Second),
 		}
 	}
 	c.mu.Unlock()
@@ -413,10 +412,4 @@ func extractPromptLabelPath(path string) []string {
 	return nil
 }
 
-// Helper: derefOr returns the value pointed to by p, or def if p is nil.
-func derefOr[T any](p *T, def T) T {
-	if p != nil {
-		return *p
-	}
-	return def
-}
+

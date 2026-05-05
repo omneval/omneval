@@ -19,10 +19,9 @@ func TestHandleSpansQuery_AuthRequired(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	h := &SpanHandler{
-		SessionStore: &testSessionStore{},
 	}
 
-	h.HandleSpansQuery(w, req)
+	h.HandleSpansQuery(w, req, nil)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status: got %d, want %d", w.Code, http.StatusUnauthorized)
@@ -34,10 +33,9 @@ func TestHandleSpansQuery_MissingBody(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	h := &SpanHandler{
-		SessionStore: &testSessionStore{projectID: "test-proj"},
 	}
 
-	h.HandleSpansQuery(w, req)
+	h.HandleSpansQuery(w, req, &testSessionStore{projectID: "test-proj"})
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
@@ -49,10 +47,9 @@ func TestHandleSpansQuery_MethodNotAllowed(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	h := &SpanHandler{
-		SessionStore: &testSessionStore{projectID: "test-proj"},
 	}
 
-	h.HandleSpansQuery(w, req)
+	h.HandleSpansQuery(w, req, &testSessionStore{projectID: "test-proj"})
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status: got %d, want %d", w.Code, http.StatusMethodNotAllowed)
@@ -69,10 +66,9 @@ func TestHandleSpansQuery_InvalidCursor(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	h := &SpanHandler{
-		SessionStore: &testSessionStore{projectID: "test-proj"},
 	}
 
-	h.HandleSpansQuery(w, req)
+	h.HandleSpansQuery(w, req, &testSessionStore{projectID: "test-proj"})
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
@@ -135,7 +131,6 @@ func TestHandleSpansQuery_WithDatabase(t *testing.T) {
 	// Create handler with real DB.
 	h := &SpanHandler{
 		DB:           db,
-		SessionStore: &testSessionStore{projectID: "test-proj"},
 	}
 
 	// Make request.
@@ -147,7 +142,7 @@ func TestHandleSpansQuery_WithDatabase(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
 	w := httptest.NewRecorder()
 
-	h.HandleSpansQuery(w, req)
+	h.HandleSpansQuery(w, req, &testSessionStore{projectID: "test-proj"})
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())

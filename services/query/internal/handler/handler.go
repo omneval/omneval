@@ -14,20 +14,14 @@ import (
 // SpanHandler handles POST /api/v1/spans/query (paginated span list)
 // and GET /api/v1/traces/:traceId (single-trace waterfall detail).
 type SpanHandler struct {
-	DB           *sql.DB
-	SessionStore sessionStore
-}
-
-// sessionStore abstracts session lookup for project ID extraction.
-type sessionStore interface {
-	ProjectID(r *http.Request) (string, bool)
+	DB *sql.DB
 }
 
 // HandleSpansQuery handles POST /api/v1/spans/query.
 // It extracts project_id from the authenticated session, builds the SQL query
 // with keyset cursor pagination, executes the hot+cold UNION, and returns
 // a paginated span list with a next cursor.
-func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
+func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request, ss sessionStore) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -40,7 +34,11 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract project_id from the authenticated session.
-	projectID, ok := h.SessionStore.ProjectID(r)
+	var projectID string
+	var ok bool
+	if ss != nil {
+		projectID, ok = ss.ProjectID(r)
+	}
 	if !ok || projectID == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -99,7 +97,7 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 
 // HandleTraceDetail handles GET /api/v1/traces/:traceId.
 // Returns the span tree for a single trace.
-func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) {
+func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request, ss sessionStore) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -112,7 +110,11 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Extract project_id from the authenticated session.
-	projectID, ok := h.SessionStore.ProjectID(r)
+	var projectID string
+	var ok bool
+	if ss != nil {
+		projectID, ok = ss.ProjectID(r)
+	}
 	if !ok || projectID == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
