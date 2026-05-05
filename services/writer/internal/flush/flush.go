@@ -14,6 +14,8 @@ import (
 	"github.com/zbloss/lantern/internal/storage"
 )
 
+const defaultBucket = "lantern"
+
 // Flusher exports spans older than flushAge from DuckDB to Hive-partitioned
 // Parquet files on S3 and prunes the corresponding rows from the hot store.
 type Flusher struct {
@@ -21,36 +23,52 @@ type Flusher struct {
 	db       *sql.DB
 	cfg      *config.Config
 	flushAge time.Duration
-	// writeDir is an optional override for the output directory.
-	// When set (for testing), Parquet files are written to a local
-	// directory instead of S3.
-	writeDir string
+	writeDir string // optional local output directory (testing only)
 }
 
 // New creates a new Flusher (legacy, does not use db or store).
-func New(client interface{}, cfg *config.Config) *Flusher {
-	flushAge := 48 * time.Hour
-	if cfg.Writer.FlushAgeDays > 0 {
-		flushAge = time.Duration(cfg.Writer.FlushAgeDays) * 24 * time.Hour
-	}
-	return &Flusher{
-		cfg:      cfg,
-		flushAge: flushAge,
-	}
+func New(client any, cfg *config.Config) *Flusher {
+	return newFlusher(cfg)
 }
 
 // NewWithDB creates a new Flusher with an ObjectStore and DuckDB connection.
 func NewWithDB(store storage.ObjectStore, db *sql.DB, cfg *config.Config) *Flusher {
-	flushAge := 48 * time.Hour
-	if cfg.Writer.FlushAgeDays > 0 {
-		flushAge = time.Duration(cfg.Writer.FlushAgeDays) * 24 * time.Hour
-	}
+	return newFlusherWithDB(store, db, cfg)
+}
+
+// newFlusher builds a Flusher with a computed flushAge from config.
+func newFlusher(cfg *config.Config) *Flusher {
+	return &Flusher{cfg: cfg, flushAge: flushAge(cfg)}
+}
+
+// newFlusherWithDB builds a Flusher with storage and database backing.
+func newFlusherWithDB(store storage.ObjectStore, db *sql.DB, cfg *config.Config) *Flusher {
 	return &Flusher{
 		store:    store,
 		db:       db,
 		cfg:      cfg,
-		flushAge: flushAge,
+		flushAge: flushAge(cfg),
 	}
+}
+
+// flushAge computes the flush age from config, falling back to 48h.
+func flushAge(cfg *config.Config) time.Duration {
+	if cfg.Writer.FlushAgeDays > 0 {
+		return time.Duration(cfg.Writer.FlushAgeDays) * 24 * time.Hour
+	}
+	return 48 * time.Hour
+}
+
+// WithFlushAge sets a custom flush age, useful in tests.
+func (f *Flusher) WithFlushAge(d time.Duration) *Flusher {
+	f.flushAge = d
+	return f
+}
+
+// WithWriteDir sets a local output directory, useful in tests.
+func (f *Flusher) WithWriteDir(dir string) *Flusher {
+	f.writeDir = dir
+	return f
 }
 
 // Run blocks until ctx is canceled. Every flush interval it exports aged
@@ -176,22 +194,19 @@ func (f *Flusher) flushPartition(ctx context.Context, pk partitionKey) error {
 		"scores_key", scoresKey,
 	)
 
-	var spansURL, scoresURL string
-
 	if f.writeDir != "" {
-		// Testing mode: write to local directory.
-		spansDir := filepath.Join(f.writeDir, partitionDir(pk, "spans"))
-		scoresDir := filepath.Join(f.writeDir, partitionDir(pk, "scores"))
+		// Testing mode: write to local directories, then upload to S3.
+		spansDir := filepath.Join(f.writeDir, partitionPath(pk, "spans", ""))
+		scoresDir := filepath.Join(f.writeDir, partitionPath(pk, "scores", ""))
 		if err := os.MkdirAll(spansDir, 0755); err != nil {
 			return fmt.Errorf("create spans dir: %w", err)
 		}
 		if err := os.MkdirAll(scoresDir, 0755); err != nil {
 			return fmt.Errorf("create scores dir: %w", err)
 		}
-		spansURL = "file://" + filepath.Join(spansDir, "spans.parquet")
-		scoresURL = "file://" + filepath.Join(scoresDir, "scores.parquet")
+		spansURL := "file://" + filepath.Join(spansDir, "spans.parquet")
+		scoresURL := "file://" + filepath.Join(scoresDir, "scores.parquet")
 
-		// Write Parquet via DuckDB COPY.
 		if err := f.writeSpansParquet(ctx, pk, spansURL); err != nil {
 			return fmt.Errorf("write spans parquet: %w", err)
 		}
@@ -199,7 +214,6 @@ func (f *Flusher) flushPartition(ctx context.Context, pk partitionKey) error {
 			return fmt.Errorf("write scores parquet: %w", err)
 		}
 
-		// Upload to S3 (mock will record the put).
 		if err := f.uploadToS3(ctx, spansKey, spansURL); err != nil {
 			return fmt.Errorf("upload spans to s3: %w", err)
 		}
@@ -207,16 +221,10 @@ func (f *Flusher) flushPartition(ctx context.Context, pk partitionKey) error {
 			return fmt.Errorf("upload scores to s3: %w", err)
 		}
 
-		// Clean up temp files.
-		offsets := []string{spansURL, scoresURL}
-		for _, u := range offsets {
-			localPath := strings.TrimPrefix(u, "file://")
-			os.Remove(localPath)
+		// Clean up local Parquet files after uploading to S3.
+		for _, u := range []string{spansURL, scoresURL} {
+			os.Remove(strings.TrimPrefix(u, "file://"))
 		}
-
-		// Clean up temp files.
-		os.Remove(spansURL[7:])
-		os.Remove(scoresURL[7:])
 	} else {
 		// Production mode: write directly to S3 via DuckDB httpfs.
 		spansS3URL := f.s3URL(spansKey)
@@ -305,7 +313,7 @@ func (f *Flusher) writeScoresParquet(ctx context.Context, pk partitionKey, url s
 func (f *Flusher) s3URL(key string) string {
 	bucket := f.cfg.Storage.Bucket
 	if bucket == "" {
-		bucket = "lantern"
+		bucket = defaultBucket
 	}
 	return fmt.Sprintf("s3://%s/%s", bucket, key)
 }
@@ -344,39 +352,28 @@ func (f *Flusher) deleteFlushedRows(ctx context.Context, pk partitionKey) error 
 }
 
 // partitionPath builds the Hive-partitioned S3 key for a partition.
+// When filename is empty, returns the directory path instead.
 // Pattern: archive/project_id={id}/date={date}/{type}/{filename}
 func partitionPath(pk partitionKey, typ, filename string) string {
-	var parts []string
-	parts = append(parts, "archive")
-	parts = append(parts, fmt.Sprintf("project_id=%s", pk.projectID))
-	parts = append(parts, fmt.Sprintf("date=%s", pk.date))
-	parts = append(parts, typ)
-	parts = append(parts, filename)
+	parts := []string{"archive",
+		fmt.Sprintf("project_id=%s", pk.projectID),
+		fmt.Sprintf("date=%s", pk.date),
+		typ,
+	}
+	if filename != "" {
+		parts = append(parts, filename)
+	}
 	return strings.Join(parts, "/")
 }
 
 // parseDuckDBDate normalizes a DuckDB DATE value to YYYY-MM-DD format.
-// DuckDB's DATE type may return as "2025-01-15", "2025-01-15T00:00:00Z", etc.
+// DuckDB's DATE type may return as "2025-01-15" or "2025-01-15T00:00:00Z".
 func parseDuckDBDate(s string) (string, error) {
-	// Try parsing as full timestamp first.
 	if t, err := time.Parse("2006-01-02T15:04:05Z", s); err == nil {
 		return t.Format("2006-01-02"), nil
 	}
-	// Already in YYYY-MM-DD format.
 	if len(s) == 10 && s[4] == '-' && s[7] == '-' {
 		return s, nil
 	}
-	// Fallback: return as-is (may work for some date formats).
 	return s, nil
-}
-
-// partitionDir builds the local directory path for a partition.
-// Pattern: archive/project_id={id}/date={date}/{type}/
-func partitionDir(pk partitionKey, typ string) string {
-	var parts []string
-	parts = append(parts, "archive")
-	parts = append(parts, fmt.Sprintf("project_id=%s", pk.projectID))
-	parts = append(parts, fmt.Sprintf("date=%s", pk.date))
-	parts = append(parts, typ)
-	return strings.Join(parts, "/")
 }

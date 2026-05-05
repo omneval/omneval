@@ -31,9 +31,6 @@ func newMockStore() *mockStore {
 }
 
 func (m *mockStore) Put(_ context.Context, key string, r io.Reader) error {
-	if m == nil {
-		return fmt.Errorf("store is nil")
-	}
 	if m.failPut {
 		return fmt.Errorf("simulated S3 failure")
 	}
@@ -48,9 +45,6 @@ func (m *mockStore) Put(_ context.Context, key string, r io.Reader) error {
 }
 
 func (m *mockStore) Get(_ context.Context, key string) (io.ReadCloser, error) {
-	if m == nil {
-		return nil, fmt.Errorf("store is nil")
-	}
 	if m.failGet {
 		return nil, fmt.Errorf("simulated S3 failure")
 	}
@@ -59,9 +53,6 @@ func (m *mockStore) Get(_ context.Context, key string) (io.ReadCloser, error) {
 }
 
 func (m *mockStore) Delete(_ context.Context, key string) error {
-	if m == nil {
-		return nil
-	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deletes = append(m.deletes, key)
@@ -159,9 +150,7 @@ func TestFlush_AgedPartitionsWrittenToS3(t *testing.T) {
 		},
 	}
 
-	f := NewWithDB(store, db, cfg)
-	f.flushAge = 48 * time.Hour
-	f.writeDir = writeDir
+	f := NewWithDB(store, db, cfg).WithFlushAge(48 * time.Hour).WithWriteDir(writeDir)
 
 	// Perform a flush.
 	if err := f.doFlush(context.Background()); err != nil {
@@ -205,19 +194,16 @@ func TestFlush_AgedPartitionsWrittenToS3(t *testing.T) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	// Sparks Parquet should exist.
-	if _, ok := store.puts["archive/project_id=proj-1/date=0000-00-00/spans/spans.parquet"]; !ok {
-		// Check with actual date format
-		found := false
-		for key := range store.puts {
-			if strings.Contains(key, "project_id=proj-1") && strings.Contains(key, "spans") {
-				found = true
-				break
-			}
+	// Spans Parquet should exist.
+	found := false
+	for key := range store.puts {
+		if strings.Contains(key, "project_id=proj-1") && strings.Contains(key, "spans") {
+			found = true
+			break
 		}
-		if !found {
-			t.Errorf("expected spans Parquet file for aged partition, got keys: %v", keys(store.puts))
-		}
+	}
+	if !found {
+		t.Errorf("expected spans Parquet file for aged partition, got keys: %v", keys(store.puts))
 	}
 
 	// Scores Parquet should exist.
@@ -266,9 +252,7 @@ func TestFlush_Atomicity(t *testing.T) {
 	}
 
 	writeDir := filepath.Join(tmpDir, "parquet")
-	f := NewWithDB(failingStore, db, cfg)
-	f.flushAge = 48 * time.Hour
-	f.writeDir = writeDir
+	f := NewWithDB(failingStore, db, cfg).WithFlushAge(48 * time.Hour).WithWriteDir(writeDir)
 
 	// Flush should fail, but DuckDB rows should NOT be deleted.
 	err = f.doFlush(context.Background())
@@ -315,8 +299,7 @@ func TestFlush_NoS3Endpoint(t *testing.T) {
 		},
 	}
 
-	f := NewWithDB(nil, db, cfg)
-	f.flushAge = 48 * time.Hour
+	f := NewWithDB(nil, db, cfg).WithFlushAge(48 * time.Hour)
 
 	// Flush should be a no-op.
 	if err := f.doFlush(context.Background()); err != nil {
@@ -330,6 +313,54 @@ func TestFlush_NoS3Endpoint(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("span should still exist when S3 is not configured, got %d", count)
+	}
+}
+
+// TestFlush_NoObjectStore verifies flush is skipped when no ObjectStore is configured.
+func TestFlush_NoObjectStore(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.duckdb")
+
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if err := createTestTables(db); err != nil {
+		t.Fatalf("create tables: %v", err)
+	}
+
+	// Insert an aged span.
+	agedTime := time.Now().UTC().Add(-72 * time.Hour)
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, project_id, model, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
+		"span-aged", "trace-aged", "proj-1", "gpt-4", agedTime, agedTime.Add(10*time.Second)); err != nil {
+		t.Fatalf("insert aged span: %v", err)
+	}
+
+	cfg := &config.Config{
+		Storage: config.StorageConfig{
+			Endpoint: "http://localhost:9000",
+			Bucket:   "test",
+		},
+	}
+
+	// Pass nil for the store.
+	f := NewWithDB(nil, db, cfg).WithFlushAge(48 * time.Hour)
+
+	// Flush should be a no-op.
+	if err := f.doFlush(context.Background()); err != nil {
+		t.Fatalf("doFlush: %v", err)
+	}
+
+	// Verify span is still in DuckDB.
+	var count int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM spans WHERE span_id = 'span-aged'`).Scan(&count); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("span should still exist when ObjectStore is nil, got %d", count)
 	}
 }
 
@@ -359,8 +390,7 @@ func TestFlush_SIGTERM(t *testing.T) {
 	}
 
 	store := newMockStore()
-	f := NewWithDB(store, db, cfg)
-	f.flushAge = 48 * time.Hour
+	f := NewWithDB(store, db, cfg).WithFlushAge(48 * time.Hour)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -403,8 +433,7 @@ func TestFlush_NoAgedPartitions(t *testing.T) {
 		},
 	}
 
-	f := NewWithDB(store, db, cfg)
-	f.flushAge = 48 * time.Hour
+	f := NewWithDB(store, db, cfg).WithFlushAge(48 * time.Hour)
 
 	// Flush should succeed with no work.
 	if err := f.doFlush(context.Background()); err != nil {
@@ -496,25 +525,4 @@ func createTestTables(db *sql.DB) error {
 	return err
 }
 
-// failingStore always returns an error on Put.
-type failingStore struct{}
 
-func (f *failingStore) Put(_ context.Context, key string, r io.Reader) error {
-	return fmt.Errorf("simulated S3 failure")
-}
-
-func (f *failingStore) Get(_ context.Context, key string) (io.ReadCloser, error) {
-	return nil, fmt.Errorf("simulated S3 failure")
-}
-
-func (f *failingStore) Delete(_ context.Context, key string) error {
-	return nil
-}
-
-func (f *failingStore) ListPrefix(_ context.Context, prefix string) ([]string, error) {
-	return nil, nil
-}
-
-func (f *failingStore) Stat(_ context.Context, key string) (*storage.ObjectStat, error) {
-	return nil, nil
-}

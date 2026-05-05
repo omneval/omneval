@@ -114,6 +114,9 @@ const (
 	DefaultLimit = 50
 	// MaxLimit is the maximum page size allowed.
 	MaxLimit = 500
+	// lanternBucket is the default S3 bucket for both the Writer's flusher
+	// and the Query API's cold Parquet reads. Must match config.Storage.Bucket.
+	lanternBucket = "lantern"
 )
 
 // SpanQuery builds a parameterized SQL query for POST /api/v1/spans/query.
@@ -188,24 +191,16 @@ func (q *SpanQuery) hotSQL() (string, []any, error) {
 // It uses read_parquet with hive_partitioning=true to read Hive-partitioned
 // Parquet files from s3://bucket/archive/project_id={id}/date={date}/spans/.
 // Only reads when S3 is configured (s3Store != nil).
+// The bucket defaults to "lantern" — matching the Writer's s3URL default.
 func (q *SpanQuery) coldSQL() string {
 	if q.s3Store == nil {
 		// No S3 configured: return a no-op that produces zero rows.
 		return `SELECT span_id, trace_id, parent_id, project_id, service_name, name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message FROM (VALUES (CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS TIMESTAMPTZ), CAST(NULL AS TIMESTAMPTZ), CAST(NULL AS VARCHAR), CAST(NULL AS JSON), CAST(NULL AS JSON), CAST(NULL AS BIGINT), CAST(NULL AS BIGINT), CAST(NULL AS DOUBLE), CAST(NULL AS VARCHAR), CAST(NULL AS BIGINT), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR)) LIMIT 0) AS t(span_id, trace_id, parent_id, project_id, service_name, name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message)`
 	}
 
-	// Build the S3 URL prefix for this project's archive.
-	bucket := "lantern"
-	if q.s3Store != nil {
-		// We can't easily get the bucket from storage.ObjectStore interface,
-		// so we use a reasonable default. In production, this is configured
-		// via the StorageConfig.Bucket field.
-		bucket = "lantern"
-	}
-
 	parquetPrefix := fmt.Sprintf(
 		"s3://%s/archive/project_id=%s/**/*.parquet",
-		bucket,
+		lanternBucket,
 		q.projectID,
 	)
 
