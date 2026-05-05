@@ -15,6 +15,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/zbloss/lantern/internal/config"
+	"github.com/zbloss/lantern/internal/metadata"
+	metadatapg "github.com/zbloss/lantern/internal/metadata/postgres"
+	metadatasqlite "github.com/zbloss/lantern/internal/metadata/sqlite"
 	"github.com/zbloss/lantern/internal/storage"
 	"github.com/zbloss/lantern/internal/storage/s3"
 	"github.com/zbloss/lantern/services/query/internal/handler"
@@ -105,11 +108,55 @@ func Run() error {
 		}()
 	}
 
+	// Create metadata store (SQLite for demo, Postgres for production).
+	var metaStore metadata.Store
+	metaDBPath := cfg.Database.DSN
+	if metaDBPath == "" {
+		metaDBPath = "/tmp/lantern-metadata.db"
+	}
+	metaDriver := cfg.Database.Driver
+	if metaDriver == "" {
+		metaDriver = "sqlite"
+	}
+	var metaErr error
+	switch metaDriver {
+	case "postgres":
+		metaStore, metaErr = metadatapg.New(metaDBPath)
+	default:
+		metaStore, metaErr = metadatasqlite.New(metaDBPath)
+	}
+	if metaErr != nil {
+		slog.Warn("query: metadata store init failed, prompt endpoints disabled", "driver", metaDriver, "err", metaErr)
+		metaStore = nil
+	}
+	if metaStore != nil {
+		if err := metaStore.Migrate(context.Background()); err != nil {
+			return fmt.Errorf("query: migrate metadata store: %w", err)
+		}
+		defer metaStore.Close()
+		slog.Info("query: metadata store initialized", "driver", metaDriver)
+	} else {
+		slog.Info("query: no metadata store configured, prompt endpoints disabled")
+	}
+
 	// Create handlers.
 	sessStore := &noopSessionStore{}
 	spanHandler := &handler.SpanHandler{
 		DB:           db,
 		SessionStore: sessStore,
+	}
+
+	var promptHandler *handler.PromptHandler
+	var promptCache *handler.PromptCache
+	if metaStore != nil {
+		promptCache = handler.NewPromptCache(metaStore)
+		promptHandler = &handler.PromptHandler{
+			Store:     metaStore,
+			Cache:     promptCache,
+			StoreImpl: metaStore,
+		}
+		// Wire the session store for auth.
+		promptHandler.SessionStore = sessStore
 	}
 
 	// Build the router.
@@ -120,6 +167,18 @@ func Run() error {
 
 	// Trace detail waterfall.
 	mux.HandleFunc("GET /api/v1/traces/{traceId}", spanHandler.HandleTraceDetail)
+
+	// Prompt Registry endpoints (require metadata store).
+	if promptHandler != nil {
+		// Wrap HandleCreatePrompt to inject the session store.
+		createFn := func(w http.ResponseWriter, r *http.Request) {
+			promptHandler.HandleCreatePrompt(w, r, sessStore)
+		}
+		mux.HandleFunc("POST /api/v1/prompts", createFn)
+		mux.HandleFunc("GET /api/v1/prompts/{name}", promptHandler.HandleGetPrompt)
+		mux.HandleFunc("GET /api/v1/prompts/{name}/versions", promptHandler.HandleListPromptVersions)
+		mux.HandleFunc("PUT /api/v1/prompts/{name}/labels/{label}", promptHandler.HandleSetLabel)
+	}
 
 	// Prometheus metrics.
 	mux.HandleFunc("GET /metrics", promhttp.Handler().ServeHTTP)
