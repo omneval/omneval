@@ -10,6 +10,8 @@ import (
 
 	"github.com/zbloss/lantern/internal/auth"
 	"github.com/zbloss/lantern/internal/domain"
+	"github.com/zbloss/lantern/internal/otlp"
+	"github.com/zbloss/lantern/internal/otlp/protobuf"
 	"github.com/zbloss/lantern/services/ingest/internal/cors"
 )
 
@@ -241,4 +243,144 @@ func nsToDomain(ns *NativeSpan, vk *auth.ValidatedKey) *domain.Span {
 	}
 
 	return span
+}
+
+// --- OTLPHandler ---
+
+// OTLPHandler handles POST /v1/traces for the OpenTelemetry Protocol.
+// It accepts both application/x-protobuf and application/json content types.
+type OTLPHandler struct {
+	queue       SpanQueue
+	validator   Validator
+	corsOrigins []string
+}
+
+// NewOTLPHandler creates an OTLPHandler with optional CORS origins.
+func NewOTLPHandler(queue SpanQueue, validator Validator, corsOrigins []string) *OTLPHandler {
+	return &OTLPHandler{queue: queue, validator: validator, corsOrigins: corsOrigins}
+}
+
+// CombinedRouter returns a single http.Handler that serves both the native
+// REST endpoint (/api/v1/spans) and the OTLP endpoint (/v1/traces).
+func CombinedRouter(queue SpanQueue, validator Validator, corsOrigins []string) http.Handler {
+	native := NewNativeHandler(queue, validator, corsOrigins)
+	otlp := NewOTLPHandler(queue, validator, corsOrigins)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/spans", native.handleIngest)
+	mux.HandleFunc("/v1/traces", otlp.handleOTLP)
+
+	if len(corsOrigins) > 0 {
+		return cors.New(corsOrigins).Handler(mux)
+	}
+	return mux
+}
+
+func (h *OTLPHandler) Router() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/traces", h.handleOTLP)
+	if len(h.corsOrigins) > 0 {
+		return cors.New(h.corsOrigins).Handler(mux)
+	}
+	return mux
+}
+
+func (h *OTLPHandler) handleOTLP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Authenticate via API key header
+	rawKey := r.Header.Get("X-API-Key")
+	if rawKey == "" {
+		http.Error(w, "missing API key", http.StatusUnauthorized)
+		return
+	}
+
+	vk, err := h.validator.Validate(r.Context(), rawKey)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid API key: %v", err), http.StatusUnauthorized)
+		return
+	}
+
+	// Read body
+	body, err := readBody(r)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to read body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Step 1: Wire format → []protobuf.FlatResourceSpans
+	flat, err := decodeWireFormat(body, r.Header.Get("Content-Type"))
+	if err != nil {
+		contentType := protobuf.ContentType(r.Header.Get("Content-Type"))
+		http.Error(w, fmt.Sprintf("failed to decode %s: %v", contentType, err), http.StatusBadRequest)
+		return
+	}
+
+	// Step 2: []protobuf.FlatResourceSpans → []*domain.Span
+	domainSpans, err := otlp.Translate(vk.ProjectID, flat, otlp.Options{
+		ServiceNameOverride: vk.ServiceName,
+	})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("translation failed: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Enqueue to Redis
+	if err := h.queue.Enqueue(r.Context(), domainSpans); err != nil {
+		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Respond with empty ExportTraceServiceResponse matching Content-Type
+	resp := &protobuf.ExportTraceServiceResponse{}
+	writeOTLPResponse(w, resp, r.Header.Get("Content-Type"))
+}
+
+// decodeWireFormat decodes request body into FlatResourceSpans based on Content-Type.
+func decodeWireFormat(body []byte, contentType string) ([]protobuf.FlatResourceSpans, error) {
+	if protobuf.IsJSON(contentType) {
+		return protobuf.DecodeJSON(body)
+	}
+	// Protobuf wire format is not yet supported in this stub.
+	return nil, fmt.Errorf("unsupported wire format: protobuf decoding requires protoc-generated types")
+}
+
+// writeOTLPResponse encodes the response to match the request's Content-Type.
+func writeOTLPResponse(w http.ResponseWriter, resp *protobuf.ExportTraceServiceResponse, contentType string) {
+	if protobuf.IsJSON(contentType) {
+		data, err := protobuf.EncodeJSON(resp)
+		if err != nil {
+			http.Error(w, "encode response: internal error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write(data); err != nil {
+			http.Error(w, "write response: internal error", http.StatusInternalServerError)
+		}
+	} else {
+		// Protobuf: empty response body.
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// readBody reads the full request body.
+func readBody(r *http.Request) ([]byte, error) {
+	defer r.Body.Close()
+	buf := make([]byte, 0, 1024)
+	for {
+		b := make([]byte, 1024)
+		n, err := r.Body.Read(b)
+		if n > 0 {
+			buf = append(buf, b[:n]...)
+		}
+		if err != nil {
+			break
+		}
+	}
+	return buf, nil
 }

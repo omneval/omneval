@@ -58,11 +58,11 @@ func Run() error {
 	// Initialize validator
 	validator := auth.NewCachingValidator(store)
 
-	// Initialize handler with CORS middleware
-	h := handler.NewNativeHandler(queue, validator, cfg.Ingest.CORSAllowedOrigins)
+	// Initialize combined router (native REST + OTLP)
+	h := handler.CombinedRouter(queue, validator, cfg.Ingest.CORSAllowedOrigins)
 
 	// Start server
 	addr := cfg.Ingest.Addr
 	slog.Info("ingest API listening", "addr", addr)
-	return http.ListenAndServe(addr, h.Router())
+	return http.ListenAndServe(addr, h)
 }
