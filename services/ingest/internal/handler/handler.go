@@ -121,38 +121,38 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *NativeHandler) validateAndTransform(ns *NativeSpan, vk *auth.ValidatedKey) error {
-	// Validate span_id: exactly 8 hex bytes = 16 hex chars
-	if ns.SpanID != "" {
-		if len(ns.SpanID) != 16 {
-			return fmt.Errorf("span_id must be 16 hex characters, got %d", len(ns.SpanID))
-		}
-		if _, err := hex.DecodeString(ns.SpanID); err != nil {
-			return fmt.Errorf("span_id is not valid hex: %v", err)
-		}
+	if err := validateHexID("span_id", ns.SpanID, 16); err != nil {
+		return err
 	}
-
-	// Validate trace_id: exactly 16 hex bytes = 32 hex chars
-	if ns.TraceID != "" {
-		if len(ns.TraceID) != 32 {
-			return fmt.Errorf("trace_id must be 32 hex characters, got %d", len(ns.TraceID))
-		}
-		if _, err := hex.DecodeString(ns.TraceID); err != nil {
-			return fmt.Errorf("trace_id is not valid hex: %v", err)
-		}
+	if err := validateHexID("trace_id", ns.TraceID, 32); err != nil {
+		return err
 	}
-
-	// Validate kind
-	if ns.Kind != "" {
-		switch domain.SpanKind(ns.Kind) {
-		case domain.SpanKindLLM, domain.SpanKindTool, domain.SpanKindAgent,
-			domain.SpanKindChain, domain.SpanKindInternal:
-			// valid
-		default:
-			return fmt.Errorf("unknown span kind: %q", ns.Kind)
-		}
+	if ns.Kind != "" && !isValidSpanKind(ns.Kind) {
+		return fmt.Errorf("unknown span kind: %q", ns.Kind)
 	}
-
 	return nil
+}
+
+func validateHexID(fieldName, value string, expectedLen int) error {
+	if value == "" {
+		return nil
+	}
+	if len(value) != expectedLen {
+		return fmt.Errorf("%s must be %d hex characters, got %d", fieldName, expectedLen, len(value))
+	}
+	if _, err := hex.DecodeString(value); err != nil {
+		return fmt.Errorf("%s is not valid hex: %v", fieldName, err)
+	}
+	return nil
+}
+
+func isValidSpanKind(kind string) bool {
+	switch domain.SpanKind(kind) {
+	case domain.SpanKindLLM, domain.SpanKindTool, domain.SpanKindAgent,
+		domain.SpanKindChain, domain.SpanKindInternal:
+		return true
+	}
+	return false
 }
 
 func (h *NativeHandler) normalizeInputOutput(ns *NativeSpan) {
@@ -184,43 +184,12 @@ func normalizeMessageArray(v any, role string) any {
 }
 
 func nsToDomain(ns *NativeSpan, vk *auth.ValidatedKey) *domain.Span {
-	// Normalize input/output before conversion
-	var inputJSON, outputJSON string
-	if ns.Input != nil {
-		switch v := ns.Input.(type) {
-		case string:
-			inputJSON = v
-		case []any:
-			data, _ := json.Marshal(v)
-			inputJSON = string(data)
-		case map[string]any:
-			data, _ := json.Marshal(v)
-			inputJSON = string(data)
-		default:
-			inputJSON = fmt.Sprintf("%v", v)
-		}
-	}
-	if ns.Output != nil {
-		switch v := ns.Output.(type) {
-		case string:
-			outputJSON = v
-		case []any:
-			data, _ := json.Marshal(v)
-			outputJSON = string(data)
-		case map[string]any:
-			data, _ := json.Marshal(v)
-			outputJSON = string(data)
-		default:
-			outputJSON = fmt.Sprintf("%v", v)
-		}
-	}
-
 	var kind domain.SpanKind
 	if ns.Kind != "" {
 		kind = domain.SpanKind(ns.Kind)
 	}
 
-	span := &domain.Span{
+	return &domain.Span{
 		SpanID:        ns.SpanID,
 		TraceID:       ns.TraceID,
 		ParentID:      ns.ParentID,
@@ -231,14 +200,33 @@ func nsToDomain(ns *NativeSpan, vk *auth.ValidatedKey) *domain.Span {
 		StartTime:     time.Now(),
 		EndTime:       time.Now(),
 		Model:         ns.Model,
-		Input:         inputJSON,
-		Output:        outputJSON,
+		Input:         spanValueToString(ns.Input),
+		Output:        spanValueToString(ns.Output),
 		InputTokens:   ns.InputTokens,
 		OutputTokens:  ns.OutputTokens,
 		PromptName:    ns.PromptName,
 		PromptVersion: ns.PromptVersion,
 		Attributes:    ns.Attributes,
 	}
+}
 
-	return span
+// spanValueToString converts a span input or output value to a JSON string.
+// Strings pass through directly; slices and maps are marshaled; everything else
+// is converted via fmt.Sprintf.
+func spanValueToString(v any) string {
+	if v == nil {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case []any:
+		data, _ := json.Marshal(val)
+		return string(data)
+	case map[string]any:
+		data, _ := json.Marshal(val)
+		return string(data)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }
