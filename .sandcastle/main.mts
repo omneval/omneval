@@ -37,6 +37,20 @@ import * as http from "http";
 import { Langfuse } from "langfuse";
 
 // ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface Issue {
+  id: string;
+  title: string;
+  branch: string;
+}
+
+interface Plan {
+  issues: Issue[];
+}
+
+// ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
 
@@ -53,6 +67,9 @@ const LANGFUSE_ENABLED = !!(process.env.LANGFUSE_SECRET_KEY && process.env.LANGF
 const LANGFUSE_PROXY_PORT = parseInt(process.env.LANGFUSE_PROXY_PORT ?? "8081", 10);
 // Where the real llama-server lives (host-side address, not Docker internal).
 const LLAMA_SERVER_URL = process.env.LLAMA_SERVER_URL ?? "http://localhost:8080";
+
+// Header names to strip when proxying requests and responses.
+const PROXY_STRIP_HEADERS = new Set(["host", "content-length", "transfer-encoding"]);
 
 // ---------------------------------------------------------------------------
 // Pre-flight: verify llama-server is reachable before burning time on Docker
@@ -85,6 +102,23 @@ let activeTrace: ReturnType<Langfuse["trace"]> | null = null;
 let lf: Langfuse | null = null;
 let proxyServer: http.Server | null = null;
 
+// ---------------------------------------------------------------------------
+// Langfuse helpers
+// ---------------------------------------------------------------------------
+
+function createLangfuseTrace(
+  langfuse: Langfuse,
+  name: string,
+  sessionId: string,
+  metadata: Record<string, unknown>,
+): void {
+  activeTrace = langfuse.trace({ name, sessionId, metadata });
+}
+
+// ---------------------------------------------------------------------------
+// HTTP proxy helpers
+// ---------------------------------------------------------------------------
+
 function readBody(req: http.IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -94,26 +128,40 @@ function readBody(req: http.IncomingMessage): Promise<Buffer> {
   });
 }
 
-function startLangfuseProxy(langfuse: Langfuse, port: number, upstreamBase: string): http.Server {
-  const STRIP_HEADERS = new Set(["host", "content-length", "transfer-encoding"]);
+function stripHeaders(headers: http.IncomingHttpHeaders): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) {
+    if (PROXY_STRIP_HEADERS.has(k.toLowerCase())) continue;
+    result[k] = Array.isArray(v) ? v.join(", ") : (v ?? "");
+  }
+  return result;
+}
 
+function parseCompletionRequest(body: Buffer): {
+  model?: string;
+  messages?: unknown[];
+  temperature?: number;
+  max_tokens?: number;
+  stream?: boolean;
+  stream_options?: { include_usage?: boolean };
+} | null {
+  try {
+    return JSON.parse(body.toString());
+  } catch {
+    return null;
+  }
+}
+
+function startLangfuseProxy(langfuse: Langfuse, port: number, upstreamBase: string): http.Server {
   const server = http.createServer(async (req, res) => {
     const bodyBuf = await readBody(req);
     const url = req.url ?? "/";
     const isCompletions = url.includes("/completions");
 
-    let requestData: {
-      model?: string;
-      messages?: unknown[];
-      temperature?: number;
-      max_tokens?: number;
-      stream?: boolean;
-      stream_options?: { include_usage?: boolean };
-    } | null = null;
-
-    if (isCompletions && bodyBuf.length > 0) {
-      try { requestData = JSON.parse(bodyBuf.toString()); } catch {}
-    }
+    // Parse request body for completions requests (non-completions pass through as-is).
+    const requestData = isCompletions && bodyBuf.length > 0
+      ? parseCompletionRequest(bodyBuf)
+      : null;
 
     // Inject stream_options.include_usage so token counts appear in streaming responses.
     let forwardBody: Buffer = bodyBuf;
@@ -125,7 +173,7 @@ function startLangfuseProxy(langfuse: Langfuse, port: number, upstreamBase: stri
       forwardBody = Buffer.from(JSON.stringify(patched));
     }
 
-    // Create a Langfuse generation span before forwarding.
+    // Create a Langfuse generation span before forwarding the request.
     let generation: ReturnType<ReturnType<Langfuse["trace"]>["generation"]> | null = null;
     if (activeTrace && requestData) {
       generation = activeTrace.generation({
@@ -139,14 +187,10 @@ function startLangfuseProxy(langfuse: Langfuse, port: number, upstreamBase: stri
       });
     }
 
-    // Build forwarded headers, stripping hop-by-hop and host.
-    const forwardHeaders: Record<string, string> = {};
-    for (const [k, v] of Object.entries(req.headers)) {
-      if (STRIP_HEADERS.has(k.toLowerCase())) continue;
-      forwardHeaders[k] = Array.isArray(v) ? v.join(", ") : (v ?? "");
-    }
+    // Forward headers, stripping hop-by-hop and host.
+    const forwardHeaders = stripHeaders(req.headers);
 
-    // Forward to llama-server.
+    // Forward request to the upstream llama-server.
     let upstream: Response;
     try {
       upstream = await fetch(`${upstreamBase}${url}`, {
@@ -162,47 +206,19 @@ function startLangfuseProxy(langfuse: Langfuse, port: number, upstreamBase: stri
     }
 
     // Relay response headers, stripping hop-by-hop.
-    const outHeaders: Record<string, string> = {};
-    upstream.headers.forEach((v, k) => {
-      if (!STRIP_HEADERS.has(k.toLowerCase())) outHeaders[k] = v;
-    });
+    const outHeaders = stripHeaders(upstream.headers as http.IncomingHttpHeaders);
     res.writeHead(upstream.status, outHeaders);
 
     const isStream = requestData?.stream === true;
 
     if (isStream && upstream.body) {
-      const reader = upstream.body.getReader();
-      const decoder = new TextDecoder();
-      const sseChunks: string[] = [];
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const text = decoder.decode(value, { stream: true });
-        sseChunks.push(text);
-        res.write(value);
-      }
+      const sseChunks = await relaySseStream(upstream.body, res, generation);
       res.end();
 
+      // Parse accumulated SSE output for Langfuse.
       if (generation) {
         const raw = sseChunks.join("");
-        let outputText = "";
-        let inputTokens = 0;
-        let outputTokens = 0;
-        for (const line of raw.split("\n")) {
-          if (!line.startsWith("data: ") || line === "data: [DONE]") continue;
-          try {
-            const d = JSON.parse(line.slice(6)) as {
-              choices?: Array<{ delta?: { content?: string } }>;
-              usage?: { prompt_tokens?: number; completion_tokens?: number };
-            };
-            if (d.choices?.[0]?.delta?.content) outputText += d.choices[0].delta.content;
-            if (d.usage) {
-              inputTokens = d.usage.prompt_tokens ?? 0;
-              outputTokens = d.usage.completion_tokens ?? 0;
-            }
-          } catch {}
-        }
+        const { outputText, inputTokens, outputTokens } = parseSseOutput(raw);
         generation.end({
           output: outputText,
           usage: { input: inputTokens, output: outputTokens },
@@ -211,21 +227,7 @@ function startLangfuseProxy(langfuse: Langfuse, port: number, upstreamBase: stri
     } else {
       const buf = Buffer.from(await upstream.arrayBuffer());
       res.end(buf);
-
-      if (generation) {
-        try {
-          const d = JSON.parse(buf.toString()) as {
-            choices?: Array<{ message?: { content?: string } }>;
-            usage?: { prompt_tokens?: number; completion_tokens?: number };
-          };
-          generation.end({
-            output: d.choices?.[0]?.message?.content ?? "",
-            usage: { input: d.usage?.prompt_tokens ?? 0, output: d.usage?.completion_tokens ?? 0 },
-          });
-        } catch {
-          generation.end({ output: "" });
-        }
-      }
+      await recordNonStreamingGeneration(generation, buf);
     }
   });
 
@@ -234,6 +236,84 @@ function startLangfuseProxy(langfuse: Langfuse, port: number, upstreamBase: stri
   });
 
   return server;
+}
+
+// Relay an SSE (Server-Sent Events) stream to the HTTP response.
+// Returns the accumulated text for Langfuse parsing.
+async function relaySseStream(
+  body: ReadableStream<Uint8Array>,
+  res: http.ServerResponse,
+  generation: ReturnType<ReturnType<Langfuse["trace"]>["generation"]> | null,
+): Promise<string[]> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const sseChunks: string[] = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    // Write raw bytes to the client immediately for low-latency streaming.
+    res.write(value);
+    // Accumulate text for Langfuse generation parsing.
+    sseChunks.push(decoder.decode(value, { stream: true }));
+  }
+
+  return sseChunks;
+}
+
+interface SseOutput {
+  outputText: string;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+function parseSseOutput(rawSse: string): SseOutput {
+  let outputText = "";
+  let inputTokens = 0;
+  let outputTokens = 0;
+
+  for (const line of rawSse.split("\n")) {
+    if (!line.startsWith("data: ") || line === "data: [DONE]") continue;
+    try {
+      const d = JSON.parse(line.slice(6)) as {
+        choices?: Array<{ delta?: { content?: string } }>;
+        usage?: { prompt_tokens?: number; completion_tokens?: number };
+      };
+      if (d.choices?.[0]?.delta?.content) outputText += d.choices[0].delta.content;
+      if (d.usage) {
+        inputTokens = d.usage.prompt_tokens ?? 0;
+        outputTokens = d.usage.completion_tokens ?? 0;
+      }
+    } catch {
+      // Malformed SSE chunk — skip.
+    }
+  }
+
+  return { outputText, inputTokens, outputTokens };
+}
+
+// Parse a non-streaming response and record it as a Langfuse generation.
+async function recordNonStreamingGeneration(
+  generation: ReturnType<ReturnType<Langfuse["trace"]>["generation"]> | null,
+  responseBuf: Buffer,
+): Promise<void> {
+  if (!generation) return;
+
+  try {
+    const d = JSON.parse(responseBuf.toString()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
+    generation.end({
+      output: d.choices?.[0]?.message?.content ?? "",
+      usage: {
+        input: d.usage?.prompt_tokens ?? 0,
+        output: d.usage?.completion_tokens ?? 0,
+      },
+    });
+  } catch {
+    generation.end({ output: "" });
+  }
 }
 
 if (LANGFUSE_ENABLED) {
@@ -350,11 +430,7 @@ try {
     // It outputs a <plan> JSON block — we parse that to drive Phase 2.
     // -------------------------------------------------------------------------
     if (lf) {
-      activeTrace = lf.trace({
-        name: "planner",
-        sessionId: `iteration-${iteration}`,
-        metadata: { iteration },
-      });
+      createLangfuseTrace(lf, "planner", `iteration-${iteration}`, { iteration });
     }
 
     const plan = await sandcastle.run({
@@ -412,7 +488,7 @@ try {
     // Create a sandbox for the single issue. The implementer runs first; if it
     // produces commits, the reviewer runs in the same sandbox.
     // -------------------------------------------------------------------------
-    let completedIssues: typeof issues = [];
+    let completedIssues: Issue[] = [];
 
     const sandbox = await sandcastle.createSandbox({
       branch: issue.branch,
@@ -422,10 +498,10 @@ try {
 
     try {
       if (lf) {
-        activeTrace = lf.trace({
-          name: "implementer",
-          sessionId: `issue-${issue.id}`,
-          metadata: { issueId: issue.id, issueTitle: issue.title, branch: issue.branch },
+        createLangfuseTrace(lf, "implementer", `issue-${issue.id}`, {
+          issueId: issue.id,
+          issueTitle: issue.title,
+          branch: issue.branch,
         });
       }
 
@@ -443,10 +519,10 @@ try {
 
       if (implement.commits.length > 0) {
         if (lf) {
-          activeTrace = lf.trace({
-            name: "reviewer",
-            sessionId: `issue-${issue.id}`,
-            metadata: { issueId: issue.id, issueTitle: issue.title, branch: issue.branch },
+          createLangfuseTrace(lf, "reviewer", `issue-${issue.id}`, {
+            issueId: issue.id,
+            issueTitle: issue.title,
+            branch: issue.branch,
           });
         }
 
@@ -495,14 +571,10 @@ try {
     // conflicts, runs Go tests, and closes the corresponding GitHub issue.
     // -------------------------------------------------------------------------
     if (lf) {
-      activeTrace = lf.trace({
-        name: "merger",
-        sessionId: `iteration-${iteration}`,
-        metadata: {
-          iteration,
-          branches: completedBranches,
-          issues: completedIssues.map((i) => i.id),
-        },
+      createLangfuseTrace(lf, "merger", `iteration-${iteration}`, {
+        iteration,
+        branches: completedBranches,
+        issues: completedIssues.map((i) => i.id),
       });
     }
 
