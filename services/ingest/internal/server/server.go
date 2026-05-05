@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"github.com/zbloss/lantern/internal/auth"
 	"github.com/zbloss/lantern/internal/config"
@@ -15,6 +16,8 @@ import (
 	"github.com/zbloss/lantern/internal/metadata/sqlite"
 	"github.com/zbloss/lantern/internal/probe"
 	redisqueue "github.com/zbloss/lantern/internal/queue/redis"
+	"github.com/zbloss/lantern/services/ingest/internal/handler"
+	"github.com/zbloss/lantern/services/ingest/internal/metrics"
 )
 
 // Run starts the Ingest API HTTP server.
@@ -23,6 +26,13 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
+
+	// Register Prometheus metrics.
+	if err := metrics.Register(cfg.Metrics.DisableProjectLabels); err != nil {
+		return fmt.Errorf("register metrics: %w", err)
+	}
+
+	metricsHelper := metrics.NewIngestMetrics(cfg)
 
 	// Initialize metadata store
 	var store metadata.Store
@@ -59,8 +69,8 @@ func Run() error {
 	// Initialize validator
 	validator := auth.NewCachingValidator(store)
 
-	// Initialize native REST handler with CORS middleware
-	nativeH := handlers.NewNativeHandler(queue, validator, cfg.Ingest.CORSAllowedOrigins)
+	// Initialize native REST handler with CORS middleware and metrics.
+	nativeH := handler.NewNativeHandler(queue, validator, cfg.Ingest.CORSAllowedOrigins, metricsHelper)
 
 	// Initialize OTLP handler
 	otlpH := handlers.NewOTLPHandler(queue, validator)
@@ -76,9 +86,12 @@ func Run() error {
 		return rdb.Ping(ctx).Err()
 	}})
 
-	// Combine the main router with probe routes.
+	// Build router with /metrics endpoint and combined probe routes.
+	metricsHandler := promhttp.Handler()
 	combined := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+		if r.URL.Path == "/metrics" {
+			metricsHandler.ServeHTTP(w, r)
+		} else if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 			p.Router().ServeHTTP(w, r)
 		} else {
 			router.ServeHTTP(w, r)

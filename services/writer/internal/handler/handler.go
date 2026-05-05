@@ -11,10 +11,10 @@ import (
 	"github.com/zbloss/lantern/internal/domain"
 )
 
-// ScoreHandler handles POST /internal/v1/scores — the internal-only endpoint
+// ScoreMux handles POST /internal/v1/scores — the internal-only endpoint
 // called by Eval Workers to write completed scores back to DuckDB.
 // Not exposed outside the cluster.
-type ScoreHandler struct {
+type ScoreMux struct {
 	db *sql.DB
 }
 
@@ -32,16 +32,16 @@ type ScoreRequest struct {
 	PromptVersion int64   `json:"prompt_version"`
 }
 
-// New creates a new ScoreHandler.
+// New creates a new ScoreMux that handles POST /internal/v1/scores.
 func New(db *sql.DB) http.Handler {
-	h := &ScoreHandler{db: db}
+	h := &ScoreMux{db: db}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /internal/v1/scores", h.HandleScores)
 	return mux
 }
 
 // HandleScores writes a single score to DuckDB.
-func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
+func (h *ScoreMux) HandleScores(w http.ResponseWriter, r *http.Request) {
 	var req ScoreRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -71,7 +71,7 @@ func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeScore writes a single score to DuckDB.
-func (h *ScoreHandler) writeScore(ctx context.Context, score *domain.Score) error {
+func (h *ScoreMux) writeScore(ctx context.Context, score *domain.Score) error {
 	_, err := h.db.ExecContext(ctx, `
 		INSERT INTO scores (
 			score_id, span_id, trace_id, project_id,

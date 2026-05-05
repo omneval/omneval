@@ -83,9 +83,11 @@ func Run() error {
 	}
 
 	// Register Prometheus metrics.
-	if err := metrics.Register(); err != nil {
+	if err := metrics.Register(cfg); err != nil {
 		return fmt.Errorf("query: register metrics: %w", err)
 	}
+
+	queryMetrics := metrics.NewQueryMetrics(cfg)
 
 	// Open metadata store
 	store, err := openMetadataStore(cfg)
@@ -122,11 +124,16 @@ func Run() error {
 	}
 
 	// Download snapshot from S3 (if configured).
+	var snapshotLastModified time.Time
 	if s3Store != nil {
 		if err := downloadSnapshot(context.Background(), s3Store, dbPath); err != nil {
 			return fmt.Errorf("query: download snapshot: %w", err)
 		}
 		slog.Info("query: snapshot downloaded from S3", "path", dbPath)
+		// Try to get the last modified time from S3.
+		if stat, err := s3Store.Stat(context.Background(), "snapshots/duckdb.db"); err == nil && stat != nil {
+			snapshotLastModified = stat.LastModified
+		}
 	} else {
 		slog.Info("query: no S3 configured, skipping snapshot download")
 	}
@@ -216,12 +223,17 @@ func Run() error {
 			for {
 				select {
 				case <-ticker.C:
-					if err := pollAndDownload(ctx, s3Store, dbPath); err != nil {
+					if err := pollAndDownload(ctx, s3Store, dbPath, &snapshotLastModified); err != nil {
 						slog.Warn("query: snapshot poll/download failed", "err", err)
+					}
+					// Update snapshot age metric.
+					if !snapshotLastModified.IsZero() {
+						age := time.Since(snapshotLastModified).Seconds()
+						queryMetrics.RecordSnapshotAge(age)
 					}
 				case <-ctx.Done():
 					// Trigger one final sync before exit.
-					if err := pollAndDownload(ctx, s3Store, dbPath); err != nil {
+					if err := pollAndDownload(ctx, s3Store, dbPath, &snapshotLastModified); err != nil {
 						slog.Warn("query: final sync failed", "err", err)
 					}
 					return
@@ -318,7 +330,7 @@ func downloadSnapshot(ctx context.Context, store storage.ObjectStore, dbPath str
 }
 
 // pollAndDownload checks if the S3 snapshot has changed and re-downloads if needed.
-func pollAndDownload(ctx context.Context, store storage.ObjectStore, dbPath string) error {
+func pollAndDownload(ctx context.Context, store storage.ObjectStore, dbPath string, lastModified *time.Time) error {
 	snapshotKey := "snapshots/duckdb.db"
 
 	// Stat the S3 object to check for changes.
@@ -338,7 +350,16 @@ func pollAndDownload(ctx context.Context, store storage.ObjectStore, dbPath stri
 
 	// Download new snapshot.
 	slog.Info("query: downloading updated snapshot from S3", "etag", info.ETag)
-	return downloadSnapshot(ctx, store, dbPath)
+	if err := downloadSnapshot(ctx, store, dbPath); err != nil {
+		return err
+	}
+
+	// Update the last modified time.
+	if info != nil {
+		*lastModified = info.LastModified
+	}
+
+	return nil
 }
 
 // openSnapshotDB opens a DuckDB database in read-only mode.

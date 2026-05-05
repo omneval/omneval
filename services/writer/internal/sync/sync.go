@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/zbloss/lantern/internal/config"
 	"github.com/zbloss/lantern/internal/storage"
+	"github.com/zbloss/lantern/services/writer/internal/metrics"
 )
 
 // Syncer copies the live DuckDB file to S3 every sync interval so Query API
@@ -20,9 +20,7 @@ type Syncer struct {
 	cfg          *config.Config
 	syncInterval time.Duration
 	snapshotKey  string
-	syncDuration *prometheus.HistogramVec
-	syncTotal    prometheus.Counter
-	syncFailures prometheus.Counter
+	metrics      *metrics.WriterMetrics
 }
 
 // New creates a new Syncer.
@@ -30,7 +28,7 @@ func New(
 	store storage.ObjectStore,
 	dbPath string,
 	cfg *config.Config,
-	reg prometheus.Registerer,
+	m *metrics.WriterMetrics,
 ) *Syncer {
 	syncInterval, err := time.ParseDuration(cfg.Writer.SyncInterval)
 	if err != nil {
@@ -48,43 +46,13 @@ func New(
 		snapshotKey = "duckdb:snapshot"
 	}
 
-	syncDuration := prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "lantern_writer",
-			Name:      "snapshot_sync_duration_seconds",
-			Help:      "Duration of DuckDB snapshot sync to S3 in seconds.",
-			Buckets:   prometheus.DefBuckets,
-		},
-		[]string{"status"},
-	)
-
-	syncTotal := prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: "lantern_writer",
-		Name:      "snapshot_sync_total",
-		Help:      "Total number of snapshot sync attempts.",
-	})
-
-	syncFailures := prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: "lantern_writer",
-		Name:      "snapshot_sync_failures_total",
-		Help:      "Total number of failed snapshot sync attempts.",
-	})
-
-	if reg != nil {
-		reg.MustRegister(syncDuration)
-		reg.MustRegister(syncTotal)
-		reg.MustRegister(syncFailures)
-	}
-
 	return &Syncer{
 		store:        store,
 		dbPath:       dbPath,
 		cfg:          cfg,
 		syncInterval: syncInterval,
 		snapshotKey:  snapshotKey,
-		syncDuration: syncDuration,
-		syncTotal:    syncTotal,
-		syncFailures: syncFailures,
+		metrics:      m,
 	}
 }
 
@@ -114,7 +82,6 @@ func (s *Syncer) Run(ctx context.Context) error {
 // doSync performs a single sync cycle. It logs errors at Warn level and
 // does not panic — the next tick will retry.
 func (s *Syncer) doSync(ctx context.Context) {
-	s.syncTotal.Inc()
 	start := time.Now()
 
 	info, err := os.Stat(s.dbPath)
@@ -151,7 +118,6 @@ func (s *Syncer) doSync(ctx context.Context) {
 			"key", s.snapshotKey,
 			"err", err,
 		)
-		s.syncFailures.Inc()
 		s.recordDuration(start, "error")
 		return
 	}
@@ -165,5 +131,7 @@ func (s *Syncer) doSync(ctx context.Context) {
 
 func (s *Syncer) recordDuration(start time.Time, status string) {
 	elapsed := time.Since(start).Seconds()
-	s.syncDuration.WithLabelValues(status).Observe(elapsed)
+	if s.metrics != nil {
+		s.metrics.RecordSnapshotSyncDuration(elapsed, status)
+	}
 }

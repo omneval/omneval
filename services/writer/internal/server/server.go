@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	redisgo "github.com/redis/go-redis/v9"
 	"github.com/zbloss/lantern/internal/config"
 	"github.com/zbloss/lantern/internal/duckdb"
@@ -18,6 +19,7 @@ import (
 	qredis "github.com/zbloss/lantern/internal/queue/redis"
 	"github.com/zbloss/lantern/internal/storage/s3"
 	"github.com/zbloss/lantern/services/writer/internal/handler"
+	"github.com/zbloss/lantern/services/writer/internal/metrics"
 	"github.com/zbloss/lantern/services/writer/internal/pipeline"
 	"github.com/zbloss/lantern/services/writer/internal/sync"
 )
@@ -35,6 +37,13 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("writer: load config: %w", err)
 	}
+
+	// Register Prometheus metrics.
+	if err := metrics.Register(cfg.Metrics.DisableProjectLabels); err != nil {
+		return fmt.Errorf("writer: register metrics: %w", err)
+	}
+
+	metricsHelper := metrics.NewWriterMetrics(cfg)
 
 	// Initialize bundled pricing (runs once, lazy).
 	pricing.InitBundledPricing()
@@ -90,7 +99,7 @@ func Run() error {
 	evalQ := qredis.NewEvalQueue(rc)
 
 	// Create pipeline.
-	pl := pipeline.New(ingestQ, db, pricingTable, meta, evalQ)
+	pl := pipeline.New(ingestQ, db, pricingTable, meta, evalQ, metricsHelper)
 
 	// Create S3 store (nil if no S3 config).
 	var s3store *s3.Store
@@ -104,10 +113,10 @@ func Run() error {
 	}
 
 	// Create syncer (S3 snapshot sync).
-	syncer := sync.New(s3store, dbPath, cfg, nil)
+	syncer := sync.New(s3store, dbPath, cfg, metricsHelper)
 
-	// Create score handler.
-	scoreHandler := handler.New(db)
+	// Create score handler (handles POST /internal/v1/scores).
+	scoreMux := handler.New(db)
 
 	// Set up health and readiness probes.
 	p := probe.New()
@@ -128,19 +137,24 @@ func Run() error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start score handler server (separate goroutine) with probe routes.
-	// Combine the score handler with health/readiness probe routes.
-	writerHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Build the full router: /metrics + /internal/v1/scores + probes.
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	mux.Handle("/internal/v1/scores", scoreMux)
+	
+	// Combine with probe routes.
+	combined := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 			p.Router().ServeHTTP(w, r)
 		} else {
-			scoreHandler.ServeHTTP(w, r)
+			mux.ServeHTTP(w, r)
 		}
 	})
 
+	// Start server.
 	scoreServer := &http.Server{
 		Addr:    cfg.Writer.Addr,
-		Handler: writerHandler,
+		Handler: combined,
 	}
 	go func() {
 		slog.Info("writer: score handler listening", "addr", cfg.Writer.Addr)

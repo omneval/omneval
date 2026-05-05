@@ -2,7 +2,13 @@ module github.com/zbloss/lantern/services/ingest
 
 go 1.25.0
 
-require github.com/redis/go-redis/v9 v9.19.0
+require (
+	github.com/prometheus/client_golang v1.23.2
+	github.com/redis/go-redis/v9 v9.19.0
+	github.com/zbloss/lantern/internal v0.0.0
+)
+
+replace github.com/zbloss/lantern/internal => ../../internal
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

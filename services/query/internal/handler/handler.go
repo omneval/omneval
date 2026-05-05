@@ -12,6 +12,7 @@ import (
 	"github.com/zbloss/lantern/internal/domain"
 	"github.com/zbloss/lantern/internal/idgen"
 	"github.com/zbloss/lantern/services/query/internal/dsl"
+	"github.com/zbloss/lantern/services/query/internal/metrics"
 	"github.com/zbloss/lantern/services/query/internal/query"
 )
 
@@ -21,6 +22,7 @@ import (
 type SpanHandler struct {
 	DB           *sql.DB
 	SessionStore sessionStore
+	Metrics      *metrics.QueryMetrics
 }
 
 // sessionStore abstracts session lookup for project ID extraction.
@@ -34,6 +36,13 @@ type sessionStore interface {
 // with keyset cursor pagination, executes the hot+cold UNION, and returns
 // a paginated span list with a next cursor.
 func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	defer func() {
+		if h.Metrics != nil {
+			h.Metrics.RecordRequestDuration("/api/v1/spans/query", time.Since(start).Seconds())
+		}
+	}()
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -106,6 +115,13 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 // HandleTraceDetail handles GET /api/v1/traces/:traceId.
 // Returns the span tree for a single trace with inline scores.
 func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	defer func() {
+		if h.Metrics != nil {
+			h.Metrics.RecordRequestDuration("/api/v1/traces/{traceId}", time.Since(start).Seconds())
+		}
+	}()
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

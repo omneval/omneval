@@ -67,7 +67,7 @@ func TestOTLP_EndToEndProto(t *testing.T) {
 
 	pipelineErr := make(chan error, 1)
 	go func() {
-		pl := pipeline.New(ingestQ, db, nil, nil, nil)
+		pl := pipeline.New(ingestQ, db, nil, nil, nil, nil)
 		pipelineErr <- pl.Run(ctx)
 	}()
 
@@ -238,7 +238,7 @@ func TestOTLP_EndToEndJSON(t *testing.T) {
 
 	pipelineErr := make(chan error, 1)
 	go func() {
-		pl := pipeline.New(ingestQ, db, nil, nil, nil)
+		pl := pipeline.New(ingestQ, db, nil, nil, nil, nil)
 		pipelineErr <- pl.Run(ctx)
 	}()
 
@@ -343,7 +343,7 @@ func TestOTLP_UnknownModelZeroCost(t *testing.T) {
 
 	pipelineErr := make(chan error, 1)
 	go func() {
-		pl := pipeline.New(ingestQ, db, nil, nil, nil)
+		pl := pipeline.New(ingestQ, db, nil, nil, nil, nil)
 		pipelineErr <- pl.Run(ctx)
 	}()
 
@@ -445,7 +445,7 @@ func TestOTLP_NativeHandlerStillWorks(t *testing.T) {
 
 	pipelineErr := make(chan error, 1)
 	go func() {
-		pl := pipeline.New(ingestQ, db, nil, nil, nil)
+		pl := pipeline.New(ingestQ, db, nil, nil, nil, nil)
 		pipelineErr <- pl.Run(ctx)
 	}()
 

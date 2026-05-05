@@ -15,6 +15,7 @@ import (
 	"github.com/zbloss/lantern/internal/metadata"
 	"github.com/zbloss/lantern/internal/pricing"
 	"github.com/zbloss/lantern/internal/queue"
+	"github.com/zbloss/lantern/services/writer/internal/metrics"
 )
 
 // Pipeline drains the Redis ingest queue and batches writes into DuckDB.
@@ -24,6 +25,7 @@ type Pipeline struct {
 	pricing *pricing.Table
 	store   metadata.Store
 	evalQ   queue.EvalQueue
+	metrics *metrics.WriterMetrics
 }
 
 // New creates a new Pipeline.
@@ -33,6 +35,7 @@ func New(
 	pricing *pricing.Table,
 	store metadata.Store,
 	evalQ queue.EvalQueue,
+	m *metrics.WriterMetrics,
 ) *Pipeline {
 	return &Pipeline{
 		ingest:  ingest,
@@ -40,6 +43,7 @@ func New(
 		pricing: pricing,
 		store:   store,
 		evalQ:   evalQ,
+		metrics: m,
 	}
 }
 
@@ -82,6 +86,8 @@ func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
 	if len(spans) == 0 {
 		return nil
 	}
+
+	start := time.Now()
 
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -148,6 +154,22 @@ func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("pipeline: commit: %w", err)
 	}
+
+	// Record metrics after successful write.
+	if p.metrics != nil {
+		elapsed := time.Since(start).Seconds()
+		p.metrics.RecordDuckDBWriteDuration(elapsed)
+
+		// Count by project.
+		projectCounts := make(map[string]int)
+		for _, span := range spans {
+			projectCounts[span.ProjectID]++
+		}
+		for projectID, count := range projectCounts {
+			p.metrics.RecordSpansWritten(projectID, count)
+		}
+	}
+
 	return nil
 }
 

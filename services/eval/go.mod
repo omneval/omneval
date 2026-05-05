@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/marcboeker/go-duckdb/v2 v2.4.3
+	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.19.0
 	github.com/zbloss/lantern/internal v0.0.0
 )
