@@ -101,12 +101,10 @@ func durationMsExpr() string {
 // (without alias). It handles the duration_ms virtual field and percentile
 // aggregations that wrap approx_quantile.
 func aggExprForField(fn AggFunc, field string) (string, error) {
-	// Validate the function.
 	if _, ok := validAggFuncs[fn]; !ok {
 		return "", fmt.Errorf("dsl: unknown aggregation function %q", fn)
 	}
 
-	// Handle COUNT(*) — asterisk is only valid for count.
 	if field == "*" {
 		if fn != AggCount {
 			return "", fmt.Errorf("dsl: field %q is only valid with count()", "*")
@@ -114,20 +112,13 @@ func aggExprForField(fn AggFunc, field string) (string, error) {
 		return "COUNT(*)", nil
 	}
 
-	// Resolve the field name — duration_ms becomes the EPOCH_MS expression.
 	colExpr := field
 	if isDurationMs(field) {
 		colExpr = durationMsExpr()
+	} else if _, ok := spanColumns[field]; !ok {
+		return "", fmt.Errorf("dsl: unknown field %q for aggregation", field)
 	}
 
-	// Validate the resolved column (unless it's duration_ms virtual).
-	if !isDurationMs(field) {
-		if _, ok := spanColumns[field]; !ok {
-			return "", fmt.Errorf("dsl: unknown field %q for aggregation", field)
-		}
-	}
-
-	// Percentile aggregations use approx_quantile.
 	switch fn {
 	case AggP50:
 		return fmt.Sprintf("APPROX_QUANTILE(%s, 0.50)", colExpr), nil
@@ -135,10 +126,6 @@ func aggExprForField(fn AggFunc, field string) (string, error) {
 		return fmt.Sprintf("APPROX_QUANTILE(%s, 0.95)", colExpr), nil
 	case AggP99:
 		return fmt.Sprintf("APPROX_QUANTILE(%s, 0.99)", colExpr), nil
-	}
-
-	// Standard aggregations.
-	switch fn {
 	case AggCount:
 		return fmt.Sprintf("COUNT(%s)", colExpr), nil
 	case AggSum:
@@ -176,15 +163,23 @@ func filterExprForField(field string) (string, error) {
 	return field, nil
 }
 
-// aliasFor extracts the column alias for a select clause.
-// If the clause has "AS alias", returns the alias; otherwise returns the
-// full clause as-is.
+// aliasFor extracts the column alias from a select clause. If the clause
+// contains " AS <alias>", returns the alias; otherwise returns the full
+// clause verbatim.
 func aliasFor(clause string) string {
-	parts := strings.SplitN(clause, " AS ", 2)
-	if len(parts) == 2 {
-		return parts[1]
+	if idx := strings.Index(clause, " AS "); idx >= 0 {
+		return clause[idx+4:]
 	}
 	return clause
+}
+
+// groupByFieldExpr returns the SQL expression for a group-by field, applying
+// date_trunc when a truncation unit is specified.
+func groupByFieldExpr(field string, trunc TruncUnit) string {
+	if trunc != "" {
+		return fmt.Sprintf("date_trunc('%s', %s)", trunc, field)
+	}
+	return field
 }
 
 // Compile translates a Query into a parameterized DuckDB SQL string and its
@@ -206,20 +201,15 @@ func Compile(projectID string, q Query) (sql string, args []any, err error) {
 		}
 	}
 
-	// Group-by columns — these must appear in the SELECT clause for SQL
-	// validity when GROUP BY is used.
+	// Group-by columns must appear in the SELECT clause for SQL validity.
 	for _, gb := range q.GroupBy {
 		if _, ok := spanColumns[gb.Field]; !ok {
 			return "", nil, fmt.Errorf("dsl: unknown group-by field %q", gb.Field)
 		}
-		if gb.Truncate != "" {
-			if _, ok := validTruncUnits[gb.Truncate]; !ok {
-				return "", nil, fmt.Errorf("dsl: unknown truncation unit %q", gb.Truncate)
-			}
-			selectClauses = append(selectClauses, fmt.Sprintf("date_trunc('%s', %s)", gb.Truncate, gb.Field))
-		} else {
-			selectClauses = append(selectClauses, gb.Field)
+		if _, ok := validTruncUnits[gb.Truncate]; !ok && gb.Truncate != "" {
+			return "", nil, fmt.Errorf("dsl: unknown truncation unit %q", gb.Truncate)
 		}
+		selectClauses = append(selectClauses, groupByFieldExpr(gb.Field, gb.Truncate))
 	}
 
 	// Default: SELECT COUNT(*) if no aggregations and no group-by.
@@ -227,9 +217,9 @@ func Compile(projectID string, q Query) (sql string, args []any, err error) {
 		selectClauses = append(selectClauses, "COUNT(*) AS count")
 	}
 
-	// Validate order-by fields (can reference aggregation aliases or real columns).
+	// Validate order-by fields: must reference an aggregation alias, a span
+	// column, or a group-by field.
 	for _, ob := range q.OrderBy {
-		// Check if it's an aggregation alias.
 		isAlias := false
 		for _, agg := range q.Aggregations {
 			if agg.Alias == ob.Field {
@@ -237,15 +227,8 @@ func Compile(projectID string, q Query) (sql string, args []any, err error) {
 				break
 			}
 		}
-		if !isAlias {
-			// Check if it's a real column or group-by field.
-			if _, ok := spanColumns[ob.Field]; !ok {
-				// Check if it's a group-by expression alias — we allow the field
-				// name since the inner query selects it.
-				if !isValidOrderByField(ob.Field, q.GroupBy) {
-					return "", nil, fmt.Errorf("dsl: unknown order-by field %q", ob.Field)
-				}
-			}
+		if !isAlias && !isValidOrderByField(ob.Field, q.GroupBy) {
+			return "", nil, fmt.Errorf("dsl: unknown order-by field %q", ob.Field)
 		}
 	}
 
@@ -254,13 +237,11 @@ func Compile(projectID string, q Query) (sql string, args []any, err error) {
 	whereClauses := []string{"project_id = ?"}
 	args = []any{projectID}
 
-	// Time range filter.
 	if !q.From.IsZero() && !q.To.IsZero() {
 		whereClauses = append(whereClauses, "start_time >= ? AND start_time <= ?")
 		args = append(args, q.From, q.To)
 	}
 
-	// User-provided filters.
 	for _, f := range q.Filters {
 		expr, err := filterExprForField(f.Field)
 		if err != nil {
@@ -306,17 +287,13 @@ func Compile(projectID string, q Query) (sql string, args []any, err error) {
 	if len(q.GroupBy) > 0 {
 		groupParts := make([]string, len(q.GroupBy))
 		for i, gb := range q.GroupBy {
-			if gb.Truncate != "" {
-				groupParts[i] = fmt.Sprintf("date_trunc('%s', %s)", gb.Truncate, gb.Field)
-			} else {
-				groupParts[i] = gb.Field
-			}
+			groupParts[i] = groupByFieldExpr(gb.Field, gb.Truncate)
 		}
 		groupSQL = "\n  GROUP BY " + strings.Join(groupParts, ", ")
 	}
 
 	// Build the ORDER BY clause.
-	var orderParts []string
+	orderParts := make([]string, 0, len(q.OrderBy))
 	for _, ob := range q.OrderBy {
 		dir := "ASC"
 		if ob.Desc {
@@ -325,15 +302,12 @@ func Compile(projectID string, q Query) (sql string, args []any, err error) {
 		orderParts = append(orderParts, fmt.Sprintf("%s %s", ob.Field, dir))
 	}
 
-	// Build the LIMIT clause.
 	limitClause := ""
 	if q.Limit > 0 {
 		limitClause = fmt.Sprintf("\n  LIMIT %d", q.Limit)
 	}
 
 	// --- Build hot + cold UNION ---
-
-	// The inner queries select the aggregation expressions with their aliases.
 	selectSQL := strings.Join(selectClauses, ", ")
 
 	// Hot side: local DuckDB snapshot.
@@ -345,9 +319,7 @@ func Compile(projectID string, q Query) (sql string, args []any, err error) {
 	// Cold side: no-op stub (zero rows) that mirrors the column aliases.
 	coldSide := buildColdSide(selectClauses)
 
-	// The outer query wraps the UNION and selects the same columns.
-	// For aggregation queries, the inner query already computes the aggregates;
-	// the outer query just projects the inner results.
+	// Outer query wraps the UNION and projects the inner results.
 	outerSelects := make([]string, len(selectClauses))
 	for i, sc := range selectClauses {
 		outerSelects[i] = aliasFor(sc)
@@ -359,33 +331,25 @@ func Compile(projectID string, q Query) (sql string, args []any, err error) {
 		coldSide,
 	)
 
-	// Append ORDER BY and LIMIT to the outer query.
 	if len(orderParts) > 0 {
 		outerSQL += "\n  ORDER BY " + strings.Join(orderParts, ", ")
 	} else if len(q.GroupBy) > 0 {
-		// Default ordering for grouped queries: order by first group-by alias.
-		// Find the alias for the first group-by field.
-		gb := q.GroupBy[0]
-		alias := aliasFor(gb.Field)
-		if gb.Truncate != "" {
-			alias = fmt.Sprintf("date_trunc('%s', %s)", gb.Truncate, gb.Field)
-		}
-		outerSQL += "\n  ORDER BY " + alias + " ASC"
+		// Default ordering for grouped queries: order by first group-by expression.
+		outerSQL += "\n  ORDER BY " + groupByFieldExpr(q.GroupBy[0].Field, q.GroupBy[0].Truncate) + " ASC"
 	}
 	outerSQL += limitClause
 
 	return outerSQL, args, nil
 }
 
-// isValidOrderByField checks if a field name is valid for ORDER BY.
+// isValidOrderByField reports whether a field is valid in an ORDER BY clause.
+// It checks group-by fields and span table columns.
 func isValidOrderByField(field string, groupBy []GroupByField) bool {
-	// Check group-by fields.
 	for _, gb := range groupBy {
 		if gb.Field == field {
 			return true
 		}
 	}
-	// Check span columns.
 	if _, ok := spanColumns[field]; ok {
 		return true
 	}
