@@ -10,6 +10,10 @@
 #
 # After starting, the UI is at http://localhost:8002.
 # The Ingest API accepts spans at http://localhost:8000.
+#
+# Environment variables from .env (see .env.example):
+#   MINIO_ROOT_USER, MINIO_ROOT_PASSWORD — MinIO credentials
+#   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB — PostgreSQL credentials
 
 services:
   redis:
@@ -28,16 +32,17 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: lantern-postgres
+    env_file: .env
     environment:
-      POSTGRES_USER: lantern
-      POSTGRES_PASSWORD: lantern
-      POSTGRES_DB: lantern
+      POSTGRES_USER: ${POSTGRES_USER:-lantern}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lantern}
+      POSTGRES_DB: ${POSTGRES_DB:-lantern}
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U lantern"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lantern}"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -45,10 +50,11 @@ services:
   minio:
     image: minio/minio:latest
     container_name: lantern-minio
+    env_file: .env
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minio_s3_access_key
-      MINIO_ROOT_PASSWORD: minio_s3_secret_key
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio_s3_access_key}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key}
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -68,18 +74,22 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+    env_file: .env
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio:9000 minio_s3_access_key minio_s3_secret_key;
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minio_s3_access_key} ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key};
       mc mb --ignore-existing local/lantern;
       exit 0;
       "
+
+  # --- Lantern application services ---
 
   lantern-ingest:
     build:
       context: ../..
       dockerfile: Dockerfile
     container_name: lantern-ingest
+    command: lantern-ingest
     depends_on:
       redis:
         condition: service_healthy
@@ -92,13 +102,13 @@ services:
       - "9090:9090"
     environment:
       LANTERN_DATABASE_DRIVER: postgres
-      LANTERN_DATABASE_DSN: postgres://lantern:lantern@postgres:5432/lantern?sslmode=disable
+      LANTERN_DATABASE_DSN: postgres://${POSTGRES_USER:-lantern}:${POSTGRES_PASSWORD:-lantern}@postgres:5432/${POSTGRES_DB:-lantern}?sslmode=disable
       LANTERN_REDIS_ADDR: redis:6379
       LANTERN_STORAGE_ENDPOINT: http://minio:9000
       LANTERN_STORAGE_BUCKET: lantern
       LANTERN_STORAGE_REGION: us-east-1
-      LANTERN_STORAGE_ACCESS_KEY: minio_s3_access_key
-      LANTERN_STORAGE_SECRET_KEY: minio_s3_secret_key
+      LANTERN_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_s3_access_key}
+      LANTERN_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key}
       LANTERN_AUTH_SECURE_COOKIE: "false"
 
   lantern-writer:
@@ -106,6 +116,7 @@ services:
       context: ../..
       dockerfile: Dockerfile
     container_name: lantern-writer
+    command: lantern-writer
     depends_on:
       redis:
         condition: service_healthy
@@ -118,13 +129,13 @@ services:
       - "9091:9090"
     environment:
       LANTERN_DATABASE_DRIVER: postgres
-      LANTERN_DATABASE_DSN: postgres://lantern:lantern@postgres:5432/lantern?sslmode=disable
+      LANTERN_DATABASE_DSN: postgres://${POSTGRES_USER:-lantern}:${POSTGRES_PASSWORD:-lantern}@postgres:5432/${POSTGRES_DB:-lantern}?sslmode=disable
       LANTERN_REDIS_ADDR: redis:6379
       LANTERN_STORAGE_ENDPOINT: http://minio:9000
       LANTERN_STORAGE_BUCKET: lantern
       LANTERN_STORAGE_REGION: us-east-1
-      LANTERN_STORAGE_ACCESS_KEY: minio_s3_access_key
-      LANTERN_STORAGE_SECRET_KEY: minio_s3_secret_key
+      LANTERN_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_s3_access_key}
+      LANTERN_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key}
       LANTERN_WRITER_DUCKDB_PATH: /data/lantern.duckdb
       LANTERN_WRITER_SYNC_INTERVAL: 30s
       LANTERN_WRITER_FLUSH_INTERVAL: 30m
@@ -137,6 +148,7 @@ services:
       context: ../..
       dockerfile: Dockerfile
     container_name: lantern-query
+    command: lantern-query
     depends_on:
       postgres:
         condition: service_healthy
@@ -147,12 +159,12 @@ services:
       - "9092:9090"
     environment:
       LANTERN_DATABASE_DRIVER: postgres
-      LANTERN_DATABASE_DSN: postgres://lantern:lantern@postgres:5432/lantern?sslmode=disable
+      LANTERN_DATABASE_DSN: postgres://${POSTGRES_USER:-lantern}:${POSTGRES_PASSWORD:-lantern}@postgres:5432/${POSTGRES_DB:-lantern}?sslmode=disable
       LANTERN_STORAGE_ENDPOINT: http://minio:9000
       LANTERN_STORAGE_BUCKET: lantern
       LANTERN_STORAGE_REGION: us-east-1
-      LANTERN_STORAGE_ACCESS_KEY: minio_s3_access_key
-      LANTERN_STORAGE_SECRET_KEY: minio_s3_secret_key
+      LANTERN_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_s3_access_key}
+      LANTERN_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key}
       LANTERN_AUTH_SECURE_COOKIE: "false"
       LANTERN_AUTH_ADMIN_EMAIL: admin@lantern.dev
       LANTERN_AUTH_ADMIN_PASSWORD: admin
@@ -164,6 +176,7 @@ services:
       context: ../..
       dockerfile: Dockerfile
     container_name: lantern-eval
+    command: lantern-eval
     depends_on:
       redis:
         condition: service_healthy
@@ -176,13 +189,13 @@ services:
       - "9093:9090"
     environment:
       LANTERN_DATABASE_DRIVER: postgres
-      LANTERN_DATABASE_DSN: postgres://lantern:lantern@postgres:5432/lantern?sslmode=disable
+      LANTERN_DATABASE_DSN: postgres://${POSTGRES_USER:-lantern}:${POSTGRES_PASSWORD:-lantern}@postgres:5432/${POSTGRES_DB:-lantern}?sslmode=disable
       LANTERN_REDIS_ADDR: redis:6379
       LANTERN_STORAGE_ENDPOINT: http://minio:9000
       LANTERN_STORAGE_BUCKET: lantern
       LANTERN_STORAGE_REGION: us-east-1
-      LANTERN_STORAGE_ACCESS_KEY: minio_s3_access_key
-      LANTERN_STORAGE_SECRET_KEY: minio_s3_secret_key
+      LANTERN_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_s3_access_key}
+      LANTERN_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key}
       LANTERN_EVAL_CONCURRENCY: 4
       LANTERN_EVAL_LLM_BASE_URL: ""
       LANTERN_EVAL_LLM_API_KEY: ""

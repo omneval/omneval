@@ -16,6 +16,9 @@ and application services needed to run Lantern locally.
 # Navigate to this directory
 cd deploy/docker-compose
 
+# (Optional) Copy .env.example to .env and override infrastructure credentials.
+# cp .env.example .env
+
 # Build and start all services
 docker compose up --build
 
@@ -62,6 +65,16 @@ An admin user is bootstrapped on first start:
 The `lantern` bucket is created automatically on first start by the `minio-init`
 helper container.
 
+## Customizing Infrastructure Credentials
+
+The `.env` file (created by copying `.env.example`) controls the credentials for
+PostgreSQL and MinIO. After changing `.env`, rebuild the compose stack:
+
+```bash
+docker compose down
+docker compose up --build
+```
+
 ## Common Commands
 
 ```bash
@@ -82,6 +95,15 @@ docker compose up --build
 
 # Scale eval workers (horizontal scaling)
 docker compose up -d --scale lantern-eval=3
+```
+
+## Service Commands
+
+Run arbitrary commands inside a service container (useful for debugging):
+
+```bash
+# Run a shell inside the query service
+docker compose run --rm lantern-query sh
 ```
 
 ## Data Persistence

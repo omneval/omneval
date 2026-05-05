@@ -24,13 +24,14 @@ COPY services/query/go.* ./services/query/
 COPY services/eval/go.* ./services/eval/
 COPY sdk/go/go.* ./sdk/go/
 
-# Copy pricing data (read-only mount target, but copy for build cache)
+# Copy pricing data (needed by the embedded pricing package for build cache)
 COPY internal/pricing/ ./internal/pricing/
 
 # Copy UI dist (embedded into query service binary)
 COPY --from=ui-builder /build/ui/dist ./ui/dist
 
-# Download dependencies
+# Compile dependencies to populate the module and build caches,
+# so that subsequent full builds only recompile changed packages.
 RUN go build ./...
 
 # Copy source code
@@ -55,9 +56,7 @@ COPY --from=go-builder /build/writer /usr/local/bin/lantern-writer
 COPY --from=go-builder /build/query /usr/local/bin/lantern-query
 COPY --from=go-builder /build/eval /usr/local/bin/lantern-eval
 
-# Pricing JSON stays in /app/internal/pricing
-COPY internal/pricing /app/internal/pricing
-
 WORKDIR /app
 
-ENTRYPOINT ["sh", "-c"]
+# Default to lantern-ingest; docker-compose overrides this per service.
+CMD ["lantern-ingest"]
