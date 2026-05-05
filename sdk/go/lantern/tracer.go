@@ -15,20 +15,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const (
-	// lanternKindAttr is the attribute key for span kind.
-	lanternKindAttr = "lantern.kind"
-	// lanternPromptName is the attribute key for prompt name.
-	lanternPromptName = "lantern.prompt.name"
-	// lanternPromptVersion is the attribute key for prompt version.
-	lanternPromptVersion = "lantern.prompt.version"
-)
-
 // Global tracer provider managed by the SDK.
 var (
 	tracerProvider *sdktrace.TracerProvider
 	tracer         trace.Tracer
-	providerOnce   sync.Once
 	mu             sync.Mutex
 )
 
@@ -36,7 +26,6 @@ var (
 // ingest endpoint. Must be called once at application startup before any spans
 // are started.
 func Configure(endpoint, apiKey string) error {
-	// Validate and strip trailing path — OTLP exporter auto-appends /v1/traces.
 	host, scheme, err := sanitizeEndpoint(endpoint)
 	if err != nil {
 		return err
@@ -180,7 +169,7 @@ func Shutdown() error {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*1000)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	return provider.Shutdown(ctx)

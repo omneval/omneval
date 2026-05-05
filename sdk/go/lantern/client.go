@@ -17,7 +17,6 @@ import (
 // no TTL (immutable); label lookups use a 30-second TTL.
 type Client struct {
 	baseURL string
-	apiKey  string
 	http    *http.Client
 
 	// Label cache: key = name + "|" + label, value = cacheEntry.
@@ -36,9 +35,9 @@ type cacheEntry struct {
 
 // NewClient creates a Client targeting the given Query API base URL.
 func NewClient(baseURL, apiKey string) *Client {
+	_ = apiKey // apiKey parameter reserved for future use (e.g., API key header).
 	return &Client{
 		baseURL:        baseURL,
-		apiKey:         apiKey,
 		http:           &http.Client{Timeout: 10 * time.Second},
 		labelCache:     make(map[string]*cacheEntry),
 		versionCache:   make(map[string]string),

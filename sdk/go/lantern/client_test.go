@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -201,7 +200,6 @@ func TestClient_GetPrompt_NotFound(t *testing.T) {
 // TestClient_WriteScore verifies WriteScore sends a score to the server.
 func TestClient_WriteScore(t *testing.T) {
 	var receivedScore domain.ScoreRequest
-	var mu sync.Mutex
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -224,9 +222,6 @@ func TestClient_WriteScore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteScore: %v", err)
 	}
-
-	mu.Lock()
-	defer mu.Unlock()
 
 	if receivedScore.SpanID != "span-abc" {
 		t.Errorf("span_id: got %q, want %q", receivedScore.SpanID, "span-abc")
@@ -318,8 +313,9 @@ func TestClient_GetPromptVersion_BaseURL(t *testing.T) {
 	}
 }
 
-// TestClient_Timeout verifies the client respects HTTP timeouts.
-func TestClient_Timeout(t *testing.T) {
+// TestClient_SlowResponse verifies the client handles slightly slow responses
+// without error (the 10-second timeout is generous enough for this 100ms delay).
+func TestClient_SlowResponse(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond)
 		w.Header().Set("Content-Type", "application/json")

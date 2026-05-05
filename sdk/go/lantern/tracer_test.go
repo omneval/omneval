@@ -58,8 +58,8 @@ func TestConfigure_WiresExporter(t *testing.T) {
 // TestConfigure_BadEndpointRejectsConfig verifies Configure returns an error
 // when the endpoint URL is malformed.
 func TestConfigure_BadEndpointRejectsConfig(t *testing.T) {
-	resetGlobal()
-	defer resetGlobal()
+	shutdownGlobal()
+	defer shutdownGlobal()
 
 	err := Configure("://bad-url", "key")
 	if err == nil {
@@ -289,7 +289,7 @@ func (f *fakeOTLPServer) RequestCount() int {
 	return len(f.requests)
 }
 
-// resetGlobal resets the global tracer provider for test isolation.
-func resetGlobal() {
+// shutdownGlobal resets the global tracer provider for test isolation.
+func shutdownGlobal() {
 	Shutdown()
 }
