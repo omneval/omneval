@@ -362,6 +362,42 @@ func (s *Store) ListAPIKeys(ctx context.Context, projectID string) ([]*domain.AP
 	return keys, rows.Err()
 }
 
+func (s *Store) GetUserByID(ctx context.Context, userID string) (*domain.User, error) {
+	var u domain.User
+	var createdAt time.Time
+	err := s.db.QueryRowContext(ctx,
+		`SELECT org_id, email, password_hash, created_at FROM users WHERE user_id = $1`, userID,
+	).Scan(&u.OrgID, &u.Email, &u.PasswordHash, &createdAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, metadata.ErrNotFound
+		}
+		return nil, fmt.Errorf("postgres: get user by id %s: %w", userID, err)
+	}
+	return &domain.User{UserID: userID, OrgID: u.OrgID, Email: u.Email, PasswordHash: u.PasswordHash, CreatedAt: createdAt}, nil
+}
+
+func (s *Store) CountUsers(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM users`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("postgres: count users: %w", err)
+	}
+	return count, nil
+}
+
+func (s *Store) UpdateUserPassword(ctx context.Context, userID, passwordHash string) error {
+	hashed, err := bcrypt.GenerateFromPassword([]byte(passwordHash), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("postgres: bcrypt hash: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `UPDATE users SET password_hash = $1 WHERE user_id = $2`, string(hashed), userID)
+	if err != nil {
+		return fmt.Errorf("postgres: update user password: %w", err)
+	}
+	return nil
+}
+
 // ---- Prompt Registry ----
 
 func (s *Store) CreatePromptVersion(ctx context.Context, pv *domain.PromptVersion) error {

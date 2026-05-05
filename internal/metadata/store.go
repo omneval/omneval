@@ -25,12 +25,18 @@ type Store interface {
 	// Users
 	CreateUser(ctx context.Context, user *domain.User) error
 	GetUserByEmail(ctx context.Context, email string) (*domain.User, error)
+	GetUserByID(ctx context.Context, userID string) (*domain.User, error)
 	ListUsers(ctx context.Context, orgID string) ([]*domain.User, error)
+	CountUsers(ctx context.Context) (int, error)
+	UpdateUserPassword(ctx context.Context, userID, passwordHash string) error
 
 	// Sessions
 	CreateSession(ctx context.Context, session *domain.Session) error
 	GetSession(ctx context.Context, sessionID string) (*domain.Session, error)
 	DeleteSession(ctx context.Context, sessionID string) error
+
+	// Auth helpers (available on all implementations)
+	CheckPassword(hashed, plaintext string) error
 
 	// API Keys
 	CreateAPIKey(ctx context.Context, key *domain.APIKey) error

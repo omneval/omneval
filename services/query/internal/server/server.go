@@ -15,14 +15,18 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/zbloss/lantern/internal/config"
+	"github.com/zbloss/lantern/internal/metadata"
+	"github.com/zbloss/lantern/internal/metadata/sqlite"
 	"github.com/zbloss/lantern/internal/storage"
 	"github.com/zbloss/lantern/internal/storage/s3"
+	"github.com/zbloss/lantern/services/query/internal/auth"
 	"github.com/zbloss/lantern/services/query/internal/handler"
 	"github.com/zbloss/lantern/services/query/internal/metrics"
 )
 
-// Run starts the Query API: pulls the latest DuckDB snapshot from S3,
-// and serves REST, analytics DSL, and Prometheus metrics endpoints.
+// Run starts the Query API: opens the DuckDB snapshot from S3 and the
+// metadata store, bootstraps the admin user, and serves auth, span,
+// analytics, and metrics endpoints.
 func Run() error {
 	// Load config.
 	cfgPath := ""
@@ -39,6 +43,13 @@ func Run() error {
 		return fmt.Errorf("query: register metrics: %w", err)
 	}
 
+	// Open metadata store
+	store, err := openMetadataStore(cfg)
+	if err != nil {
+		return fmt.Errorf("query: open metadata store: %w", err)
+	}
+	defer store.Close()
+
 	// Resolve DuckDB snapshot path.
 	dbPath := cfg.Query.DuckDBPath
 	if dbPath == "" {
@@ -51,6 +62,13 @@ func Run() error {
 		syncInterval = 30 * time.Second
 		slog.Warn("query: invalid sync_interval, using default 30s",
 			"raw", cfg.Query.SyncInterval)
+	}
+
+	// Parse session TTL
+	sessionTTL, err := time.ParseDuration(cfg.Auth.SessionTTL)
+	if err != nil {
+		sessionTTL = 168 * time.Hour // default 7 days
+		slog.Warn("invalid session_ttl, using default 168h", "given", cfg.Auth.SessionTTL)
 	}
 
 	// Connect to S3 (may be nil if no storage config).
@@ -76,15 +94,46 @@ func Run() error {
 	}
 	defer db.Close()
 
-	// Set up signal handling.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// Bootstrap admin user if no users exist
+	h := auth.NewHandler(store, cfg.Auth.SecureCookie, sessionTTL, cfg.Auth.AdminEmail, cfg.Auth.AdminPassword)
+	created, err := h.BootstrapAdmin(context.Background())
+	if err != nil {
+		return fmt.Errorf("query: bootstrap admin: %w", err)
+	}
+	if created {
+		slog.Info("query: admin user bootstrapped", "email", cfg.Auth.AdminEmail)
+	} else {
+		if count, _ := store.CountUsers(context.Background()); count == 0 {
+			slog.Warn("query: no admin configured and no users exist — set LANTERN_AUTH_ADMIN_EMAIL and LANTERN_AUTH_ADMIN_PASSWORD to create the first admin user")
+		}
+	}
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	// Create handlers.
+	spanHandler := &handler.SpanHandler{
+		DB:           db,
+		SessionStore: h,
+	}
+
+	// Build the router.
+	mux := http.NewServeMux()
+
+	// Register auth routes
+	h.Register(mux)
+
+	// Span list with keyset pagination.
+	mux.HandleFunc("POST /api/v1/spans/query", spanHandler.HandleSpansQuery)
+
+	// Trace detail waterfall.
+	mux.HandleFunc("GET /api/v1/traces/{traceId}", spanHandler.HandleTraceDetail)
+
+	// Prometheus metrics.
+	mux.HandleFunc("GET /metrics", promhttp.Handler().ServeHTTP)
 
 	// Start S3 snapshot poller (separate goroutine).
 	if s3Store != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
 		go func() {
 			ticker := time.NewTicker(syncInterval)
 			defer ticker.Stop()
@@ -105,53 +154,34 @@ func Run() error {
 		}()
 	}
 
-	// Create handlers.
-	sessStore := &noopSessionStore{}
-	spanHandler := &handler.SpanHandler{
-		DB:           db,
-		SessionStore: sessStore,
+	// Parse query listen address
+	addr := cfg.Query.Addr
+	if addr == "" {
+		addr = ":8002"
 	}
 
-	// Build the router.
-	mux := http.NewServeMux()
-
-	// Span list with keyset pagination.
-	mux.HandleFunc("POST /api/v1/spans/query", spanHandler.HandleSpansQuery)
-
-	// Trace detail waterfall.
-	mux.HandleFunc("GET /api/v1/traces/{traceId}", spanHandler.HandleTraceDetail)
-
-	// Prometheus metrics.
-	mux.HandleFunc("GET /metrics", promhttp.Handler().ServeHTTP)
-
 	// Start server.
-	addr := cfg.Query.Addr
 	srv := &http.Server{
 		Addr:    addr,
 		Handler: mux,
 	}
 
+	// Graceful shutdown
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	go func() {
 		slog.Info("query: listening", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("query: server error", "err", err)
+			slog.Error("query: server error", "error", err)
 		}
 	}()
 
-	// Block until signal.
-	<-sigCh
-	slog.Info("query: shutting down")
-	cancel()
-
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("query: shutdown: %w", err)
-	}
-
-	slog.Info("query: stopped")
-	return nil
+	<-ctx.Done()
+	slog.Info("query: shutting down...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return srv.Shutdown(shutdownCtx)
 }
 
 // downloadSnapshot downloads the DuckDB snapshot from S3 to the local path.
@@ -240,18 +270,30 @@ func openSnapshotDB(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-// noopSessionStore is a no-op session store that always returns the configured
-// project ID from the LANTERN_PROJECT environment variable.
-// In production, this would be backed by real session middleware.
-type noopSessionStore struct{}
+// openMetadataStore creates a metadata store from config.
+func openMetadataStore(cfg *config.Config) (metadata.Store, error) {
+	driver := cfg.Database.Driver
+	dsn := cfg.Database.DSN
 
-func (s *noopSessionStore) ProjectID(r *http.Request) (string, bool) {
-	if pid := os.Getenv("LANTERN_PROJECT"); pid != "" {
-		return pid, true
+	switch driver {
+	case "", "sqlite":
+		if dsn == "" {
+			dsn = "lantern.db"
+		}
+		slog.Info("query: opening SQLite metadata store", "path", dsn)
+		store, err := sqlite.New(dsn)
+		if err != nil {
+			return nil, err
+		}
+		if err := store.Migrate(context.Background()); err != nil {
+			store.Close()
+			return nil, fmt.Errorf("query: migrate: %w", err)
+		}
+		return store, nil
+	case "postgres":
+		// TODO: implement postgres store
+		return nil, fmt.Errorf("query: postgres metadata store not yet implemented")
+	default:
+		return nil, fmt.Errorf("query: unknown database driver: %s", driver)
 	}
-	// Fallback: accept project_id from query param for development.
-	if pid := r.URL.Query().Get("project_id"); pid != "" {
-		return pid, true
-	}
-	return "", false
 }

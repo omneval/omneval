@@ -356,6 +356,53 @@ func (s *Store) ListUsers(ctx context.Context, orgID string) ([]*domain.User, er
 	return users, rows.Err()
 }
 
+func (s *Store) CountUsers(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM users`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("sqlite: count users: %w", err)
+	}
+	return count, nil
+}
+
+func (s *Store) UpdateUserPassword(ctx context.Context, userID, passwordHash string) error {
+	// Hash the password before storing
+	hashed, err := bcrypt.GenerateFromPassword([]byte(passwordHash), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("sqlite: bcrypt hash: %w", err)
+	}
+
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE users SET password_hash = ? WHERE user_id = ?`, string(hashed), userID,
+	)
+	if err != nil {
+		return fmt.Errorf("sqlite: update user password: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite: check rows affected: %w", err)
+	}
+	if n == 0 {
+		return metadata.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) GetUserByID(ctx context.Context, userID string) (*domain.User, error) {
+	var email, orgID, passwordHash, createdAt string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT user_id, org_id, email, password_hash, created_at FROM users WHERE user_id = ?`, userID,
+	).Scan(&userID, &orgID, &email, &passwordHash, &createdAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, metadata.ErrNotFound
+		}
+		return nil, fmt.Errorf("sqlite: get user by id: %w", err)
+	}
+	t, _ := time.Parse(time.RFC3339, createdAt)
+	return &domain.User{UserID: userID, OrgID: orgID, Email: email, PasswordHash: passwordHash, CreatedAt: t}, nil
+}
+
 // CheckPassword compares a plaintext password against a stored bcrypt hash.
 func (s *Store) CheckPassword(hashed, plaintext string) error {
 	return bcrypt.CompareHashAndPassword([]byte(hashed), []byte(plaintext))
