@@ -19,6 +19,7 @@ import (
 	"github.com/zbloss/lantern/internal/probe"
 	qredis "github.com/zbloss/lantern/internal/queue/redis"
 	"github.com/zbloss/lantern/internal/storage/s3"
+	"github.com/zbloss/lantern/services/writer/internal/flush"
 	"github.com/zbloss/lantern/services/writer/internal/handler"
 	"github.com/zbloss/lantern/services/writer/internal/metrics"
 	"github.com/zbloss/lantern/services/writer/internal/pipeline"
@@ -116,8 +117,11 @@ func Run() error {
 	// Create syncer (S3 snapshot sync).
 	syncer := sync.New(s3store, dbPath, cfg, metricsHelper)
 
+	// Create flusher (aged partition flush to Parquet on S3).
+	flusher := flush.NewWithDB(s3store, db, cfg)
+
 	// Create score handler (handles POST /internal/v1/scores).
-	scoreMux := handler.New(db)
+	scoreHandler := handler.New(db)
 
 	// Set up health and readiness probes.
 	p := probe.New()
@@ -141,7 +145,7 @@ func Run() error {
 	// Build the full router: /metrics + /internal/v1/scores + probes.
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
-	mux.Handle("/internal/v1/scores", scoreMux)
+	mux.Handle("/internal/v1/scores", scoreHandler)
 	
 	// Combine with probe routes.
 	combined := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -168,6 +172,14 @@ func Run() error {
 	go func() {
 		if err := syncer.Run(ctx); err != nil {
 			slog.Error("writer: syncer error", "err", err)
+		}
+	}()
+
+	// Start flusher (separate goroutine).
+	go func() {
+		slog.Info("writer: flusher started")
+		if err := flusher.Run(ctx); err != nil && err != context.Canceled {
+			slog.Error("writer: flusher error", "err", err)
 		}
 	}()
 
