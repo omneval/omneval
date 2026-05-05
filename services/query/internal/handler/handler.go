@@ -12,8 +12,9 @@ import (
 	"github.com/zbloss/lantern/services/query/internal/query"
 )
 
-// SpanHandler handles POST /api/v1/spans/query (paginated span list)
-// and GET /api/v1/traces/:traceId (single-trace waterfall detail).
+// SpanHandler handles POST /api/v1/spans/query (paginated span list),
+// GET /api/v1/traces/:traceId (single-trace waterfall detail),
+// and GET /api/v1/projects (project list for the UI project switcher).
 type SpanHandler struct {
 	DB           *sql.DB
 	SessionStore sessionStore
@@ -22,6 +23,7 @@ type SpanHandler struct {
 // sessionStore abstracts session lookup for project ID extraction.
 type sessionStore interface {
 	ProjectID(r *http.Request) (string, bool)
+	ListProjects(r *http.Request) ([]*domain.Project, error)
 }
 
 // HandleSpansQuery handles POST /api/v1/spans/query.
@@ -275,6 +277,28 @@ func scanAllRows(rows *sql.Rows) ([][]any, error) {
 		return nil, fmt.Errorf("rows iteration: %w", err)
 	}
 	return result, nil
+}
+
+// HandleProjects handles GET /api/v1/projects.
+// Returns the list of projects for the authenticated user's organization.
+// Used by the frontend project switcher dropdown.
+func (h *SpanHandler) HandleProjects(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	projects, err := h.SessionStore.ListProjects(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(projects); err != nil {
+		http.Error(w, "encode error", http.StatusInternalServerError)
+		return
+	}
 }
 
 // buildTraceTree groups spans by trace_id and links parent-child relationships.

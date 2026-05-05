@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -815,12 +816,112 @@ type spanScore struct {
 
 // testSessionStore is a test implementation of sessionStore.
 type testSessionStore struct {
-	projectID string
+	projectID     string
+	userID        string
+	authenticated bool
+	projects      []*domain.Project
+	projectErr    error
 }
 
 func (s *testSessionStore) ProjectID(r *http.Request) (string, bool) {
+	if !s.authenticated && s.projectID == "" {
+		return "", false
+	}
 	if s.projectID == "" {
 		return "", false
 	}
 	return s.projectID, true
+}
+
+func (s *testSessionStore) ListProjects(r *http.Request) ([]*domain.Project, error) {
+	if !s.authenticated {
+		return nil, fmt.Errorf("unauthenticated")
+	}
+	return s.projects, s.projectErr
+}
+
+func TestHandleProjects_AuthRequired(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	w := httptest.NewRecorder()
+
+	mux := http.NewServeMux()
+	h := &SpanHandler{
+		SessionStore: &testSessionStore{},
+	}
+	mux.HandleFunc("GET /api/v1/projects", h.HandleProjects)
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestHandleProjects_ReturnsProjects(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	req.Header.Set("Authorization", "Bearer test-session")
+	w := httptest.NewRecorder()
+
+	inputProjects := []*domain.Project{
+		{ProjectID: "proj-1", OrgID: "org-1", Name: "project one"},
+		{ProjectID: "proj-2", OrgID: "org-1", Name: "project two"},
+	}
+
+	mux := http.NewServeMux()
+	h := &SpanHandler{
+		SessionStore: &testSessionStore{
+			projectID:     "proj-1",
+			authenticated: true,
+			projects:      inputProjects,
+		},
+	}
+	mux.HandleFunc("GET /api/v1/projects", h.HandleProjects)
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+		return
+	}
+
+	var resp []domain.Project
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if len(resp) != 2 {
+		t.Errorf("projects count: got %d, want 2", len(resp))
+	}
+	if resp[0].Name != "project one" {
+		t.Errorf("first project name: got %q, want %q", resp[0].Name, "project one")
+	}
+}
+
+func TestHandleProjects_EmptyList(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	req.Header.Set("Authorization", "Bearer test-session")
+	w := httptest.NewRecorder()
+
+	mux := http.NewServeMux()
+	h := &SpanHandler{
+		SessionStore: &testSessionStore{
+			projectID:     "proj-1",
+			authenticated: true,
+			projects:      []*domain.Project{},
+		},
+	}
+	mux.HandleFunc("GET /api/v1/projects", h.HandleProjects)
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusOK)
+		return
+	}
+
+	var projects []domain.Project
+	if err := json.NewDecoder(w.Body).Decode(&projects); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if len(projects) != 0 {
+		t.Errorf("projects count: got %d, want 0", len(projects))
+	}
 }

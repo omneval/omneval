@@ -69,6 +69,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /logout", h.Logout)
 	mux.HandleFunc("POST /api/v1/users/invite", h.Invite)
 	mux.HandleFunc("PUT /api/v1/users/me/password", h.ChangePassword)
+	mux.HandleFunc("GET /api/v1/projects", h.HandleProjects)
 }
 
 // BootstrapAdmin creates the initial admin user if no users exist and
@@ -156,6 +157,33 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	ClearSessionCookie(w, h.secure)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
+}
+
+// HandleProjects handles GET /api/v1/projects.
+// Returns the list of projects for the authenticated user's organization.
+// Used by the frontend project switcher dropdown.
+func (h *Handler) HandleProjects(w http.ResponseWriter, r *http.Request) {
+	user := CurrentUserFromContext(r)
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	// Look up the user to get their org ID
+	u, err := h.store.GetUserByID(r.Context(), user.UserID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to look up user"})
+		return
+	}
+
+	// List all projects for the user's org
+	projects, err := h.store.ListProjects(r.Context(), u.OrgID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list projects"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, projects)
 }
 
 // Invite handles POST /api/v1/users/invite (admin only). Creates a new user
@@ -259,6 +287,22 @@ func generateTempPassword() string {
 		result[i] = chars[int(bytes[i])%len(chars)]
 	}
 	return string(result)
+}
+
+// ListProjects returns all projects for the authenticated user's organization.
+// Used by the sessionStore interface for the projects endpoint.
+func (h *Handler) ListProjects(r *http.Request) ([]*domain.Project, error) {
+	user := CurrentUserFromContext(r)
+	if user == nil {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	u, err := h.store.GetUserByID(r.Context(), user.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("get user: %w", err)
+	}
+
+	return h.store.ListProjects(r.Context(), u.OrgID)
 }
 
 // ProjectID returns the project ID associated with the request.

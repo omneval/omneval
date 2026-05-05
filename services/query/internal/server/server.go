@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"fmt"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"os/signal"
@@ -23,6 +25,49 @@ import (
 	"github.com/zbloss/lantern/services/query/internal/handler"
 	"github.com/zbloss/lantern/services/query/internal/metrics"
 )
+
+//go:embed ui/dist
+var uiFS embed.FS
+
+// serveUI serves static files from the embedded UI dist directory.
+// It handles MIME type detection and falls back to index.html for SPA routing.
+func serveUI(w http.ResponseWriter, r *http.Request) {
+	// Clean the path to prevent directory traversal.
+	path := filepath.Clean(r.URL.Path)
+	if path == "/" {
+		path = "/index.html"
+	}
+
+	// Use the embed.FS directly for ReadFile (fs.FS doesn't expose it).
+	embedFS := &uiFS
+
+	// Try to serve the exact file.
+	data, err := embedFS.ReadFile("ui/dist" + path)
+	if err == nil {
+		// Determine content type from file extension.
+		ct := mime.TypeByExtension(filepath.Ext(path))
+		if ct == "" {
+			// Fallback: sniff from content.
+			ct = http.DetectContentType(data)
+		}
+		w.Header().Set("Content-Type", ct)
+		if _, err := w.Write(data); err != nil {
+			slog.Warn("query: write ui file", "path", path, "err", err)
+		}
+		return
+	}
+
+	// Not found — serve index.html for SPA routing.
+	data, err = embedFS.ReadFile("ui/dist/index.html")
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if _, err := w.Write(data); err != nil {
+		slog.Warn("query: write index.html", "err", err)
+	}
+}
 
 // Run starts the Query API: opens the DuckDB snapshot from S3 and the
 // metadata store, bootstraps the admin user, and serves auth, span,
@@ -117,7 +162,7 @@ func Run() error {
 	// Build the router.
 	mux := http.NewServeMux()
 
-	// Register auth routes
+	// Register auth routes (includes login, logout, invite, change password, projects)
 	h.Register(mux)
 
 	// Span list with keyset pagination.
@@ -126,8 +171,14 @@ func Run() error {
 	// Trace detail waterfall.
 	mux.HandleFunc("GET /api/v1/traces/{traceId}", spanHandler.HandleTraceDetail)
 
+	// Projects list (also served by auth handler, but wire it here too).
+	mux.HandleFunc("GET /api/v1/projects", spanHandler.HandleProjects)
+
 	// Prometheus metrics.
 	mux.HandleFunc("GET /metrics", promhttp.Handler().ServeHTTP)
+
+	// Serve embedded UI for all other routes (SPA fallback to index.html).
+	mux.HandleFunc("/", serveUI)
 
 	// Start S3 snapshot poller (separate goroutine).
 	if s3Store != nil {
