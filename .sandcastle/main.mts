@@ -176,10 +176,13 @@ function startLangfuseProxy(langfuse: Langfuse, port: number, upstreamBase: stri
     // Create a Langfuse generation span before forwarding the request.
     let generation: ReturnType<ReturnType<Langfuse["trace"]>["generation"]> | null = null;
     if (activeTrace && requestData) {
+      const messages = (requestData.messages ?? []) as Array<{ role: string; content: unknown }>;
+      // Log only the last user message to avoid re-logging the full growing history on every call.
+      const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
       generation = activeTrace.generation({
         name: "completion",
         model: requestData.model,
-        input: requestData.messages,
+        input: lastUserMessage ? [lastUserMessage] : messages,
         modelParameters: {
           temperature: requestData.temperature,
           maxTokens: requestData.max_tokens,

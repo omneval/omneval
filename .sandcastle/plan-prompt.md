@@ -10,7 +10,7 @@ Here are the open issues in the repo:
 
 # TASK
 
-Analyze the open issues and build a dependency graph. For each issue, determine whether it **blocks** or **is blocked by** any other open issue.
+Analyze the open issues and build a dependency graph. For each issue, determine whether it **blocks** or **is blocked by** any other open issue. If an issue is missing from the <issues-json> block then assume it has already been resolved.
 
 An issue B is **blocked by** issue A if:
 
