@@ -238,7 +238,7 @@ func UnixNano(ts uint64) time.Time {
 	}
 	sec := ts / 1e9
 	nsec := ts % 1e9
-	// Handle overflow: ts > math.MaxInt64 / 1e9
+	// Clamp to int64 max to avoid overflow when converting to time.Time.
 	if sec > math.MaxInt64 {
 		sec = math.MaxInt64
 		nsec = 0

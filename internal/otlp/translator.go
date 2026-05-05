@@ -55,53 +55,81 @@ func Translate(projectID string, rss []protobuf.FlatResourceSpans, opts Options)
 // translateOne converts a single OTLP span + its resource into a domain.Span.
 func translateOne(res *Resource, s *Span, opts Options) (*domain.Span, error) {
 	d := &domain.Span{
-		SpanID:     protobuf.DecodeSpanID(s.SpanId),
-		TraceID:    protobuf.DecodeTraceID(s.TraceId),
-		ParentID:   protobuf.DecodeSpanID(s.ParentSpanId),
-		Name:       s.Name,
-		Kind:       deriveKind(s.Attributes),
-		StartTime:  protobuf.UnixNano(s.StartTimeUnixNano),
-		EndTime:    protobuf.UnixNano(s.EndTimeUnixNano),
-		StatusCode: statusCodeString(s.Flags),
+		SpanID:    protobuf.DecodeSpanID(s.SpanId),
+		TraceID:   protobuf.DecodeTraceID(s.TraceId),
+		ParentID:  protobuf.DecodeSpanID(s.ParentSpanId),
+		Name:      s.Name,
+		Kind:      deriveKind(s.Attributes),
+		StartTime: protobuf.UnixNano(s.StartTimeUnixNano),
+		EndTime:   protobuf.UnixNano(s.EndTimeUnixNano),
 	}
 
-	// ServiceName: resource-level service.name, overridden by opts.
-	d.ServiceName = getStringResourceAttr(res, "service.name")
-	if opts.ServiceNameOverride != "" {
-		d.ServiceName = opts.ServiceNameOverride
-	}
-
-	// LLM model from gen_ai.request.model.
-	if model, ok := protobuf.GetStringAttribute(s.Attributes, "gen_ai.request.model"); ok {
-		d.Model = model
-	}
-
-	// Token counts — supports both modern and legacy attribute names.
-	d.InputTokens = extractTokenCount(s.Attributes, "gen_ai.usage.input_tokens", "prompt_tokens")
-	d.OutputTokens = extractTokenCount(s.Attributes, "gen_ai.usage.output_tokens", "completion_tokens")
-
-	// Input (gen_ai.prompt) and Output (gen_ai.completion).
-	inputJSON := extractPromptCompletion(s.Attributes, "gen_ai.prompt", "user")
-	if inputJSON != "" {
-		d.Input = inputJSON
-	}
-	outputJSON := extractPromptCompletion(s.Attributes, "gen_ai.completion", "assistant")
-	if outputJSON != "" {
-		d.Output = outputJSON
-	}
-
-	// Prompt linkage from lantern.* attributes.
-	if promptName, ok := protobuf.GetStringAttribute(s.Attributes, "lantern.prompt.name"); ok {
-		d.PromptName = promptName
-	}
-	if promptVersion, ok := protobuf.GetInt64Attribute(s.Attributes, "lantern.prompt.version"); ok {
-		d.PromptVersion = promptVersion
-	}
-
-	// Overflow: all unmapped attributes.
+	d.ServiceName = resolveServiceName(res, opts)
+	d.Model = resolveModel(s.Attributes)
+	d.InputTokens, d.OutputTokens = resolveTokenCounts(s.Attributes)
+	d.Input = resolveInput(s.Attributes)
+	d.Output = resolveOutput(s.Attributes)
+	d.PromptName, d.PromptVersion = resolvePromptInfo(s.Attributes)
+	d.StatusCode = resolveStatusCode(s.Flags)
 	d.Attributes = collectOverflowAttributes(s.Attributes)
 
 	return d, nil
+}
+
+// resolveServiceName returns the service name, preferring an API-key override
+// over the resource-level service.name attribute.
+func resolveServiceName(res *Resource, opts Options) string {
+	if opts.ServiceNameOverride != "" {
+		return opts.ServiceNameOverride
+	}
+	return getStringResourceAttr(res, "service.name")
+}
+
+// resolveModel extracts the LLM model name from gen_ai.request.model.
+func resolveModel(attrs []*protobuf.KeyValue) string {
+	model, _ := protobuf.GetStringAttribute(attrs, "gen_ai.request.model")
+	return model
+}
+
+// resolveTokenCounts extracts input and output token counts, supporting
+// both modern (gen_ai.usage.*) and legacy (prompt_tokens, completion_tokens)
+// attribute names. Modern names take precedence.
+func resolveTokenCounts(attrs []*protobuf.KeyValue) (int64, int64) {
+	inputTokens := extractTokenCount(attrs, "gen_ai.usage.input_tokens", "prompt_tokens")
+	outputTokens := extractTokenCount(attrs, "gen_ai.usage.output_tokens", "completion_tokens")
+	return inputTokens, outputTokens
+}
+
+// resolveInput builds a JSON message array from gen_ai.prompt attributes.
+func resolveInput(attrs []*protobuf.KeyValue) string {
+	return extractPromptCompletion(attrs, "gen_ai.prompt", "user")
+}
+
+// resolveOutput builds a JSON message array from gen_ai.completion attributes.
+func resolveOutput(attrs []*protobuf.KeyValue) string {
+	return extractPromptCompletion(attrs, "gen_ai.completion", "assistant")
+}
+
+// resolvePromptInfo extracts prompt linkage from lantern.* attributes.
+func resolvePromptInfo(attrs []*protobuf.KeyValue) (string, int64) {
+	var promptName string
+	if name, ok := protobuf.GetStringAttribute(attrs, "lantern.prompt.name"); ok {
+		promptName = name
+	}
+	var promptVersion int64
+	if version, ok := protobuf.GetInt64Attribute(attrs, "lantern.prompt.version"); ok {
+		promptVersion = version
+	}
+	return promptName, promptVersion
+}
+
+// resolveStatusCode converts the span flags to an OTLP status code string.
+// Bit 0 of the flags indicates whether the span has an explicit status set.
+func resolveStatusCode(flags uint32) string {
+	if flags&0x01 == 0 {
+		return "unset"
+	}
+	return "ok"
 }
 
 // getStringResourceAttr retrieves a string attribute from a Resource.
@@ -221,30 +249,30 @@ func extractPromptCompletion(attrs []*protobuf.KeyValue, prefix, defaultRole str
 	}
 
 	// Sort messages by index.
-	type kv struct {
+	type pair struct {
 		idx int
 		msg *indexedMsg
 	}
-	kvs := make([]kv, 0, len(msgMap))
+	pairs := make([]pair, 0, len(msgMap))
 	for idx, msg := range msgMap {
-		kvs = append(kvs, kv{idx: idx, msg: msg})
+		pairs = append(pairs, pair{idx: idx, msg: msg})
 	}
-	for i := 0; i < len(kvs); i++ {
-		for j := i + 1; j < len(kvs); j++ {
-			if kvs[i].idx > kvs[j].idx {
-				kvs[i], kvs[j] = kvs[j], kvs[i]
+	for i := 0; i < len(pairs); i++ {
+		for j := i + 1; j < len(pairs); j++ {
+			if pairs[i].idx > pairs[j].idx {
+				pairs[i], pairs[j] = pairs[j], pairs[i]
 			}
 		}
 	}
 
 	// Build JSON message array.
-	messages := make([]map[string]string, 0, len(kvs))
-	for _, kv := range kvs {
+	messages := make([]map[string]string, 0, len(pairs))
+	for _, p := range pairs {
 		msg := map[string]string{
-			"content": kv.msg.content,
+			"content": p.msg.content,
 		}
-		if kv.msg.roleSet {
-			msg["role"] = kv.msg.role
+		if p.msg.roleSet {
+			msg["role"] = p.msg.role
 		} else {
 			msg["role"] = defaultRole
 		}
@@ -293,11 +321,4 @@ func collectOverflowAttributes(attrs []*protobuf.KeyValue) map[string]any {
 	return overflow
 }
 
-// statusCodeString converts the span flags to a status code string.
-func statusCodeString(flags uint32) string {
-	// OTLP flag: bit 0 = 0x01 means span ended (status set), else unset.
-	if flags&0x01 == 0 {
-		return "unset"
-	}
-	return "ok"
-}
+

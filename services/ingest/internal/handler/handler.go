@@ -344,9 +344,7 @@ func decodeWireFormat(body []byte, contentType string) ([]protobuf.FlatResourceS
 	if protobuf.IsJSON(contentType) {
 		return protobuf.DecodeJSON(body)
 	}
-	// Default: protobuf (wire format is binary, no JSON decoding needed).
-	// Since we don't have a protobuf library, we treat unknown binary
-	// as invalid for now. This is a stub — production would use protoc-generated code.
+	// Protobuf wire format is not yet supported in this stub.
 	return nil, fmt.Errorf("unsupported wire format: protobuf decoding requires protoc-generated types")
 }
 
@@ -360,15 +358,17 @@ func writeOTLPResponse(w http.ResponseWriter, resp *protobuf.ExportTraceServiceR
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(data)
+		if _, err := w.Write(data); err != nil {
+			http.Error(w, "write response: internal error", http.StatusInternalServerError)
+		}
 	} else {
-		// Protobuf: empty message.
+		// Protobuf: empty response body.
 		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.WriteHeader(http.StatusOK)
 	}
 }
 
-// readBody reads the full request body (max 10MB).
+// readBody reads the full request body.
 func readBody(r *http.Request) ([]byte, error) {
 	defer r.Body.Close()
 	buf := make([]byte, 0, 1024)
