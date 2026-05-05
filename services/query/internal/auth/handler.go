@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -246,15 +245,14 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "password_updated"})
 }
 
-// generateTempPassword creates a 16-character random alphanumeric password.
+// generateTempPassword creates a 16-character random alphanumeric password
+// from crypto/rand. Failure to read from crypto/rand is extremely unlikely
+// (kernel entropy exhaustion) and results in a panic.
 func generateTempPassword() string {
 	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	bytes := make([]byte, 16)
 	if _, err := rand.Read(bytes); err != nil {
-		// Fallback: use hex encoding (will be longer but still random)
-		hexBytes := make([]byte, 16)
-		hex.Encode(hexBytes, bytes)
-		return fmt.Sprintf("%x", hexBytes)[:16]
+		panic(fmt.Sprintf("auth: cannot read from crypto/rand: %v", err))
 	}
 	result := make([]byte, 16)
 	for i := range result {

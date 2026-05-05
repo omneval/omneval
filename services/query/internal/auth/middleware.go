@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
 	"github.com/zbloss/lantern/internal/metadata"
 )
 
@@ -83,8 +83,7 @@ func (m *SessionMiddleware) Handler(next http.Handler) http.Handler {
 // handler with session validation.
 func RequireAuth(store metadata.Store, secure bool, sessionTTL time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		m := SessionMiddleware{store: store, secure: secure, sessionTTL: sessionTTL}
-		return m.Handler(next)
+		return NewSessionMiddleware(store, secure, sessionTTL).Handler(next)
 	}
 }
 
@@ -135,33 +134,7 @@ func IsAdmin(r *http.Request, adminEmail string) bool {
 	if user == nil || adminEmail == "" {
 		return false
 	}
-	return user.Email != "" && len(user.Email) == len(adminEmail) && equalFold(user.Email, adminEmail)
+	return user.Email != "" && strings.EqualFold(user.Email, adminEmail)
 }
 
-// equalFold is a simple case-insensitive string comparison (ASCII-only).
-func equalFold(a, b string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := 0; i < len(a); i++ {
-		c1 := a[i]
-		if c1 >= 'A' && c1 <= 'Z' {
-			c1 += 'a' - 'A'
-		}
-		c2 := b[i]
-		if c2 >= 'A' && c2 <= 'Z' {
-			c2 += 'a' - 'A'
-		}
-		if c1 != c2 {
-			return false
-		}
-	}
-	return true
-}
 
-// UserByIDFromContext returns the full domain.User from context, or nil.
-// Note: this requires the full user object to be stored in context.
-func UserByIDFromContext(r *http.Request) *domain.User {
-	user, _ := r.Context().Value(CurrentUserKey).(*domain.User)
-	return user
-}
