@@ -1,53 +1,14 @@
 {
-  "analysis": {
-    "total_open_issues": 14,
-    "unblocked": 6,
-    "blocked": 8,
-    "note": "Issues reference foundational blockers (#2, #4, #5, #6, #7) that are not in the open issue set — likely completed or tracked separately. The 6 unblocked issues can proceed in parallel."
-  },
-  "dependency_chains": {
-    "#14 (Eval pipeline)": ["#20 (Health probes)", "#21 (Graceful shutdown)", "#23 (Prometheus metrics)"],
-    "#9 (Auth)": ["#10 (React UI)"],
-    "#10 (React UI)": ["#11 (Analytics)"],
-    "#12 (OTLP ingest)": ["#13 (OTLP e2e)"],
-    "#15 (Prompt Registry)": ["#16 (Go SDK)", "#17 (Python SDK)"]
-  },
   "issues": [
-    {
-      "id": "8",
-      "title": "Query API: trace waterfall",
-      "branch": "sandcastle/issue-8-query-api-trace-waterfall",
-      "blocked_by_outside_list": [7]
-    },
-    {
-      "id": "9",
-      "title": "Auth: login, session cookie, admin bootstrap, user invite, password change",
-      "branch": "sandcastle/issue-9-auth-login-session",
-      "blocked_by_outside_list": [2]
-    },
-    {
-      "id": "12",
-      "title": "OTLP ingest: proto + JSON decode, two-step translation",
-      "branch": "sandcastle/issue-12-otlp-ingest-translation",
-      "blocked_by_outside_list": [4]
-    },
     {
       "id": "14",
       "title": "Eval pipeline: rule cache, eval queue, Eval Workers, score write-back",
-      "branch": "sandcastle/issue-14-eval-pipeline",
-      "blocked_by_outside_list": [5]
+      "branch": "sandcastle/issue-14-eval-pipeline"
     },
     {
       "id": "15",
       "title": "Prompt Registry: version CRUD, label assignment, prompt cache",
-      "branch": "sandcastle/issue-15-prompt-registry",
-      "blocked_by_outside_list": [2, 7]
-    },
-    {
-      "id": "18",
-      "title": "Archival sweep: hot→cold Parquet flush via DuckDB httpfs",
-      "branch": "sandcastle/issue-18-archival-sweep",
-      "blocked_by_outside_list": [5, 6]
+      "branch": "sandcastle/issue-15-prompt-registry"
     }
   ]
 }
