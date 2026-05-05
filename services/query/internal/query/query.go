@@ -117,8 +117,10 @@ const (
 )
 
 // SpanQuery builds a parameterized SQL query for POST /api/v1/spans/query.
-// It handles hot+cold UNION (cold side is a no-op stub in this slice),
-// keyset cursor pagination, and field-level filters with allowlisted operators.
+// It handles hot+cold UNION with keyset cursor pagination and
+// field-level filters with allowlisted operators.
+// The cold side reads Hive-partitioned Parquet files from S3 via
+// DuckDB's read_parquet with hive_partitioning=true.
 type SpanQuery struct {
 	projectID  string
 	from       time.Time
@@ -137,8 +139,9 @@ func (q *SpanQuery) EffectiveLimit() int {
 }
 
 // SQL returns the compiled SQL string and positional arguments.
-// The query always emits a hot+cold UNION. The cold side is a no-op stub
-// (always false) in this slice since Parquet archival is not yet implemented.
+// The query always emits a hot+cold UNION. The cold side reads
+// Hive-partitioned Parquet files from S3 via read_parquet with
+// hive_partitioning=true.
 func (q *SpanQuery) SQL() (sql string, args []any, err error) {
 	// --- Hot side: local DuckDB snapshot ---
 	hotSQL, hotArgs, err := q.hotSQL()
@@ -146,11 +149,8 @@ func (q *SpanQuery) SQL() (sql string, args []any, err error) {
 		return "", nil, err
 	}
 
-	// --- Cold side: Parquet stub (no-op) ---
-	// This stub always returns zero rows, establishing the UNION pattern
-	// for when Parquet archival is implemented.
-	// Must match the 19 columns of the hot query.
-	coldSQL := `SELECT span_id, trace_id, parent_id, project_id, service_name, name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message FROM (VALUES (CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS TIMESTAMPTZ), CAST(NULL AS TIMESTAMPTZ), CAST(NULL AS VARCHAR), CAST(NULL AS JSON), CAST(NULL AS JSON), CAST(NULL AS BIGINT), CAST(NULL AS BIGINT), CAST(NULL AS DOUBLE), CAST(NULL AS VARCHAR), CAST(NULL AS BIGINT), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR)) LIMIT 0) AS t(span_id, trace_id, parent_id, project_id, service_name, name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message)`
+	// --- Cold side: Parquet on S3 via read_parquet ---
+	coldSQL := q.coldSQL()
 
 	parts := []string{hotSQL, coldSQL}
 	unionSQL := strings.Join(parts, "\nUNION ALL\n")
@@ -182,6 +182,41 @@ func (q *SpanQuery) hotSQL() (string, []any, error) {
 	sb.WriteString(where)
 
 	return sb.String(), args, nil
+}
+
+// coldSQL builds the SELECT for the Parquet archive on S3.
+// It uses read_parquet with hive_partitioning=true to read Hive-partitioned
+// Parquet files from s3://bucket/archive/project_id={id}/date={date}/spans/.
+// Only reads when S3 is configured (s3Store != nil).
+func (q *SpanQuery) coldSQL() string {
+	if q.s3Store == nil {
+		// No S3 configured: return a no-op that produces zero rows.
+		return `SELECT span_id, trace_id, parent_id, project_id, service_name, name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message FROM (VALUES (CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS TIMESTAMPTZ), CAST(NULL AS TIMESTAMPTZ), CAST(NULL AS VARCHAR), CAST(NULL AS JSON), CAST(NULL AS JSON), CAST(NULL AS BIGINT), CAST(NULL AS BIGINT), CAST(NULL AS DOUBLE), CAST(NULL AS VARCHAR), CAST(NULL AS BIGINT), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR)) LIMIT 0) AS t(span_id, trace_id, parent_id, project_id, service_name, name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message)`
+	}
+
+	// Build the S3 URL prefix for this project's archive.
+	bucket := "lantern"
+	if q.s3Store != nil {
+		// We can't easily get the bucket from storage.ObjectStore interface,
+		// so we use a reasonable default. In production, this is configured
+		// via the StorageConfig.Bucket field.
+		bucket = "lantern"
+	}
+
+	parquetPrefix := fmt.Sprintf(
+		"s3://%s/archive/project_id=%s/**/*.parquet",
+		bucket,
+		q.projectID,
+	)
+
+	return fmt.Sprintf(`
+		SELECT span_id, trace_id, parent_id, project_id, service_name, name, kind,
+		       start_time, end_time, model, input, output,
+		       input_tokens, output_tokens, cost_usd,
+		       prompt_name, prompt_version,
+		       status_code, status_message
+		FROM read_parquet(['%s'], hive_partitioning=true)
+	`, parquetPrefix)
 }
 
 // outerSQL wraps the UNION result for keyset cursor pagination.

@@ -2,29 +2,52 @@ package flush
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/zbloss/lantern/internal/config"
+	"github.com/zbloss/lantern/internal/storage"
 )
 
-// Flusher exports spans older than 48 hours from DuckDB to Hive-partitioned
+// Flusher exports spans older than flushAge from DuckDB to Hive-partitioned
 // Parquet files on S3 and prunes the corresponding rows from the hot store.
 type Flusher struct {
-	client   *redis.Client
+	store    storage.ObjectStore
+	db       *sql.DB
 	cfg      *config.Config
 	flushAge time.Duration
+	// writeDir is an optional override for the output directory.
+	// When set (for testing), Parquet files are written to a local
+	// directory instead of S3.
+	writeDir string
 }
 
-// New creates a new Flusher.
-func New(client *redis.Client, cfg *config.Config) *Flusher {
+// New creates a new Flusher (legacy, does not use db or store).
+func New(client interface{}, cfg *config.Config) *Flusher {
 	flushAge := 48 * time.Hour
 	if cfg.Writer.FlushAgeDays > 0 {
 		flushAge = time.Duration(cfg.Writer.FlushAgeDays) * 24 * time.Hour
 	}
 	return &Flusher{
-		client:   client,
+		cfg:      cfg,
+		flushAge: flushAge,
+	}
+}
+
+// NewWithDB creates a new Flusher with an ObjectStore and DuckDB connection.
+func NewWithDB(store storage.ObjectStore, db *sql.DB, cfg *config.Config) *Flusher {
+	flushAge := 48 * time.Hour
+	if cfg.Writer.FlushAgeDays > 0 {
+		flushAge = time.Duration(cfg.Writer.FlushAgeDays) * 24 * time.Hour
+	}
+	return &Flusher{
+		store:    store,
+		db:       db,
 		cfg:      cfg,
 		flushAge: flushAge,
 	}
@@ -52,13 +75,308 @@ func (f *Flusher) Run(ctx context.Context) error {
 	}
 }
 
-// doFlush performs a single flush cycle.
+// doFlush performs a single flush cycle. It identifies partitions (project_id + date)
+// older than flushAge, writes them as Parquet to S3, and only then deletes from DuckDB.
+// The delete is transactional — if any S3 write fails, rows remain in DuckDB.
 func (f *Flusher) doFlush(ctx context.Context) error {
 	if f.cfg.Storage.Endpoint == "" {
-		slog.Info("writer: flusher skipped", "reason", "no_s3_endpoint")
+		slog.InfoContext(ctx, "writer: flusher skipped", "reason", "no_s3_endpoint")
 		return nil
 	}
 
-	slog.InfoContext(ctx, "writer: flusher: exporting spans to Parquet", "age", f.flushAge)
+	if f.store == nil {
+		slog.InfoContext(ctx, "writer: flusher skipped", "reason", "no_object_store")
+		return nil
+	}
+
+	cutoff := time.Now().UTC().Add(-f.flushAge)
+
+	// Identify distinct (project_id, date) partitions older than the cutoff.
+	partitions, err := f.listAgedPartitions(ctx, cutoff)
+	if err != nil {
+		return fmt.Errorf("flusher: list aged partitions: %w", err)
+	}
+
+	if len(partitions) == 0 {
+		slog.InfoContext(ctx, "writer: flusher: no aged partitions to flush")
+		return nil
+	}
+
+	slog.InfoContext(ctx, "writer: flusher: flushing partitions", "count", len(partitions))
+
+	var firstErr error
+	for _, p := range partitions {
+		if err := f.flushPartition(ctx, p); err != nil {
+			slog.ErrorContext(ctx, "writer: flusher: failed to flush partition",
+				"project_id", p.projectID,
+				"date", p.date,
+				"err", err,
+			)
+			if firstErr == nil {
+				firstErr = err
+			}
+			// Continue with other partitions — one failure doesn't block the rest.
+		}
+	}
+
+	if firstErr != nil {
+		return fmt.Errorf("flusher: %w", firstErr)
+	}
 	return nil
+}
+
+// partitionKey represents a single (project_id, date) partition to flush.
+type partitionKey struct {
+	projectID string
+	date      string // YYYY-MM-DD format
+}
+
+// listAgedPartitions returns distinct (project_id, date) pairs where spans
+// in the partition are older than cutoff.
+func (f *Flusher) listAgedPartitions(ctx context.Context, cutoff time.Time) ([]partitionKey, error) {
+	rows, err := f.db.QueryContext(ctx, `
+		SELECT DISTINCT
+			project_id,
+			DATE(start_time) AS pdate
+		FROM spans
+		WHERE start_time < ?
+		ORDER BY project_id, pdate
+	`, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("list aged partitions: %w", err)
+	}
+	defer rows.Close()
+
+	var partitions []partitionKey
+	for rows.Next() {
+		var pk partitionKey
+		if err := rows.Scan(&pk.projectID, &pk.date); err != nil {
+			return nil, fmt.Errorf("scan partition: %w", err)
+		}
+		// Normalize date format: ensure YYYY-MM-DD (DuckDB may return timestamp strings).
+		if d, err := parseDuckDBDate(pk.date); err == nil {
+			pk.date = d
+		}
+		partitions = append(partitions, pk)
+	}
+	return partitions, rows.Err()
+}
+
+// flushPartition writes spans and scores for a single partition to S3 as Parquet,
+// then deletes from DuckDB. Both Parquet files are written before any deletion,
+// ensuring no partition is ever in a state where cold spans exist without cold scores.
+func (f *Flusher) flushPartition(ctx context.Context, pk partitionKey) error {
+	spansKey := partitionPath(pk, "spans", "spans.parquet")
+	scoresKey := partitionPath(pk, "scores", "scores.parquet")
+
+	slog.InfoContext(ctx, "writer: flusher: writing partition",
+		"project_id", pk.projectID,
+		"date", pk.date,
+		"spans_key", spansKey,
+		"scores_key", scoresKey,
+	)
+
+	var spansURL, scoresURL string
+
+	if f.writeDir != "" {
+		// Testing mode: write to local directory.
+		spansDir := filepath.Join(f.writeDir, partitionDir(pk, "spans"))
+		scoresDir := filepath.Join(f.writeDir, partitionDir(pk, "scores"))
+		if err := os.MkdirAll(spansDir, 0755); err != nil {
+			return fmt.Errorf("create spans dir: %w", err)
+		}
+		if err := os.MkdirAll(scoresDir, 0755); err != nil {
+			return fmt.Errorf("create scores dir: %w", err)
+		}
+		spansURL = "file://" + filepath.Join(spansDir, "spans.parquet")
+		scoresURL = "file://" + filepath.Join(scoresDir, "scores.parquet")
+
+		// Write Parquet via DuckDB COPY.
+		if err := f.writeSpansParquet(ctx, pk, spansURL); err != nil {
+			return fmt.Errorf("write spans parquet: %w", err)
+		}
+		if err := f.writeScoresParquet(ctx, pk, scoresURL); err != nil {
+			return fmt.Errorf("write scores parquet: %w", err)
+		}
+
+		// Upload to S3 (mock will record the put).
+		if err := f.uploadToS3(ctx, spansKey, spansURL); err != nil {
+			return fmt.Errorf("upload spans to s3: %w", err)
+		}
+		if err := f.uploadToS3(ctx, scoresKey, scoresURL); err != nil {
+			return fmt.Errorf("upload scores to s3: %w", err)
+		}
+
+		// Clean up temp files.
+		offsets := []string{spansURL, scoresURL}
+		for _, u := range offsets {
+			localPath := strings.TrimPrefix(u, "file://")
+			os.Remove(localPath)
+		}
+
+		// Clean up temp files.
+		os.Remove(spansURL[7:])
+		os.Remove(scoresURL[7:])
+	} else {
+		// Production mode: write directly to S3 via DuckDB httpfs.
+		spansS3URL := f.s3URL(spansKey)
+		scoresS3URL := f.s3URL(scoresKey)
+
+		if err := f.writeSpansParquet(ctx, pk, spansS3URL); err != nil {
+			return fmt.Errorf("write spans parquet: %w", err)
+		}
+		if err := f.writeScoresParquet(ctx, pk, scoresS3URL); err != nil {
+			return fmt.Errorf("write scores parquet: %w", err)
+		}
+	}
+
+	slog.InfoContext(ctx, "writer: flusher: partition Parquet files written, pruning from DuckDB",
+		"project_id", pk.projectID,
+		"date", pk.date,
+	)
+
+	// Both Parquet files confirmed — now safely delete from DuckDB.
+	if err := f.deleteFlushedRows(ctx, pk); err != nil {
+		return fmt.Errorf("delete flushed rows: %w", err)
+	}
+
+	slog.InfoContext(ctx, "writer: flusher: partition flushed",
+		"project_id", pk.projectID,
+		"date", pk.date,
+	)
+	return nil
+}
+
+// uploadToS3 reads a local Parquet file (optionally prefixed with file://) and uploads it to S3.
+func (f *Flusher) uploadToS3(ctx context.Context, s3Key string, localPath string) error {
+	// Strip file:// prefix if present.
+	localPath = strings.TrimPrefix(localPath, "file://")
+
+	fh, err := os.Open(localPath)
+	if err != nil {
+		return fmt.Errorf("open local file: %w", err)
+	}
+	defer fh.Close()
+
+	if err := f.store.Put(ctx, s3Key, fh); err != nil {
+		return fmt.Errorf("put s3 %s: %w", s3Key, err)
+	}
+	return nil
+}
+
+// writeSpansParquet uses DuckDB's httpfs to COPY spans to a Parquet file.
+func (f *Flusher) writeSpansParquet(ctx context.Context, pk partitionKey, url string) error {
+	query := fmt.Sprintf(`
+		COPY (
+			SELECT span_id, trace_id, parent_id, project_id, service_name, name, kind,
+			       start_time, end_time, model, input, output,
+			       input_tokens, output_tokens, cost_usd,
+			       prompt_name, prompt_version,
+			       status_code, status_message, attributes
+			FROM spans
+			WHERE project_id = '%s' AND DATE(start_time) = '%s'
+		) TO '%s' (FORMAT PARQUET)
+	`, pk.projectID, pk.date, url)
+
+	if _, err := f.db.ExecContext(ctx, query); err != nil {
+		return fmt.Errorf("COPY spans to %s: %w", url, err)
+	}
+	return nil
+}
+
+// writeScoresParquet uses DuckDB's httpfs to COPY scores to a Parquet file.
+func (f *Flusher) writeScoresParquet(ctx context.Context, pk partitionKey, url string) error {
+	query := fmt.Sprintf(`
+		COPY (
+			SELECT score_id, span_id, trace_id, project_id, eval_name, value,
+			       reasoning, judge_model, prompt_name, prompt_version, created_at
+			FROM scores
+			WHERE project_id = '%s' AND DATE(created_at) = '%s'
+		) TO '%s' (FORMAT PARQUET)
+	`, pk.projectID, pk.date, url)
+
+	if _, err := f.db.ExecContext(ctx, query); err != nil {
+		return fmt.Errorf("COPY scores to %s: %w", url, err)
+	}
+	return nil
+}
+
+// s3URL builds an S3 URL for the given object key.
+func (f *Flusher) s3URL(key string) string {
+	bucket := f.cfg.Storage.Bucket
+	if bucket == "" {
+		bucket = "lantern"
+	}
+	return fmt.Sprintf("s3://%s/%s", bucket, key)
+}
+
+// deleteFlushedRows removes spans and scores for the flushed partition from DuckDB.
+// This is only called after both Parquet files are confirmed on S3.
+func (f *Flusher) deleteFlushedRows(ctx context.Context, pk partitionKey) error {
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete spans.
+	_, err = tx.ExecContext(ctx, `
+		DELETE FROM spans
+		WHERE project_id = ? AND DATE(start_time) = ?
+	`, pk.projectID, pk.date)
+	if err != nil {
+		return fmt.Errorf("delete spans: %w", err)
+	}
+
+	// Delete scores for the same partition.
+	_, err = tx.ExecContext(ctx, `
+		DELETE FROM scores
+		WHERE project_id = ? AND DATE(created_at) = ?
+	`, pk.projectID, pk.date)
+	if err != nil {
+		return fmt.Errorf("delete scores: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
+// partitionPath builds the Hive-partitioned S3 key for a partition.
+// Pattern: archive/project_id={id}/date={date}/{type}/{filename}
+func partitionPath(pk partitionKey, typ, filename string) string {
+	var parts []string
+	parts = append(parts, "archive")
+	parts = append(parts, fmt.Sprintf("project_id=%s", pk.projectID))
+	parts = append(parts, fmt.Sprintf("date=%s", pk.date))
+	parts = append(parts, typ)
+	parts = append(parts, filename)
+	return strings.Join(parts, "/")
+}
+
+// parseDuckDBDate normalizes a DuckDB DATE value to YYYY-MM-DD format.
+// DuckDB's DATE type may return as "2025-01-15", "2025-01-15T00:00:00Z", etc.
+func parseDuckDBDate(s string) (string, error) {
+	// Try parsing as full timestamp first.
+	if t, err := time.Parse("2006-01-02T15:04:05Z", s); err == nil {
+		return t.Format("2006-01-02"), nil
+	}
+	// Already in YYYY-MM-DD format.
+	if len(s) == 10 && s[4] == '-' && s[7] == '-' {
+		return s, nil
+	}
+	// Fallback: return as-is (may work for some date formats).
+	return s, nil
+}
+
+// partitionDir builds the local directory path for a partition.
+// Pattern: archive/project_id={id}/date={date}/{type}/
+func partitionDir(pk partitionKey, typ string) string {
+	var parts []string
+	parts = append(parts, "archive")
+	parts = append(parts, fmt.Sprintf("project_id=%s", pk.projectID))
+	parts = append(parts, fmt.Sprintf("date=%s", pk.date))
+	parts = append(parts, typ)
+	return strings.Join(parts, "/")
 }

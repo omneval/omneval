@@ -16,6 +16,7 @@ import (
 	"github.com/zbloss/lantern/internal/pricing"
 	qredis "github.com/zbloss/lantern/internal/queue/redis"
 	"github.com/zbloss/lantern/internal/storage/s3"
+	"github.com/zbloss/lantern/services/writer/internal/flush"
 	"github.com/zbloss/lantern/services/writer/internal/handler"
 	"github.com/zbloss/lantern/services/writer/internal/pipeline"
 	"github.com/zbloss/lantern/services/writer/internal/sync"
@@ -105,6 +106,9 @@ func Run() error {
 	// Create syncer (S3 snapshot sync).
 	syncer := sync.New(s3store, dbPath, cfg, nil)
 
+	// Create flusher (aged partition flush to Parquet on S3).
+	flusher := flush.NewWithDB(s3store, db, cfg)
+
 	// Create score handler.
 	scoreHandler := handler.New(db)
 
@@ -131,6 +135,14 @@ func Run() error {
 	go func() {
 		if err := syncer.Run(ctx); err != nil {
 			slog.Error("writer: syncer error", "err", err)
+		}
+	}()
+
+	// Start flusher (separate goroutine).
+	go func() {
+		slog.Info("writer: flusher started")
+		if err := flusher.Run(ctx); err != nil && err != context.Canceled {
+			slog.Error("writer: flusher error", "err", err)
 		}
 	}()
 
