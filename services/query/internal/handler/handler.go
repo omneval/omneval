@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zbloss/lantern/internal/domain"
+	"github.com/zbloss/lantern/services/query/internal/dsl"
 	"github.com/zbloss/lantern/services/query/internal/query"
 )
 
@@ -299,6 +300,89 @@ func (h *SpanHandler) HandleProjects(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "encode error", http.StatusInternalServerError)
 		return
 	}
+}
+
+// HandleAnalyticsSpans handles POST /api/v1/analytics/spans.
+// Accepts a structured Query (filters, aggregations, group_by, order_by, limit),
+// compiles it to parameterized DuckDB SQL via the DSL compiler, executes
+// the hot+cold UNION, and returns the aggregated rows.
+func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req dsl.Query
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	// Extract project_id from the authenticated session — never from client input.
+	projectID, ok := h.SessionStore.ProjectID(r)
+	if !ok || projectID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Compile the query — all fields are validated against allowlists.
+	sqlStr, args, err := dsl.Compile(projectID, req)
+	if err != nil {
+		http.Error(w, "query compilation error: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	rows, err := h.DB.Query(sqlStr, args...)
+	if err != nil {
+		http.Error(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	// Scan rows into column headers + [][]any.
+	cols, err := rows.ColumnTypes()
+	if err != nil {
+		http.Error(w, "scan column types: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var result []map[string]any
+	for rows.Next() {
+		values := make([]any, len(cols))
+		valuePtrs := make([]any, len(cols))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		if err := rows.Scan(valuePtrs...); err != nil {
+			http.Error(w, "scan row: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		row := make(map[string]any, len(cols))
+		for i, col := range cols {
+			row[col.Name()] = values[i]
+		}
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "row iteration: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	resp := AnalyticsResponse{
+		Rows: result,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, "encode error", http.StatusInternalServerError)
+		return
+	}
+}
+
+// AnalyticsResponse is the JSON body returned by POST /api/v1/analytics/spans.
+type AnalyticsResponse struct {
+	Rows []map[string]any `json:"rows"`
 }
 
 // buildTraceTree groups spans by trace_id and links parent-child relationships.

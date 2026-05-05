@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import LoginPage from "./pages/Login";
 import TracesPage from "./pages/Traces";
+import DashboardPage from "./pages/Dashboard";
 
-type Page = "login" | "traces";
+type Page = "login" | "traces" | "dashboard";
 
 export default function App() {
   const [page, setPage] = useState<Page>("login");
@@ -69,6 +70,12 @@ export default function App() {
         <div className="font-semibold text-gray-900">Lantern</div>
         {page === "traces" && (
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setPage("dashboard")}
+              className="text-sm text-gray-600 hover:text-gray-900"
+            >
+              Dashboard
+            </button>
             <div className="flex items-center gap-2">
               {loadingProjects ? (
                 <div className="text-sm text-gray-500">Loading...</div>
@@ -85,6 +92,12 @@ export default function App() {
                   ))}
                 </select>
               )}
+              <button
+                onClick={() => setPage("traces")}
+                className="text-sm text-gray-600 hover:text-gray-900"
+              >
+                Traces
+              </button>
               <button
                 onClick={handleLogout}
                 className="text-sm text-gray-600 hover:text-gray-900"
@@ -103,6 +116,7 @@ export default function App() {
             projects={projects}
           />
         )}
+        {page === "dashboard" && <DashboardPage activeProject={activeProject} projects={projects} />}
       </main>
     </div>
   );

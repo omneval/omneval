@@ -165,6 +165,9 @@ func Run() error {
 	// Span list with keyset pagination.
 	mux.HandleFunc("POST /api/v1/spans/query", spanHandler.HandleSpansQuery)
 
+	// Analytics: parameterized SQL compilation from structured DSL queries.
+	mux.HandleFunc("POST /api/v1/analytics/spans", spanHandler.HandleAnalyticsSpans)
+
 	// Trace detail waterfall.
 	mux.HandleFunc("GET /api/v1/traces/{traceId}", spanHandler.HandleTraceDetail)
 

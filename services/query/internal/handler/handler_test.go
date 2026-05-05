@@ -902,3 +902,203 @@ func TestHandleProjects_EmptyList(t *testing.T) {
 		t.Errorf("projects count: got %d, want 0", len(projects))
 	}
 }
+
+func TestHandleAnalyticsSpans_AuthRequired(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+
+	mux := http.NewServeMux()
+	h := &SpanHandler{
+		SessionStore: &testSessionStore{},
+	}
+	mux.HandleFunc("POST /api/v1/analytics/spans", h.HandleAnalyticsSpans)
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestHandleAnalyticsSpans_MethodNotAllowed(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/analytics/spans", nil)
+	w := httptest.NewRecorder()
+
+	mux := http.NewServeMux()
+	h := &SpanHandler{
+		SessionStore: &testSessionStore{projectID: "test-proj"},
+	}
+	mux.HandleFunc("POST /api/v1/analytics/spans", h.HandleAnalyticsSpans)
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestHandleAnalyticsSpans_InvalidJSON(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", strings.NewReader(`not json`))
+	w := httptest.NewRecorder()
+
+	mux := http.NewServeMux()
+	h := &SpanHandler{
+		SessionStore: &testSessionStore{projectID: "test-proj"},
+	}
+	mux.HandleFunc("POST /api/v1/analytics/spans", h.HandleAnalyticsSpans)
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleAnalyticsSpans_Count(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "lantern-analytics-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	for i := 0; i < 5; i++ {
+		_, err := db.ExecContext(context.Background(),
+			`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, model, start_time, end_time, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			fmt.Sprintf("span-%03d", i), fmt.Sprintf("trace-%d", i/2), "", "test-proj",
+			"llm-call", "gpt-4",
+			baseTime.Add(time.Duration(i)*time.Second),
+			baseTime.Add(time.Duration(i)*time.Second+5*time.Second),
+			100+i*10, 50+i*5, 0.001+float64(i)*0.0001)
+		if err != nil {
+			t.Fatalf("insert span %d: %v", i, err)
+		}
+	}
+
+	mux := http.NewServeMux()
+	h := &SpanHandler{
+		DB:           db,
+		SessionStore: &testSessionStore{projectID: "test-proj"},
+	}
+	mux.HandleFunc("POST /api/v1/analytics/spans", h.HandleAnalyticsSpans)
+
+	// COUNT(*) query.
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", strings.NewReader(`{
+		"from": "2025-01-01T00:00:00Z",
+		"to": "2025-01-02T00:00:00Z",
+		"aggregations": [{"function": "count", "field": "*", "alias": "count"}]
+	}`))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if len(resp.Rows) != 1 {
+		t.Fatalf("rows: got %d, want 1", len(resp.Rows))
+	}
+	countVal := resp.Rows[0]["count"]
+	if countVal == nil {
+		t.Fatal("count column is nil")
+	}
+	// The cold side has LIMIT 0, so count should be 5.
+	// Handle various types DuckDB might return for COUNT(*).
+	var count int64
+	switch v := countVal.(type) {
+	case int64:
+		count = v
+	case float64:
+		count = int64(v)
+	case string:
+		fmt.Sscanf(v, "%d", &count)
+	default:
+		t.Errorf("count: unexpected type %T, got %v", countVal, countVal)
+		return
+	}
+	if count != 5 {
+		t.Errorf("count: got %d, want 5", count)
+	}
+}
+
+func TestHandleAnalyticsSpans_SumWithGroupBy(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "lantern-analytics-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	// Insert spans for two different models.
+	_, err = db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, model, start_time, end_time, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"span-1", "trace-1", "", "test-proj", "llm", "gpt-4", baseTime, baseTime.Add(5*time.Second), 0.01)
+	if err != nil {
+		t.Fatalf("insert span-1: %v", err)
+	}
+	_, err = db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, model, start_time, end_time, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"span-2", "trace-2", "", "test-proj", "llm", "claude-3", baseTime.Add(time.Hour), baseTime.Add(time.Hour+5*time.Second), 0.02)
+	if err != nil {
+		t.Fatalf("insert span-2: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	h := &SpanHandler{
+		DB:           db,
+		SessionStore: &testSessionStore{projectID: "test-proj"},
+	}
+	mux.HandleFunc("POST /api/v1/analytics/spans", h.HandleAnalyticsSpans)
+
+	// SUM cost_usd grouped by model.
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", strings.NewReader(`{
+		"from": "2025-01-01T00:00:00Z",
+		"to": "2025-01-02T00:00:00Z",
+		"aggregations": [{"function": "sum", "field": "cost_usd", "alias": "total_cost"}],
+		"group_by": [{"field": "model"}]
+	}`))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// Should have 2 rows (one per model).
+	if len(resp.Rows) != 2 {
+		t.Fatalf("rows: got %d, want 2 (one per model)", len(resp.Rows))
+	}
+}
