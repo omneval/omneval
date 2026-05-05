@@ -1,0 +1,178 @@
+"""Tests for LanternClient."""
+import json
+import time
+import responses
+
+from lantern_sdk.client import LanternClient
+
+
+class TestGetPrompt:
+    """Tests for LanternClient.get_prompt."""
+
+    @responses.activate
+    def test_get_prompt_returns_cached_value(self):
+        """get_prompt returns the cached value within TTL without an HTTP call."""
+        prompt_response = {
+            "name": "greeting",
+            "version": 1,
+            "template": "Hello, {{.Name}}!",
+            "model_config": {"model": "gpt-4", "temperature": 0.7, "max_tokens": 100},
+        }
+
+        responses.add(
+            responses.GET,
+            "http://localhost:8080/api/v1/prompts/greeting?label=production",
+            json=prompt_response,
+            status=200,
+        )
+
+        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+
+        # First call — should hit the server.
+        result1 = client.get_prompt("greeting", "production")
+        assert result1["template"] == "Hello, {{.Name}}!"
+
+        # Second call — should use cache (no additional HTTP request).
+        result2 = client.get_prompt("greeting", "production")
+        assert result2["template"] == "Hello, {{.Name}}!"
+
+        # Only 1 HTTP request should have been made.
+        assert len(responses.calls) == 1
+
+    @responses.activate
+    def test_get_prompt_with_label(self):
+        """get_prompt fetches prompt by name and label."""
+        prompt_response = {
+            "name": "eval",
+            "version": 2,
+            "template": "Evaluate: {{.Input}}",
+            "model_config": {"model": "gpt-4"},
+        }
+
+        responses.add(
+            responses.GET,
+            "http://localhost:8080/api/v1/prompts/eval?label=staging",
+            json=prompt_response,
+            status=200,
+        )
+
+        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        result = client.get_prompt("eval", "staging")
+        assert result["template"] == "Evaluate: {{.Input}}"
+
+    @responses.activate
+    def test_get_prompt_default_label(self):
+        """get_prompt defaults label to 'production'."""
+        captured_label = None
+
+        def capture_request(request):
+            nonlocal captured_label
+            captured_label = request.url.split("label=")[-1]
+            return (
+                200,
+                {},
+                json.dumps({"name": "test", "version": 1, "template": "test", "model_config": {}}),
+            )
+
+        responses.add_callback(
+            responses.GET,
+            "http://localhost:8080/api/v1/prompts/test",
+            callback=capture_request,
+        )
+
+        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        client.get_prompt("test", "")  # empty label should default to production
+
+        assert captured_label == "production"
+
+
+class TestWriteScore:
+    """Tests for LanternClient.write_score."""
+
+    @responses.activate
+    def test_write_score_posts_to_endpoint(self):
+        """write_score posts to POST /api/v1/scores."""
+        responses.add(
+            responses.POST,
+            "http://localhost:8080/api/v1/scores",
+            json={"score_id": "score-123"},
+            status=201,
+        )
+
+        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        client.write_score("span-abc", "helpfulness", 0.8, "Great answer")
+
+        assert len(responses.calls) == 1
+        req = responses.calls[0].request
+        assert req.method == "POST"
+        assert "/api/v1/scores" in req.url
+
+        body = json.loads(req.body)
+        assert body["span_id"] == "span-abc"
+        assert body["eval_name"] == "helpfulness"
+        assert body["value"] == 0.8
+        assert body["reasoning"] == "Great answer"
+        assert "trace_id" in body  # SDK generates trace_id
+
+    @responses.activate
+    def test_write_score_with_empty_reasoning(self):
+        """write_score works with empty reasoning string."""
+        responses.add(
+            responses.POST,
+            "http://localhost:8080/api/v1/scores",
+            json={"score_id": "score-123"},
+            status=201,
+        )
+
+        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        client.write_score("span-xyz", "accuracy", 1.0)
+
+        body = json.loads(responses.calls[0].request.body)
+        assert body["reasoning"] == ""
+
+    def test_write_score_requires_span_id(self):
+        """write_score raises ValueError for empty span_id."""
+        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        try:
+            client.write_score("", "eval", 1.0)
+            assert False, "Expected ValueError"
+        except ValueError as e:
+            assert "span_id is required" in str(e)
+
+
+class TestGetPromptVersion:
+    """Tests for LanternClient.get_prompt_version."""
+
+    @responses.activate
+    def test_get_prompt_version_fetches_by_version(self):
+        """get_prompt_version fetches a prompt by explicit version number."""
+        responses.add(
+            responses.GET,
+            "http://localhost:8080/api/v1/prompts/greeting?version=2",
+            json={"name": "greeting", "version": 2, "template": "Welcome!", "model_config": {}},
+            status=200,
+        )
+
+        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        result = client.get_prompt_version("greeting", 2)
+        assert result["template"] == "Welcome!"
+        assert result["version"] == 2
+
+    @responses.activate
+    def test_get_prompt_version_cached(self):
+        """get_prompt_version caches indefinitely (no TTL)."""
+        responses.add(
+            responses.GET,
+            "http://localhost:8080/api/v1/prompts/greeting?version=1",
+            json={"name": "greeting", "version": 1, "template": "Hello!", "model_config": {}},
+            status=200,
+        )
+
+        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+
+        # First call — hits the server.
+        client.get_prompt_version("greeting", 1)
+        # Second call — uses cache.
+        client.get_prompt_version("greeting", 1)
+
+        assert len(responses.calls) == 1
