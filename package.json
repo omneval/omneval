@@ -1,4 +1,7 @@
 {
+  "dependencies": {
+    "langfuse": "^3.0.0"
+  },
   "devDependencies": {
     "@ai-hero/sandcastle": "^0.5.7",
     "patch-package": "^8.0.1"
