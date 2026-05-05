@@ -16,6 +16,10 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 class TestConfigure:
     """Tests for lantern.configure(endpoint, api_key)."""
 
+    def teardown_method(self, method) -> None:
+        """Restore tracer provider after each test to avoid state leakage."""
+        lantern_sdk.exporter._tracer_provider = None
+
     @responses.activate
     def test_configure_wires_otlp_exporter(self):
         """configure() sets up an OTLP HTTP exporter pointing at the endpoint."""

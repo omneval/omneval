@@ -1,15 +1,12 @@
 """OTLP HTTP exporter configuration for Lantern."""
 from __future__ import annotations
 
-import logging
 from typing import Optional
 
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.semconv.resource import ResourceAttributes
-
-logger = logging.getLogger(__name__)
 
 # Global tracer provider managed by the SDK.
 _tracer_provider: Optional[TracerProvider] = None

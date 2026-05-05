@@ -1,6 +1,7 @@
 """HTTP client for prompt fetch and manual score writes."""
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -13,24 +14,9 @@ import requests
 class _CacheEntry:
     """A cache entry with an optional expiry time."""
     template: str
-    expires_at: Optional[float] = None  # None means no TTL
-
-
-@dataclass
-class _ModelConfig:
-    """Model configuration for a prompt version."""
-    model: str = ""
-    temperature: float = 0.0
-    max_tokens: int = 0
-
-
-@dataclass
-class PromptResponse:
-    """Response from the prompt API."""
-    name: str
-    version: int
-    template: str
+    version: int = 0
     model_config: dict[str, Any] = field(default_factory=dict)
+    expires_at: Optional[float] = None  # None means no TTL
 
 
 class LanternClient:
@@ -47,11 +33,10 @@ class LanternClient:
     def __init__(self, base_url: str, api_key: str = "") -> None:
         self._base_url = base_url.rstrip("/")
         self._http = requests.Session()
-        self._http.timeout = 10.0
         self._label_cache: dict[str, _CacheEntry] = {}
         self._version_cache: dict[str, str] = {}
-        self._label_lock = __import__("threading").Lock()
-        self._version_lock = __import__("threading").Lock()
+        self._label_lock = threading.Lock()
+        self._version_lock = threading.Lock()
 
     def get_prompt(self, name: str, label: str = "production") -> dict[str, Any]:
         """Fetch a prompt by name and label.
@@ -67,7 +52,7 @@ class LanternClient:
             Dict containing prompt data.
 
         Raises:
-            httpx.HTTPStatusError: If the server returns an error status.
+            requests.HTTPError: If the server returns an error status.
         """
         if label == "":
             label = "production"
@@ -75,18 +60,21 @@ class LanternClient:
         cache_key = f"{name}|{label}"
         now = time.time()
 
-        # Check label cache first.
+        # Check label cache before acquiring the lock.
         with self._label_lock:
             entry = self._label_cache.get(cache_key)
-            if entry is not None and entry.expires_at is not None and now < entry.expires_at:
-                return {
-                    "name": name,
-                    "version": 0,
-                    "template": entry.template,
-                    "model_config": {},
-                }
-            if entry is not None and (entry.expires_at is None or now >= entry.expires_at):
-                # Expired — clear it so we re-fetch.
+
+        if entry is not None and entry.expires_at is not None and now < entry.expires_at:
+            return {
+                "name": name,
+                "version": entry.version,
+                "template": entry.template,
+                "model_config": entry.model_config,
+            }
+
+        # Evict expired or non-expiring (immutable) entries.
+        with self._label_lock:
+            if cache_key in self._label_cache:
                 del self._label_cache[cache_key]
 
         # Cache miss — fetch from server.
@@ -96,6 +84,8 @@ class LanternClient:
         with self._label_lock:
             self._label_cache[cache_key] = _CacheEntry(
                 template=resp["template"],
+                version=resp["version"],
+                model_config=resp["model_config"],
                 expires_at=now + 30.0,
             )
 
@@ -114,7 +104,7 @@ class LanternClient:
             Dict containing prompt data.
 
         Raises:
-            httpx.HTTPStatusError: If the server returns an error status.
+            requests.HTTPError: If the server returns an error status.
         """
         cache_key = f"{name}|{version}"
 
@@ -154,7 +144,7 @@ class LanternClient:
 
         Raises:
             ValueError: If span_id is empty.
-            httpx.HTTPStatusError: If the server returns an error status.
+            requests.HTTPError: If the server returns an error status.
         """
         if not span_id:
             raise ValueError("span_id is required")
@@ -170,7 +160,7 @@ class LanternClient:
         }
 
         url = f"{self._base_url}/api/v1/scores"
-        resp = self._http.post(url, json=payload, timeout=10)
+        resp = self._http.post(url, json=payload, timeout=10.0)
         resp.raise_for_status()
 
     def _fetch_prompt_from_server(
@@ -187,13 +177,9 @@ class LanternClient:
                 label = "production"
             url = f"{self._base_url}/api/v1/prompts/{name}?label={label}"
 
-        resp = self._http.get(url, timeout=10)
+        resp = self._http.get(url, timeout=10.0)
         if resp.status_code == 404:
-            raise httpx.HTTPStatusError(
-                f"prompt not found: {name}",
-                request=resp.request,
-                response=resp,
-            )
+            raise requests.HTTPError(f"prompt not found: {name}")
         resp.raise_for_status()
 
         data = resp.json()
