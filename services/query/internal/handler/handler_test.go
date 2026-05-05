@@ -672,7 +672,7 @@ func TestHandleTraceDetail_ProjectIsolation(t *testing.T) {
 }
 
 func TestBuildTraceTree_EmptySpans(t *testing.T) {
-	trace := buildTraceTree([]*domain.Span{})
+	trace := buildTraceTree([]*domain.Span{}, nil, "", "")
 	if trace.TraceID != "" {
 		t.Errorf("trace_id: got %q, want empty", trace.TraceID)
 	}
@@ -687,7 +687,7 @@ func TestBuildTraceTree_SingleSpan(t *testing.T) {
 		{SpanID: "span-001", TraceID: "trace-1", ParentID: "", Name: "root", StartTime: baseTime},
 	}
 
-	trace := buildTraceTree(spans)
+	trace := buildTraceTree(spans, nil, "", "")
 
 	if trace.TraceID != "trace-1" {
 		t.Errorf("trace_id: got %q, want %q", trace.TraceID, "trace-1")
@@ -712,7 +712,7 @@ func TestBuildTraceTree_NestedChildren(t *testing.T) {
 		{SpanID: "grandchild", TraceID: "trace-1", ParentID: "child1", Name: "grandchild", StartTime: baseTime.Add(3 * time.Second)},
 	}
 
-	trace := buildTraceTree(spans)
+	trace := buildTraceTree(spans, nil, "", "")
 
 	if trace.RootSpan == nil {
 		t.Fatal("root_span is nil")
@@ -766,7 +766,7 @@ func TestBuildTraceTree_AllMissingParents(t *testing.T) {
 		{SpanID: "span-b", TraceID: "trace-1", ParentID: "missing-2", Name: "b", StartTime: baseTime.Add(time.Second)},
 	}
 
-	trace := buildTraceTree(spans)
+	trace := buildTraceTree(spans, nil, "", "")
 
 	// With no valid root, the first span should be used as root.
 	if trace.RootSpan == nil {

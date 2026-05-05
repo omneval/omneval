@@ -48,7 +48,7 @@ type Span struct {
 	Children []*Span `json:"children"`
 
 	// Scores attached to this span from the eval pipeline.
-	Scores []*SpanScore `json:"scores"`
+	Scores []Score `json:"scores"`
 }
 
 // Trace groups a set of spans that share a TraceID.

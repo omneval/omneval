@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zbloss/lantern/internal/domain"
+	"github.com/zbloss/lantern/internal/idgen"
 	"github.com/zbloss/lantern/services/query/internal/dsl"
 	"github.com/zbloss/lantern/services/query/internal/query"
 )
@@ -135,22 +137,8 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Load scores for all spans in this trace.
-	scoresBySpan, err := h.queryScoresForTrace(projectID, traceID)
-	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	// Attach scores to spans.
-	for _, s := range spans {
-		if sc, ok := scoresBySpan[s.SpanID]; ok {
-			s.Scores = sc
-		}
-	}
-
-	// Build the trace tree.
-	trace := buildTraceTree(spans)
+	// Build the trace tree (includes score loading).
+	trace := buildTraceTree(spans, h.DB, traceID, projectID)
 
 	resp := domain.TraceResponse{
 		TraceID:   trace.TraceID,
@@ -387,7 +375,7 @@ type AnalyticsResponse struct {
 
 // buildTraceTree groups spans by trace_id and links parent-child relationships.
 // It sets Span.Children for proper waterfall rendering.
-func buildTraceTree(spans []*domain.Span) domain.Trace {
+func buildTraceTree(spans []*domain.Span, db *sql.DB, traceID, projectID string) domain.Trace {
 	if len(spans) == 0 {
 		return domain.Trace{}
 	}
@@ -422,5 +410,138 @@ func buildTraceTree(spans []*domain.Span) domain.Trace {
 
 	trace.RootSpan = root
 	trace.Spans = spans
+
+	// Load scores for all spans in this trace.
+	if db != nil && traceID != "" && projectID != "" {
+		trace.Spans = withScores(db, trace.Spans, traceID, projectID)
+	}
+
 	return trace
+}
+
+// withScores loads scores for the given spans and attaches them inline.
+func withScores(db *sql.DB, spans []*domain.Span, traceID, projectID string) []*domain.Span {
+	rows, err := db.QueryContext(context.Background(),
+		`SELECT span_id, eval_name, value, reasoning, judge_model,
+		        prompt_name, prompt_version, created_at
+		 FROM scores WHERE trace_id = ? AND project_id = ?`,
+		traceID, projectID,
+	)
+	if err != nil {
+		return spans // non-fatal, continue without scores
+	}
+	defer rows.Close()
+
+	// Map span_id -> scores.
+	scoresBySpan := make(map[string][]domain.Score)
+	for rows.Next() {
+		var s domain.Score
+		var createdAtStr string
+		var judgeModelStr *string
+		var promptNameStr *string
+		var promptVer *int64
+		if err := rows.Scan(&s.SpanID, &s.EvalName, &s.Value, &s.Reasoning, &judgeModelStr, &promptNameStr, &promptVer, &createdAtStr); err != nil {
+			continue
+		}
+		if judgeModelStr != nil {
+			s.JudgeModel = *judgeModelStr
+		}
+		if promptNameStr != nil {
+			s.PromptName = *promptNameStr
+		}
+		if promptVer != nil {
+			s.PromptVersion = *promptVer
+		}
+		// Parse the timestamp if available.
+		if createdAtStr != "" {
+			t, err := time.Parse(time.RFC3339, createdAtStr)
+			if err == nil {
+				s.CreatedAt = t
+			}
+		}
+		scoresBySpan[s.SpanID] = append(scoresBySpan[s.SpanID], s)
+	}
+
+	// Attach scores to spans.
+	for _, span := range spans {
+		span.Scores = scoresBySpan[span.SpanID]
+	}
+
+	return spans
+}
+
+// ScoreHandler handles POST /api/v1/scores — the public-facing endpoint
+// that allows manual score writes from the UI or API consumers.
+type ScoreHandler struct {
+	DB *sql.DB
+}
+
+// NewScoreHandler creates a new ScoreHandler.
+func NewScoreHandler(db *sql.DB) http.Handler {
+	h := &ScoreHandler{DB: db}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/scores", h.HandleScores)
+	return mux
+}
+
+// HandleScores writes a score to DuckDB.
+func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
+	var req domain.ScoreRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.SpanID == "" || req.TraceID == "" || req.ProjectID == "" {
+		http.Error(w, "span_id, trace_id, and project_id are required", http.StatusBadRequest)
+		return
+	}
+
+	scoreID := idgen.Generate()
+	score := &domain.Score{
+		ScoreID:       scoreID,
+		SpanID:        req.SpanID,
+		TraceID:       req.TraceID,
+		ProjectID:     req.ProjectID,
+		EvalName:      req.EvalName,
+		Value:         req.Value,
+		Reasoning:     req.Reasoning,
+		JudgeModel:    req.JudgeModel,
+		PromptName:    req.PromptName,
+		PromptVersion: req.PromptVersion,
+		CreatedAt:     time.Now(),
+	}
+
+	if err := h.writeScore(r.Context(), score); err != nil {
+		http.Error(w, fmt.Sprintf("write score: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"score_id": scoreID})
+}
+
+// writeScore writes a score to DuckDB.
+func (h *ScoreHandler) writeScore(ctx context.Context, score *domain.Score) error {
+	_, err := h.DB.ExecContext(ctx, `
+		INSERT INTO scores (
+			score_id, span_id, trace_id, project_id,
+			eval_name, value, reasoning, judge_model,
+			prompt_name, prompt_version, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		score.ScoreID,
+		score.SpanID,
+		score.TraceID,
+		score.ProjectID,
+		score.EvalName,
+		score.Value,
+		score.Reasoning,
+		score.JudgeModel,
+		score.PromptName,
+		score.PromptVersion,
+		score.CreatedAt,
+	)
+	return err
 }
