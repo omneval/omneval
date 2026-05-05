@@ -18,6 +18,7 @@ import (
 	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/zbloss/lantern/internal/config"
 	"github.com/zbloss/lantern/internal/metadata"
+	metadatapg "github.com/zbloss/lantern/internal/metadata/postgres"
 	"github.com/zbloss/lantern/internal/metadata/sqlite"
 	"github.com/zbloss/lantern/internal/probe"
 	"github.com/zbloss/lantern/internal/storage"
@@ -69,7 +70,7 @@ func serveUI(w http.ResponseWriter, r *http.Request) {
 
 // Run starts the Query API: opens the DuckDB snapshot from S3 and the
 // metadata store, bootstraps the admin user, and serves auth, span,
-// analytics, and metrics endpoints.
+// analytics, prompt, and metrics endpoints.
 func Run() error {
 	// Load config.
 	cfgPath := ""
@@ -159,6 +160,18 @@ func Run() error {
 		SessionStore: h,
 	}
 
+	// Prompt registry handler (requires metadata store).
+	var promptHandler *handler.PromptHandler
+	var promptCache *handler.PromptCache
+	if store != nil {
+		promptCache = handler.NewPromptCache(store)
+		promptHandler = &handler.PromptHandler{
+			Store:        store,
+			Cache:        promptCache,
+			SessionStore: h,
+		}
+	}
+
 	// Build the router.
 	mux := http.NewServeMux()
 
@@ -173,6 +186,14 @@ func Run() error {
 
 	// Trace detail waterfall.
 	mux.HandleFunc("GET /api/v1/traces/{traceId}", spanHandler.HandleTraceDetail)
+
+	// Prompt Registry endpoints (require metadata store).
+	if promptHandler != nil {
+		mux.HandleFunc("POST /api/v1/prompts", promptHandler.HandleCreatePrompt)
+		mux.HandleFunc("GET /api/v1/prompts/{name}", promptHandler.HandleGetPrompt)
+		mux.HandleFunc("GET /api/v1/prompts/{name}/versions", promptHandler.HandleListPromptVersions)
+		mux.HandleFunc("PUT /api/v1/prompts/{name}/labels/{label}", promptHandler.HandleSetLabel)
+	}
 
 	// Score write endpoint (for eval worker score write-back).
 	mux.HandleFunc("POST /api/v1/scores", handler.NewScoreHandler(db).ServeHTTP)
@@ -369,8 +390,16 @@ func openMetadataStore(cfg *config.Config) (metadata.Store, error) {
 		}
 		return store, nil
 	case "postgres":
-		// TODO: implement postgres store
-		return nil, fmt.Errorf("query: postgres metadata store not yet implemented")
+		store, err := metadatapg.New(dsn)
+		if err != nil {
+			return nil, fmt.Errorf("query: postgres metadata store: %w", err)
+		}
+		if err := store.Migrate(context.Background()); err != nil {
+			store.Close()
+			return nil, fmt.Errorf("query: migrate: %w", err)
+		}
+		slog.Info("query: opening Postgres metadata store", "dsn", dsn)
+		return store, nil
 	default:
 		return nil, fmt.Errorf("query: unknown database driver: %s", driver)
 	}
