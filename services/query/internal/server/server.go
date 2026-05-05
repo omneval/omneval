@@ -38,11 +38,8 @@ func serveUI(w http.ResponseWriter, r *http.Request) {
 		path = "/index.html"
 	}
 
-	// Use the embed.FS directly for ReadFile (fs.FS doesn't expose it).
-	embedFS := &uiFS
-
 	// Try to serve the exact file.
-	data, err := embedFS.ReadFile("ui/dist" + path)
+	data, err := uiFS.ReadFile("ui/dist" + path)
 	if err == nil {
 		// Determine content type from file extension.
 		ct := mime.TypeByExtension(filepath.Ext(path))
@@ -58,7 +55,7 @@ func serveUI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Not found — serve index.html for SPA routing.
-	data, err = embedFS.ReadFile("ui/dist/index.html")
+	data, err = uiFS.ReadFile("ui/dist/index.html")
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -162,7 +159,7 @@ func Run() error {
 	// Build the router.
 	mux := http.NewServeMux()
 
-	// Register auth routes (includes login, logout, invite, change password, projects)
+	// Register auth routes (login, logout, invite, change password, projects).
 	h.Register(mux)
 
 	// Span list with keyset pagination.
@@ -171,13 +168,11 @@ func Run() error {
 	// Trace detail waterfall.
 	mux.HandleFunc("GET /api/v1/traces/{traceId}", spanHandler.HandleTraceDetail)
 
-	// Projects list (also served by auth handler, but wire it here too).
-	mux.HandleFunc("GET /api/v1/projects", spanHandler.HandleProjects)
-
 	// Prometheus metrics.
 	mux.HandleFunc("GET /metrics", promhttp.Handler().ServeHTTP)
 
 	// Serve embedded UI for all other routes (SPA fallback to index.html).
+	// NOTE: GET /api/v1/projects is already registered by h.Register(mux) above.
 	mux.HandleFunc("/", serveUI)
 
 	// Start S3 snapshot poller (separate goroutine).

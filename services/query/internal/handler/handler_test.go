@@ -140,31 +140,7 @@ func TestHandleSpansQuery_WithDatabase(t *testing.T) {
 	defer db.Close()
 
 	// Create the spans table.
-	if _, err := db.ExecContext(context.Background(), `
-		CREATE TABLE spans (
-			span_id        VARCHAR NOT NULL,
-			trace_id       VARCHAR NOT NULL,
-			parent_id      VARCHAR,
-			project_id     VARCHAR NOT NULL,
-			service_name   VARCHAR,
-			name           VARCHAR,
-			kind           VARCHAR,
-			start_time     TIMESTAMPTZ NOT NULL,
-			end_time       TIMESTAMPTZ,
-			model          VARCHAR,
-			input          JSON,
-			output         JSON,
-			input_tokens   BIGINT,
-			output_tokens  BIGINT,
-			cost_usd       DOUBLE,
-			prompt_name    VARCHAR,
-			prompt_version BIGINT,
-			status_code    VARCHAR,
-			status_message VARCHAR,
-			attributes     JSON,
-			PRIMARY KEY (trace_id, span_id)
-		);
-	`); err != nil {
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
 		t.Fatalf("create table: %v", err)
 	}
 
@@ -521,7 +497,8 @@ func TestHandleTraceDetail_NoParentFallback(t *testing.T) {
 
 	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
 
-	// All spans have non-empty parent_id — no root. The first span (by start_time) becomes root.
+	// One span has an empty parent_id (span-b), so it becomes the root.
+	// span-a has parent_id=span-b, making span-b the root of the tree.
 	_, err = db.ExecContext(context.Background(),
 		`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"span-a", "trace-noroot", "span-b", "test-proj", "span-a", baseTime, baseTime.Add(50*time.Millisecond))
