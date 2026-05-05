@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/zbloss/lantern/internal/config"
+	"github.com/zbloss/lantern/internal/probe"
 	"github.com/zbloss/lantern/internal/storage"
 	"github.com/zbloss/lantern/internal/storage/s3"
 	"github.com/zbloss/lantern/services/query/internal/handler"
@@ -124,11 +125,25 @@ func Run() error {
 	// Prometheus metrics.
 	mux.HandleFunc("GET /metrics", promhttp.Handler().ServeHTTP)
 
+	// Set up health and readiness probes.
+	// Readiness: snapshot file must exist on disk.
+	p := probe.New()
+	p.AddCheck("snapshot", &probe.FileExists{Path: dbPath})
+
+	// Combine the main router with probe routes.
+	combined := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+			p.Router().ServeHTTP(w, r)
+		} else {
+			mux.ServeHTTP(w, r)
+		}
+	})
+
 	// Start server.
 	addr := cfg.Query.Addr
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: combined,
 	}
 
 	go func() {

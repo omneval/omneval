@@ -12,6 +12,7 @@ import (
 	"github.com/zbloss/lantern/internal/metadata"
 	"github.com/zbloss/lantern/internal/metadata/postgres"
 	"github.com/zbloss/lantern/internal/metadata/sqlite"
+	"github.com/zbloss/lantern/internal/probe"
 	redisqueue "github.com/zbloss/lantern/internal/queue/redis"
 	"github.com/zbloss/lantern/services/ingest/internal/handler"
 )
@@ -61,8 +62,23 @@ func Run() error {
 	// Initialize handler with CORS middleware
 	h := handler.NewNativeHandler(queue, validator, cfg.Ingest.CORSAllowedOrigins)
 
+	// Set up health and readiness probes.
+	p := probe.New()
+	p.AddCheck("redis", &probe.RedisPing{Pinger: func(ctx context.Context) error {
+		return rdb.Ping(ctx).Err()
+	}})
+
+	// Combine the main router with probe routes.
+	combined := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+			p.Router().ServeHTTP(w, r)
+		} else {
+			h.Router().ServeHTTP(w, r)
+		}
+	})
+
 	// Start server
 	addr := cfg.Ingest.Addr
 	slog.Info("ingest API listening", "addr", addr)
-	return http.ListenAndServe(addr, h.Router())
+	return http.ListenAndServe(addr, combined)
 }
