@@ -13,7 +13,7 @@ Teams building LLM agents need to understand what their models are doing, how mu
 
 Lantern bridges this gap. It accepts traces via OpenTelemetry (OTLP), making it a drop-in destination for any LLM framework already instrumented with OTel — including LangChain, LlamaIndex, CrewAI, and Smolagents — with zero SDK changes.
 
-A minimal deployment requires only a single `docker compose up`. A production Kubernetes deployment adds Postgres, Redis, and S3-compatible object storage.
+A minimal development deployment requires a single `docker compose` command in `deploy/docker-compose/`. Production Kubernetes deployments add Postgres, Redis, and S3-compatible object storage.
 
 ## Architecture
 
@@ -44,21 +44,25 @@ Lantern consists of five independently deployable Go services communicating via 
 
 ## Getting Started
 
-### Demo (SQLite + MinIO)
+### Local Development (Postgres + Redis + MinIO)
 
 ```bash
-docker compose up
+cd deploy/docker-compose && docker compose up
 ```
 
-Access the UI at `http://localhost:3000`. An admin user is bootstrapped via environment variables.
+Access the UI at `http://localhost:8002`. The Ingest API accepts spans at `http://localhost:8000`.
 
-### Production (Postgres + Redis + S3)
+Configure infrastructure credentials via `.env` (see `deploy/docker-compose/.env.example`).
+
+### Service Commands
 
 ```bash
-docker compose -f docker-compose.prod.yml up
+# Run a single service locally (useful for debugging)
+docker compose run --rm ingest
+docker compose run --rm writer
+docker compose run --rm query
+docker compose run --rm eval
 ```
-
-Or deploy via the Helm chart in `deploy/helm/lantern/`.
 
 ## API Overview
 
@@ -71,6 +75,12 @@ Or deploy via the Helm chart in `deploy/helm/lantern/`.
 | `/api/v1/scores` | POST | Manual score write |
 | `/api/v1/prompts` | POST | Create prompt version |
 | `/api/v1/prompts/:name` | GET | Resolve prompt by version or label |
+| `/api/v1/prompts/:name/versions` | GET | List all versions of a prompt |
+| `/api/v1/prompts/:name/labels/:label` | PUT | Assign/reassign a label to a prompt version |
+| `/api/v1/analytics/spans` | POST | Analytics query (filter, aggregation, group-by, percentiles) |
+| `/healthz` | GET | Health check (all services) |
+| `/readyz` | GET | Readiness probe (all services) |
+| `/metrics` | GET | Prometheus metrics (all services) |
 
 ## SDKs
 
@@ -91,7 +101,18 @@ Or deploy via the Helm chart in `deploy/helm/lantern/`.
 
 ## Status
 
-Lantern is under active development. The core tracing pipeline (ingest → write → query) is implemented and tested. See the [ROADMAP](ROADMAP.md) for detailed progress on each component.
+Lantern is under active development. The following features are implemented and tested:
+
+- **Tracing pipeline** — OTLP + REST span ingest, DuckDB write, snapshot/Parquet archival, hot+cold queries
+- **Evaluation pipeline** — configurable judge LLM rules, score write-back, sample-rate support
+- **Prompt registry** — version management, label resolution, `{{variable}}` template interpolation, prompt caching
+- **Analytics** — DSL-based span queries with aggregation, group-by, and percentiles (p50/p95/p99)
+- **Auth** — login, session cookies, admin bootstrap, user invites, password change
+- **UI** — React SPA with traces view, span waterfall, project switcher
+- **SDKs** — Go (`lantern/tracer` + `lantern/client`) and Python (`lantern-sdk` with `@trace` decorator)
+- **Observability** — health/readiness probes, Prometheus metrics on all services, graceful shutdown
+
+See the [ROADMAP](ROADMAP.md) for detailed progress on each component.
 
 ## License
 
