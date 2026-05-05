@@ -28,8 +28,12 @@ func (s *Store) GetProject(ctx context.Context, id string) (*domain.Project, err
 func (s *Store) ListProjects(ctx context.Context, orgID string) ([]*domain.Project, error) { return nil, metadata.ErrNotFound }
 func (s *Store) CreateUser(ctx context.Context, u *domain.User) error                     { return metadata.ErrNotFound }
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (*domain.User, error)   { return nil, metadata.ErrNotFound }
+func (s *Store) GetUserByID(ctx context.Context, userID string) (*domain.User, error)     { return nil, metadata.ErrNotFound }
 func (s *Store) ListUsers(ctx context.Context, orgID string) ([]*domain.User, error)      { return nil, metadata.ErrNotFound }
+func (s *Store) CountUsers(ctx context.Context) (int, error)                              { return 0, nil }
+func (s *Store) UpdateUserPassword(ctx context.Context, userID, passwordHash string) error { return metadata.ErrNotFound }
 func (s *Store) CreateSession(ctx context.Context, sess *domain.Session) error            { return metadata.ErrNotFound }
+func (s *Store) CheckPassword(hashed, plaintext string) error                             { return metadata.ErrNotFound }
 func (s *Store) GetSession(ctx context.Context, id string) (*domain.Session, error)       { return nil, metadata.ErrNotFound }
 func (s *Store) DeleteSession(ctx context.Context, id string) error                       { return metadata.ErrNotFound }
 func (s *Store) CreateAPIKey(ctx context.Context, k *domain.APIKey) error                 { return metadata.ErrNotFound }
