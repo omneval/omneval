@@ -9,11 +9,11 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/zbloss/lantern/internal/auth"
 	"github.com/zbloss/lantern/internal/config"
+	"github.com/zbloss/lantern/internal/handlers"
 	"github.com/zbloss/lantern/internal/metadata"
 	"github.com/zbloss/lantern/internal/metadata/postgres"
 	"github.com/zbloss/lantern/internal/metadata/sqlite"
 	redisqueue "github.com/zbloss/lantern/internal/queue/redis"
-	"github.com/zbloss/lantern/services/ingest/internal/handler"
 )
 
 // Run starts the Ingest API HTTP server.
@@ -58,11 +58,19 @@ func Run() error {
 	// Initialize validator
 	validator := auth.NewCachingValidator(store)
 
-	// Initialize combined router (native REST + OTLP)
-	h := handler.CombinedRouter(queue, validator, cfg.Ingest.CORSAllowedOrigins)
+	// Initialize native REST handler with CORS middleware
+	nativeH := handlers.NewNativeHandler(queue, validator, cfg.Ingest.CORSAllowedOrigins)
+
+	// Initialize OTLP handler
+	otlpH := handlers.NewOTLPHandler(queue, validator)
+
+	// Combine handlers on a single router
+	router := http.NewServeMux()
+	router.Handle("/", nativeH.Router())
+	router.Handle("/v1/traces", otlpH.Router())
 
 	// Start server
 	addr := cfg.Ingest.Addr
 	slog.Info("ingest API listening", "addr", addr)
-	return http.ListenAndServe(addr, h)
+	return http.ListenAndServe(addr, router)
 }
