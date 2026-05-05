@@ -177,12 +177,13 @@ function startLangfuseProxy(langfuse: Langfuse, port: number, upstreamBase: stri
     let generation: ReturnType<ReturnType<Langfuse["trace"]>["generation"]> | null = null;
     if (activeTrace && requestData) {
       const messages = (requestData.messages ?? []) as Array<{ role: string; content: unknown }>;
-      // Log only the last user message to avoid re-logging the full growing history on every call.
-      const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
+      // Log only the last message (the new context since the previous call — initial user prompt
+      // on the first turn, tool result on every subsequent turn in the agent loop).
+      const lastMessage = messages.at(-1);
       generation = activeTrace.generation({
         name: "completion",
         model: requestData.model,
-        input: lastUserMessage ? [lastUserMessage] : messages,
+        input: lastMessage ? [lastMessage] : messages,
         modelParameters: {
           temperature: requestData.temperature,
           maxTokens: requestData.max_tokens,
