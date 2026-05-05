@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	redisgo "github.com/redis/go-redis/v9"
 	_ "github.com/marcboeker/go-duckdb/v2"
@@ -15,11 +17,12 @@ import (
 	"github.com/zbloss/lantern/internal/metadata/sqlite"
 	qredis "github.com/zbloss/lantern/internal/queue/redis"
 	"github.com/zbloss/lantern/services/eval/internal/judge"
+	"github.com/zbloss/lantern/internal/probe"
 	"github.com/zbloss/lantern/services/eval/internal/worker"
 )
 
 // Run starts the Eval Worker pool: drains the Redis eval queue and
-// dispatches LLM-as-a-Judge jobs.
+// dispatches LLM-as-a-Judge jobs. Serves /healthz and /readyz probes.
 func Run() error {
 	// Load config.
 	cfgPath := ""
@@ -86,6 +89,15 @@ func Run() error {
 	}
 	w := worker.New(evalQ, scoreWriter, j, db, concurrency)
 
+	// Set up health and readiness probes.
+	p := probe.New()
+	p.AddCheck("redis", &probe.RedisPing{Pinger: func(ctx context.Context) error {
+		return rc.Ping(ctx).Err()
+	}})
+
+	// Health + readiness router.
+	probeHandler := p.Router()
+
 	// Set up signal handling.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -94,9 +106,36 @@ func Run() error {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	slog.Info("eval: started")
+
+	// Start server (ready to accept score write-back and future endpoints).
+	addr := cfg.Eval.Addr
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: probeHandler,
+	}
+
+	go func() {
+		slog.Info("eval workers listening", "addr", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("eval: server error", "err", err)
+		}
+	}()
+
 	if err := w.Run(ctx); err != nil {
 		return fmt.Errorf("eval: worker: %w", err)
 	}
 
+	// Block until signal.
+	<-sigCh
+	slog.Info("eval: shutting down")
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("eval: shutdown: %w", err)
+	}
+
+	slog.Info("eval: stopped")
 	return nil
 }

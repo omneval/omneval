@@ -19,6 +19,7 @@ import (
 	"github.com/zbloss/lantern/internal/config"
 	"github.com/zbloss/lantern/internal/metadata"
 	"github.com/zbloss/lantern/internal/metadata/sqlite"
+	"github.com/zbloss/lantern/internal/probe"
 	"github.com/zbloss/lantern/internal/storage"
 	"github.com/zbloss/lantern/internal/storage/s3"
 	"github.com/zbloss/lantern/services/query/internal/auth"
@@ -208,6 +209,19 @@ func Run() error {
 		}()
 	}
 
+	// Set up health and readiness probes.
+	p := probe.New()
+	p.AddCheck("snapshot", &probe.FileExists{Path: dbPath})
+
+	// Combine the main router with probe routes.
+	combined := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+			p.Router().ServeHTTP(w, r)
+		} else {
+			mux.ServeHTTP(w, r)
+		}
+	})
+
 	// Parse query listen address
 	addr := cfg.Query.Addr
 	if addr == "" {
@@ -217,7 +231,7 @@ func Run() error {
 	// Start server.
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: combined,
 	}
 
 	// Graceful shutdown

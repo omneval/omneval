@@ -144,7 +144,7 @@ func resolvePromptInfo(attrs map[string]any) (string, int64) {
 		}
 	}
 	var promptVersion int64
-	if v, ok := attrs["lantern.prompt.version"]; ok {
+	if _, ok := attrs["lantern.prompt.version"]; ok {
 		promptVersion = extractAttributeInt64(attrs, "lantern.prompt.version")
 	}
 	return promptName, promptVersion

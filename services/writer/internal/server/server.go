@@ -14,6 +14,7 @@ import (
 	"github.com/zbloss/lantern/internal/duckdb"
 	"github.com/zbloss/lantern/internal/metadata/sqlite"
 	"github.com/zbloss/lantern/internal/pricing"
+	"github.com/zbloss/lantern/internal/probe"
 	qredis "github.com/zbloss/lantern/internal/queue/redis"
 	"github.com/zbloss/lantern/internal/storage/s3"
 	"github.com/zbloss/lantern/services/writer/internal/handler"
@@ -108,6 +109,18 @@ func Run() error {
 	// Create score handler.
 	scoreHandler := handler.New(db)
 
+	// Set up health and readiness probes.
+	p := probe.New()
+	p.AddCheck("duckdb", &probe.DuckDBWritable{
+		Open: func(path string) (probe.WritableView, error) {
+			return duckdb.Open(path)
+		},
+		Path: dbPath,
+	})
+	p.AddCheck("redis", &probe.RedisPing{Pinger: func(ctx context.Context) error {
+		return rc.Ping(ctx).Err()
+	}})
+
 	// Set up signal handling.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -115,10 +128,19 @@ func Run() error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start score handler server (separate goroutine).
+	// Start score handler server (separate goroutine) with probe routes.
+	// Combine the score handler with health/readiness probe routes.
+	writerHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+			p.Router().ServeHTTP(w, r)
+		} else {
+			scoreHandler.ServeHTTP(w, r)
+		}
+	})
+
 	scoreServer := &http.Server{
 		Addr:    cfg.Writer.Addr,
-		Handler: scoreHandler,
+		Handler: writerHandler,
 	}
 	go func() {
 		slog.Info("writer: score handler listening", "addr", cfg.Writer.Addr)
