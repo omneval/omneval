@@ -9,9 +9,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/zbloss/lantern/internal/auth"
 	"github.com/zbloss/lantern/internal/domain"
+	"github.com/zbloss/lantern/internal/handlers"
 	"github.com/zbloss/lantern/internal/queue"
-	"github.com/zbloss/lantern/services/ingest/internal/handler"
 )
 
 // fakeIngestQueue stores enqueued spans in-memory for testing.
@@ -29,15 +30,15 @@ type fakeValidator struct {
 	key *domain.APIKey
 }
 
-func (f *fakeValidator) Validate(_ context.Context, rawKey string) (*handler.ValidatedKey, error) {
+func (f *fakeValidator) Validate(_ context.Context, rawKey string) (*auth.ValidatedKey, error) {
 	if rawKey == "valid_project_key" {
-		return &handler.ValidatedKey{
+		return &auth.ValidatedKey{
 			ProjectID: "proj-1",
 			Kind:      domain.APIKeyKindProject,
 		}, nil
 	}
 	if rawKey == "valid_service_key" {
-		return &handler.ValidatedKey{
+		return &auth.ValidatedKey{
 			ProjectID:   "proj-2",
 			Kind:        domain.APIKeyKindService,
 			ServiceName: "my-service",
@@ -51,18 +52,18 @@ func (f *fakeValidator) Validate(_ context.Context, rawKey string) (*handler.Val
 func TestNativeHandler_PostSpans_202OnSuccess(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, nil)
+	h := handlers.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
-	spans := []*handler.NativeSpan{
+	spans := []*handlers.NativeSpan{
 		{
 			TraceID: "0123456789abcdef0123456789abcdef",
 			SpanID:  "0123456789abcdef",
 			Name:    "test-span",
 		},
 	}
-	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+	payload, _ := json.Marshal(map[string][]*handlers.NativeSpan{"spans": spans})
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
 	req.Header.Set("X-API-Key", "valid_project_key")
@@ -87,7 +88,7 @@ func TestNativeHandler_PostSpans_202OnSuccess(t *testing.T) {
 func TestNativeHandler_PostSpans_401OnMissingKey(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, nil)
+	h := handlers.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -108,7 +109,7 @@ func TestNativeHandler_PostSpans_401OnMissingKey(t *testing.T) {
 func TestNativeHandler_PostSpans_401OnInvalidKey(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, nil)
+	h := handlers.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -130,11 +131,11 @@ func TestNativeHandler_PostSpans_401OnInvalidKey(t *testing.T) {
 func TestNativeHandler_NormalizesStringInput(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, nil)
+	h := handlers.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
-	spans := []*handler.NativeSpan{
+	spans := []*handlers.NativeSpan{
 		{
 			TraceID: "0123456789abcdef0123456789abcdef",
 			SpanID:  "0123456789abcdef",
@@ -142,7 +143,7 @@ func TestNativeHandler_NormalizesStringInput(t *testing.T) {
 			Input:   "Hello world",
 		},
 	}
-	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+	payload, _ := json.Marshal(map[string][]*handlers.NativeSpan{"spans": spans})
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
 	req.Header.Set("X-API-Key", "valid_project_key")
@@ -180,11 +181,11 @@ func TestNativeHandler_NormalizesStringInput(t *testing.T) {
 func TestNativeHandler_NormalizesStringOutput(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, nil)
+	h := handlers.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
-	spans := []*handler.NativeSpan{
+	spans := []*handlers.NativeSpan{
 		{
 			TraceID: "0123456789abcdef0123456789abcdef",
 			SpanID:  "0123456789abcdef",
@@ -192,7 +193,7 @@ func TestNativeHandler_NormalizesStringOutput(t *testing.T) {
 			Output:  "Response text",
 		},
 	}
-	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+	payload, _ := json.Marshal(map[string][]*handlers.NativeSpan{"spans": spans})
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
 	req.Header.Set("X-API-Key", "valid_project_key")
@@ -226,19 +227,19 @@ func TestNativeHandler_NormalizesStringOutput(t *testing.T) {
 func TestNativeHandler_ValidatesSpanIDFormat(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, nil)
+	h := handlers.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
 	// span_id must be exactly 8 hex bytes (16 hex chars)
-	spans := []*handler.NativeSpan{
+	spans := []*handlers.NativeSpan{
 		{
 			TraceID: "0123456789abcdef0123456789abcdef",
 			SpanID:  "short",
 			Name:    "test-span",
 		},
 	}
-	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+	payload, _ := json.Marshal(map[string][]*handlers.NativeSpan{"spans": spans})
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
 	req.Header.Set("X-API-Key", "valid_project_key")
@@ -257,19 +258,19 @@ func TestNativeHandler_ValidatesSpanIDFormat(t *testing.T) {
 func TestNativeHandler_ValidatesTraceIDFormat(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, nil)
+	h := handlers.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
 	// trace_id must be exactly 16 hex bytes (32 hex chars)
-	spans := []*handler.NativeSpan{
+	spans := []*handlers.NativeSpan{
 		{
 			TraceID: "short",
 			SpanID:  "0123456789abcdef",
 			Name:    "test-span",
 		},
 	}
-	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+	payload, _ := json.Marshal(map[string][]*handlers.NativeSpan{"spans": spans})
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
 	req.Header.Set("X-API-Key", "valid_project_key")
@@ -288,18 +289,18 @@ func TestNativeHandler_ValidatesTraceIDFormat(t *testing.T) {
 func TestNativeHandler_AttachesServiceNameFromServiceKey(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, nil)
+	h := handlers.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
-	spans := []*handler.NativeSpan{
+	spans := []*handlers.NativeSpan{
 		{
 			TraceID: "0123456789abcdef0123456789abcdef",
 			SpanID:  "0123456789abcdef",
 			Name:    "test-span",
 		},
 	}
-	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+	payload, _ := json.Marshal(map[string][]*handlers.NativeSpan{"spans": spans})
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
 	req.Header.Set("X-API-Key", "valid_service_key")
@@ -325,18 +326,18 @@ func TestNativeHandler_AttachesServiceNameFromServiceKey(t *testing.T) {
 func TestNativeHandler_PostSpans_503WhenQueueFails(t *testing.T) {
 	q := &failingQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, nil)
+	h := handlers.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
-	spans := []*handler.NativeSpan{
+	spans := []*handlers.NativeSpan{
 		{
 			TraceID: "0123456789abcdef0123456789abcdef",
 			SpanID:  "0123456789abcdef",
 			Name:    "test-span",
 		},
 	}
-	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+	payload, _ := json.Marshal(map[string][]*handlers.NativeSpan{"spans": spans})
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
 	req.Header.Set("X-API-Key", "valid_project_key")
@@ -355,7 +356,7 @@ func TestNativeHandler_PostSpans_503WhenQueueFails(t *testing.T) {
 func TestNativeHandler_EmptySpansArray(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, nil)
+	h := handlers.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -381,11 +382,11 @@ func TestNativeHandler_EmptySpansArray(t *testing.T) {
 func TestNativeHandler_MultipleSpansInOneRequest(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, nil)
+	h := handlers.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
-	spans := []*handler.NativeSpan{
+	spans := []*handlers.NativeSpan{
 		{
 			TraceID: "0123456789abcdef0123456789abcdef",
 			SpanID:  "0123456789abcdef",
@@ -397,7 +398,7 @@ func TestNativeHandler_MultipleSpansInOneRequest(t *testing.T) {
 			Name:    "span-2",
 		},
 	}
-	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+	payload, _ := json.Marshal(map[string][]*handlers.NativeSpan{"spans": spans})
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
 	req.Header.Set("X-API-Key", "valid_project_key")
@@ -422,12 +423,12 @@ func TestNativeHandler_MultipleSpansInOneRequest(t *testing.T) {
 func TestNativeHandler_JSONArrayInput(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, nil)
+	h := handlers.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
 	// Input is already a JSON array - should be preserved as-is
-	spans := []*handler.NativeSpan{
+	spans := []*handlers.NativeSpan{
 		{
 			TraceID: "0123456789abcdef0123456789abcdef",
 			SpanID:  "0123456789abcdef",
@@ -435,7 +436,7 @@ func TestNativeHandler_JSONArrayInput(t *testing.T) {
 			Input:   `[{"role":"user","content":"Hi"},{"role":"assistant","content":"Hello"}]`,
 		},
 	}
-	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+	payload, _ := json.Marshal(map[string][]*handlers.NativeSpan{"spans": spans})
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
 	req.Header.Set("X-API-Key", "valid_project_key")
@@ -465,18 +466,18 @@ func TestNativeHandler_JSONArrayInput(t *testing.T) {
 func TestNativeHandler_SetProjectIDFromKey(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, nil)
+	h := handlers.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
-	spans := []*handler.NativeSpan{
+	spans := []*handlers.NativeSpan{
 		{
 			TraceID: "0123456789abcdef0123456789abcdef",
 			SpanID:  "0123456789abcdef",
 			Name:    "test-span",
 		},
 	}
-	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+	payload, _ := json.Marshal(map[string][]*handlers.NativeSpan{"spans": spans})
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
 	req.Header.Set("X-API-Key", "valid_project_key")
@@ -502,18 +503,18 @@ func TestNativeHandler_SetProjectIDFromKey(t *testing.T) {
 func TestNativeHandler_SetProjectIDFromServiceKey(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, nil)
+	h := handlers.NewNativeHandler(q, v, nil)
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
-	spans := []*handler.NativeSpan{
+	spans := []*handlers.NativeSpan{
 		{
 			TraceID: "0123456789abcdef0123456789abcdef",
 			SpanID:  "0123456789abcdef",
 			Name:    "test-span",
 		},
 	}
-	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+	payload, _ := json.Marshal(map[string][]*handlers.NativeSpan{"spans": spans})
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
 	req.Header.Set("X-API-Key", "valid_service_key")
@@ -548,7 +549,7 @@ func (f *failingQueue) Enqueue(_ context.Context, _ []*domain.Span) error {
 func TestNativeHandler_CORS_PreflightReturns204(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, []string{"*"})
+	h := handlers.NewNativeHandler(q, v, []string{"*"})
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -569,7 +570,7 @@ func TestNativeHandler_CORS_PreflightReturns204(t *testing.T) {
 func TestNativeHandler_CORS_PreflightSetsAllowOrigin(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, []string{"*"})
+	h := handlers.NewNativeHandler(q, v, []string{"*"})
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
@@ -590,14 +591,14 @@ func TestNativeHandler_CORS_PreflightSetsAllowOrigin(t *testing.T) {
 func TestNativeHandler_CORS_PostWithWildcardOrigin(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, []string{"*"})
+	h := handlers.NewNativeHandler(q, v, []string{"*"})
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
-	spans := []*handler.NativeSpan{
+	spans := []*handlers.NativeSpan{
 		{TraceID: "0123456789abcdef0123456789abcdef", SpanID: "0123456789abcdef", Name: "test"},
 	}
-	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+	payload, _ := json.Marshal(map[string][]*handlers.NativeSpan{"spans": spans})
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
 	req.Header.Set("X-API-Key", "valid_project_key")
@@ -620,14 +621,14 @@ func TestNativeHandler_CORS_PostWithWildcardOrigin(t *testing.T) {
 func TestNativeHandler_CORS_PostWithSpecificOrigin(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, []string{"http://example.com"})
+	h := handlers.NewNativeHandler(q, v, []string{"http://example.com"})
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
-	spans := []*handler.NativeSpan{
+	spans := []*handlers.NativeSpan{
 		{TraceID: "0123456789abcdef0123456789abcdef", SpanID: "0123456789abcdef", Name: "test"},
 	}
-	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+	payload, _ := json.Marshal(map[string][]*handlers.NativeSpan{"spans": spans})
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
 	req.Header.Set("X-API-Key", "valid_project_key")
@@ -650,14 +651,14 @@ func TestNativeHandler_CORS_PostWithSpecificOrigin(t *testing.T) {
 func TestNativeHandler_CORS_PostWithUnmatchedOrigin(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, []string{"http://example.com"})
+	h := handlers.NewNativeHandler(q, v, []string{"http://example.com"})
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
-	spans := []*handler.NativeSpan{
+	spans := []*handlers.NativeSpan{
 		{TraceID: "0123456789abcdef0123456789abcdef", SpanID: "0123456789abcdef", Name: "test"},
 	}
-	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+	payload, _ := json.Marshal(map[string][]*handlers.NativeSpan{"spans": spans})
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
 	req.Header.Set("X-API-Key", "valid_project_key")
@@ -680,14 +681,14 @@ func TestNativeHandler_CORS_PostWithUnmatchedOrigin(t *testing.T) {
 func TestNativeHandler_CORS_WithoutOriginHeader(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
-	h := handler.NewNativeHandler(q, v, []string{"*"})
+	h := handlers.NewNativeHandler(q, v, []string{"*"})
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
-	spans := []*handler.NativeSpan{
+	spans := []*handlers.NativeSpan{
 		{TraceID: "0123456789abcdef0123456789abcdef", SpanID: "0123456789abcdef", Name: "test"},
 	}
-	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+	payload, _ := json.Marshal(map[string][]*handlers.NativeSpan{"spans": spans})
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
 	req.Header.Set("X-API-Key", "valid_project_key")

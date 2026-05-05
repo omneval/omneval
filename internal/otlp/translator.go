@@ -1,6 +1,8 @@
 package otlp
 
 import (
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/zbloss/lantern/internal/domain"
@@ -45,5 +47,296 @@ type Options struct {
 // projectID is attached to every span. opts controls system-prompt logging
 // and service-name override for service-scoped API keys.
 func Translate(projectID string, rss []ResourceSpans, opts Options) ([]*domain.Span, error) {
-	panic("not implemented")
+	spans := make([]*domain.Span, 0, totalSpanCount(rss))
+	for _, rs := range rss {
+		for _, s := range rs.Spans {
+			span := translateSpan(projectID, rs.Resource, *s, opts)
+			spans = append(spans, span)
+		}
+	}
+	return spans, nil
+}
+
+func totalSpanCount(rss []ResourceSpans) int {
+	total := 0
+	for _, rs := range rss {
+		total += len(rs.Spans)
+	}
+	return total
+}
+
+func translateSpan(projectID string, resource Resource, span Span, opts Options) *domain.Span {
+	// Derive model from GenAI attributes.
+	model := extractAttributeString(span.Attributes, "gen_ai.request.model")
+	if model == "" {
+		model = extractAttributeString(span.Attributes, "llm.request.model")
+	}
+
+	// Derive token counts (prefer GenAI conventions, fall back to legacy).
+	inputTokens := extractAttributeInt64(span.Attributes, "gen_ai.usage.input_tokens")
+	if inputTokens == -1 {
+		inputTokens = extractAttributeInt64(span.Attributes, "prompt_tokens")
+	}
+	outputTokens := extractAttributeInt64(span.Attributes, "gen_ai.usage.output_tokens")
+	if outputTokens == -1 {
+		outputTokens = extractAttributeInt64(span.Attributes, "completion_tokens")
+	}
+
+	// Build Input from gen_ai.prompt.N.
+	input := buildMessageArray(span.Attributes, "gen_ai.prompt")
+	if input == "" {
+		input = buildMessageArray(span.Attributes, "llm.prompt")
+	}
+
+	// Build Output from gen_ai.completion.N.
+	output := buildMessageArray(span.Attributes, "gen_ai.completion")
+	if output == "" {
+		output = buildMessageArray(span.Attributes, "llm.completion")
+	}
+
+	// Derive Kind: explicit lantern.kind wins, then heuristic.
+	kind := deriveKind(span.Attributes)
+
+	// Derive ServiceName from Resource attributes.
+	serviceName := extractResourceAttributeString(resource.Attributes, "service.name")
+
+	// Apply service-name override if set (service-scoped API key).
+	if opts.ServiceNameOverride != "" {
+		serviceName = opts.ServiceNameOverride
+	}
+
+	// Build attributes overflow map (remove GenAI/LLM attributes already mapped).
+	overflow := buildOverflowAttributes(span.Attributes, model, inputTokens, outputTokens, input, output, kind, serviceName)
+
+	return &domain.Span{
+		SpanID:        span.SpanID,
+		TraceID:       span.TraceID,
+		ParentID:      span.ParentID,
+		ProjectID:     projectID,
+		ServiceName:   serviceName,
+		Name:          span.Name,
+		Kind:          kind,
+		StartTime:     span.StartTime,
+		EndTime:       span.EndTime,
+		Model:         model,
+		Input:         input,
+		Output:        output,
+		InputTokens:   inputTokens,
+		OutputTokens:  outputTokens,
+		CostUSD:       0, // pre-computed by Writer Service
+		StatusCode:    span.StatusCode,
+		StatusMessage: span.StatusMsg,
+		Attributes:    overflow,
+	}
+}
+
+// extractAttributeString looks up a string attribute from the overflow map.
+func extractAttributeString(attrs map[string]any, key string) string {
+	v, ok := attrs[key]
+	if !ok {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case int64:
+		return fmt.Sprintf("%d", val)
+	default:
+		return fmt.Sprintf("%v", val)
+	}
+}
+
+// extractAttributeInt64 looks up an integer attribute, returns -1 on missing/error.
+func extractAttributeInt64(attrs map[string]any, key string) int64 {
+	v, ok := attrs[key]
+	if !ok {
+		return -1
+	}
+	switch val := v.(type) {
+	case int64:
+		return val
+	case float64:
+		// JSON numbers are decoded as float64.
+		return int64(val)
+	case int:
+		return int64(val)
+	default:
+		return -1
+	}
+}
+
+// extractResourceAttributeString looks up a string attribute from Resource-level attributes.
+func extractResourceAttributeString(resourceAttrs map[string]any, key string) string {
+	v, ok := resourceAttrs[key]
+	if !ok {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	default:
+		return fmt.Sprintf("%v", val)
+	}
+}
+
+// buildMessageArray constructs a JSON-serialized message array from
+// numbered attributes like gen_ai.prompt.0.role, gen_ai.prompt.0.content.
+func buildMessageArray(attrs map[string]any, prefix string) string {
+	// Find max index for this prefix.
+	maxIdx := -1
+	for k := range attrs {
+		if idx, ok := extractNumberedIndex(k, prefix); ok && idx > maxIdx {
+			maxIdx = idx
+		}
+	}
+	if maxIdx < 0 {
+		return ""
+	}
+
+	messages := make([]map[string]any, 0, maxIdx+1)
+	for i := 0; i <= maxIdx; i++ {
+		role := extractAttributeString(attrs, fmt.Sprintf("%s.%d.role", prefix, i))
+		content := extractAttributeString(attrs, fmt.Sprintf("%s.%d.content", prefix, i))
+		if role != "" && content != "" {
+			messages = append(messages, map[string]any{
+				"role":    role,
+				"content": content,
+			})
+		}
+	}
+
+	if len(messages) == 0 {
+		return ""
+	}
+
+	data, err := json.Marshal(messages)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// extractNumberedIndex checks if a key matches pattern "prefix.N.suffix"
+// and returns N. Returns false if no match.
+func extractNumberedIndex(key, prefix string) (int, bool) {
+	// Key must start with prefix.
+	if len(key) <= len(prefix)+1 || key[:len(prefix)+1] != prefix+"." {
+		return 0, false
+	}
+	rest := key[len(prefix)+1:]
+	// Find the first dot after the number.
+	dotIdx := -1
+	for i, r := range rest {
+		if r == '.' {
+			dotIdx = i
+			break
+		}
+		if r < '0' || r > '9' {
+			return 0, false
+		}
+	}
+	if dotIdx < 0 {
+		return 0, false
+	}
+	numStr := rest[:dotIdx]
+	var n int
+	for _, c := range numStr {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n, true
+}
+
+// deriveKind determines the SpanKind from attribute heuristics.
+func deriveKind(attrs map[string]any) domain.SpanKind {
+	// Explicit lantern.kind wins.
+	if kind := extractAttributeString(attrs, "lantern.kind"); kind != "" {
+		if dk := domain.SpanKind(kind); dk == domain.SpanKindLLM || dk == domain.SpanKindTool ||
+			dk == domain.SpanKindAgent || dk == domain.SpanKindChain || dk == domain.SpanKindInternal {
+			return dk
+		}
+	}
+
+	// Check for GenAI attributes → llm.
+	if _, hasGenAI := attrs["gen_ai.request.model"]; hasGenAI {
+		return domain.SpanKindLLM
+	}
+	if _, hasGenAIPrompt := attrs["gen_ai.prompt"]; hasGenAIPrompt {
+		return domain.SpanKindLLM
+	}
+
+	// Check for LLM attributes → llm.
+	if _, hasLLMModel := attrs["llm.request.model"]; hasLLMModel {
+		return domain.SpanKindLLM
+	}
+
+	// Check for tool attributes → tool.
+	if _, hasToolCall := attrs["tool_call"]; hasToolCall {
+		return domain.SpanKindTool
+	}
+	if _, hasToolName := attrs["tool.name"]; hasToolName {
+		return domain.SpanKindTool
+	}
+
+	// Default: internal.
+	return domain.SpanKindInternal
+}
+
+// buildOverflowAttributes creates an overflow map without the GenAI/LLM attributes
+// that have been extracted into typed columns.
+func buildOverflowAttributes(attrs map[string]any, model string, inputTokens, outputTokens int64, input, output string, kind domain.SpanKind, serviceName string) map[string]any {
+	// Collect all keys to remove.
+	remove := make(map[string]bool)
+
+	// GenAI model.
+	for k := range attrs {
+		if k == "gen_ai.request.model" || k == "llm.request.model" {
+			remove[k] = true
+		}
+	}
+
+	// GenAI tokens.
+	for k := range attrs {
+		if k == "gen_ai.usage.input_tokens" || k == "prompt_tokens" {
+			remove[k] = true
+		}
+		if k == "gen_ai.usage.output_tokens" || k == "completion_tokens" {
+			remove[k] = true
+		}
+	}
+
+	// GenAI prompt/completion numbered attributes.
+	for k := range attrs {
+		if _, ok := extractNumberedIndex(k, "gen_ai.prompt"); ok {
+			remove[k] = true
+		} else if _, ok := extractNumberedIndex(k, "llm.prompt"); ok {
+			remove[k] = true
+		}
+		if _, ok := extractNumberedIndex(k, "gen_ai.completion"); ok {
+			remove[k] = true
+		} else if _, ok := extractNumberedIndex(k, "llm.completion"); ok {
+			remove[k] = true
+		}
+	}
+
+	// Kind.
+	if _, hasKind := attrs["lantern.kind"]; hasKind {
+		remove["lantern.kind"] = true
+	}
+
+	// Service name.
+	if _, hasServiceName := attrs["service.name"]; hasServiceName {
+		remove["service.name"] = true
+	}
+
+	// Build overflow without removed keys.
+	overflow := make(map[string]any, len(attrs)-len(remove))
+	for k, v := range attrs {
+		if !remove[k] {
+			overflow[k] = v
+		}
+	}
+	return overflow
 }
