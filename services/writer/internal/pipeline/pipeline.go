@@ -165,12 +165,14 @@ func (p *Pipeline) evalSpans(ctx context.Context, span *domain.Span, rules []dom
 		}
 		if !sampleRateDecides(rule.SampleRate) {
 			job := &domain.EvalJob{
-				JobID:      generateJobID(),
-				RuleID:     rule.RuleID,
-				SpanID:     span.SpanID,
-				TraceID:    span.TraceID,
-				ProjectID:  span.ProjectID,
-				EnqueuedAt: time.Now(),
+				JobID:         generateJobID(),
+				RuleID:        rule.RuleID,
+				SpanID:        span.SpanID,
+				TraceID:       span.TraceID,
+				ProjectID:     span.ProjectID,
+				EnqueuedAt:    time.Now(),
+				PromptName:    rule.PromptName,
+				PromptVersion: rule.PromptVersion,
 			}
 			if err := p.evalQ.Enqueue(ctx, job); err != nil {
 				slog.WarnContext(ctx, "failed to enqueue eval job",

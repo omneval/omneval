@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -160,7 +162,7 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Build the trace tree.
-	trace := buildTraceTree(spans)
+	trace := buildTraceTree(spans, h.DB, traceID, projectID)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(trace); err != nil {
@@ -195,7 +197,7 @@ func scanAllRows(rows *sql.Rows) ([][]any, error) {
 }
 
 // buildTraceTree groups spans by trace_id and links parent-child relationships.
-func buildTraceTree(spans []*domain.Span) domain.Trace {
+func buildTraceTree(spans []*domain.Span, db *sql.DB, traceID string, projectID string) domain.Trace {
 	if len(spans) == 0 {
 		return domain.Trace{}
 	}
@@ -207,10 +209,8 @@ func buildTraceTree(spans []*domain.Span) domain.Trace {
 		TraceID: spans[0].TraceID,
 	}
 
-	// Build a map of span_id -> span for parent lookup.
-	spanMap := make(map[string]*domain.Span, len(spans))
+	// Collect project_id from spans.
 	for i := range spans {
-		spanMap[spans[i].SpanID] = spans[i]
 		trace.ProjectID = spans[i].ProjectID
 	}
 
@@ -228,5 +228,154 @@ func buildTraceTree(spans []*domain.Span) domain.Trace {
 
 	trace.RootSpan = root
 	trace.Spans = spans
+
+	// Load scores for all spans in this trace.
+	if db != nil && traceID != "" && projectID != "" {
+		trace.Spans = withScores(db, trace.Spans, traceID, projectID)
+	}
+
 	return trace
+}
+
+// withScores loads scores for the given spans and attaches them inline.
+func withScores(db *sql.DB, spans []*domain.Span, traceID, projectID string) []*domain.Span {
+	rows, err := db.QueryContext(context.Background(),
+		`SELECT span_id, eval_name, value, reasoning, judge_model,
+		        prompt_name, prompt_version, created_at
+		 FROM scores WHERE trace_id = ? AND project_id = ?`,
+		traceID, projectID,
+	)
+	if err != nil {
+		return spans // non-fatal, continue without scores
+	}
+	defer rows.Close()
+
+	// Map span_id -> scores.
+	scoresBySpan := make(map[string][]domain.Score)
+	for rows.Next() {
+		var s domain.Score
+		var createdAtStr string
+		var promptNameStr *string
+		var promptVer *int64
+		if err := rows.Scan(&s.SpanID, &s.EvalName, &s.Value, &s.Reasoning, &s.JudgeModel, &promptNameStr, &promptVer, &createdAtStr); err != nil {
+			continue
+		}
+		if promptNameStr != nil {
+			s.PromptName = *promptNameStr
+		}
+		if promptVer != nil {
+			s.PromptVersion = *promptVer
+		}
+		// Parse the timestamp if available.
+		if createdAtStr != "" {
+			t, err := time.Parse(time.RFC3339, createdAtStr)
+			if err == nil {
+				s.CreatedAt = t
+			}
+		}
+		scoresBySpan[s.SpanID] = append(scoresBySpan[s.SpanID], s)
+	}
+
+	// Attach scores to spans.
+	for _, span := range spans {
+		span.Scores = scoresBySpan[span.SpanID]
+	}
+
+	return spans
+}
+
+// ScoreHandler handles POST /api/v1/scores — the public-facing endpoint
+// that allows manual score writes from the UI or API consumers.
+type ScoreHandler struct {
+	DB *sql.DB
+}
+
+// ScoreRequest is the JSON body for POST /api/v1/scores.
+type ScoreRequest struct {
+	SpanID        string  `json:"span_id"`
+	TraceID       string  `json:"trace_id"`
+	ProjectID     string  `json:"project_id"`
+	EvalName      string  `json:"eval_name"`
+	Value         float64 `json:"value"`
+	Reasoning     string  `json:"reasoning"`
+	JudgeModel    string  `json:"judge_model"`
+	PromptName    string  `json:"prompt_name"`
+	PromptVersion int64   `json:"prompt_version"`
+}
+
+// NewScoreHandler creates a new ScoreHandler.
+func NewScoreHandler(db *sql.DB) http.Handler {
+	h := &ScoreHandler{DB: db}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/scores", h.HandleScores)
+	return mux
+}
+
+// HandleScores writes a score to DuckDB.
+func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
+	var req ScoreRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.SpanID == "" || req.TraceID == "" || req.ProjectID == "" {
+		http.Error(w, "span_id, trace_id, and project_id are required", http.StatusBadRequest)
+		return
+	}
+
+	scoreID := generateID()
+	score := &domain.Score{
+		ScoreID:       scoreID,
+		SpanID:        req.SpanID,
+		TraceID:       req.TraceID,
+		ProjectID:     req.ProjectID,
+		EvalName:      req.EvalName,
+		Value:         req.Value,
+		Reasoning:     req.Reasoning,
+		JudgeModel:    req.JudgeModel,
+		PromptName:    req.PromptName,
+		PromptVersion: req.PromptVersion,
+		CreatedAt:     time.Now(),
+	}
+
+	if err := h.writeScore(r.Context(), score); err != nil {
+		http.Error(w, fmt.Sprintf("write score: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"score_id": scoreID})
+}
+
+// writeScore writes a score to DuckDB.
+func (h *ScoreHandler) writeScore(ctx context.Context, score *domain.Score) error {
+	_, err := h.DB.ExecContext(ctx, `
+		INSERT INTO scores (
+			score_id, span_id, trace_id, project_id,
+			eval_name, value, reasoning, judge_model,
+			prompt_name, prompt_version, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		score.ScoreID,
+		score.SpanID,
+		score.TraceID,
+		score.ProjectID,
+		score.EvalName,
+		score.Value,
+		score.Reasoning,
+		score.JudgeModel,
+		score.PromptName,
+		score.PromptVersion,
+		score.CreatedAt,
+	)
+	return err
+}
+
+// generateID creates a unique score ID.
+func generateID() string {
+	b := make([]byte, 8)
+	rand.Read(b) //nolint:errcheck // crypto/rand.Read only fails for truly pathological reasons
+	return fmt.Sprintf("%x", b)
 }

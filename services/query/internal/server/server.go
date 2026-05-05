@@ -69,8 +69,10 @@ func Run() error {
 		slog.Info("query: no S3 configured, skipping snapshot download")
 	}
 
-	// Open the snapshot database read-only.
-	db, err := openSnapshotDB(dbPath)
+	// Open the snapshot database (read-write to allow score writes).
+	// The Writer Service syncs snapshots to S3, so score writes here
+	// are eventually included in the snapshot.
+	db, err := openSnapshotDBRW(dbPath)
 	if err != nil {
 		return fmt.Errorf("query: open snapshot: %w", err)
 	}
@@ -118,8 +120,11 @@ func Run() error {
 	// Span list with keyset pagination.
 	mux.HandleFunc("POST /api/v1/spans/query", spanHandler.HandleSpansQuery)
 
-	// Trace detail waterfall.
+	// Trace detail waterfall (with inline scores).
 	mux.HandleFunc("GET /api/v1/traces/{traceId}", spanHandler.HandleTraceDetail)
+
+	// Score write endpoint.
+	mux.HandleFunc("POST /api/v1/scores", handler.NewScoreHandler(db).ServeHTTP)
 
 	// Prometheus metrics.
 	mux.HandleFunc("GET /metrics", promhttp.Handler().ServeHTTP)
@@ -224,12 +229,22 @@ func pollAndDownload(ctx context.Context, store storage.ObjectStore, dbPath stri
 
 // openSnapshotDB opens a DuckDB database in read-only mode.
 func openSnapshotDB(path string) (*sql.DB, error) {
-	// Open DuckDB in read-only mode using the file URI.
 	dsn := "file:" + path + "?mode=ro"
+	return openDuckDB(dsn)
+}
 
+// openSnapshotDBRW opens a DuckDB database in read-write mode.
+// Used by the Query API for score writes.
+func openSnapshotDBRW(path string) (*sql.DB, error) {
+	dsn := "file:" + path + "?mode=rw"
+	return openDuckDB(dsn)
+}
+
+// openDuckDB opens a DuckDB database with the given DSN and verifies connectivity.
+func openDuckDB(dsn string) (*sql.DB, error) {
 	db, err := sql.Open("duckdb", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("duckdb: open %s: %w", path, err)
+		return nil, fmt.Errorf("duckdb: open %s: %w", dsn, err)
 	}
 
 	if err := db.Ping(); err != nil {

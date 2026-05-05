@@ -32,10 +32,12 @@ type EvalRule struct {
 
 // EvalJob is a unit of work placed on the eval Redis queue.
 type EvalJob struct {
-	JobID      string
-	RuleID     string
-	SpanID     string
-	TraceID    string
-	ProjectID  string
-	EnqueuedAt time.Time
+	JobID         string
+	RuleID        string
+	SpanID        string
+	TraceID       string
+	ProjectID     string
+	EnqueuedAt    time.Time
+	PromptName    string
+	PromptVersion int64
 }

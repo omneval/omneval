@@ -43,6 +43,9 @@ type Span struct {
 
 	// Overflow bucket for all other OTel attributes.
 	Attributes map[string]any
+
+	// Scores populated at query time via a JOIN or separate query.
+	Scores []Score
 }
 
 // Trace groups a set of spans that share a TraceID.
