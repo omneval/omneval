@@ -280,9 +280,17 @@ func Run() error {
 
 	<-ctx.Done()
 	slog.Info("query: shutting down...")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+
+	// Graceful shutdown with 30-second drain timeout.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("query: shutdown: %w", err)
+	}
+
+	slog.Info("query: stopped")
+	return nil
 }
 
 // downloadSnapshot downloads the DuckDB snapshot from S3 to the local path.

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	redisgo "github.com/redis/go-redis/v9"
@@ -174,12 +175,27 @@ func Run() error {
 	slog.Info("writer: pipeline started")
 	if err := pl.Run(ctx); err != nil {
 		cancel()
-		scoreServer.Shutdown(context.Background())
+		if shutdownErr := gracefulShutdown(scoreServer, 30*time.Second); shutdownErr != nil {
+			return fmt.Errorf("writer: pipeline shutdown: %w", shutdownErr)
+		}
 		return fmt.Errorf("writer: pipeline: %w", err)
 	}
 
-	// Shutdown.
+	// Graceful shutdown.
 	cancel()
-	scoreServer.Shutdown(context.Background())
+	if err := gracefulShutdown(scoreServer, 30*time.Second); err != nil {
+		return fmt.Errorf("writer: shutdown: %w", err)
+	}
+	slog.Info("writer: stopped")
+	return nil
+}
+
+// gracefulShutdown shuts down an HTTP server with the given drain timeout.
+func gracefulShutdown(srv *http.Server, timeout time.Duration) error {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), timeout)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("server shutdown: %w", err)
+	}
 	return nil
 }

@@ -112,7 +112,7 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleTraceDetail handles GET /api/v1/traces/:traceId.
+// HandleTraceDetail handles GET /api/v1/traces/{traceId}.
 // Returns the span tree for a single trace with inline scores.
 func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()

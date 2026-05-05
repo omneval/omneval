@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -85,7 +86,13 @@ type EvalConfig struct {
 	// LLMBaseURL is an OpenAI-compatible base URL for judge LLM calls.
 	// Works with OpenAI, LiteLLM proxy, Ollama, or any compatible endpoint.
 	LLMBaseURL string `mapstructure:"llm_base_url"`
+	// LLMModel is the model name for judge LLM calls.
+	LLMModel string `mapstructure:"llm_model"`
 	LLMAPIKey  string `mapstructure:"llm_api_key"`
+	// JudgeTimeout is the maximum duration for a judge LLM call.
+	JudgeTimeout time.Duration `mapstructure:"judge_timeout"`
+	// RetryCount is the number of retries for failed judge calls.
+	RetryCount int `mapstructure:"retry_count"`
 }
 
 // PricingModelOverride holds per-million-token prices for a single model.
@@ -149,7 +156,10 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("eval.addr", ":8003")
 	v.SetDefault("eval.concurrency", 4)
 	v.SetDefault("eval.llm_base_url", "")
+	v.SetDefault("eval.llm_model", "gpt-4")
 	v.SetDefault("eval.llm_api_key", "")
+	v.SetDefault("eval.judge_timeout", 90*time.Second)
+	v.SetDefault("eval.retry_count", 3)
 	// metrics
 	v.SetDefault("metrics.addr", ":9090")
 	v.SetDefault("metrics.disable_project_labels", false)

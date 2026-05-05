@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
@@ -20,7 +24,11 @@ import (
 	"github.com/zbloss/lantern/services/ingest/internal/metrics"
 )
 
-// Run starts the Ingest API HTTP server.
+// Run starts the Ingest API HTTP server with graceful shutdown.
+//
+// Graceful shutdown behavior:
+// - Stops accepting new connections on SIGTERM/SIGINT
+// - Waits up to 30s for in-flight HTTP requests to complete
 func Run() error {
 	cfg, err := config.Load("")
 	if err != nil {
@@ -100,6 +108,32 @@ func Run() error {
 
 	// Start server
 	addr := cfg.Ingest.Addr
-	slog.Info("ingest API listening", "addr", addr)
-	return http.ListenAndServe(addr, combined)
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: combined,
+	}
+
+	go func() {
+		slog.Info("ingest API listening", "addr", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("ingest API server error", "err", err)
+		}
+	}()
+
+	// Wait for shutdown signal.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+	slog.Info("ingest API: shutting down")
+
+	// Graceful shutdown with 30-second drain timeout.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("ingest API: shutdown: %w", err)
+	}
+
+	slog.Info("ingest API: stopped")
+	return nil
 }

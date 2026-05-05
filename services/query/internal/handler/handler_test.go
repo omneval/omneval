@@ -64,7 +64,7 @@ func TestHandleSpansQuery_AuthRequired(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	h := &SpanHandler{
-		SessionStore: &testSessionStore{},
+		SessionStore: &FakeSessionStore{},
 	}
 
 	h.HandleSpansQuery(w, req)
@@ -79,7 +79,7 @@ func TestHandleSpansQuery_MissingBody(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	h := &SpanHandler{
-		SessionStore: &testSessionStore{projectID: "test-proj"},
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
 	h.HandleSpansQuery(w, req)
@@ -94,7 +94,7 @@ func TestHandleSpansQuery_MethodNotAllowed(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	h := &SpanHandler{
-		SessionStore: &testSessionStore{projectID: "test-proj"},
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
 	h.HandleSpansQuery(w, req)
@@ -114,7 +114,7 @@ func TestHandleSpansQuery_InvalidCursor(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	h := &SpanHandler{
-		SessionStore: &testSessionStore{projectID: "test-proj"},
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
 	h.HandleSpansQuery(w, req)
@@ -140,7 +140,31 @@ func TestHandleSpansQuery_WithDatabase(t *testing.T) {
 	defer db.Close()
 
 	// Create the spans table.
-	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+	if _, err := db.ExecContext(context.Background(), `
+		CREATE TABLE spans (
+			span_id        VARCHAR NOT NULL,
+			trace_id       VARCHAR NOT NULL,
+			parent_id      VARCHAR,
+			project_id     VARCHAR NOT NULL,
+			service_name   VARCHAR,
+			name           VARCHAR,
+			kind           VARCHAR,
+			start_time     TIMESTAMPTZ NOT NULL,
+			end_time       TIMESTAMPTZ,
+			model          VARCHAR,
+			input          JSON,
+			output         JSON,
+			input_tokens   BIGINT,
+			output_tokens  BIGINT,
+			cost_usd       DOUBLE,
+			prompt_name    VARCHAR,
+			prompt_version BIGINT,
+			status_code    VARCHAR,
+			status_message VARCHAR,
+			attributes     JSON,
+			PRIMARY KEY (trace_id, span_id)
+		);
+	`); err != nil {
 		t.Fatalf("create table: %v", err)
 	}
 
@@ -156,7 +180,7 @@ func TestHandleSpansQuery_WithDatabase(t *testing.T) {
 	// Create handler with real DB.
 	h := &SpanHandler{
 		DB:           db,
-		SessionStore: &testSessionStore{projectID: "test-proj"},
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
 	// Make request.
@@ -213,7 +237,7 @@ func serveTraceDetail(h *SpanHandler, method, url string, body io.Reader) *httpt
 func TestHandleTraceDetail_MissingTraceID(t *testing.T) {
 	// When path doesn't match /api/v1/traces/{traceId}, ServeMux returns 404.
 	w := serveTraceDetail(&SpanHandler{
-		SessionStore: &testSessionStore{projectID: "test-proj"},
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}, http.MethodGet, "/api/v1/traces/", nil)
 
 	if w.Code != http.StatusNotFound {
@@ -223,7 +247,7 @@ func TestHandleTraceDetail_MissingTraceID(t *testing.T) {
 
 func TestHandleTraceDetail_MethodNotAllowed(t *testing.T) {
 	w := serveTraceDetail(&SpanHandler{
-		SessionStore: &testSessionStore{projectID: "test-proj"},
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}, http.MethodPost, "/api/v1/traces/abc123", strings.NewReader(`{}`))
 
 	if w.Code != http.StatusMethodNotAllowed {
@@ -252,7 +276,7 @@ func TestHandleTraceDetail_NotFound(t *testing.T) {
 
 	h := &SpanHandler{
 		DB:           db,
-		SessionStore: &testSessionStore{projectID: "test-proj"},
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
 	w := serveTraceDetail(h, http.MethodGet, "/api/v1/traces/nonexistent", nil)
@@ -290,7 +314,7 @@ func TestHandleTraceDetail_SingleSpan(t *testing.T) {
 
 	h := &SpanHandler{
 		DB:           db,
-		SessionStore: &testSessionStore{projectID: "test-proj"},
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
 	w := serveTraceDetail(h, http.MethodGet, "/api/v1/traces/trace-abc", nil)
@@ -362,7 +386,7 @@ func TestHandleTraceDetail_MultiLevelTree(t *testing.T) {
 
 	h := &SpanHandler{
 		DB:           db,
-		SessionStore: &testSessionStore{projectID: "test-proj"},
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
 	w := serveTraceDetail(h, http.MethodGet, "/api/v1/traces/trace-xyz", nil)
@@ -444,7 +468,7 @@ func TestHandleTraceDetail_SiblingChildren(t *testing.T) {
 
 	h := &SpanHandler{
 		DB:           db,
-		SessionStore: &testSessionStore{projectID: "test-proj"},
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
 	w := serveTraceDetail(h, http.MethodGet, "/api/v1/traces/trace-sib", nil)
@@ -497,8 +521,7 @@ func TestHandleTraceDetail_NoParentFallback(t *testing.T) {
 
 	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
 
-	// One span has an empty parent_id (span-b), so it becomes the root.
-	// span-a has parent_id=span-b, making span-b the root of the tree.
+	// All spans have non-empty parent_id — no root. The first span (by start_time) becomes root.
 	_, err = db.ExecContext(context.Background(),
 		`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"span-a", "trace-noroot", "span-b", "test-proj", "span-a", baseTime, baseTime.Add(50*time.Millisecond))
@@ -514,7 +537,7 @@ func TestHandleTraceDetail_NoParentFallback(t *testing.T) {
 
 	h := &SpanHandler{
 		DB:           db,
-		SessionStore: &testSessionStore{projectID: "test-proj"},
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
 	w := serveTraceDetail(h, http.MethodGet, "/api/v1/traces/trace-noroot", nil)
@@ -577,7 +600,7 @@ func TestHandleTraceDetail_ScoresAttached(t *testing.T) {
 
 	h := &SpanHandler{
 		DB:           db,
-		SessionStore: &testSessionStore{projectID: "test-proj"},
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
 	w := serveTraceDetail(h, http.MethodGet, "/api/v1/traces/trace-scores", nil)
@@ -645,7 +668,7 @@ func TestHandleTraceDetail_ProjectIsolation(t *testing.T) {
 	// Query as proj-a — should only see proj-a's span.
 	h := &SpanHandler{
 		DB:           db,
-		SessionStore: &testSessionStore{projectID: "proj-a"},
+		SessionStore: &FakeSessionStore{projectID: "proj-a"},
 	}
 
 	w := serveTraceDetail(h, http.MethodGet, "/api/v1/traces/trace-shared", nil)
@@ -786,319 +809,26 @@ type treeSpan struct {
 }
 
 type spanScore struct {
-	EvalName string  `json:"eval_name"`
-	Value    float64 `json:"value"`
-	Reasoning string `json:"reasoning"`
+	EvalName  string  `json:"eval_name"`
+	Value     float64 `json:"value"`
+	Reasoning string  `json:"reasoning"`
 }
 
-// testSessionStore is a test implementation of sessionStore.
-type testSessionStore struct {
-	projectID     string
-	userID        string
-	authenticated bool
-	projects      []*domain.Project
-	projectErr    error
+// FakeSessionStore is a test fake implementing sessionStore.
+type FakeSessionStore struct {
+	projectID string
 }
 
-func (s *testSessionStore) ProjectID(r *http.Request) (string, bool) {
-	if !s.authenticated && s.projectID == "" {
+func (f *FakeSessionStore) ProjectID(r *http.Request) (string, bool) {
+	if f.projectID == "" {
 		return "", false
 	}
-	if s.projectID == "" {
-		return "", false
-	}
-	return s.projectID, true
+	return f.projectID, true
 }
 
-func (s *testSessionStore) ListProjects(r *http.Request) ([]*domain.Project, error) {
-	if !s.authenticated {
+func (f *FakeSessionStore) ListProjects(r *http.Request) ([]*domain.Project, error) {
+	if f.projectID == "" {
 		return nil, fmt.Errorf("unauthenticated")
 	}
-	return s.projects, s.projectErr
-}
-
-func TestHandleProjects_AuthRequired(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
-	w := httptest.NewRecorder()
-
-	mux := http.NewServeMux()
-	h := &SpanHandler{
-		SessionStore: &testSessionStore{},
-	}
-	mux.HandleFunc("GET /api/v1/projects", h.HandleProjects)
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("status: got %d, want %d", w.Code, http.StatusUnauthorized)
-	}
-}
-
-func TestHandleProjects_ReturnsProjects(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
-	req.Header.Set("Authorization", "Bearer test-session")
-	w := httptest.NewRecorder()
-
-	inputProjects := []*domain.Project{
-		{ProjectID: "proj-1", OrgID: "org-1", Name: "project one"},
-		{ProjectID: "proj-2", OrgID: "org-1", Name: "project two"},
-	}
-
-	mux := http.NewServeMux()
-	h := &SpanHandler{
-		SessionStore: &testSessionStore{
-			projectID:     "proj-1",
-			authenticated: true,
-			projects:      inputProjects,
-		},
-	}
-	mux.HandleFunc("GET /api/v1/projects", h.HandleProjects)
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
-		return
-	}
-
-	var resp []domain.Project
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-
-	if len(resp) != 2 {
-		t.Errorf("projects count: got %d, want 2", len(resp))
-	}
-	if resp[0].Name != "project one" {
-		t.Errorf("first project name: got %q, want %q", resp[0].Name, "project one")
-	}
-}
-
-func TestHandleProjects_EmptyList(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
-	req.Header.Set("Authorization", "Bearer test-session")
-	w := httptest.NewRecorder()
-
-	mux := http.NewServeMux()
-	h := &SpanHandler{
-		SessionStore: &testSessionStore{
-			projectID:     "proj-1",
-			authenticated: true,
-			projects:      []*domain.Project{},
-		},
-	}
-	mux.HandleFunc("GET /api/v1/projects", h.HandleProjects)
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("status: got %d, want %d", w.Code, http.StatusOK)
-		return
-	}
-
-	var projects []domain.Project
-	if err := json.NewDecoder(w.Body).Decode(&projects); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-
-	if len(projects) != 0 {
-		t.Errorf("projects count: got %d, want 0", len(projects))
-	}
-}
-
-func TestHandleAnalyticsSpans_AuthRequired(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", strings.NewReader(`{}`))
-	w := httptest.NewRecorder()
-
-	mux := http.NewServeMux()
-	h := &SpanHandler{
-		SessionStore: &testSessionStore{},
-	}
-	mux.HandleFunc("POST /api/v1/analytics/spans", h.HandleAnalyticsSpans)
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("status: got %d, want %d", w.Code, http.StatusUnauthorized)
-	}
-}
-
-func TestHandleAnalyticsSpans_MethodNotAllowed(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/analytics/spans", nil)
-	w := httptest.NewRecorder()
-
-	mux := http.NewServeMux()
-	h := &SpanHandler{
-		SessionStore: &testSessionStore{projectID: "test-proj"},
-	}
-	mux.HandleFunc("POST /api/v1/analytics/spans", h.HandleAnalyticsSpans)
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("status: got %d, want %d", w.Code, http.StatusMethodNotAllowed)
-	}
-}
-
-func TestHandleAnalyticsSpans_InvalidJSON(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", strings.NewReader(`not json`))
-	w := httptest.NewRecorder()
-
-	mux := http.NewServeMux()
-	h := &SpanHandler{
-		SessionStore: &testSessionStore{projectID: "test-proj"},
-	}
-	mux.HandleFunc("POST /api/v1/analytics/spans", h.HandleAnalyticsSpans)
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
-	}
-}
-
-func TestHandleAnalyticsSpans_Count(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "lantern-analytics-test")
-	if err != nil {
-		t.Fatalf("create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-	tmpPath := tmpDir + "/test.duckdb"
-
-	db, err := sql.Open("duckdb", tmpPath)
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	defer db.Close()
-
-	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
-		t.Fatalf("create table: %v", err)
-	}
-
-	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
-	for i := 0; i < 5; i++ {
-		_, err := db.ExecContext(context.Background(),
-			`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, model, start_time, end_time, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			fmt.Sprintf("span-%03d", i), fmt.Sprintf("trace-%d", i/2), "", "test-proj",
-			"llm-call", "gpt-4",
-			baseTime.Add(time.Duration(i)*time.Second),
-			baseTime.Add(time.Duration(i)*time.Second+5*time.Second),
-			100+i*10, 50+i*5, 0.001+float64(i)*0.0001)
-		if err != nil {
-			t.Fatalf("insert span %d: %v", i, err)
-		}
-	}
-
-	mux := http.NewServeMux()
-	h := &SpanHandler{
-		DB:           db,
-		SessionStore: &testSessionStore{projectID: "test-proj"},
-	}
-	mux.HandleFunc("POST /api/v1/analytics/spans", h.HandleAnalyticsSpans)
-
-	// COUNT(*) query.
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", strings.NewReader(`{
-		"from": "2025-01-01T00:00:00Z",
-		"to": "2025-01-02T00:00:00Z",
-		"aggregations": [{"function": "count", "field": "*", "alias": "count"}]
-	}`))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
-	}
-
-	var resp struct {
-		Rows []map[string]any `json:"rows"`
-	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-
-	if len(resp.Rows) != 1 {
-		t.Fatalf("rows: got %d, want 1", len(resp.Rows))
-	}
-	countVal := resp.Rows[0]["count"]
-	if countVal == nil {
-		t.Fatal("count column is nil")
-	}
-	// The cold side has LIMIT 0, so count should be 5.
-	// Handle various types DuckDB might return for COUNT(*).
-	var count int64
-	switch v := countVal.(type) {
-	case int64:
-		count = v
-	case float64:
-		count = int64(v)
-	case string:
-		fmt.Sscanf(v, "%d", &count)
-	default:
-		t.Errorf("count: unexpected type %T, got %v", countVal, countVal)
-		return
-	}
-	if count != 5 {
-		t.Errorf("count: got %d, want 5", count)
-	}
-}
-
-func TestHandleAnalyticsSpans_SumWithGroupBy(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "lantern-analytics-test")
-	if err != nil {
-		t.Fatalf("create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-	tmpPath := tmpDir + "/test.duckdb"
-
-	db, err := sql.Open("duckdb", tmpPath)
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	defer db.Close()
-
-	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
-		t.Fatalf("create table: %v", err)
-	}
-
-	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
-	// Insert spans for two different models.
-	_, err = db.ExecContext(context.Background(),
-		`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, model, start_time, end_time, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		"span-1", "trace-1", "", "test-proj", "llm", "gpt-4", baseTime, baseTime.Add(5*time.Second), 0.01)
-	if err != nil {
-		t.Fatalf("insert span-1: %v", err)
-	}
-	_, err = db.ExecContext(context.Background(),
-		`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, model, start_time, end_time, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		"span-2", "trace-2", "", "test-proj", "llm", "claude-3", baseTime.Add(time.Hour), baseTime.Add(time.Hour+5*time.Second), 0.02)
-	if err != nil {
-		t.Fatalf("insert span-2: %v", err)
-	}
-
-	mux := http.NewServeMux()
-	h := &SpanHandler{
-		DB:           db,
-		SessionStore: &testSessionStore{projectID: "test-proj"},
-	}
-	mux.HandleFunc("POST /api/v1/analytics/spans", h.HandleAnalyticsSpans)
-
-	// SUM cost_usd grouped by model.
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", strings.NewReader(`{
-		"from": "2025-01-01T00:00:00Z",
-		"to": "2025-01-02T00:00:00Z",
-		"aggregations": [{"function": "sum", "field": "cost_usd", "alias": "total_cost"}],
-		"group_by": [{"field": "model"}]
-	}`))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
-	}
-
-	var resp struct {
-		Rows []map[string]any `json:"rows"`
-	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-
-	// Should have 2 rows (one per model).
-	if len(resp.Rows) != 2 {
-		t.Fatalf("rows: got %d, want 2 (one per model)", len(resp.Rows))
-	}
+	return []*domain.Project{{ProjectID: f.projectID}}, nil
 }

@@ -130,7 +130,7 @@ func TestPromptHandler_CreatePrompt(t *testing.T) {
 	handler := &PromptHandler{
 		Store:     store,
 		Cache:     cache,
-		SessionStore: &testSessionStore{projectID: "test-proj"},
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(`{
@@ -156,7 +156,7 @@ func TestPromptHandler_CreatePrompt_Conflict(t *testing.T) {
 	handler := &PromptHandler{
 		Store:     store,
 		Cache:     cache,
-		SessionStore: &testSessionStore{projectID: "test-proj"},
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
 	// Create first version.

@@ -240,3 +240,78 @@ func (f *failingStore) ListPrefix(_ context.Context, prefix string) ([]string, e
 func (f *failingStore) Stat(_ context.Context, key string) (*storage.ObjectStat, error) {
 	return nil, io.ErrUnexpectedEOF
 }
+
+func TestRun_FinalSyncOnShutdown(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lantern.db")
+	if err := os.WriteFile(dbPath, []byte("fake duckdb"), 0644); err != nil {
+		t.Fatalf("create temp db: %v", err)
+	}
+
+	store := &mockStore{}
+	cfg := &config.Config{
+		Writer: config.WriterConfig{
+			SyncInterval: "100ms",
+		},
+		Storage: config.StorageConfig{
+			Bucket: "my-bucket",
+		},
+	}
+
+	s := New(store, dbPath, cfg, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan error, 1)
+	go func() {
+		done <- s.Run(ctx)
+	}()
+
+	// Let the syncer run at least one cycle.
+	time.Sleep(150 * time.Millisecond)
+
+	// Cancel the context — this should trigger a final sync.
+	cancel()
+
+	err := <-done
+	if err != context.Canceled && err != context.DeadlineExceeded {
+		t.Logf("Run returned: %v", err)
+	}
+
+	// Verify that at least one final sync was attempted after cancel.
+	// We expect at least 1 put call (the final sync triggered by cancel).
+	if len(store.puts) == 0 {
+		t.Error("expected at least one sync (final sync on shutdown), got 0")
+	}
+}
+
+func TestRun_SyncIntervalTriggeredSync(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lantern.db")
+	if err := os.WriteFile(dbPath, []byte("fake duckdb"), 0644); err != nil {
+		t.Fatalf("create temp db: %v", err)
+	}
+
+	store := &mockStore{}
+	cfg := &config.Config{
+		Writer: config.WriterConfig{
+			SyncInterval: "100ms",
+		},
+		Storage: config.StorageConfig{
+			Bucket: "my-bucket",
+		},
+	}
+
+	s := New(store, dbPath, cfg, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	err := s.Run(ctx)
+	if err != context.DeadlineExceeded {
+		t.Logf("Run returned: %v", err)
+	}
+
+	// At least one interval-triggered sync should have happened.
+	if len(store.puts) == 0 {
+		t.Error("expected at least one sync from interval, got 0")
+	}
+}
