@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zbloss/lantern/internal/domain"
+	"github.com/zbloss/lantern/internal/idgen"
 	"github.com/zbloss/lantern/internal/metadata"
 	"github.com/zbloss/lantern/internal/pricing"
 	"github.com/zbloss/lantern/internal/queue"
@@ -165,7 +166,7 @@ func (p *Pipeline) evalSpans(ctx context.Context, span *domain.Span, rules []dom
 		}
 		if !sampleRateDecides(rule.SampleRate) {
 			job := &domain.EvalJob{
-				JobID:         generateJobID(),
+				JobID:         idgen.Generate(),
 				RuleID:        rule.RuleID,
 				SpanID:        span.SpanID,
 				TraceID:       span.TraceID,
@@ -248,11 +249,7 @@ func attributesJSON(attrs map[string]any) string {
 	return string(data)
 }
 
-func generateJobID() string {
-	b := make([]byte, 8)
-	rand.Read(b) //nolint:errcheck // crypto/rand.Read only fails for truly pathological reasons
-	return fmt.Sprintf("%x", b)
-}
+
 
 // sampleRateDecides returns true if a span should be evaluated based on
 // the given sample rate (0.0–1.0). Always returns true for rate >= 1.0.

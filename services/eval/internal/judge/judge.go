@@ -3,7 +3,6 @@ package judge
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zbloss/lantern/internal/domain"
+	"github.com/zbloss/lantern/internal/idgen"
 	"github.com/zbloss/lantern/internal/metadata"
 )
 
@@ -33,11 +33,8 @@ type LLMResponse struct {
 // Judge renders a prompt template with span data, calls the judge LLM,
 // and returns a structured Score.
 type Judge struct {
-	client     JudgeClient
-	store      metadata.Store
-	agent      *http.Client
-	baseURL    string
-	apiKey     string
+	client JudgeClient
+	store  metadata.Store
 }
 
 // New creates a new Judge with an HTTP client for OpenAI-compatible API calls.
@@ -45,9 +42,6 @@ func New(store metadata.Store, baseURL, apiKey string) *Judge {
 	return &Judge{
 		client:  &httpJudgeClient{baseURL: baseURL, apiKey: apiKey, agent: &http.Client{}},
 		store:   store,
-		agent:   &http.Client{},
-		baseURL: baseURL,
-		apiKey:  apiKey,
 	}
 }
 
@@ -72,7 +66,7 @@ func (j *Judge) Evaluate(ctx context.Context, job *domain.EvalJob, span *domain.
 		return nil, fmt.Errorf("judge: eval: %w", err)
 	}
 
-	scoreID := generateID()
+	scoreID := idgen.Generate()
 	return &domain.Score{
 		ScoreID:       scoreID,
 		SpanID:        span.SpanID,
@@ -134,6 +128,12 @@ type httpJudgeClient struct {
 	apiKey  string
 	agent   *http.Client
 }
+
+// markdownFence matches markdown code fences (optional "json" label).
+var markdownFence = regexp.MustCompile("```(?:json)?\n?")
+
+// floatRegex matches a floating point number in text.
+var floatRegex = regexp.MustCompile(`([0-9]+\.[0-9]+)`)
 
 // Eval calls the OpenAI-compatible API with the rendered prompt and parses
 // the numeric score and reasoning from the response.
@@ -216,7 +216,7 @@ func (c *httpJudgeClient) Eval(ctx context.Context, input string) (*LLMResponse,
 func (c *httpJudgeClient) parseScoreResponse(content string) (*LLMResponse, error) {
 	// Strip markdown code fences if present.
 	content = strings.TrimSpace(content)
-	content = regexp.MustCompile("```(?:json)?\n?").ReplaceAllString(content, "")
+	content = markdownFence.ReplaceAllString(content, "")
 	content = strings.TrimSpace(content)
 
 	var result struct {
@@ -246,8 +246,7 @@ func (c *httpJudgeClient) parseScoreResponse(content string) (*LLMResponse, erro
 // parseFallback tries to extract a score number from the response text.
 func (c *httpJudgeClient) parseFallback(content string) (*LLMResponse, error) {
 	// Look for any floating point number in [0,1] range.
-	re := regexp.MustCompile(`([0-9]+\.[0-9]+)`)
-	matches := re.FindStringSubmatch(content)
+	matches := floatRegex.FindStringSubmatch(content)
 	if len(matches) >= 2 {
 		var score float64
 		if _, err := fmt.Sscanf(matches[1], "%f", &score); err == nil {
@@ -280,9 +279,4 @@ func (c *httpJudgeClient) parseRawJSON(body string) (*LLMResponse, error) {
 	return nil, fmt.Errorf("judge: could not parse response: %s", body)
 }
 
-// generateID creates a unique score ID.
-func generateID() string {
-	b := make([]byte, 8)
-	rand.Read(b) //nolint:errcheck // crypto/rand.Read only fails for truly pathological reasons
-	return fmt.Sprintf("%x", b)
-}
+

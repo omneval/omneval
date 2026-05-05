@@ -3,18 +3,17 @@ package worker
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/metadata"
 	"github.com/zbloss/lantern/internal/queue"
 	"github.com/zbloss/lantern/services/eval/internal/judge"
 )
@@ -43,20 +42,7 @@ func (w *ScoreWriter) WriteScore(ctx context.Context, score *domain.Score) error
 		client = &http.Client{}
 	}
 
-	reqBody := ScoreRequest{
-		ScoreID:       score.ScoreID,
-		SpanID:        score.SpanID,
-		TraceID:       score.TraceID,
-		ProjectID:     score.ProjectID,
-		EvalName:      score.EvalName,
-		Value:         score.Value,
-		Reasoning:     score.Reasoning,
-		JudgeModel:    score.JudgeModel,
-		PromptName:    score.PromptName,
-		PromptVersion: score.PromptVersion,
-	}
-
-	data, err := json.Marshal(reqBody)
+	data, err := json.Marshal(score)
 	if err != nil {
 		return fmt.Errorf("score writer: marshal: %w", err)
 	}
@@ -80,27 +66,12 @@ func (w *ScoreWriter) WriteScore(ctx context.Context, score *domain.Score) error
 	return nil
 }
 
-// ScoreRequest is the JSON body for POST /internal/v1/scores.
-type ScoreRequest struct {
-	ScoreID       string  `json:"score_id"`
-	SpanID        string  `json:"span_id"`
-	TraceID       string  `json:"trace_id"`
-	ProjectID     string  `json:"project_id"`
-	EvalName      string  `json:"eval_name"`
-	Value         float64 `json:"value"`
-	Reasoning     string  `json:"reasoning"`
-	JudgeModel    string  `json:"judge_model"`
-	PromptName    string  `json:"prompt_name"`
-	PromptVersion int64   `json:"prompt_version"`
-}
-
 // Worker drains the Redis eval queue and dispatches jobs to the judge pipeline.
 type Worker struct {
 	evalQ    queue.EvalQueue
 	scoreQ   ScoreWriter
 	judge    *judge.Judge
 	db       *sql.DB
-	store    metadata.Store
 	conc     int
 }
 
@@ -110,7 +81,6 @@ func New(
 	scoreWriter ScoreWriter,
 	judge *judge.Judge,
 	db *sql.DB,
-	store metadata.Store,
 	concurrency int,
 ) *Worker {
 	return &Worker{
@@ -118,7 +88,6 @@ func New(
 		scoreQ: scoreWriter,
 		judge:  judge,
 		db:     db,
-		store:  store,
 		conc:   concurrency,
 	}
 }
@@ -126,11 +95,11 @@ func New(
 // Run starts the worker pool, draining eval jobs and processing them.
 func (w *Worker) Run(ctx context.Context) error {
 	// Launch concurrent workers.
-	var err error
+	var firstErr atomic.Pointer[error]
 	for i := 0; i < w.conc; i++ {
 		go func(id int) {
-			if wErr := w.worker(ctx, id); wErr != nil && err == nil {
-				err = wErr
+			if wErr := w.worker(ctx, id); wErr != nil {
+				firstErr.CompareAndSwap(nil, &wErr)
 			}
 		}(i)
 	}
@@ -138,7 +107,10 @@ func (w *Worker) Run(ctx context.Context) error {
 	// Wait for context cancellation.
 	<-ctx.Done()
 	slog.InfoContext(ctx, "eval: workers shutting down")
-	return err
+	if err := firstErr.Load(); err != nil {
+		return *err
+	}
+	return nil
 }
 
 // worker is a single goroutine that drains the eval queue and processes jobs.
@@ -271,7 +243,7 @@ func (w *Worker) writeScoreWithRetry(ctx context.Context, score *domain.Score) e
 // longRetryLoop continues retrying score write-back for up to 5 minutes
 // using increasing delays. After 5 minutes, logs at Error and drops.
 func (w *Worker) longRetryLoop(ctx context.Context, score *domain.Score, initialErr error) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	longCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	maxDelay := 60 * time.Second
@@ -279,7 +251,7 @@ func (w *Worker) longRetryLoop(ctx context.Context, score *domain.Score, initial
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-longCtx.Done():
 			slog.ErrorContext(ctx, "eval: score write timed out after 5 minutes, dropping score",
 				"score_id", score.ScoreID, "span_id", score.SpanID,
 				"last_error", initialErr.Error())
@@ -287,7 +259,7 @@ func (w *Worker) longRetryLoop(ctx context.Context, score *domain.Score, initial
 		default:
 		}
 
-		writeCtx, writeCancel := context.WithTimeout(ctx, 10*time.Second)
+		writeCtx, writeCancel := context.WithTimeout(longCtx, 10*time.Second)
 		err := w.scoreQ.WriteScore(writeCtx, score)
 		writeCancel()
 
@@ -307,7 +279,7 @@ func (w *Worker) longRetryLoop(ctx context.Context, score *domain.Score, initial
 			if delay > maxDelay {
 				delay = maxDelay
 			}
-		case <-ctx.Done():
+		case <-longCtx.Done():
 			slog.Error("eval: score write timed out, dropping score",
 				"score_id", score.ScoreID, "span_id", score.SpanID,
 				"last_error", err.Error())
@@ -316,9 +288,4 @@ func (w *Worker) longRetryLoop(ctx context.Context, score *domain.Score, initial
 	}
 }
 
-// generateID creates a unique ID string.
-func generateID() string {
-	b := make([]byte, 8)
-	rand.Read(b) //nolint:errcheck // crypto/rand.Read only fails for truly pathological reasons
-	return fmt.Sprintf("%x", b)
-}
+

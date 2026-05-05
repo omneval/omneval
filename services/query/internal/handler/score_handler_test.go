@@ -132,16 +132,16 @@ func TestHandleScores_WritesToDB(t *testing.T) {
 	}
 
 	// Make score write request.
-	scoreReq := map[string]any{
-		"span_id":        "span-001",
-		"trace_id":       "trace-abc",
-		"project_id":     "test-proj",
-		"eval_name":      "helpfulness",
-		"value":          0.8,
-		"reasoning":      "Good response",
-		"judge_model":    "claude-sonnet-4-6",
-		"prompt_name":    "helpfulness-judge",
-		"prompt_version": 1,
+	scoreReq := domain.ScoreRequest{
+		SpanID:        "span-001",
+		TraceID:       "trace-abc",
+		ProjectID:     "test-proj",
+		EvalName:      "helpfulness",
+		Value:         0.8,
+		Reasoning:     "Good response",
+		JudgeModel:    "claude-sonnet-4-6",
+		PromptName:    "helpfulness-judge",
+		PromptVersion: 1,
 	}
 	body, _ := json.Marshal(scoreReq)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/scores", strings.NewReader(string(body)))

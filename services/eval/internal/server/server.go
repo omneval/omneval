@@ -84,7 +84,7 @@ func Run() error {
 	if concurrency <= 0 {
 		concurrency = 4
 	}
-	w := worker.New(evalQ, scoreWriter, j, db, meta, concurrency)
+	w := worker.New(evalQ, scoreWriter, j, db, concurrency)
 
 	// Set up signal handling.
 	ctx, cancel := context.WithCancel(context.Background())

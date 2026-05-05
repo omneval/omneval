@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zbloss/lantern/internal/domain"
+	"github.com/zbloss/lantern/internal/idgen"
 	"github.com/zbloss/lantern/services/query/internal/query"
 )
 
@@ -290,19 +290,6 @@ type ScoreHandler struct {
 	DB *sql.DB
 }
 
-// ScoreRequest is the JSON body for POST /api/v1/scores.
-type ScoreRequest struct {
-	SpanID        string  `json:"span_id"`
-	TraceID       string  `json:"trace_id"`
-	ProjectID     string  `json:"project_id"`
-	EvalName      string  `json:"eval_name"`
-	Value         float64 `json:"value"`
-	Reasoning     string  `json:"reasoning"`
-	JudgeModel    string  `json:"judge_model"`
-	PromptName    string  `json:"prompt_name"`
-	PromptVersion int64   `json:"prompt_version"`
-}
-
 // NewScoreHandler creates a new ScoreHandler.
 func NewScoreHandler(db *sql.DB) http.Handler {
 	h := &ScoreHandler{DB: db}
@@ -313,7 +300,7 @@ func NewScoreHandler(db *sql.DB) http.Handler {
 
 // HandleScores writes a score to DuckDB.
 func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
-	var req ScoreRequest
+	var req domain.ScoreRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
@@ -324,7 +311,7 @@ func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scoreID := generateID()
+	scoreID := idgen.Generate()
 	score := &domain.Score{
 		ScoreID:       scoreID,
 		SpanID:        req.SpanID,
@@ -373,9 +360,4 @@ func (h *ScoreHandler) writeScore(ctx context.Context, score *domain.Score) erro
 	return err
 }
 
-// generateID creates a unique score ID.
-func generateID() string {
-	b := make([]byte, 8)
-	rand.Read(b) //nolint:errcheck // crypto/rand.Read only fails for truly pathological reasons
-	return fmt.Sprintf("%x", b)
-}
+
