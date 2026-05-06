@@ -1,6 +1,8 @@
 # Build artifacts
 *.duckdb
 ui/dist
+services/query/ui/dist
+services/query/internal/server/ui/dist
 *.tar.gz
 
 # Git

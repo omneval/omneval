@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -164,10 +166,6 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("metrics.addr", ":9090")
 	v.SetDefault("metrics.disable_project_labels", false)
 
-	v.SetEnvPrefix("LANTERN")
-	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	v.AutomaticEnv()
-
 	if path != "" {
 		v.SetConfigFile(path)
 		if err := v.ReadInConfig(); err != nil {
@@ -179,5 +177,67 @@ func Load(path string) (*Config, error) {
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshalling config: %w", err)
 	}
+
+	// Apply LANTERN_* environment variable overrides directly.
+	// Viper's AutomaticEnv does not reliably propagate env vars into nested
+	// struct fields via Unmarshal — os.Getenv is the only guaranteed path.
+	envString(&cfg.Database.Driver,  "LANTERN_DATABASE_DRIVER")
+	envString(&cfg.Database.DSN,     "LANTERN_DATABASE_DSN")
+	envString(&cfg.Redis.Addr,       "LANTERN_REDIS_ADDR")
+	envString(&cfg.Redis.Password,   "LANTERN_REDIS_PASSWORD")
+	envInt(&cfg.Redis.DB,            "LANTERN_REDIS_DB")
+	envString(&cfg.Storage.Endpoint, "LANTERN_STORAGE_ENDPOINT")
+	envString(&cfg.Storage.Bucket,   "LANTERN_STORAGE_BUCKET")
+	envString(&cfg.Storage.Region,   "LANTERN_STORAGE_REGION")
+	envString(&cfg.Storage.AccessKey,"LANTERN_STORAGE_ACCESS_KEY")
+	envString(&cfg.Storage.SecretKey,"LANTERN_STORAGE_SECRET_KEY")
+	envString(&cfg.Auth.SessionTTL,  "LANTERN_AUTH_SESSION_TTL")
+	envBool(&cfg.Auth.SecureCookie,  "LANTERN_AUTH_SECURE_COOKIE")
+	envString(&cfg.Auth.AdminEmail,  "LANTERN_AUTH_ADMIN_EMAIL")
+	envString(&cfg.Auth.AdminPassword,"LANTERN_AUTH_ADMIN_PASSWORD")
+	envString(&cfg.Ingest.Addr,      "LANTERN_INGEST_ADDR")
+	envBool(&cfg.Ingest.LogSystemPrompt, "LANTERN_INGEST_LOG_SYSTEM_PROMPT")
+	if v := os.Getenv("LANTERN_INGEST_CORS_ALLOWED_ORIGINS"); v != "" {
+		cfg.Ingest.CORSAllowedOrigins = strings.Split(v, ",")
+	}
+	envString(&cfg.Writer.Addr,         "LANTERN_WRITER_ADDR")
+	envString(&cfg.Writer.DuckDBPath,   "LANTERN_WRITER_DUCKDB_PATH")
+	envString(&cfg.Writer.SyncInterval, "LANTERN_WRITER_SYNC_INTERVAL")
+	envString(&cfg.Writer.FlushInterval,"LANTERN_WRITER_FLUSH_INTERVAL")
+	envInt(&cfg.Writer.FlushAgeDays,    "LANTERN_WRITER_FLUSH_AGE_DAYS")
+	envString(&cfg.Query.Addr,          "LANTERN_QUERY_ADDR")
+	envString(&cfg.Query.DuckDBPath,    "LANTERN_QUERY_DUCKDB_PATH")
+	envString(&cfg.Query.SyncInterval,  "LANTERN_QUERY_SYNC_INTERVAL")
+	envString(&cfg.Eval.Addr,           "LANTERN_EVAL_ADDR")
+	envInt(&cfg.Eval.Concurrency,       "LANTERN_EVAL_CONCURRENCY")
+	envString(&cfg.Eval.LLMBaseURL,     "LANTERN_EVAL_LLM_BASE_URL")
+	envString(&cfg.Eval.LLMModel,       "LANTERN_EVAL_LLM_MODEL")
+	envString(&cfg.Eval.LLMAPIKey,      "LANTERN_EVAL_LLM_API_KEY")
+	envInt(&cfg.Eval.RetryCount,        "LANTERN_EVAL_RETRY_COUNT")
+	envString(&cfg.Metrics.Addr,        "LANTERN_METRICS_ADDR")
+	envBool(&cfg.Metrics.DisableProjectLabels, "LANTERN_METRICS_DISABLE_PROJECT_LABELS")
+
 	return &cfg, nil
+}
+
+func envString(dst *string, key string) {
+	if v := os.Getenv(key); v != "" {
+		*dst = v
+	}
+}
+
+func envBool(dst *bool, key string) {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			*dst = b
+		}
+	}
+}
+
+func envInt(dst *int, key string) {
+	if v := os.Getenv(key); v != "" {
+		if i, err := strconv.Atoi(v); err == nil {
+			*dst = i
+		}
+	}
 }

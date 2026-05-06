@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -87,12 +88,27 @@ func (h *Handler) BootstrapAdmin(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 
+	// Ensure the default org exists before creating the user (FK constraint).
+	_, err = h.store.GetOrganization(ctx, "default")
+	if errors.Is(err, metadata.ErrNotFound) {
+		if err := h.store.CreateOrganization(ctx, &domain.Organization{
+			OrgID:     "default",
+			Name:      "Default",
+			CreatedAt: time.Now(),
+		}); err != nil {
+			return false, fmt.Errorf("auth: create default org: %w", err)
+		}
+	} else if err != nil {
+		return false, fmt.Errorf("auth: get default org: %w", err)
+	}
+
 	// Create the first admin user
 	user := &domain.User{
 		UserID:       xid.New().String(),
 		OrgID:        "default",
 		Email:        h.adminEmail,
 		PasswordHash: h.adminPassword,
+		CreatedAt:    time.Now(),
 	}
 	if err := h.store.CreateUser(ctx, user); err != nil {
 		return false, fmt.Errorf("auth: create bootstrap admin: %w", err)

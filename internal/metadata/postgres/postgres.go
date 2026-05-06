@@ -186,9 +186,7 @@ func (s *Store) ListProjects(ctx context.Context, orgID string) ([]*domain.Proje
 // ---- Users ----
 
 func (s *Store) CreateUser(ctx context.Context, user *domain.User) error {
-	// Hash the user ID as the password (demo mode: no separate password field).
-	// The stored PasswordHash is overwritten with the bcrypt result.
-	hashed, err := bcrypt.GenerateFromPassword([]byte(user.UserID), bcrypt.DefaultCost)
+	hashed, err := bcrypt.GenerateFromPassword([]byte(user.PasswordHash), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("postgres: bcrypt hash: %w", err)
 	}

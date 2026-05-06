@@ -5,7 +5,7 @@ import { resolve } from "path";
 export default defineConfig({
   plugins: [react()],
   build: {
-    outDir: resolve(__dirname, "../services/query/ui/dist"),
+    outDir: resolve(__dirname, "../services/query/internal/server/ui/dist"),
     emptyOutDir: true,
   },
 });

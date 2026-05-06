@@ -370,17 +370,10 @@ func pollAndDownload(ctx context.Context, store storage.ObjectStore, dbPath stri
 	return nil
 }
 
-// openSnapshotDB opens a DuckDB database in read-only mode.
-func openSnapshotDB(path string) (*sql.DB, error) {
-	dsn := "file:" + path + "?mode=ro"
-	return openDuckDB(dsn)
-}
-
 // openSnapshotDBRW opens a DuckDB database in read-write mode.
 // Used by the Query API for score writes.
 func openSnapshotDBRW(path string) (*sql.DB, error) {
-	dsn := "file:" + path + "?mode=rw"
-	return openDuckDB(dsn)
+	return openDuckDB(path + "?access_mode=read_write")
 }
 
 // openDuckDB opens a DuckDB database with the given DSN and verifies connectivity.
