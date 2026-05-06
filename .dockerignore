@@ -20,7 +20,7 @@ docs/
 *.md
 
 # Node modules
-node_modules/
+**/node_modules/
 
 # IDE
 .vscode/
