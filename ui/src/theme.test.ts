@@ -53,9 +53,9 @@ describe("Branding Theme", () => {
   describe("hex color format", () => {
     const hexPattern = /^#[0-9A-Fa-f]{6}$/;
 
-    it.each(Object.entries(colors) as [ColorCategory, Record<string, string>][])(
-      "all $category colors are valid hex",
-      (_, palette) => {
+    it.each([colors.backgrounds, colors.accents, colors.typography])(
+      "all colors in a category are valid hex",
+      (palette) => {
         Object.values(palette).forEach((hex) => {
           expect(hex).toMatch(hexPattern);
         });

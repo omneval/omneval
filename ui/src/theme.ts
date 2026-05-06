@@ -70,18 +70,9 @@ export interface BrandingTheme {
   typography: Record<string, HexColor>;
 }
 
-// ──────────────────────────────────────────────────────────────
-// Color Palette
-// ──────────────────────────────────────────────────────────────
+// ── Internal base (as const for precise types) ──────────────
 
-export const colors: BrandingTheme & {
-  /** Convert any hex color to rgba with given alpha (0–1). */
-  toRgba(hex: string, alpha: number): string;
-  /** Convenience: flicker (pale orange) as rgba with given alpha. */
-  flickerRgba(alpha: number): string;
-  /** CSS custom property names mapped to hex values. */
-  cssVariables: Record<string, string>;
-} = {
+const baseColors = {
   backgrounds: {
     abyssBlack: "#000000",
     charcoalDepth: "#0D0D0D",
@@ -98,8 +89,33 @@ export const colors: BrandingTheme & {
     pureLight: "#FFFFFF",
     ashGrey: "#A1A1AA",
   },
+  cssVariables: {
+    "--lantern-bg-abyss": "#000000",
+    "--lantern-bg-charcoal": "#0D0D0D",
+    "--lantern-bg-illumination": "#1A1A1A",
+    "--lantern-bg-cave": "#2D2D2D",
+    "--lantern-accent-ember": "#FF5722",
+    "--lantern-accent-glow": "#FF8A65",
+    "--lantern-accent-flicker": "#FFCCBC",
+    "--lantern-accent-heat": "#E64A19",
+    "--lantern-text-pure": "#FFFFFF",
+    "--lantern-text-ash": "#A1A1AA",
+  },
+} as const;
 
-  // ── Utilities ──────────────────────────────────────────────
+type BaseColors = typeof baseColors;
+
+// ──────────────────────────────────────────────────────────────
+// Color Palette (exported)
+// ──────────────────────────────────────────────────────────────
+
+export const colors: BaseColors & {
+  /** Convert any hex color to rgba with given alpha (0–1). */
+  toRgba: (hex: string, alpha: number) => string;
+  /** Convenience: flicker (pale orange) as rgba with given alpha. */
+  flickerRgba: (alpha: number) => string;
+} = {
+  ...baseColors,
 
   /** Convert a hex color to rgba string. */
   toRgba(hex: string, alpha: number): string {
@@ -114,19 +130,4 @@ export const colors: BrandingTheme & {
   flickerRgba(alpha: number): string {
     return this.toRgba("#FFCCBC", alpha);
   },
-
-  // ── CSS Custom Properties ─────────────────────────────────
-
-  cssVariables: {
-    "--lantern-bg-abyss": "#000000",
-    "--lantern-bg-charcoal": "#0D0D0D",
-    "--lantern-bg-illumination": "#1A1A1A",
-    "--lantern-bg-cave": "#2D2D2D",
-    "--lantern-accent-ember": "#FF5722",
-    "--lantern-accent-glow": "#FF8A65",
-    "--lantern-accent-flicker": "#FFCCBC",
-    "--lantern-accent-heat": "#E64A19",
-    "--lantern-text-pure": "#FFFFFF",
-    "--lantern-text-ash": "#A1A1AA",
-  },
-} as const;
+};
