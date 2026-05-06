@@ -1,0 +1,68 @@
+/**
+ * Lantern Branding — CSS Custom Properties
+ *
+ * Import this file to apply the Lantern brand palette globally.
+ * All colors are exposed as CSS custom properties under the `:root` scope.
+ *
+ * Usage in any component stylesheet:
+ *   .my-element {
+ *     background: var(--lantern-bg-abyss);
+ *     color: var(--lantern-text-pure);
+ *     border: 1px solid var(--lantern-bg-cave);
+ *   }
+ *
+ * Usage for hover highlights (flicker at 10–15% opacity):
+ *   .table-row:hover {
+ *     background: var(--lantern-accent-flicker-hover);
+ *   }
+ */
+
+:root {
+  /* ── The Cave: Backgrounds & Surfaces ─────────────────── */
+  --lantern-bg-abyss: #000000;
+  --lantern-bg-charcoal: #0D0D0D;
+  --lantern-bg-illumination: #1A1A1A;
+  --lantern-bg-cave: #2D2D2D;
+
+  /* ── The Lantern: Accents & Data Visualization ────────── */
+  --lantern-accent-ember: #FF5722;
+  --lantern-accent-glow: #FF8A65;
+  --lantern-accent-flicker: #FFCCBC;
+  --lantern-accent-heat: #E64A19;
+
+  /* ── Illumination: Typography ─────────────────────────── */
+  --lantern-text-pure: #FFFFFF;
+  --lantern-text-ash: #A1A1AA;
+
+  /* ── Derived / Convenience ────────────────────────────── */
+  /** Flicker at 10% opacity — for subtle row hover highlights */
+  --lantern-accent-flicker-hover: rgba(255, 204, 188, 0.1);
+  /** Flicker at 15% opacity — for stronger hover highlights */
+  --lantern-accent-flicker-hover-strong: rgba(255, 204, 188, 0.15);
+  /** Ember glow for active states — emberFlare at 15% opacity */
+  --lantern-accent-ember-glow: rgba(255, 87, 34, 0.15);
+  /** Deep heat for error states — deepHeat at 15% opacity */
+  --lantern-accent-heat-glow: rgba(230, 74, 25, 0.15);
+
+  /* ── Default Dark Mode Palette ────────────────────────── */
+  /** Main application background */
+  --lantern-bg-root: var(--lantern-bg-abyss);
+  /** Sidebar / header background */
+  --lantern-bg-surface: var(--lantern-bg-charcoal);
+  /** Card / widget background */
+  --lantern-bg-card: var(--lantern-bg-charcoal);
+  /** Table header / search bar background */
+  --lantern-bg-elevated: var(--lantern-bg-illumination);
+  /** Border / divider color */
+  --lantern-border: var(--lantern-bg-cave);
+  /** Primary text color */
+  --lantern-text-primary: var(--lantern-text-pure);
+  /** Secondary text color */
+  --lantern-text-secondary: var(--lantern-text-ash);
+  /** Primary CTA / active accent */
+  --lantern-primary: var(--lantern-accent-ember);
+  /** Secondary accent */
+  --lantern-secondary: var(--lantern-accent-glow);
+  /** Error / critical alert */
+  --lantern-danger: var(--lantern-accent-heat);
+}
