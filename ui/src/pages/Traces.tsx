@@ -1,4 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
+import { colors } from "@/theme";
+
+// ── Types ──────────────────────────────────────────────────────────
 
 interface TracesPageProps {
   activeProject: string;
@@ -16,136 +19,780 @@ interface Span {
   cost_usd: number;
   input_tokens: number;
   output_tokens: number;
+  Children?: Span[];
+  input?: string;
+  output?: string;
+  status_code?: string;
+  attributes?: Record<string, unknown>;
 }
+
+interface SpanQueryResponse {
+  spans: Span[];
+  next?: string;
+  limit: number;
+}
+
+interface SpanQueryRequest {
+  from: string;
+  to: string;
+  limit: number;
+  cursor?: string;
+  filters?: QueryFilter[];
+}
+
+interface QueryFilter {
+  field: string;
+  op: string;
+  value: string | string[];
+}
+
+// ── Filter State ───────────────────────────────────────────────────
+
+interface FilterState {
+  [fieldName: string]: string[];
+}
+
+// ── Helpers ────────────────────────────────────────────────────────
+
+function formatTime(iso: string): string {
+  if (!iso) return "N/A";
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatDuration(start: string, end: string): string {
+  const ms = new Date(end).getTime() - new Date(start).getTime();
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
+function truncate(str: string | undefined, len: number): string {
+  if (!str) return "—";
+  return str.length > len ? str.slice(0, len) + "…" : str;
+}
+
+// ── Observation Level Pills ────────────────────────────────────────
+
+interface ObservationPillsProps {
+  count: number;
+  kind?: string;
+}
+
+function ObservationPills({ count, kind }: ObservationPillsProps) {
+  if (count <= 0) return null;
+
+  const kindLabel = kind ?? "span";
+  const shortLabel = kindLabel.slice(0, 3).toUpperCase();
+
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+      style={{
+        background: `${colors.accents.emberFlare}22`,
+        color: colors.accents.softGlow,
+        border: `1px solid ${colors.accents.emberFlare}44`,
+      }}
+    >
+      {shortLabel} {count}
+    </span>
+  );
+}
+
+// ── Bookmark Star ──────────────────────────────────────────────────
+
+function BookmarkStar({ starred, onClick }: { starred: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="transition-colors duration-150"
+      style={{ color: starred ? colors.accents.emberFlare : colors.typography.ashGrey }}
+      onMouseEnter={(e) => {
+        if (!starred) (e.currentTarget as HTMLElement).style.color = colors.accents.softGlow;
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLElement).style.color = starred
+          ? colors.accents.emberFlare
+          : colors.typography.ashGrey;
+      }}
+      title={starred ? "Remove bookmark" : "Bookmark this trace"}
+      aria-label={starred ? "Remove bookmark" : "Bookmark this trace"}
+    >
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path
+          d="M8 1.5l1.8 3.7 4 .6-2.9 2.8.7 4L8 10.9 4.4 12.6l.7-4L2.2 5.8l4-.6L8 1.5z"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          fill={starred ? "currentColor" : "none"}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  );
+}
+
+// ── Filter Sidebar ─────────────────────────────────────────────────
+
+const FILTER_SECTIONS = [
+  "environment",
+  "trace_name",
+  "trace_id",
+  "user_id",
+  "session_id",
+  "tags",
+  "latency",
+  "tokens",
+  "cost",
+];
+
+function FilterSection({
+  name,
+  label,
+  expanded,
+  onToggle,
+  onApply,
+  value,
+}: {
+  name: string;
+  label: string;
+  expanded: boolean;
+  onToggle: () => void;
+  onApply: (val: string[]) => void;
+  value: string[];
+}) {
+  const [input, setInput] = useState(value.join(", "));
+
+  const handleApply = () => {
+    const vals = input
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    setInput(input);
+    onApply(vals);
+  };
+
+  return (
+    <div
+      className="border-b"
+      style={{ borderColor: colors.backgrounds.caveWall }}
+    >
+      <button
+        onClick={onToggle}
+        className="flex items-center justify-between w-full px-3 py-2 text-sm font-medium text-lantern-pure hover:bg-lantern-accent-flicker-hover transition-colors"
+      >
+        <span>{label}</span>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          className={`transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
+        >
+          <path d="M4.5 3l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+
+      {expanded && (
+        <div className="px-3 pb-3">
+          {name === "trace_name" && (
+            <div className="space-y-1">
+              {["planner", "implementer", "reviewer", "merger", "coder", "architect"].map((traceName) => (
+                <label
+                  key={traceName}
+                  className="flex items-center gap-2 text-sm text-lantern-ash hover:text-lantern-pure cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={value.includes(traceName)}
+                    onChange={(e) => {
+                      const newVals = e.target.checked
+                        ? [...value, traceName]
+                        : value.filter((v) => v !== traceName);
+                      onApply(newVals);
+                    }}
+                    className="rounded"
+                    style={{
+                      accentColor: colors.accents.emberFlare,
+                    }}
+                  />
+                  {traceName}
+                </label>
+              ))}
+            </div>
+          )}
+          {name === "latency" && (
+            <div className="space-y-2">
+              <input
+                type="text"
+                placeholder="e.g., &gt;1000 or 100-500"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                className="w-full text-sm px-2 py-1.5 rounded border bg-lantern-bg-illumination text-lantern-pure placeholder-lantern-ash"
+                style={{ borderColor: colors.backgrounds.caveWall }}
+              />
+              <button
+                onClick={handleApply}
+                className="text-xs px-2 py-1 rounded transition-colors"
+                style={{
+                  background: colors.accents.emberFlare,
+                  color: colors.typography.pureLight,
+                }}
+              >
+                Apply
+              </button>
+            </div>
+          )}
+          {name !== "trace_name" && name !== "latency" && (
+            <div className="space-y-2">
+              <input
+                type="text"
+                placeholder={`Filter by ${label}...`}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                className="w-full text-sm px-2 py-1.5 rounded border bg-lantern-bg-illumination text-lantern-pure placeholder-lantern-ash"
+                style={{ borderColor: colors.backgrounds.caveWall }}
+              />
+              <button
+                onClick={handleApply}
+                className="text-xs px-2 py-1 rounded transition-colors"
+                style={{
+                  background: colors.accents.emberFlare,
+                  color: colors.typography.pureLight,
+                }}
+              >
+                Apply
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Pagination ─────────────────────────────────────────────────────
+
+function PaginationControls({
+  pageSize,
+  onPageSizeChange,
+  hasMore,
+  loading,
+}: {
+  pageSize: number;
+  onPageSizeChange: (size: number) => void;
+  hasMore: boolean;
+  loading: boolean;
+}) {
+  const sizes = [10, 25, 50, 100];
+
+  return (
+    <div className="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: colors.backgrounds.caveWall }}>
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-lantern-ash">Rows per page:</span>
+        <select
+          value={pageSize}
+          onChange={(e) => onPageSizeChange(Number(e.target.value))}
+          className="text-sm px-2 py-1 rounded border bg-lantern-bg-illumination text-lantern-pure"
+          style={{ borderColor: colors.backgrounds.caveWall }}
+        >
+          {sizes.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          disabled={loading}
+          className="text-sm px-3 py-1.5 rounded transition-colors disabled:opacity-50"
+          style={{
+            background: colors.accents.emberFlare,
+            color: colors.typography.pureLight,
+            opacity: loading ? 0.6 : 1,
+          }}
+          onMouseEnter={(e) => {
+            if (!loading) (e.currentTarget as HTMLElement).style.background = colors.accents.softGlow;
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.background = colors.accents.emberFlare;
+          }}
+        >
+          {loading ? "Loading..." : hasMore ? "Load Next Page" : "No more data"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Traces Page ───────────────────────────────────────────────
 
 export default function TracesPage({ activeProject }: TracesPageProps) {
   const [spans, setSpans] = useState<Span[]>([]);
   const [nextCursor, setNextCursor] = useState("");
   const [loading, setLoading] = useState(false);
-  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [_, setPage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeTab, setActiveTab] = useState<"traces" | "observations">("traces");
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [columnVisibility, setColumnVisibility] = useState({
+    checkbox: true,
+    bookmark: true,
+    timestamp: true,
+    name: true,
+    input: true,
+    output: true,
+    observationLevels: true,
+    latency: true,
+    tokens: true,
+    cost: true,
+    environment: true,
+  });
 
-  const fetchSpans = useCallback(async (cursor: string) => {
-    setLoading(true);
-    try {
-      const body: Record<string, unknown> = {
-        from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-        to: new Date().toISOString(),
-        limit: 25,
-      };
-      if (cursor) body.cursor = cursor;
+  // Filters
+  const [expandedFilters, setExpandedFilters] = useState<Record<string, boolean>>({
+    trace_name: true,
+  });
+  const [filterState, setFilterState] = useState<FilterState>({});
+  const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
 
-      const res = await fetch("/api/v1/spans/query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSpans(data.spans ?? []);
-        setNextCursor(data.next ?? "");
+  const fetchSpans = useCallback(
+    async (cursor: string, append = false) => {
+      setLoading(true);
+      try {
+        const body: SpanQueryRequest = {
+          from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+          to: new Date().toISOString(),
+          limit: pageSize,
+        };
+
+        if (cursor) body.cursor = cursor;
+
+        // Apply text search
+        if (searchQuery) {
+          body.filters = [
+            { field: "name", op: "ilike", value: `%${searchQuery}%` },
+          ];
+        }
+
+        // Apply filter state
+        if (Object.keys(filterState).length > 0) {
+          body.filters = body.filters ?? [];
+          for (const [field, values] of Object.entries(filterState)) {
+            if (values.length > 0) {
+              if (field === "trace_name") {
+                body.filters.push({ field: "name", op: "in", value: values });
+              } else if (field === "latency") {
+                const match = values[0]?.match(/[><=]?\s*(\d+)/);
+                if (match) {
+                  const threshold = parseInt(match[1] ?? "0");
+                  const op = values[0]?.includes(">") && !values[0]?.includes(">=")
+                    ? "gt"
+                    : values[0]?.includes(">=")
+                      ? "gte"
+                      : values[0]?.includes("<") && !values[0]?.includes("<=")
+                        ? "lt"
+                        : values[0]?.includes("<=")
+                          ? "lte"
+                          : "eq";
+                  body.filters.push({ field: "duration_ms", op, value: String(threshold) });
+                }
+              }
+            }
+          }
+        }
+
+        const res = await fetch("/api/v1/spans/query", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+        if (res.ok) {
+          const data: SpanQueryResponse = await res.json();
+          if (append) {
+            setSpans((prev) => [...prev, ...(data.spans ?? [])]);
+          } else {
+            setSpans(data.spans ?? []);
+          }
+          setNextCursor(data.next ?? "");
+        }
+      } finally {
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+    [pageSize, searchQuery, filterState],
+  );
+
+  const resetAndFetch = useCallback(
+    (cursor = "", append = false) => {
+      fetchSpans(cursor, append);
+    },
+    [fetchSpans],
+  );
 
   useEffect(() => {
-    setPage(1);
-    fetchSpans("");
-  }, [activeProject, fetchSpans]);
+    resetAndFetch("");
+  }, [activeProject, pageSize, resetAndFetch]);
 
-  const loadMore = () => {
-    if (nextCursor) {
-      fetchSpans(nextCursor);
-      setPage((p) => p + 1);
+  // Auto-refresh effect
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const interval = setInterval(() => {
+      fetchSpans("", false);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [autoRefresh, fetchSpans]);
+
+  const toggleBookmark = async (traceId: string) => {
+    const newBookmarks = new Set(bookmarks);
+    if (newBookmarks.has(traceId)) {
+      newBookmarks.delete(traceId);
+    } else {
+      newBookmarks.add(traceId);
+    }
+    setBookmarks(newBookmarks);
+    // API call placeholder — toggling bookmark on the server
+    try {
+      await fetch(`/api/v1/traces/${traceId}/bookmark`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookmarked: newBookmarks.has(traceId) }),
+      });
+    } catch {
+      // Silently fail — bookmark is local-first
     }
   };
 
-  const formatTime = (iso: string) => {
-    return new Date(iso).toLocaleString();
+  const toggleColumn = (col: keyof typeof columnVisibility) => {
+    setColumnVisibility((prev) => ({ ...prev, [col]: !prev[col] }));
   };
 
-  const formatDuration = (start: string, end: string) => {
-    const ms = new Date(end).getTime() - new Date(start).getTime();
-    if (ms < 1000) return `${ms}ms`;
-    return `${(ms / 1000).toFixed(2)}s`;
+  const toggleFilter = (name: string) => {
+    setExpandedFilters((prev) => ({ ...prev, [name]: !prev[name] }));
   };
+
+  const applyFilter = (field: string, values: string[]) => {
+    setFilterState((prev) => ({
+      ...prev,
+      [field]: values,
+    }));
+    // Re-fetch with new filter
+    resetAndFetch("", false);
+  };
+
+  const totalTokens = (span: Span) => span.input_tokens + span.output_tokens;
+
+  // ── Columns Definition ──
+  const columns = [
+    { key: "bookmark", label: "", visible: columnVisibility.bookmark },
+    { key: "timestamp", label: "Timestamp", visible: columnVisibility.timestamp },
+    { key: "name", label: "Name", visible: columnVisibility.name },
+    { key: "input", label: "Input", visible: columnVisibility.input },
+    { key: "output", label: "Output", visible: columnVisibility.output },
+    { key: "observationLevels", label: "Levels", visible: columnVisibility.observationLevels },
+    { key: "latency", label: "Latency", visible: columnVisibility.latency },
+    { key: "tokens", label: "Tokens", visible: columnVisibility.tokens },
+    { key: "cost", label: "Cost", visible: columnVisibility.cost },
+    { key: "environment", label: "Env", visible: columnVisibility.environment },
+  ];
+
+  const visibleColumns = columns.filter((c) => c.visible);
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold text-gray-900">Traces</h1>
-      </div>
-
-      {spans.length === 0 && !loading && (
-        <div className="text-center py-12 text-gray-500">
-          No traces found for this project.
+    <div className="flex h-full" style={{ background: colors.backgrounds.abyssBlack }}>
+      {/* ── Filter Sidebar ── */}
+      <div
+        className="flex flex-col w-64 border-r overflow-y-auto"
+        style={{
+          background: colors.backgrounds.charcoalDepth,
+          borderColor: colors.backgrounds.caveWall,
+        }}
+      >
+        <div className="px-3 py-3 border-b" style={{ borderColor: colors.backgrounds.caveWall }}>
+          <h3 className="text-sm font-medium text-lantern-pure">Filters</h3>
         </div>
-      )}
-
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                Trace
-              </th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                Name
-              </th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                Model
-              </th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                Duration
-              </th>
-              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">
-                Cost
-              </th>
-              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">
-                Tokens
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {spans.map((span) => (
-              <tr key={span.span_id} className="hover:bg-gray-50">
-                <td className="px-4 py-3 text-sm">
-                  <div className="font-mono text-gray-900">{span.trace_id}</div>
-                  <div className="text-xs text-gray-400">
-                    {formatTime(span.start_time)}
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700">{span.name}</td>
-                <td className="px-4 py-3 text-sm text-gray-500">
-                  {span.model || "—"}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-500">
-                  {formatDuration(span.start_time, span.end_time)}
-                </td>
-                <td className="px-4 py-3 text-sm text-right text-gray-700">
-                  ${span.cost_usd?.toFixed(4) ?? "0.0000"}
-                </td>
-                <td className="px-4 py-3 text-sm text-right text-gray-500">
-                  {span.input_tokens + span.output_tokens}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {nextCursor && (
-        <div className="mt-4 text-center">
+        <div className="flex-1 py-1">
+          {FILTER_SECTIONS.map((section) => {
+            const labelMap: Record<string, string> = {
+              environment: "Environment",
+              trace_name: "Trace Name",
+              trace_id: "Trace ID",
+              user_id: "User ID",
+              session_id: "Session ID",
+              tags: "Tags",
+              latency: "Latency",
+              tokens: "Tokens",
+              cost: "Cost",
+            };
+            return (
+              <FilterSection
+                key={section}
+                name={section}
+                label={labelMap[section] ?? section}
+                expanded={!!expandedFilters[section]}
+                onToggle={() => toggleFilter(section)}
+                onApply={(vals) => applyFilter(section, vals)}
+                value={filterState[section] ?? []}
+              />
+            );
+          })}
+        </div>
+        <div className="px-3 py-2 border-t" style={{ borderColor: colors.backgrounds.caveWall }}>
           <button
-            onClick={loadMore}
-            disabled={loading}
-            className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+            onClick={() => {
+              setFilterState({});
+              setExpandedFilters({ trace_name: true });
+              resetAndFetch("", false);
+            }}
+            className="w-full text-center text-sm py-1.5 rounded transition-colors"
+            style={{
+              border: `1px solid ${colors.backgrounds.caveWall}`,
+              color: colors.typography.ashGrey,
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLElement).style.borderColor = colors.accents.emberFlare;
+              (e.currentTarget as HTMLElement).style.color = colors.accents.emberFlare;
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.borderColor = colors.backgrounds.caveWall;
+              (e.currentTarget as HTMLElement).style.color = colors.typography.ashGrey;
+            }}
           >
-            {loading ? "Loading..." : `Load more (${page + 1})`}
+            Clear All Filters
           </button>
         </div>
-      )}
+      </div>
+
+      {/* ── Main Content ── */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Toolbar */}
+        <div
+          className="flex items-center gap-4 px-4 py-2 border-b"
+          style={{
+            borderColor: colors.backgrounds.caveWall,
+            background: colors.backgrounds.slightIllumination,
+          }}
+        >
+          {/* Tabs */}
+          <div className="flex gap-1">
+            {(["traces", "observations"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors capitalize ${
+                  tab === activeTab
+                    ? "text-lantern-ember"
+                    : "text-lantern-ash hover:text-lantern-pure"
+                }`}
+                style={
+                  tab === activeTab
+                    ? {
+                        background: colors.backgrounds.charcoalDepth,
+                        borderBottom: `2px solid ${colors.accents.emberFlare}`,
+                      }
+                    : {}
+                }
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          {/* Search */}
+          <div className="flex-1" />
+          <input
+            type="text"
+            placeholder="Search by ID/Name..."
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              resetAndFetch("", false);
+            }}
+            className="w-48 text-sm px-2.5 py-1.5 rounded border bg-lantern-bg-charcoal text-lantern-pure placeholder-lantern-ash"
+            style={{ borderColor: colors.backgrounds.caveWall }}
+          />
+
+          {/* Auto-refresh toggle */}
+          <label className="flex items-center gap-2 text-sm text-lantern-ash cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className="rounded"
+              style={{ accentColor: colors.accents.emberFlare }}
+            />
+            <span className={autoRefresh ? "text-lantern-ember" : ""}>
+              30s
+            </span>
+          </label>
+
+          {/* Column toggles */}
+          <div className="flex items-center gap-1">
+            {columns.map((col) => (
+              <button
+                key={col.key}
+                onClick={() => toggleColumn(col.key as keyof typeof columnVisibility)}
+                className="w-6 h-6 flex items-center justify-center rounded text-xs font-bold transition-colors"
+                style={{
+                  background: columnVisibility[col.key as keyof typeof columnVisibility]
+                    ? colors.accents.emberFlare
+                    : colors.backgrounds.caveWall,
+                  color: columnVisibility[col.key as keyof typeof columnVisibility]
+                    ? colors.typography.pureLight
+                    : colors.typography.ashGrey,
+                }}
+                title={`Toggle ${col.label}`}
+              >
+                {col.label.slice(0, 2).toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className="flex-1 overflow-auto">
+          {spans.length === 0 && !loading ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <svg
+                width="48"
+                height="48"
+                viewBox="0 0 48 48"
+                fill="none"
+                className="mb-3 text-lantern-bg-cave"
+              >
+                <rect x="8" y="8" width="32" height="32" rx="4" stroke="currentColor" strokeWidth="2" />
+                <path d="M18 24h12M24 18v12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              <p className="text-sm text-lantern-ash">No traces found</p>
+              <p className="text-xs text-lantern-ash opacity-70 mt-1">
+                Try adjusting your filters or time range
+              </p>
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr
+                  style={{
+                    background: colors.backgrounds.slightIllumination,
+                    borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
+                    color: colors.typography.ashGrey,
+                  }}
+                >
+                  {visibleColumns.map((col) => (
+                    <th
+                      key={col.key}
+                      className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider whitespace-nowrap"
+                    >
+                      {col.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {spans.map((span) => {
+                  const observationCount = span.Children?.length ?? 0;
+                  const observationKind = span.kind;
+                  return (
+                    <tr
+                      key={span.span_id}
+                      className="transition-colors duration-150"
+                      style={{
+                        borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
+                      }}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLElement).style.background =
+                          `rgba(255, 204, 188, 0.1)`;
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLElement).style.background = "transparent";
+                      }}
+                    >
+                      {visibleColumns.map((col) => (
+                        <td key={col.key} className="px-3 py-2.5 whitespace-nowrap">
+                          {col.key === "bookmark" && (
+                            <BookmarkStar
+                              starred={bookmarks.has(span.trace_id)}
+                              onClick={() => toggleBookmark(span.trace_id)}
+                            />
+                          )}
+                          {col.key === "timestamp" && (
+                            <span className="text-lantern-ash text-xs">
+                              {formatTime(span.start_time)}
+                            </span>
+                          )}
+                          {col.key === "name" && (
+                            <div>
+                              <div className="text-lantern-pure font-medium">{span.name}</div>
+                              <div className="text-lantern-ash text-xs font-mono truncate max-w-[120px]">
+                                {span.trace_id.slice(0, 12)}…
+                              </div>
+                            </div>
+                          )}
+                          {col.key === "input" && (
+                            <div className="max-w-[200px] truncate text-lantern-ash text-xs font-mono">
+                              {span.input ? truncate(JSON.parse(span.input)[0]?.content ?? span.input, 40) : "—"}
+                            </div>
+                          )}
+                          {col.key === "output" && (
+                            <div className="max-w-[200px] truncate text-lantern-ash text-xs font-mono">
+                              {span.output ? truncate(JSON.parse(span.output)[0]?.content ?? span.output, 40) : "—"}
+                            </div>
+                          )}
+                          {col.key === "observationLevels" && (
+                            <ObservationPills count={observationCount} kind={observationKind} />
+                          )}
+                          {col.key === "latency" && (
+                            <span className="text-lantern-ash">
+                              {formatDuration(span.start_time, span.end_time)}
+                            </span>
+                          )}
+                          {col.key === "tokens" && (
+                            <span className="text-lantern-ash">
+                              {totalTokens(span).toLocaleString()}
+                              <span className="text-lantern-ash opacity-60 text-xs ml-1">
+                                ({span.input_tokens}+{span.output_tokens})
+                              </span>
+                            </span>
+                          )}
+                          {col.key === "cost" && (
+                            <span
+                              className="font-medium"
+                              style={{ color: colors.accents.emberFlare }}
+                            >
+                              ${span.cost_usd.toFixed(4)}
+                            </span>
+                          )}
+                          {col.key === "environment" && (
+                            <span className="text-lantern-ash text-xs">default</span>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Pagination */}
+        <PaginationControls
+          pageSize={pageSize}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setPage(1);
+          }}
+          hasMore={!!nextCursor}
+          loading={loading}
+        />
+      </div>
     </div>
   );
 }

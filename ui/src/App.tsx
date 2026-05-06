@@ -2,8 +2,25 @@ import { useState, useEffect } from "react";
 import LoginPage from "./pages/Login";
 import TracesPage from "./pages/Traces";
 import DashboardPage from "./pages/Dashboard";
+import Header from "./components/Header";
+import Layout from "./components/Layout";
+import { colors } from "./theme";
 
-type Page = "login" | "traces" | "dashboard";
+type Page = "login" | "traces" | "dashboard" | "scores" | "sessions" | "users" | "prompts" | "playground" | "judge-llm" | "human-annotation" | "datasets" | "settings";
+
+const NAV_MAP: Record<string, Page> = {
+  dashboard: "dashboard",
+  traces: "traces",
+  sessions: "sessions",
+  users: "users",
+  prompts: "prompts",
+  playground: "playground",
+  scores: "scores",
+  "judge-llm": "judge-llm",
+  "human-annotation": "human-annotation",
+  datasets: "datasets",
+  settings: "settings",
+};
 
 export default function App() {
   const [page, setPage] = useState<Page>("login");
@@ -11,7 +28,9 @@ export default function App() {
     { project_id: string; name: string; org_id: string }[]
   >([]);
   const [activeProject, setActiveProject] = useState<string>("");
-  const [loadingProjects, setLoadingProjects] = useState(false);
+
+  const [timeRange, setTimeRange] = useState("1d");
+  const [environment, setEnvironment] = useState("default");
 
   // Check for existing session on mount
   useEffect(() => {
@@ -26,7 +45,6 @@ export default function App() {
   }, []);
 
   const fetchProjects = async (_session: string) => {
-    setLoadingProjects(true);
     try {
       const res = await fetch("/api/v1/projects");
       if (res.ok) {
@@ -39,7 +57,6 @@ export default function App() {
         }
       }
     } finally {
-      setLoadingProjects(false);
     }
   };
 
@@ -61,63 +78,76 @@ export default function App() {
     await fetch("/logout", { method: "POST" });
     setProjects([]);
     setActiveProject("");
+    setTimeRange("1d");
+    setEnvironment("default");
     setPage("login");
   };
 
+  const handleNavigate = (id: string) => {
+    const route = NAV_MAP[id];
+    if (route) setPage(route);
+  };
+
+  // ── Login ──
+  if (page === "login") {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+
+  // ── Authenticated Layout ──
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between">
-        <div className="font-semibold text-gray-900">Lantern</div>
-        {page === "traces" && (
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setPage("dashboard")}
-              className="text-sm text-gray-600 hover:text-gray-900"
-            >
-              Dashboard
-            </button>
-            <div className="flex items-center gap-2">
-              {loadingProjects ? (
-                <div className="text-sm text-gray-500">Loading...</div>
-              ) : (
-                <select
-                  value={activeProject}
-                  onChange={(e) => setActiveProject(e.target.value)}
-                  className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white"
-                >
-                  {projects.map((p) => (
-                    <option key={p.project_id} value={p.project_id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <button
-                onClick={() => setPage("traces")}
-                className="text-sm text-gray-600 hover:text-gray-900"
+    <div className="flex flex-col h-screen" style={{ background: colors.backgrounds.abyssBlack }}>
+      {/* Header */}
+      <Header
+        activeProject={activeProject}
+        projects={projects}
+        onProjectChange={setActiveProject}
+        timeRange={timeRange}
+        onTimeRangeChange={setTimeRange}
+        environment={environment}
+        onEnvironmentChange={setEnvironment}
+        onLogout={handleLogout}
+      />
+
+      {/* Main Content */}
+      <Layout activeNav={page} onNavigate={handleNavigate}>
+        <div style={{ background: colors.backgrounds.abyssBlack }}>
+          {page === "dashboard" && (
+            <DashboardPage
+              activeProject={activeProject}
+              projects={projects}
+            />
+          )}
+          {page === "traces" && (
+            <TracesPage
+              activeProject={activeProject}
+              projects={projects}
+            />
+          )}
+          {page !== "dashboard" && page !== "traces" && (
+            <div className="flex flex-col items-center justify-center h-[60vh]">
+              <svg
+                width="48"
+                height="48"
+                viewBox="0 0 48 48"
+                fill="none"
+                className="mb-4 text-lantern-bg-cave"
               >
-                Traces
-              </button>
-              <button
-                onClick={handleLogout}
-                className="text-sm text-gray-600 hover:text-gray-900"
-              >
-                Logout
-              </button>
+                <path
+                  d="M24 4l20 12v20c0 2-4 8-20 16C8 44 4 38 4 36V16L24 4z"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinejoin="round"
+                />
+                <path d="M24 16v16M16 24h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              <h2 className="text-lg font-medium text-lantern-pure">Coming Soon</h2>
+              <p className="text-sm text-lantern-ash mt-1">
+                This page is under development
+              </p>
             </div>
-          </div>
-        )}
-      </nav>
-      <main className="max-w-6xl mx-auto p-4">
-        {page === "login" && <LoginPage onLogin={handleLogin} />}
-        {page === "traces" && (
-          <TracesPage
-            activeProject={activeProject}
-            projects={projects}
-          />
-        )}
-        {page === "dashboard" && <DashboardPage activeProject={activeProject} projects={projects} />}
-      </main>
+          )}
+        </div>
+      </Layout>
     </div>
   );
 }
