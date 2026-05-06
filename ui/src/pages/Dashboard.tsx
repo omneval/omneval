@@ -12,12 +12,16 @@ import {
   Cell,
 } from "recharts";
 import { colors } from "@/theme";
+import {
+  formatNumber,
+  formatTime,
+  timeRangeLabel,
+} from "@/utils/formatters";
 
 // ── Types ──────────────────────────────────────────────────────────
 
 interface DashboardPageProps {
   activeProject: string;
-  projects: { project_id: string; name: string; org_id: string }[];
 }
 
 interface RowData {
@@ -31,7 +35,6 @@ interface AnalyticsRequest {
   group_by: { field: string; truncate?: string }[];
   order_by: { field: string; desc: boolean }[];
   aggregations: { function: string; field: string; alias: string }[];
-  limit?: number;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -43,26 +46,6 @@ function getDefaultFromTo(): { from: string; to: string } {
     from: from.toISOString(),
     to: now.toISOString(),
   };
-}
-
-function formatNumber(v: unknown): string {
-  if (v == null) return "0";
-  const num = typeof v === "string" ? parseFloat(v) : Number(v);
-  if (isNaN(num)) return "0";
-  if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
-  if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
-  return num.toFixed(2);
-}
-
-function formatTime(iso: string): string {
-  if (!iso) return "N/A";
-  const d = new Date(iso);
-  return d.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 // ── Empty State ────────────────────────────────────────────────────
@@ -587,23 +570,13 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
     fetchData();
   }, [activeProject, from, to, fetchData]);
 
-  const timeRangeLabel = (() => {
-    const now = new Date();
-    const fromD = new Date(from);
-    const diffHours = (now.getTime() - fromD.getTime()) / (1000 * 60 * 60);
-    if (diffHours <= 1) return "Past hour";
-    if (diffHours <= 24) return "Past 24 hours";
-    if (diffHours <= 168) return "Past 7 days";
-    return "Custom range";
-  })();
-
   return (
     <div className="p-6" style={{ background: colors.backgrounds.abyssBlack }}>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-lantern-pure">Dashboard</h1>
-          <p className="text-sm text-lantern-ash mt-1">{timeRangeLabel}</p>
+          <p className="text-sm text-lantern-ash mt-1">{timeRangeLabel(from)}</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">

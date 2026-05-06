@@ -45,22 +45,17 @@ export default function App() {
   }, []);
 
   const fetchProjects = async (_session: string) => {
-    try {
-      const res = await fetch("/api/v1/projects");
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          setProjects(data);
-          setActiveProject(
-            data[0]?.project_id ?? "",
-          );
-        }
+    const res = await fetch("/api/v1/projects");
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setProjects(data);
+        setActiveProject(data[0]?.project_id ?? "");
       }
-    } finally {
     }
   };
 
-  const handleLogin = async (email: string, password: string) => {
+  const handleLogin = async (email: string, password: string): Promise<boolean> => {
     const res = await fetch("/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -112,16 +107,10 @@ export default function App() {
       <Layout activeNav={page} onNavigate={handleNavigate}>
         <div style={{ background: colors.backgrounds.abyssBlack }}>
           {page === "dashboard" && (
-            <DashboardPage
-              activeProject={activeProject}
-              projects={projects}
-            />
+            <DashboardPage activeProject={activeProject} />
           )}
           {page === "traces" && (
-            <TracesPage
-              activeProject={activeProject}
-              projects={projects}
-            />
+            <TracesPage activeProject={activeProject} />
           )}
           {page !== "dashboard" && page !== "traces" && (
             <div className="flex flex-col items-center justify-center h-[60vh]">

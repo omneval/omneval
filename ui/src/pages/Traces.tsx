@@ -1,11 +1,16 @@
 import { useState, useEffect, useCallback } from "react";
 import { colors } from "@/theme";
+import {
+  formatTime,
+  formatDuration,
+  truncate,
+  safeExtractInputOutput,
+} from "@/utils/formatters";
 
 // ── Types ──────────────────────────────────────────────────────────
 
 interface TracesPageProps {
   activeProject: string;
-  projects: { project_id: string; name: string; org_id: string }[];
 }
 
 interface Span {
@@ -46,34 +51,8 @@ interface QueryFilter {
   value: string | string[];
 }
 
-// ── Filter State ───────────────────────────────────────────────────
-
 interface FilterState {
   [fieldName: string]: string[];
-}
-
-// ── Helpers ────────────────────────────────────────────────────────
-
-function formatTime(iso: string): string {
-  if (!iso) return "N/A";
-  const d = new Date(iso);
-  return d.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatDuration(start: string, end: string): string {
-  const ms = new Date(end).getTime() - new Date(start).getTime();
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
-}
-
-function truncate(str: string | undefined, len: number): string {
-  if (!str) return "—";
-  return str.length > len ? str.slice(0, len) + "…" : str;
 }
 
 // ── Observation Level Pills ────────────────────────────────────────
@@ -167,12 +146,16 @@ function FilterSection({
 }) {
   const [input, setInput] = useState(value.join(", "));
 
+  // Sync local input state when the value prop changes from outside.
+  useEffect(() => {
+    setInput(value.join(", "));
+  }, [value]);
+
   const handleApply = () => {
     const vals = input
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    setInput(input);
     onApply(vals);
   };
 
@@ -342,7 +325,6 @@ export default function TracesPage({ activeProject }: TracesPageProps) {
   const [activeTab, setActiveTab] = useState<"traces" | "observations">("traces");
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [columnVisibility, setColumnVisibility] = useState({
-    checkbox: true,
     bookmark: true,
     timestamp: true,
     name: true,
@@ -361,6 +343,20 @@ export default function TracesPage({ activeProject }: TracesPageProps) {
   });
   const [filterState, setFilterState] = useState<FilterState>({});
   const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
+
+  // ── Columns Definition ──
+  const columns = [
+    { key: "bookmark", label: "", visible: columnVisibility.bookmark },
+    { key: "timestamp", label: "Timestamp", visible: columnVisibility.timestamp },
+    { key: "name", label: "Name", visible: columnVisibility.name },
+    { key: "input", label: "Input", visible: columnVisibility.input },
+    { key: "output", label: "Output", visible: columnVisibility.output },
+    { key: "observationLevels", label: "Levels", visible: columnVisibility.observationLevels },
+    { key: "latency", label: "Latency", visible: columnVisibility.latency },
+    { key: "tokens", label: "Tokens", visible: columnVisibility.tokens },
+    { key: "cost", label: "Cost", visible: columnVisibility.cost },
+    { key: "environment", label: "Env", visible: columnVisibility.environment },
+  ];
 
   const fetchSpans = useCallback(
     async (cursor: string, append = false) => {
@@ -483,25 +479,10 @@ export default function TracesPage({ activeProject }: TracesPageProps) {
       ...prev,
       [field]: values,
     }));
-    // Re-fetch with new filter
     resetAndFetch("", false);
   };
 
   const totalTokens = (span: Span) => span.input_tokens + span.output_tokens;
-
-  // ── Columns Definition ──
-  const columns = [
-    { key: "bookmark", label: "", visible: columnVisibility.bookmark },
-    { key: "timestamp", label: "Timestamp", visible: columnVisibility.timestamp },
-    { key: "name", label: "Name", visible: columnVisibility.name },
-    { key: "input", label: "Input", visible: columnVisibility.input },
-    { key: "output", label: "Output", visible: columnVisibility.output },
-    { key: "observationLevels", label: "Levels", visible: columnVisibility.observationLevels },
-    { key: "latency", label: "Latency", visible: columnVisibility.latency },
-    { key: "tokens", label: "Tokens", visible: columnVisibility.tokens },
-    { key: "cost", label: "Cost", visible: columnVisibility.cost },
-    { key: "environment", label: "Env", visible: columnVisibility.environment },
-  ];
 
   const visibleColumns = columns.filter((c) => c.visible);
 
@@ -737,12 +718,12 @@ export default function TracesPage({ activeProject }: TracesPageProps) {
                           )}
                           {col.key === "input" && (
                             <div className="max-w-[200px] truncate text-lantern-ash text-xs font-mono">
-                              {span.input ? truncate(JSON.parse(span.input)[0]?.content ?? span.input, 40) : "—"}
+                              {span.input ? truncate(safeExtractInputOutput(span.input), 40) : "—"}
                             </div>
                           )}
                           {col.key === "output" && (
                             <div className="max-w-[200px] truncate text-lantern-ash text-xs font-mono">
-                              {span.output ? truncate(JSON.parse(span.output)[0]?.content ?? span.output, 40) : "—"}
+                              {span.output ? truncate(safeExtractInputOutput(span.output), 40) : "—"}
                             </div>
                           )}
                           {col.key === "observationLevels" && (
