@@ -12,6 +12,15 @@ import (
 	"github.com/zbloss/lantern/internal/metadata"
 )
 
+// extractProjectID extracts the authenticated project ID from the request.
+// Returns an empty string and false when no session store is configured.
+func extractProjectID(sessionStore sessionStore, r *http.Request) (string, bool) {
+	if sessionStore == nil {
+		return "", false
+	}
+	return sessionStore.ProjectID(r)
+}
+
 // EvalRuleHandler handles eval rule CRUD endpoints:
 //   POST   /api/v1/eval-rules          — create an eval rule
 //   GET    /api/v1/eval-rules          — list all eval rules for the project
@@ -48,12 +57,7 @@ func (h *EvalRuleHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract project_id from the authenticated session.
-	var projectID string
-	var ok bool
-	if h.SessionStore != nil {
-		projectID, ok = h.SessionStore.ProjectID(r)
-	}
+	projectID, ok := extractProjectID(h.SessionStore, r)
 	if !ok || projectID == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -75,31 +79,18 @@ func (h *EvalRuleHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate sample_rate is in range [0.0, 1.0].
+	// Validate and default sample_rate.
 	sampleRate := req.SampleRate
-	if sampleRate < 0.0 {
+	if sampleRate < 0.0 || sampleRate > 1.0 {
 		http.Error(w, "sample_rate must be between 0.0 and 1.0", http.StatusBadRequest)
 		return
 	}
-	if sampleRate > 1.0 {
-		// Default to 1.0 if not specified (0 means not set)
-		// But if explicitly set > 1.0, reject.
-		http.Error(w, "sample_rate must be between 0.0 and 1.0", http.StatusBadRequest)
-		return
-	}
-	// Default sample_rate to 1.0 if zero.
 	if sampleRate == 0.0 {
 		sampleRate = 1.0
 	}
 
-	// Default enabled to true if not specified.
-	enabled := req.Enabled
-	if !enabled && req.Enabled == false {
-		// User explicitly set false — keep it.
-		// If user didn't set it at all (JSON omits the field), Go defaults to false.
-		// We need a pointer to distinguish. Let's just default to true.
-		enabled = true
-	}
+	// Default enabled to true (Go bool zero value is false, but we want true).
+	enabled := true
 
 	rule := &domain.EvalRule{
 		RuleID:        uuid.New().String(),
@@ -125,19 +116,13 @@ func (h *EvalRuleHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleList handles GET /api/v1/eval-rules.
-// Returns all rules for the authenticated project.
 func (h *EvalRuleHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Extract project_id from the authenticated session.
-	var projectID string
-	var ok bool
-	if h.SessionStore != nil {
-		projectID, ok = h.SessionStore.ProjectID(r)
-	}
+	projectID, ok := extractProjectID(h.SessionStore, r)
 	if !ok || projectID == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -154,20 +139,13 @@ func (h *EvalRuleHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleDelete handles DELETE /api/v1/eval-rules/:id.
-// Removes a rule by ID. The Writer Service will pick up the change
-// within its next 60-second cache reload.
 func (h *EvalRuleHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Extract project_id from the authenticated session.
-	var projectID string
-	var ok bool
-	if h.SessionStore != nil {
-		projectID, ok = h.SessionStore.ProjectID(r)
-	}
+	projectID, ok := extractProjectID(h.SessionStore, r)
 	if !ok || projectID == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -175,7 +153,7 @@ func (h *EvalRuleHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 
 	ruleID := r.PathValue("id")
 	if ruleID == "" {
-		// Fallback for tests that don't use ServeMux pattern matching.
+		// Fallback for httptest requests that don't use ServeMux pattern matching.
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 		if len(parts) >= 3 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "eval-rules" {
 			ruleID = parts[3]
