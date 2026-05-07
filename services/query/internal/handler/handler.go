@@ -21,12 +21,12 @@ import (
 // and GET /api/v1/projects (project list for the UI project switcher).
 type SpanHandler struct {
 	DB           *sql.DB
-	SessionStore sessionStore
+	SessionStore SessionStore
 	Metrics      *metrics.QueryMetrics
 }
 
-// sessionStore abstracts session lookup for project ID extraction.
-type sessionStore interface {
+// SessionStore abstracts session lookup for project ID extraction.
+type SessionStore interface {
 	ProjectID(r *http.Request) (string, bool)
 	ListProjects(r *http.Request) ([]*domain.Project, error)
 }

@@ -90,6 +90,11 @@ type QueryConfig struct {
 	Addr          string `mapstructure:"addr"`
 	DuckDBPath    string `mapstructure:"duckdb_path"`
 	SyncInterval  string `mapstructure:"sync_interval"` // default "30s"
+	// PlaygroundLLMBaseURL is an OpenAI-compatible base URL for the playground LLM.
+	// Works with OpenAI, LiteLLM proxy, Ollama, or any compatible endpoint.
+	PlaygroundLLMBaseURL string `mapstructure:"playground_llm_base_url"`
+	// PlaygroundLLMAPIKey is the API key for the playground LLM.
+	PlaygroundLLMAPIKey string `mapstructure:"playground_llm_api_key"`
 }
 
 type EvalConfig struct {
@@ -166,6 +171,8 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("query.addr", ":8002")
 	v.SetDefault("query.duckdb_path", "")
 	v.SetDefault("query.sync_interval", "30s")
+	v.SetDefault("query.playground_llm_base_url", "")
+	v.SetDefault("query.playground_llm_api_key", "")
 	// eval
 	v.SetDefault("eval.addr", ":8003")
 	v.SetDefault("eval.concurrency", 4)
@@ -219,9 +226,11 @@ func Load(path string) (*Config, error) {
 	envInt(&cfg.Writer.FlushAgeDays,            "LANTERN_WRITER_FLUSH_AGE_DAYS")
 	envBool(&cfg.Writer.LeaderElection.Enabled, "LANTERN_WRITER_LEADER_ELECTION_ENABLED")
 	envInt(&cfg.Writer.LeaderElection.LockTTL,  "LANTERN_WRITER_LEADER_ELECTION_LOCK_TTL")
-	envString(&cfg.Query.Addr,          "LANTERN_QUERY_ADDR")
-	envString(&cfg.Query.DuckDBPath,    "LANTERN_QUERY_DUCKDB_PATH")
-	envString(&cfg.Query.SyncInterval,  "LANTERN_QUERY_SYNC_INTERVAL")
+	envString(&cfg.Query.Addr,              "LANTERN_QUERY_ADDR")
+	envString(&cfg.Query.DuckDBPath,        "LANTERN_QUERY_DUCKDB_PATH")
+	envString(&cfg.Query.SyncInterval,      "LANTERN_QUERY_SYNC_INTERVAL")
+	envString(&cfg.Query.PlaygroundLLMBaseURL, "LANTERN_QUERY_PLAYGROUND_LLM_BASE_URL")
+	envString(&cfg.Query.PlaygroundLLMAPIKey,  "LANTERN_QUERY_PLAYGROUND_LLM_API_KEY")
 	envString(&cfg.Eval.Addr,           "LANTERN_EVAL_ADDR")
 	envInt(&cfg.Eval.Concurrency,       "LANTERN_EVAL_CONCURRENCY")
 	envString(&cfg.Eval.LLMBaseURL,     "LANTERN_EVAL_LLM_BASE_URL")

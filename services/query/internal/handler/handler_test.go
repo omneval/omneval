@@ -814,7 +814,7 @@ type spanScore struct {
 	Reasoning string  `json:"reasoning"`
 }
 
-// FakeSessionStore is a test fake implementing sessionStore.
+// FakeSessionStore is a test fake implementing SessionStore.
 type FakeSessionStore struct {
 	projectID string
 }

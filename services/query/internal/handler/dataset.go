@@ -24,7 +24,7 @@ import (
 
 type DatasetHandler struct {
 	Store        metadata.Store
-	SessionStore sessionStore
+	SessionStore SessionStore
 }
 
 // ---- Request / Response Types ----

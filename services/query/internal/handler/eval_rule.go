@@ -14,11 +14,11 @@ import (
 
 // extractProjectID extracts the authenticated project ID from the request.
 // Returns an empty string and false when no session store is configured.
-func extractProjectID(sessionStore sessionStore, r *http.Request) (string, bool) {
-	if sessionStore == nil {
+func extractProjectID(SessionStore SessionStore, r *http.Request) (string, bool) {
+	if SessionStore == nil {
 		return "", false
 	}
-	return sessionStore.ProjectID(r)
+	return SessionStore.ProjectID(r)
 }
 
 // EvalRuleHandler handles eval rule CRUD endpoints:
@@ -27,7 +27,7 @@ func extractProjectID(sessionStore sessionStore, r *http.Request) (string, bool)
 //   DELETE /api/v1/eval-rules/:id      — delete an eval rule by ID
 type EvalRuleHandler struct {
 	Store        metadata.Store
-	SessionStore sessionStore
+	SessionStore SessionStore
 }
 
 // ---- Request / Response Types ----

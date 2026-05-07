@@ -27,7 +27,7 @@ import (
 type PromptHandler struct {
 	Store        metadata.Store
 	Cache        *PromptCache
-	SessionStore sessionStore
+	SessionStore SessionStore
 }
 
 // HandleCreatePrompt handles POST /api/v1/prompts.

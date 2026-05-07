@@ -26,6 +26,7 @@ import (
 	"github.com/zbloss/lantern/services/query/internal/auth"
 	"github.com/zbloss/lantern/services/query/internal/handler"
 	"github.com/zbloss/lantern/services/query/internal/metrics"
+	"github.com/zbloss/lantern/services/query/internal/playground"
 )
 
 //go:embed ui/dist
@@ -188,6 +189,16 @@ func Run() error {
 		}
 	}
 
+	// Playground handler (requires metadata store + LLM config).
+	var playgroundHandler *playground.PlaygroundHandler
+	if store != nil && (cfg.Query.PlaygroundLLMBaseURL != "" && cfg.Query.PlaygroundLLMAPIKey != "") {
+		playgroundHandler = &playground.PlaygroundHandler{
+			Cache:        promptCache,
+			LLMClient:    playground.NewHTTPClient(cfg.Query.PlaygroundLLMBaseURL, cfg.Query.PlaygroundLLMAPIKey),
+			SessionStore: h,
+		}
+	}
+
 	// Build the router.
 	mux := http.NewServeMux()
 
@@ -231,6 +242,11 @@ func Run() error {
 		mux.HandleFunc("POST /api/v1/datasets/{id}/items", datasetHandler.HandleAddItems)
 		mux.HandleFunc("GET /api/v1/datasets/{id}/items", datasetHandler.HandleListItems)
 		mux.HandleFunc("DELETE /api/v1/datasets/{id}", datasetHandler.HandleDelete)
+	}
+
+	// Playground endpoint (requires metadata store + LLM config).
+	if playgroundHandler != nil {
+		mux.HandleFunc("POST /api/v1/playground/run", playgroundHandler.HandleRun)
 	}
 
 	// Score write endpoint (for eval worker score write-back).
