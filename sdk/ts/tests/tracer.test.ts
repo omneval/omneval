@@ -1,0 +1,263 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { ManualTracer } from "../src/tracer";
+import { createLantern } from "../src/lantern";
+
+describe("ManualTracer", () => {
+  it("startSpan returns a 16-char hex span ID", () => {
+    const tracer = new ManualTracer({ export: async () => true });
+    tracer.init();
+    const spanId = tracer.startSpan("test.span");
+    expect(spanId).toHaveLength(16);
+    expect(spanId).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("endSpan sends spans to the exporter", async () => {
+    let exportedSpans: any[] = [];
+    const mockExporter = {
+      export: async (spans: any[]) => {
+        exportedSpans = spans;
+        return true;
+      },
+    };
+    const tracer = new ManualTracer(mockExporter as any);
+    tracer.init();
+
+    const spanId = tracer.startSpan("test.span");
+    await tracer.endSpan(spanId);
+
+    expect(exportedSpans).toHaveLength(1);
+    expect(exportedSpans[0].name).toBe("test.span");
+    expect(exportedSpans[0].span_id).toBe(spanId);
+  });
+
+  it("setModel attaches model to span", async () => {
+    let exportedSpans: any[] = [];
+    const mockExporter = {
+      export: async (spans: any[]) => {
+        exportedSpans = spans;
+        return true;
+      },
+    };
+    const tracer = new ManualTracer(mockExporter as any);
+    tracer.init();
+
+    const spanId = tracer.startSpan("test.span");
+    tracer.setModel(spanId, "gpt-4");
+    await tracer.endSpan(spanId);
+
+    expect(exportedSpans[0].model).toBe("gpt-4");
+  });
+
+  it("setInput attaches input to span", async () => {
+    let exportedSpans: any[] = [];
+    const mockExporter = {
+      export: async (spans: any[]) => {
+        exportedSpans = spans;
+        return true;
+      },
+    };
+    const tracer = new ManualTracer(mockExporter as any);
+    tracer.init();
+
+    const spanId = tracer.startSpan("test.span");
+    tracer.setInput(spanId, "hello world");
+    await tracer.endSpan(spanId);
+
+    expect(exportedSpans[0].input).toBe("hello world");
+  });
+
+  it("setTokens attaches token counts to span", async () => {
+    let exportedSpans: any[] = [];
+    const mockExporter = {
+      export: async (spans: any[]) => {
+        exportedSpans = spans;
+        return true;
+      },
+    };
+    const tracer = new ManualTracer(mockExporter as any);
+    tracer.init();
+
+    const spanId = tracer.startSpan("test.span");
+    tracer.setTokens(spanId, 100, 50);
+    await tracer.endSpan(spanId);
+
+    expect(exportedSpans[0].input_tokens).toBe(100);
+    expect(exportedSpans[0].output_tokens).toBe(50);
+  });
+
+  it("setPrompt attaches prompt name/version to span", async () => {
+    let exportedSpans: any[] = [];
+    const mockExporter = {
+      export: async (spans: any[]) => {
+        exportedSpans = spans;
+        return true;
+      },
+    };
+    const tracer = new ManualTracer(mockExporter as any);
+    tracer.init();
+
+    const spanId = tracer.startSpan("test.span");
+    tracer.setPrompt(spanId, "greeting", 1);
+    await tracer.endSpan(spanId);
+
+    expect(exportedSpans[0].prompt_name).toBe("greeting");
+    expect(exportedSpans[0].prompt_version).toBe(1);
+  });
+
+  it("endSpan with output string", async () => {
+    let exportedSpans: any[] = [];
+    const mockExporter = {
+      export: async (spans: any[]) => {
+        exportedSpans = spans;
+        return true;
+      },
+    };
+    const tracer = new ManualTracer(mockExporter as any);
+    tracer.init();
+
+    const spanId = tracer.startSpan("test.span");
+    await tracer.endSpan(spanId, { output: "response text" });
+
+    expect(exportedSpans[0].output).toBe("response text");
+  });
+
+  it("endSpan ignores unknown span ID", async () => {
+    let exportedSpans: any[] = [];
+    const mockExporter = {
+      export: async (spans: any[]) => {
+        exportedSpans = spans;
+        return true;
+      },
+    };
+    const tracer = new ManualTracer(mockExporter as any);
+    tracer.init();
+
+    await tracer.endSpan("unknown-span-id");
+    expect(exportedSpans).toHaveLength(0);
+  });
+
+  it("endSpan with attributes merges with startSpan attributes", async () => {
+    let exportedSpans: any[] = [];
+    const mockExporter = {
+      export: async (spans: any[]) => {
+        exportedSpans = spans;
+        return true;
+      },
+    };
+    const tracer = new ManualTracer(mockExporter as any);
+    tracer.init();
+
+    const spanId = tracer.startSpan("test.span", { attributes: { custom: "value" } });
+    await tracer.endSpan(spanId, { attributes: { extra: "attr" } });
+
+    expect(exportedSpans[0].attributes).toEqual({
+      custom: "value",
+      extra: "attr",
+    });
+  });
+
+  it("flush sends all pending spans in one batch", async () => {
+    let exportedSpans: any[] = [];
+    const mockExporter = {
+      export: async (spans: any[]) => {
+        exportedSpans = spans;
+        return true;
+      },
+    };
+    const tracer = new ManualTracer(mockExporter as any);
+    tracer.init();
+
+    tracer.startSpan("span-1");
+    tracer.startSpan("span-2");
+    tracer.startSpan("span-3");
+    await tracer.flush();
+
+    expect(exportedSpans).toHaveLength(3);
+  });
+
+  it("span includes start_time and end_time", async () => {
+    let exportedSpans: any[] = [];
+    const mockExporter = {
+      export: async (spans: any[]) => {
+        exportedSpans = spans;
+        return true;
+      },
+    };
+    const tracer = new ManualTracer(mockExporter as any);
+    tracer.init();
+
+    const spanId = tracer.startSpan("timed.span");
+    await tracer.endSpan(spanId);
+
+    expect(exportedSpans[0].start_time).toBeDefined();
+    expect(exportedSpans[0].end_time).toBeDefined();
+    expect(exportedSpans[0].end_time).toBeGreaterThanOrEqual(exportedSpans[0].start_time);
+  });
+
+  it("span has trace_id matching the generated format", async () => {
+    let exportedSpans: any[] = [];
+    const mockExporter = {
+      export: async (spans: any[]) => {
+        exportedSpans = spans;
+        return true;
+      },
+    };
+    const tracer = new ManualTracer(mockExporter as any);
+    tracer.init();
+
+    const spanId = tracer.startSpan("trace.span");
+    await tracer.endSpan(spanId);
+
+    expect(exportedSpans[0].trace_id).toHaveLength(32);
+    expect(exportedSpans[0].trace_id).toMatch(/^[0-9a-f]{32}$/);
+  });
+});
+
+describe("createLantern", () => {
+  it("creates a fresh LanternSDK instance", () => {
+    const lantern = createLantern();
+    expect(lantern).toBeDefined();
+    expect(lantern.config).toBeUndefined();
+  });
+
+  it("init() sets up the SDK", () => {
+    const lantern = createLantern();
+    lantern.init({ baseUrl: "http://localhost:3000", apiKey: "ltn_proj_test" });
+    expect(lantern.config).toBeDefined();
+  });
+
+  it("startSpan returns a span ID after init", () => {
+    const lantern = createLantern();
+    lantern.init({ baseUrl: "http://localhost:3000" });
+    const spanId = lantern.startSpan("test.span");
+    expect(spanId).toHaveLength(16);
+  });
+
+  it("startSpan before init returns empty string with warning", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const lantern = createLantern();
+    const spanId = lantern.startSpan("test.span");
+    expect(spanId).toBe("");
+    expect(warnSpy).toHaveBeenCalledWith(
+      "@lantern/sdk: Lantern.init() not called — startSpan() is a no-op"
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("endSpan before init is a no-op", async () => {
+    const lantern = createLantern();
+    await expect(lantern.endSpan("any-id")).resolves.toBeUndefined();
+  });
+
+  it("writeScore throws before init", async () => {
+    const lantern = createLantern();
+    await expect(
+      lantern.writeScore("span-1", { name: "eval", value: 1.0 })
+    ).rejects.toThrow("Lantern.init() not called");
+  });
+
+  it("getPrompt throws before init", async () => {
+    const lantern = createLantern();
+    await expect(lantern.getPrompt("test")).rejects.toThrow("Lantern.init() not called");
+  });
+});
