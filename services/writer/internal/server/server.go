@@ -359,48 +359,23 @@ func runWithLeaderElection(
 			renewErrCh <- election.RenewLoop(renewCtx, leader.RenewIntervalDefault)
 		}()
 
-		// If we're not already the leader, try to acquire.
+		// Try to acquire leadership if not already the leader.
 		if !election.IsLeader() {
-			acquired, err := election.Acquire(ctx)
-			if err != nil {
+			if err := waitForLeadership(ctx, election, rng); err != nil {
 				renewCancel()
 				<-renewErrCh
-				return fmt.Errorf("leader election: acquire: %w", err)
-			}
-			if !acquired {
-				renewCancel()
-				<-renewErrCh
-				// Wait with jitter before retrying.
-				wait := time.Duration(rng.Intn(3)+1) * time.Second
-				slog.Info("writer: not leader, retrying in", "seconds", wait)
-				select {
-				case <-time.After(wait):
-					continue
-				case <-ctx.Done():
-					return ctx.Err()
-				}
+				return err
 			}
 			slog.Info("writer: elected leader")
 		}
 
-		// We are the leader. If fencing is enabled, reconcile the snapshot first.
-		if reconciler != nil {
-			slog.Info("writer: fencing enabled, reconciling snapshot before accepting writes")
-			reconStatus.SetError(fmt.Errorf("reconciliation in progress"))
-
-			if err := reconciler.Reconcile(ctx); err != nil {
-				slog.Error("writer: fencing: snapshot reconciliation failed", "err", err)
-				reconStatus.SetError(err)
-				// Still run the pipeline but readiness will show 503.
-				// In production you might want to fail fast here.
-			} else {
-				slog.Info("writer: fencing: snapshot reconciled, ready to accept writes")
-				reconStatus.SetComplete()
-			}
+		// Reconcile the S3 snapshot before accepting writes (if fencing is enabled).
+		if err := reconcileLeaderSnapshot(ctx, reconciler, reconStatus); err != nil {
+			// Still run the pipeline but readiness will show 503.
+			slog.Warn("writer: snapshot reconciliation non-fatal", "err", err)
 		}
 
-		// We are the leader — run the pipeline.
-		slog.Info("writer: pipeline running (leader)")
+		// Run the pipeline.
 		plErr := pl.Run(ctx)
 
 		// Pipeline completed (likely due to context cancellation).
@@ -411,7 +386,7 @@ func runWithLeaderElection(
 		// to prevent any window of dual-write.
 		if errors.Is(renewErr, leader.ErrLostLeadership) {
 			if cfg.Writer.LeaderElection.FencingEnabled {
-				slog.Warn("writer: lost leadership — closing DuckDB immediately to prevent dual-write")
+				slog.Warn("writer: lost leadership — closing DuckDB to prevent dual-write")
 				db.Close()
 			}
 		}
@@ -435,6 +410,55 @@ func runWithLeaderElection(
 
 		return ctx.Err()
 	}
+}
+
+// waitForLeadership blocks until this instance acquires the leader lock
+// or the context is cancelled. Returns with jitter-backed retries.
+func waitForLeadership(ctx context.Context, election *leader.LeaderElection, rng *rand.Rand) error {
+	for {
+		acquired, err := election.Acquire(ctx)
+		if err != nil {
+			return fmt.Errorf("leader election: acquire: %w", err)
+		}
+		if acquired {
+			return nil
+		}
+
+		// Wait with jitter before retrying.
+		wait := time.Duration(rng.Intn(3)+1) * time.Second
+		slog.Info("writer: not leader, retrying in", "seconds", wait)
+		select {
+		case <-time.After(wait):
+			continue
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// reconcileLeaderSnapshot reconciles the S3 snapshot when this instance
+// becomes leader. If fencing is disabled (reconciler is nil), it returns nil.
+// Returns nil on success or when reconciliation is skipped.
+func reconcileLeaderSnapshot(
+	ctx context.Context,
+	reconciler *Reconciler,
+	reconStatus *reconciliationStatus,
+) error {
+	if reconciler == nil {
+		return nil
+	}
+
+	slog.Info("writer: fencing enabled, reconciling snapshot before accepting writes")
+	reconStatus.SetError(fmt.Errorf("reconciliation in progress"))
+
+	if err := reconciler.Reconcile(ctx); err != nil {
+		reconStatus.SetError(err)
+		return err
+	}
+
+	slog.Info("writer: fencing: snapshot reconciled, ready to accept writes")
+	reconStatus.SetComplete()
+	return nil
 }
 
 // releaseLeaderLock releases the leader lock gracefully.

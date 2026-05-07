@@ -19,10 +19,10 @@ type LLMClient interface {
 
 // ChatRequest is the request sent to the OpenAI-compatible chat completions endpoint.
 type ChatRequest struct {
-	Model       string           `json:"model"`
-	Messages    []ChatMessage    `json:"messages"`
-	Temperature float64          `json:"temperature,omitempty"`
-	MaxTokens   int              `json:"max_tokens,omitempty"`
+	Model       string        `json:"model"`
+	Messages    []ChatMessage `json:"messages"`
+	Temperature float64       `json:"temperature,omitempty"`
+	MaxTokens   int           `json:"max_tokens,omitempty"`
 }
 
 // ChatMessage represents a single message in a chat conversation.
@@ -127,19 +127,34 @@ var variableRegex = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}`)
 func Interpolate(template string, variables map[string]string) (string, []string) {
 	var missing []string
 
-	result := variableRegex.ReplaceAllStringFunc(template, func(match string) string {
-		submatches := variableRegex.FindStringSubmatch(match)
-		name := submatches[1]
+	// Collect all match indices once, so the callback can look up data without re-parsing.
+	matches := variableRegex.FindAllStringSubmatchIndex(template, -1)
+	var result strings.Builder
+	result.Grow(len(template))
+
+	prevEnd := 0
+	for _, match := range matches {
+		nameStart, nameEnd := match[2], match[3]
+		name := template[nameStart:nameEnd]
+		fullStart, fullEnd := match[0], match[1]
+
+		// Write the literal text before this match.
+		result.WriteString(template[prevEnd:fullStart])
 
 		val, ok := variables[name]
 		if !ok {
 			missing = append(missing, name)
-			return match // leave uninterpolated
+			result.WriteString(template[fullStart:fullEnd]) // leave uninterpolated
+		} else {
+			result.WriteString(val)
 		}
-		return val
-	})
+		prevEnd = fullEnd
+	}
 
-	return result, missing
+	// Write remaining text after the last match.
+	result.WriteString(template[prevEnd:])
+
+	return result.String(), missing
 }
 
 // BuildJudgeMessages constructs OpenAI-compatible messages for judge/eval LLM calls.

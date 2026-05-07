@@ -15,8 +15,8 @@ import (
 // LastModified and downloads the S3 snapshot when S3 is newer. This prevents
 // dual-writer data corruption during leader failover.
 type Reconciler struct {
-	store     storage.ObjectStore
-	dbPath    string
+	store       storage.ObjectStore
+	dbPath      string
 	snapshotKey string
 }
 

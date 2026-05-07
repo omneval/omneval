@@ -199,7 +199,7 @@ func (h *DatasetRunHandler) scoreItem(
 	// Interpolate the prompt template.
 	interpolated, missing := judge.Interpolate(pv.Template, variables)
 	if len(missing) > 0 {
-		return &judgeError{msg: "missing prompt variables: " + strings.Join(missing, ", ")}
+		return fmt.Errorf("scoreItem: missing prompt variables: %s", strings.Join(missing, ", "))
 	}
 
 	// Build chat messages for the judge LLM.
@@ -212,7 +212,7 @@ func (h *DatasetRunHandler) scoreItem(
 		Temperature: 0.0, // deterministic scoring
 	})
 	if err != nil {
-		return &judgeError{msg: err.Error()}
+		return fmt.Errorf("scoreItem: judge LLM: %w", err)
 	}
 
 	// Parse the response for score and reasoning.
@@ -234,46 +234,75 @@ func (h *DatasetRunHandler) scoreItem(
 	}
 
 	if err := h.Store.CreateDatasetRunItem(ctx, runItem); err != nil {
-		return &judgeError{msg: "store error: " + err.Error()}
+		return fmt.Errorf("scoreItem: store: %w", err)
 	}
 
 	return nil
 }
 
-// judgeError wraps an error for internal use.
-type judgeError struct {
-	msg string
-}
-
-func (e *judgeError) Error() string { return e.msg }
-
-// parseJudgeResponse extracts a numeric score and reasoning from the LLM response.
-// The judge prompt should produce output like:
+// parseJudgeResponse extracts a numeric and reasoning from an LLM response.
+// The judge prompt produces output in one of these formats:
 //
 //	Score: 8.5
 //	Reasoning: The output is accurate but could be more detailed.
 //
-// Falls back to 0.0 score and the full content as reasoning if parsing fails.
+//	Score 8.5
+//	Reasoning: ...
+//
+// It also handles a standalone numeric score on its own line. Falls back to
+// 0.0 score and the full content as reasoning if parsing fails.
 func parseJudgeResponse(content string) (float64, string) {
 	score := 0.0
 	reasoning := content
 
-	lines := strings.Split(content, "\n")
-	for _, line := range lines {
+	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
-		lower := strings.ToLower(line)
-		if strings.HasPrefix(lower, "score:") || strings.HasPrefix(lower, "score ") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				if _, err := fmt.Sscanf(strings.TrimSpace(parts[1]), "%f", &score); err == nil {
-					reasoning = strings.TrimSpace(line)
-					break
-				}
-			}
+		if line == "" {
+			continue
+		}
+
+		// Try "Score: <value>" or "Score <value>" format.
+		if parsed, ok := parseScoreLine(line); ok {
+			score = parsed
+			reasoning = line
+			break
+		}
+
+		// Try a standalone numeric score (e.g. "8.5").
+		var standaloneScore float64
+		if n, err := fmt.Sscanf(line, "%f", &standaloneScore); err == nil && n == 1 {
+			score = standaloneScore
+			reasoning = line
+			break
 		}
 	}
 
 	return score, reasoning
+}
+
+// parseScoreLine extracts a numeric score from a line like "Score: 8.5" or "score 3.2".
+func parseScoreLine(line string) (float64, bool) {
+	// Try "Score: <value>" format.
+	if idx := strings.IndexByte(line, ':'); idx > 0 {
+		prefix := strings.TrimSpace(line[:idx])
+		if strings.EqualFold(prefix, "score") {
+			var s float64
+			if _, err := fmt.Sscanf(strings.TrimSpace(line[idx+1:]), "%f", &s); err == nil {
+				return s, true
+			}
+		}
+	}
+
+	// Try "Score <value>" without colon.
+	parts := strings.Fields(line)
+	if len(parts) >= 2 && strings.EqualFold(parts[0], "score") {
+		var s float64
+		if _, err := fmt.Sscanf(parts[1], "%f", &s); err == nil {
+			return s, true
+		}
+	}
+
+	return 0, false
 }
 
 // HandleListRuns handles GET /api/v1/datasets/:id/runs.
