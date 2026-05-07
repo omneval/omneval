@@ -11,6 +11,8 @@ import {
 
 interface TracesPageProps {
   activeProject: string;
+  onNavigateToTrace: (traceId: string) => void;
+  onNavigateToTraceDetail: () => void;
 }
 
 interface Span {
@@ -315,7 +317,11 @@ function PaginationControls({
 
 // ── Main Traces Page ───────────────────────────────────────────────
 
-export default function TracesPage({ activeProject }: TracesPageProps) {
+export default function TracesPage({
+  activeProject,
+  onNavigateToTrace,
+  onNavigateToTraceDetail,
+}: TracesPageProps) {
   const [spans, setSpans] = useState<Span[]>([]);
   const [nextCursor, setNextCursor] = useState("");
   const [loading, setLoading] = useState(false);
@@ -709,12 +715,19 @@ export default function TracesPage({ activeProject }: TracesPageProps) {
                             </span>
                           )}
                           {col.key === "name" && (
-                            <div>
+                            <button
+                              onClick={() => {
+                                onNavigateToTrace(span.trace_id);
+                                onNavigateToTraceDetail();
+                              }}
+                              className="text-left block w-full"
+                              title="View trace waterfall"
+                            >
                               <div className="text-lantern-pure font-medium">{span.name}</div>
                               <div className="text-lantern-ash text-xs font-mono truncate max-w-[120px]">
                                 {span.trace_id.slice(0, 12)}…
                               </div>
-                            </div>
+                            </button>
                           )}
                           {col.key === "input" && (
                             <div className="max-w-[200px] truncate text-lantern-ash text-xs font-mono">
