@@ -48,6 +48,7 @@ type Store interface {
 	CreatePromptVersion(ctx context.Context, pv *domain.PromptVersion) error
 	GetPromptVersion(ctx context.Context, projectID, name string, version int64) (*domain.PromptVersion, error)
 	GetPromptByLabel(ctx context.Context, projectID, name, label string) (*domain.PromptVersion, error)
+	ListPromptNames(ctx context.Context, projectID string) ([]string, error)
 	ListPromptVersions(ctx context.Context, projectID, name string) ([]*domain.PromptVersion, error)
 	SetPromptLabel(ctx context.Context, label *domain.PromptLabel) error
 

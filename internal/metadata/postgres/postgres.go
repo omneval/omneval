@@ -484,6 +484,26 @@ func (s *Store) ListPromptVersions(ctx context.Context, projectID, name string) 
 	return versions, rows.Err()
 }
 
+func (s *Store) ListPromptNames(ctx context.Context, projectID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT name FROM prompt_versions WHERE project_id = $1 ORDER BY name`, projectID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: list prompt names: %w", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("postgres: scan prompt name: %w", err)
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}
+
 func (s *Store) SetPromptLabel(ctx context.Context, label *domain.PromptLabel) error {
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx,

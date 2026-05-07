@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import LoginPage from "./pages/Login";
 import TracesPage from "./pages/Traces";
 import DashboardPage from "./pages/Dashboard";
+import PromptsPage from "./pages/Prompts";
 import Header from "./components/Header";
 import Layout from "./components/Layout";
 import { colors } from "./theme";
@@ -112,7 +113,10 @@ export default function App() {
           {page === "traces" && (
             <TracesPage activeProject={activeProject} />
           )}
-          {page !== "dashboard" && page !== "traces" && (
+          {page === "prompts" && (
+            <PromptsPage activeProject={activeProject} />
+          )}
+          {page !== "dashboard" && page !== "traces" && page !== "prompts" && (
             <div className="flex flex-col items-center justify-center h-[60vh]">
               <svg
                 width="48"

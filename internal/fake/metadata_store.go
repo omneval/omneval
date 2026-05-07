@@ -292,6 +292,22 @@ func (f *FakeMetadataStore) ListPromptVersions(ctx context.Context, projectID, n
 	return versions, nil
 }
 
+func (f *FakeMetadataStore) ListPromptNames(ctx context.Context, projectID string) ([]string, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	nameSet := make(map[string]struct{})
+	for _, pv := range f.promptVersions {
+		if pv.ProjectID == projectID {
+			nameSet[pv.Name] = struct{}{}
+		}
+	}
+	names := make([]string, 0, len(nameSet))
+	for name := range nameSet {
+		names = append(names, name)
+	}
+	return names, nil
+}
+
 func (f *FakeMetadataStore) SetPromptLabel(ctx context.Context, l *domain.PromptLabel) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

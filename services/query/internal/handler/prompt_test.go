@@ -78,7 +78,32 @@ func (m *FakePromptStore) GetPromptByLabel(ctx context.Context, projectID, name,
 }
 
 func (m *FakePromptStore) ListPromptVersions(ctx context.Context, projectID, name string) ([]*domain.PromptVersion, error) {
-	return nil, nil
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var versions []*domain.PromptVersion
+	for _, pv := range m.promptVersions {
+		if pv.ProjectID == projectID && pv.Name == name {
+			cp := *pv
+			versions = append(versions, &cp)
+		}
+	}
+	return versions, nil
+}
+
+func (m *FakePromptStore) ListPromptNames(ctx context.Context, projectID string) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	nameSet := make(map[string]struct{})
+	for _, pv := range m.promptVersions {
+		if pv.ProjectID == projectID {
+			nameSet[pv.Name] = struct{}{}
+		}
+	}
+	names := make([]string, 0, len(nameSet))
+	for name := range nameSet {
+		names = append(names, name)
+	}
+	return names, nil
 }
 
 func (m *FakePromptStore) SetPromptLabel(ctx context.Context, label *domain.PromptLabel) error {
@@ -613,6 +638,7 @@ func (e *ErrorPromptStore) GetPromptByLabel(ctx context.Context, projectID, name
 	return nil, errors.New("store error")
 }
 func (e *ErrorPromptStore) ListPromptVersions(ctx context.Context, projectID, name string) ([]*domain.PromptVersion, error) { return nil, nil }
+func (e *ErrorPromptStore) ListPromptNames(ctx context.Context, projectID string) ([]string, error)                      { return nil, nil }
 func (e *ErrorPromptStore) SetPromptLabel(ctx context.Context, label *domain.PromptLabel) error                           { return errors.New("store error") }
 func (e *ErrorPromptStore) CreateOrganization(ctx context.Context, o *domain.Organization) error                           { return nil }
 func (e *ErrorPromptStore) GetOrganization(ctx context.Context, id string) (*domain.Organization, error)                   { return nil, metadata.ErrNotFound }
@@ -642,3 +668,149 @@ func (e *ErrorPromptStore) CreateDatasetRun(ctx context.Context, r *domain.Datas
 func (e *ErrorPromptStore) GetDatasetRun(ctx context.Context, id string) (*domain.DatasetRun, error)                       { return nil, metadata.ErrNotFound }
 func (e *ErrorPromptStore) Migrate(ctx context.Context) error                                                              { return nil }
 func (e *ErrorPromptStore) Close() error                                                                                   { return nil }
+
+
+// ---- HandleListPrompts tests ----
+
+func TestPromptHandler_ListPrompts(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:     store,
+		Cache:     cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	// Pre-seed two prompts with multiple versions.
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v1", ProjectID: "test-proj", Name: "greeting", Version: 1,
+		Template: "Hello {{name}}!",
+		ModelConfig: domain.PromptModelConfig{Model: "gpt-3.5", Temperature: 0.5, MaxTokens: 128},
+	})
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v2", ProjectID: "test-proj", Name: "greeting", Version: 2,
+		Template: "Hi {{name}}!",
+		ModelConfig: domain.PromptModelConfig{Model: "gpt-4", Temperature: 0.7, MaxTokens: 256},
+	})
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v3", ProjectID: "test-proj", Name: "summarize", Version: 1,
+		Template: "Summarize: {{text}}",
+		ModelConfig: domain.PromptModelConfig{Model: "claude-3", Temperature: 0.0, MaxTokens: 512},
+	})
+
+	// Set a label.
+	store.SetPromptLabel(context.Background(), &domain.PromptLabel{
+		ProjectID: "test-proj", Name: "greeting", Label: "production", Version: 2,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts?project_id=test-proj", nil)
+	w := httptest.NewRecorder()
+	handler.HandleListPrompts(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var result []promptListItem
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if len(result) != 2 {
+		t.Errorf("count: got %d, want 2", len(result))
+	}
+
+	// Find the greeting entry.
+	var greeting *promptListItem
+	for i := range result {
+		if result[i].Name == "greeting" {
+			greeting = &result[i]
+			break
+		}
+	}
+	if greeting == nil {
+		t.Fatal("missing greeting in result")
+	}
+	if greeting.LatestVersion != 2 {
+		t.Errorf("greeting latest_version: got %d, want 2", greeting.LatestVersion)
+	}
+	if greeting.Labels["production"] != 2 {
+		t.Errorf("greeting production label: got %d, want 2", greeting.Labels["production"])
+	}
+
+	// Find the summarize entry.
+	var summarize *promptListItem
+	for i := range result {
+		if result[i].Name == "summarize" {
+			summarize = &result[i]
+			break
+		}
+	}
+	if summarize == nil {
+		t.Fatal("missing summarize in result")
+	}
+	if summarize.LatestVersion != 1 {
+		t.Errorf("summarize latest_version: got %d, want 1", summarize.LatestVersion)
+	}
+}
+
+func TestPromptHandler_ListPrompts_Empty(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:     store,
+		Cache:     cache,
+		SessionStore: &FakeSessionStore{projectID: "empty-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts?project_id=empty-proj", nil)
+	w := httptest.NewRecorder()
+	handler.HandleListPrompts(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var result []promptListItem
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if len(result) != 0 {
+		t.Errorf("empty result: got %d items, want 0", len(result))
+	}
+}
+
+func TestPromptHandler_ListPrompts_MethodNotAllowed(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:     store,
+		Cache:     cache,
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+	handler.HandleListPrompts(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestPromptHandler_ListPrompts_MissingProjectID(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:     store,
+		Cache:     cache,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts", nil)
+	w := httptest.NewRecorder()
+	handler.HandleListPrompts(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}

@@ -205,6 +205,7 @@ func Run() error {
 
 	// Prompt Registry endpoints (require metadata store).
 	if promptHandler != nil {
+		mux.HandleFunc("GET /api/v1/prompts", promptHandler.HandleListPrompts)
 		mux.HandleFunc("POST /api/v1/prompts", promptHandler.HandleCreatePrompt)
 		mux.HandleFunc("GET /api/v1/prompts/{name}", promptHandler.HandleGetPrompt)
 		mux.HandleFunc("GET /api/v1/prompts/{name}/versions", promptHandler.HandleListPromptVersions)

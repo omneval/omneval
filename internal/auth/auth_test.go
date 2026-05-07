@@ -105,6 +105,9 @@ func (f *FakeMetadataStore) GetPromptByLabel(_ context.Context, _, _, _ string) 
 func (f *FakeMetadataStore) ListPromptVersions(_ context.Context, _, _ string) ([]*domain.PromptVersion, error) {
 	return nil, nil
 }
+func (f *FakeMetadataStore) ListPromptNames(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
 func (f *FakeMetadataStore) SetPromptLabel(_ context.Context, _ *domain.PromptLabel) error {
 	return nil
 }

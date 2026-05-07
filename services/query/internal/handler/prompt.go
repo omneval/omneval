@@ -19,9 +19,11 @@ import (
 
 
 // PromptHandler handles prompt registry endpoints:
-//   POST /api/v1/prompts             — create an immutable prompt version
-//   GET  /api/v1/prompts/:name       — resolve by ?version=N or ?label=<label>
-//   PUT  /api/v1/prompts/:name/labels/:label — reassign a label
+//   GET    /api/v1/prompts                       — list all prompt names with latest versions and labels
+//   POST   /api/v1/prompts                       — create an immutable prompt version
+//   GET    /api/v1/prompts/:name                 — resolve by ?version=N or ?label=<label>
+//   GET    /api/v1/prompts/:name/versions        — list all versions for a prompt
+//   PUT    /api/v1/prompts/:name/labels/:label   — reassign a label
 
 type PromptHandler struct {
 	Store        metadata.Store
@@ -155,6 +157,76 @@ func (h *PromptHandler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(pv)
+}
+
+// promptListItem represents a prompt name with its latest version and active labels.
+type promptListItem struct {
+	Name          string            `json:"name"`
+	LatestVersion int64             `json:"latest_version"`
+	Labels        map[string]int64  `json:"labels"`
+}
+
+// HandleListPrompts handles GET /api/v1/prompts.
+// Returns all prompt names for the authenticated project with their latest
+// version and active labels (production, staging, dev).
+func (h *PromptHandler) HandleListPrompts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var projectID string
+	var ok bool
+	if h.SessionStore != nil {
+		projectID, ok = h.SessionStore.ProjectID(r)
+	}
+	if !ok || projectID == "" {
+		projectID = r.URL.Query().Get("project_id")
+	}
+	if projectID == "" {
+		http.Error(w, "project_id is required", http.StatusBadRequest)
+		return
+	}
+
+	names, err := h.Store.ListPromptNames(r.Context(), projectID)
+	if err != nil {
+		http.Error(w, "store error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	result := make([]promptListItem, 0, len(names))
+	for _, name := range names {
+		// Get all versions for this prompt to find the latest.
+		versions, err := h.Store.ListPromptVersions(r.Context(), projectID, name)
+		if err != nil {
+			continue // skip prompts with errors
+		}
+
+		var latestVersion int64
+		for _, v := range versions {
+			if v.Version > latestVersion {
+				latestVersion = v.Version
+			}
+		}
+
+		// Get active labels for this prompt.
+		labels := make(map[string]int64)
+		for _, label := range []string{"production", "staging", "dev"} {
+			pv, err := h.Store.GetPromptByLabel(r.Context(), projectID, name, label)
+			if err == nil {
+				labels[label] = pv.Version
+			}
+		}
+
+		result = append(result, promptListItem{
+			Name:          name,
+			LatestVersion: latestVersion,
+			Labels:        labels,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 // HandleSetLabel handles PUT /api/v1/prompts/:name/labels/:label.
