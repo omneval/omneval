@@ -34,8 +34,8 @@ type CreateDatasetRequest struct {
 	Name string `json:"name"`
 }
 
-// ListDatasetResponse is returned by GET /api/v1/datasets.
-// Each dataset includes its item count.
+// datasetListItem represents a dataset in the list endpoint response.
+// Each entry includes its item count.
 type datasetListItem struct {
 	DatasetID string `json:"dataset_id"`
 	Name      string `json:"name"`
@@ -76,10 +76,10 @@ type datasetItemResponse struct {
 
 // ListDatasetItemsResponse is returned by GET /api/v1/datasets/:id/items.
 type ListDatasetItemsResponse struct {
-	Items []datasetItemResponse `json:"items"`
-	Next  string                `json:"next,omitempty"`
-	Limit int                   `json:"limit"`
-	Total int                   `json:"total,omitempty"`
+	Items      []datasetItemResponse `json:"items"`
+	Next       string                `json:"next,omitempty"`
+	Limit      int                   `json:"limit"`
+	PageCount  int                   `json:"page_count"`
 }
 
 // ---- HTTP Handlers ----
@@ -150,7 +150,7 @@ func (h *DatasetHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			DatasetID: ds.DatasetID,
 			Name:      ds.Name,
 			CreatedAt: ds.CreatedAt.Format(time.RFC3339),
-			ItemCount: countItemsForDataset(h.Store, ds.DatasetID),
+			ItemCount: countItemsForDataset(r.Context(), h.Store, ds.DatasetID),
 		})
 	}
 
@@ -202,7 +202,7 @@ func (h *DatasetHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 		ProjectID: ds.ProjectID,
 		Name:      ds.Name,
 		CreatedAt: ds.CreatedAt.Format(time.RFC3339),
-		ItemCount: countItemsForDataset(h.Store, ds.DatasetID),
+		ItemCount: countItemsForDataset(r.Context(), h.Store, ds.DatasetID),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -330,10 +330,10 @@ func (h *DatasetHandler) HandleListItems(w http.ResponseWriter, r *http.Request)
 	}
 
 	resp := ListDatasetItemsResponse{
-		Items: make([]datasetItemResponse, 0, len(items)),
-		Next:  nextCursor,
-		Limit: limit,
-		Total: len(items),
+		Items:      make([]datasetItemResponse, 0, len(items)),
+		Next:       nextCursor,
+		Limit:      limit,
+		PageCount:  len(items),
 	}
 	for _, item := range items {
 		resp.Items = append(resp.Items, datasetItemResponse{
@@ -401,10 +401,9 @@ func (h *DatasetHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 
 // ---- Helpers ----
 
-// countItemsForDataset counts the number of items for a dataset.
-// It uses the ListDatasetItems method which is simpler for counting.
-func countItemsForDataset(store metadata.Store, datasetID string) int {
-	items, err := store.ListDatasetItems(context.Background(), datasetID)
+// countItemsForDataset counts the number of dataset items.
+func countItemsForDataset(ctx context.Context, store metadata.Store, datasetID string) int {
+	items, err := store.ListDatasetItems(ctx, datasetID)
 	if err != nil {
 		return 0
 	}

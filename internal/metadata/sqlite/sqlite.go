@@ -797,7 +797,11 @@ func (s *Store) ListDatasets(ctx context.Context, projectID string) ([]*domain.D
 		if err := rows.Scan(&d.DatasetID, &d.ProjectID, &d.Name, &createdAt); err != nil {
 			return nil, fmt.Errorf("sqlite: scan dataset: %w", err)
 		}
-		d.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		createdAtTime, err := time.Parse(time.RFC3339, createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("sqlite: parse created_at: %w", err)
+		}
+		d.CreatedAt = createdAtTime
 		datasets = append(datasets, &d)
 	}
 	return datasets, rows.Err()
@@ -890,10 +894,12 @@ func (s *Store) ListDatasetItemsPaginated(ctx context.Context, datasetID, cursor
 	if cursor != "" {
 		rows, err = s.db.QueryContext(ctx,
 			`SELECT item_id, dataset_id, source_span_id, input, expected_output, created_at
-			 FROM dataset_items WHERE dataset_id = ? AND (created_at, item_id) > (?, ?)
+			 FROM dataset_items WHERE dataset_id = ?
+			 AND (created_at, item_id) > (
+			   SELECT created_at, item_id FROM dataset_items WHERE item_id = ? LIMIT 1
+			 )
 			 ORDER BY created_at ASC, item_id ASC LIMIT ?`,
-			datasetID, cursor, cursor,
-			limit+1, // fetch one extra to check if there are more pages
+			datasetID, cursor, limit+1,
 		)
 	} else {
 		rows, err = s.db.QueryContext(ctx,
@@ -916,7 +922,11 @@ func (s *Store) ListDatasetItemsPaginated(ctx context.Context, datasetID, cursor
 		if err := rows.Scan(&item.ItemID, &item.DatasetID, &item.SourceSpanID, &item.Input, &item.ExpectedOutput, &createdAt); err != nil {
 			return nil, "", fmt.Errorf("sqlite: scan dataset item: %w", err)
 		}
-		item.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		itemCreatedAt, err := time.Parse(time.RFC3339, createdAt)
+		if err != nil {
+			return nil, "", fmt.Errorf("sqlite: parse created_at: %w", err)
+		}
+		item.CreatedAt = itemCreatedAt
 		items = append(items, &item)
 	}
 

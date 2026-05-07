@@ -737,10 +737,12 @@ func (s *Store) ListDatasetItemsPaginated(ctx context.Context, datasetID, cursor
 	if cursor != "" {
 		rows, err = s.db.QueryContext(ctx,
 			`SELECT item_id, dataset_id, source_span_id, input, expected_output, created_at
-			 FROM dataset_items WHERE dataset_id = $1 AND (created_at, item_id) > ($2, $3)
-			 ORDER BY created_at ASC, item_id ASC LIMIT $4`,
-			datasetID, cursor, cursor,
-			limit+1, // fetch one extra to check if there are more pages
+			 FROM dataset_items WHERE dataset_id = $1
+			 AND (created_at, item_id) > (
+			   SELECT created_at, item_id FROM dataset_items WHERE item_id = $2 LIMIT 1
+			 )
+			 ORDER BY created_at ASC, item_id ASC LIMIT $3`,
+			datasetID, cursor, limit+1,
 		)
 	} else {
 		rows, err = s.db.QueryContext(ctx,

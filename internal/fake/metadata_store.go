@@ -3,6 +3,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -438,14 +439,12 @@ func (f *FakeMetadataStore) ListDatasetItemsPaginated(ctx context.Context, datas
 	}
 
 	// Sort by CreatedAt ascending, then ItemID ascending for deterministic ordering.
-	for i := 0; i < len(items); i++ {
-		for j := i + 1; j < len(items); j++ {
-			if items[j].CreatedAt.Before(items[i].CreatedAt) ||
-				(items[j].CreatedAt.Equal(items[i].CreatedAt) && items[j].ItemID < items[i].ItemID) {
-				items[i], items[j] = items[j], items[i]
-			}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].ItemID < items[j].ItemID
 		}
-	}
+		return items[i].CreatedAt.Before(items[j].CreatedAt)
+	})
 
 	// Apply keyset cursor: skip past the cursor position.
 	start := 0
