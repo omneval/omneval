@@ -79,6 +79,18 @@ func (h *EvalRuleHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate attribute filter dot-path depth limits.
+	if err := req.Filter.ValidateDotPaths(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Compile regex patterns (validates patterns too).
+	if err := req.Filter.CompilePatterns(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	// Validate and default sample_rate.
 	sampleRate := req.SampleRate
 	if sampleRate < 0.0 || sampleRate > 1.0 {

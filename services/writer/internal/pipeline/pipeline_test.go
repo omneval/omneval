@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -176,4 +177,250 @@ func TestMatchesFilter_MultipleConditions(t *testing.T) {
 
 func strPtr(s string) *string {
 	return &s
+}
+
+// ---- AttributeRegexFilter validation tests ----
+
+func TestEvalFilter_CompilePatterns_Valid(t *testing.T) {
+	f := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "user_id", Pattern: `.*-123$`},
+		},
+	}
+	if err := f.CompilePatterns(); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestEvalFilter_CompilePatterns_Invalid(t *testing.T) {
+	f := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "user_id", Pattern: `[invalid`},
+		},
+	}
+	err := f.CompilePatterns()
+	if err == nil {
+		t.Fatal("expected error for invalid pattern")
+	}
+	if !strings.Contains(err.Error(), "invalid pattern") {
+		t.Errorf("expected 'invalid pattern' in error, got: %v", err)
+	}
+}
+
+func TestEvalFilter_CompilePatterns_EmptyPattern(t *testing.T) {
+	f := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "user_id", Pattern: ""},
+		},
+	}
+	if err := f.CompilePatterns(); err != nil {
+		t.Fatalf("expected no error for empty pattern, got: %v", err)
+	}
+}
+
+func TestEvalFilter_ValidateDotPaths_MaxDepth(t *testing.T) {
+	f := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "a.b.c.d.e", Pattern: `.*`}, // depth 5, OK
+		},
+	}
+	if err := f.ValidateDotPaths(); err != nil {
+		t.Fatalf("depth 5 should be OK, got: %v", err)
+	}
+
+	f2 := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "a.b.c.d.e.f", Pattern: `.*`}, // depth 6, too deep
+		},
+	}
+	err := f2.ValidateDotPaths()
+	if err == nil {
+		t.Fatal("expected error for depth > 5")
+	}
+}
+
+func TestEvalFilter_ValidateDotPaths_TopLevel(t *testing.T) {
+	f := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "user_id", Pattern: `.*`},
+		},
+	}
+	if err := f.ValidateDotPaths(); err != nil {
+		t.Fatalf("top-level key should pass, got: %v", err)
+	}
+}
+
+// ---- AttributeRegexFilter tests ----
+
+func TestMatchesFilter_AttributesMatch_TopLevel(t *testing.T) {
+	span := &domain.Span{
+		Attributes: map[string]any{
+			"user_id": "abc-123",
+		},
+	}
+	pattern := `.*-123$`
+	f := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "user_id", Pattern: pattern},
+		},
+	}
+	if !matchesFilter(span, f) {
+		t.Error("expected match for top-level key")
+	}
+
+	pattern2 := `^xyz$`
+	f2 := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "user_id", Pattern: pattern2},
+		},
+	}
+	if matchesFilter(span, f2) {
+		t.Error("expected no match, pattern doesn't match value")
+	}
+}
+
+func TestMatchesFilter_AttributesMatch_NestedDotPath(t *testing.T) {
+	span := &domain.Span{
+		Attributes: map[string]any{
+			"metadata": `{"user_id": "usr-456", "tier": "premium"}`,
+		},
+	}
+
+	f := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "metadata.user_id", Pattern: `usr-456`},
+		},
+	}
+	if !matchesFilter(span, f) {
+		t.Error("expected match for dot-notation path")
+	}
+
+	f2 := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "metadata.tier", Pattern: `premium`},
+		},
+	}
+	if !matchesFilter(span, f2) {
+		t.Error("expected match for nested key 'tier'")
+	}
+}
+
+func TestMatchesFilter_AttributesMatch_NestedDepth3(t *testing.T) {
+	span := &domain.Span{
+		Attributes: map[string]any{
+			"a": `{"b": {"c": "deep-value"}}`,
+		},
+	}
+
+	f := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "a.b.c", Pattern: `deep-value`},
+		},
+	}
+	if !matchesFilter(span, f) {
+		t.Error("expected match for depth-3 dot path")
+	}
+}
+
+func TestMatchesFilter_AttributesMatch_MissingIntermediateKey(t *testing.T) {
+	span := &domain.Span{
+		Attributes: map[string]any{
+			"metadata": `{"user_id": "abc"}`,
+		},
+	}
+
+	// "metadata" exists but "metadata.extra" does not.
+	f := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "metadata.extra", Pattern: `.*`},
+		},
+	}
+	if matchesFilter(span, f) {
+		t.Error("expected no match for missing intermediate key")
+	}
+}
+
+func TestMatchesFilter_AttributesMatch_MissingTopLevelKey(t *testing.T) {
+	span := &domain.Span{
+		Attributes: map[string]any{},
+	}
+
+	f := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "nonexistent", Pattern: `.*`},
+		},
+	}
+	if matchesFilter(span, f) {
+		t.Error("expected no match for missing top-level key")
+	}
+}
+
+func TestMatchesFilter_AttributesMatch_NonObjectIntermediate(t *testing.T) {
+	span := &domain.Span{
+		Attributes: map[string]any{
+			"metadata": "just-a-string", // not JSON
+		},
+	}
+
+	f := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "metadata.user_id", Pattern: `.*`},
+		},
+	}
+	if matchesFilter(span, f) {
+		t.Error("expected no match for non-object intermediate")
+	}
+}
+
+func TestMatchesFilter_AttributesMatch_AttributesNil(t *testing.T) {
+	span := &domain.Span{
+		Attributes: nil,
+	}
+
+	f := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "user_id", Pattern: `.*`},
+		},
+	}
+	if matchesFilter(span, f) {
+		t.Error("expected no match when attributes is nil")
+	}
+}
+
+func TestMatchesFilter_AttributesMatch_MultipleConditionsAllMatch(t *testing.T) {
+	span := &domain.Span{
+		Attributes: map[string]any{
+			"tier":     "premium",
+			"metadata": `{"user_id": "abc-123"}`,
+		},
+	}
+
+	f := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "tier", Pattern: `premium`},
+			{Key: "metadata.user_id", Pattern: `abc-123`},
+		},
+	}
+	if !matchesFilter(span, f) {
+		t.Error("expected match for multiple conditions all matching")
+	}
+}
+
+func TestMatchesFilter_AttributesMatch_MultipleConditionsOneFails(t *testing.T) {
+	span := &domain.Span{
+		Attributes: map[string]any{
+			"tier":     "basic",
+			"metadata": `{"user_id": "abc-123"}`,
+		},
+	}
+
+	f := domain.EvalFilter{
+		AttributesMatch: []domain.AttributeRegexFilter{
+			{Key: "tier", Pattern: `premium`},
+			{Key: "metadata.user_id", Pattern: `abc-123`},
+		},
+	}
+	if matchesFilter(span, f) {
+		t.Error("expected no match, one condition fails")
+	}
 }

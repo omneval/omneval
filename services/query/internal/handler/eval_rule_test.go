@@ -515,3 +515,100 @@ func TestEvalRuleHandler_CreateEvalRule_StoreError(t *testing.T) {
 		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusInternalServerError, w.Body.String())
 	}
 }
+
+func TestEvalRuleHandler_CreateEvalRule_AttributesMatch_TopLevel(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &EvalRuleHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
+		"name": "attr-eval",
+		"judge_model": "gpt-4",
+		"filter": {
+			"attributes_match": [
+				{"key": "user_id", "pattern": "usr-.*"}
+			]
+		}
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreate(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+}
+
+func TestEvalRuleHandler_CreateEvalRule_AttributesMatch_NestedDotPath(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &EvalRuleHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
+		"name": "attr-eval",
+		"judge_model": "gpt-4",
+		"filter": {
+			"attributes_match": [
+				{"key": "metadata.user_id", "pattern": "usr-456"}
+			]
+		}
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreate(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+}
+
+func TestEvalRuleHandler_CreateEvalRule_AttributesMatch_DepthLimitExceeded(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &EvalRuleHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	// 6 segments = too deep (> max depth 5)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
+		"name": "attr-eval",
+		"judge_model": "gpt-4",
+		"filter": {
+			"attributes_match": [
+				{"key": "a.b.c.d.e.f", "pattern": ".*"}
+			]
+		}
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+func TestEvalRuleHandler_CreateEvalRule_AttributesMatch_InvalidPattern(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &EvalRuleHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
+		"name": "attr-eval",
+		"judge_model": "gpt-4",
+		"filter": {
+			"attributes_match": [
+				{"key": "user_id", "pattern": "[invalid"}
+			]
+		}
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
