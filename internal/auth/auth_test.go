@@ -127,8 +127,15 @@ func (f *FakeMetadataStore) GetDataset(_ context.Context, _ string) (*domain.Dat
 func (f *FakeMetadataStore) CreateDatasetItem(_ context.Context, _ *domain.DatasetItem) error {
 	return nil
 }
+func (f *FakeMetadataStore) ListDatasets(_ context.Context, _ string) ([]*domain.Dataset, error) {
+	return nil, nil
+}
+func (f *FakeMetadataStore) DeleteDataset(_ context.Context, _ string) error { return nil }
 func (f *FakeMetadataStore) ListDatasetItems(_ context.Context, _ string) ([]*domain.DatasetItem, error) {
 	return nil, nil
+}
+func (f *FakeMetadataStore) ListDatasetItemsPaginated(_ context.Context, _, _ string, _ int) ([]*domain.DatasetItem, string, error) {
+	return nil, "", nil
 }
 func (f *FakeMetadataStore) CreateDatasetRun(_ context.Context, _ *domain.DatasetRun) error {
 	return nil

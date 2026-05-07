@@ -368,6 +368,18 @@ func (f *FakeMetadataStore) CreateDataset(ctx context.Context, d *domain.Dataset
 	return nil
 }
 
+func (f *FakeMetadataStore) ListDatasets(ctx context.Context, projectID string) ([]*domain.Dataset, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	var datasets []*domain.Dataset
+	for _, d := range f.datasets {
+		if d.ProjectID == projectID {
+			datasets = append(datasets, d)
+		}
+	}
+	return datasets, nil
+}
+
 func (f *FakeMetadataStore) GetDataset(ctx context.Context, id string) (*domain.Dataset, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -376,6 +388,22 @@ func (f *FakeMetadataStore) GetDataset(ctx context.Context, id string) (*domain.
 		return nil, metadata.ErrNotFound
 	}
 	return d, nil
+}
+
+func (f *FakeMetadataStore) DeleteDataset(ctx context.Context, datasetID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.datasets[datasetID]; !ok {
+		return metadata.ErrNotFound
+	}
+	delete(f.datasets, datasetID)
+	// Also delete all items belonging to this dataset.
+	for id, item := range f.datasetItems {
+		if item.DatasetID == datasetID {
+			delete(f.datasetItems, id)
+		}
+	}
+	return nil
 }
 
 func (f *FakeMetadataStore) CreateDatasetItem(ctx context.Context, item *domain.DatasetItem) error {
@@ -395,6 +423,58 @@ func (f *FakeMetadataStore) ListDatasetItems(ctx context.Context, datasetID stri
 		}
 	}
 	return items, nil
+}
+
+func (f *FakeMetadataStore) ListDatasetItemsPaginated(ctx context.Context, datasetID, cursor string, limit int) ([]*domain.DatasetItem, string, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	// Collect all items for this dataset.
+	var items []*domain.DatasetItem
+	for _, item := range f.datasetItems {
+		if item.DatasetID == datasetID {
+			items = append(items, item)
+		}
+	}
+
+	// Sort by CreatedAt ascending, then ItemID ascending for deterministic ordering.
+	for i := 0; i < len(items); i++ {
+		for j := i + 1; j < len(items); j++ {
+			if items[j].CreatedAt.Before(items[i].CreatedAt) ||
+				(items[j].CreatedAt.Equal(items[i].CreatedAt) && items[j].ItemID < items[i].ItemID) {
+				items[i], items[j] = items[j], items[i]
+			}
+		}
+	}
+
+	// Apply keyset cursor: skip past the cursor position.
+	start := 0
+	if cursor != "" {
+		for i, item := range items {
+			if item.ItemID == cursor {
+				start = i + 1
+				break
+			}
+		}
+	}
+
+	// Slice the page.
+	if start >= len(items) {
+		return nil, "", nil
+	}
+	end := start + limit
+	if end > len(items) {
+		end = len(items)
+	}
+	page := items[start:end]
+
+	// Compute next cursor.
+	var nextCursor string
+	if len(page) == limit && end < len(items) {
+		nextCursor = page[len(page)-1].ItemID
+	}
+
+	return page, nextCursor, nil
 }
 
 func (f *FakeMetadataStore) CreateDatasetRun(ctx context.Context, run *domain.DatasetRun) error {

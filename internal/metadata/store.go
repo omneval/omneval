@@ -61,9 +61,12 @@ type Store interface {
 
 	// Datasets
 	CreateDataset(ctx context.Context, ds *domain.Dataset) error
+	ListDatasets(ctx context.Context, projectID string) ([]*domain.Dataset, error)
 	GetDataset(ctx context.Context, datasetID string) (*domain.Dataset, error)
+	DeleteDataset(ctx context.Context, datasetID string) error
 	CreateDatasetItem(ctx context.Context, item *domain.DatasetItem) error
 	ListDatasetItems(ctx context.Context, datasetID string) ([]*domain.DatasetItem, error)
+	ListDatasetItemsPaginated(ctx context.Context, datasetID, cursor string, limit int) ([]*domain.DatasetItem, string, error)
 	CreateDatasetRun(ctx context.Context, run *domain.DatasetRun) error
 	GetDatasetRun(ctx context.Context, runID string) (*domain.DatasetRun, error)
 

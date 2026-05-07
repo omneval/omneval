@@ -172,8 +172,15 @@ func (m *FakePromptStore) GetDataset(ctx context.Context, id string) (*domain.Da
 func (m *FakePromptStore) CreateDatasetItem(ctx context.Context, i *domain.DatasetItem) error {
 	return nil
 }
+func (m *FakePromptStore) ListDatasets(ctx context.Context, projectID string) ([]*domain.Dataset, error) {
+	return nil, nil
+}
+func (m *FakePromptStore) DeleteDataset(ctx context.Context, id string) error { return nil }
 func (m *FakePromptStore) ListDatasetItems(ctx context.Context, datasetID string) ([]*domain.DatasetItem, error) {
 	return nil, nil
+}
+func (m *FakePromptStore) ListDatasetItemsPaginated(ctx context.Context, datasetID, cursor string, limit int) ([]*domain.DatasetItem, string, error) {
+	return nil, "", nil
 }
 func (m *FakePromptStore) CreateDatasetRun(ctx context.Context, r *domain.DatasetRun) error {
 	return nil

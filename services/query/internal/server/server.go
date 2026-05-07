@@ -219,6 +219,20 @@ func Run() error {
 		mux.HandleFunc("DELETE /api/v1/eval-rules/{id}", evalRuleHandler.HandleDelete)
 	}
 
+	// Dataset endpoints (require metadata store).
+	if store != nil {
+		datasetHandler := &handler.DatasetHandler{
+			Store:        store,
+			SessionStore: h,
+		}
+		mux.HandleFunc("POST /api/v1/datasets", datasetHandler.HandleCreate)
+		mux.HandleFunc("GET /api/v1/datasets", datasetHandler.HandleList)
+		mux.HandleFunc("GET /api/v1/datasets/{id}", datasetHandler.HandleGet)
+		mux.HandleFunc("POST /api/v1/datasets/{id}/items", datasetHandler.HandleAddItems)
+		mux.HandleFunc("GET /api/v1/datasets/{id}/items", datasetHandler.HandleListItems)
+		mux.HandleFunc("DELETE /api/v1/datasets/{id}", datasetHandler.HandleDelete)
+	}
+
 	// Score write endpoint (for eval worker score write-back).
 	mux.HandleFunc("POST /api/v1/scores", handler.NewScoreHandler(db).ServeHTTP)
 

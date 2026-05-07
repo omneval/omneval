@@ -781,6 +781,28 @@ func (s *Store) CreateDataset(ctx context.Context, ds *domain.Dataset) error {
 	return nil
 }
 
+func (s *Store) ListDatasets(ctx context.Context, projectID string) ([]*domain.Dataset, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT dataset_id, project_id, name, created_at FROM datasets WHERE project_id = ? ORDER BY name`, projectID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list datasets: %w", err)
+	}
+	defer rows.Close()
+
+	var datasets []*domain.Dataset
+	for rows.Next() {
+		var d domain.Dataset
+		var createdAt string
+		if err := rows.Scan(&d.DatasetID, &d.ProjectID, &d.Name, &createdAt); err != nil {
+			return nil, fmt.Errorf("sqlite: scan dataset: %w", err)
+		}
+		d.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		datasets = append(datasets, &d)
+	}
+	return datasets, rows.Err()
+}
+
 func (s *Store) GetDataset(ctx context.Context, datasetID string) (*domain.Dataset, error) {
 	var projectID, name, createdAt string
 	err := s.db.QueryRowContext(ctx,
@@ -794,6 +816,32 @@ func (s *Store) GetDataset(ctx context.Context, datasetID string) (*domain.Datas
 	}
 	t, _ := time.Parse(time.RFC3339, createdAt)
 	return &domain.Dataset{DatasetID: datasetID, ProjectID: projectID, Name: name, CreatedAt: t}, nil
+}
+
+func (s *Store) DeleteDataset(ctx context.Context, datasetID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("sqlite: begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete items first.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM dataset_items WHERE dataset_id = ?`, datasetID); err != nil {
+		return fmt.Errorf("sqlite: delete dataset items: %w", err)
+	}
+
+	// Delete the dataset.
+	result, err := tx.ExecContext(ctx,
+		`DELETE FROM datasets WHERE dataset_id = ?`, datasetID)
+	if err != nil {
+		return fmt.Errorf("sqlite: delete dataset: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return metadata.ErrNotFound
+	}
+
+	return tx.Commit()
 }
 
 func (s *Store) CreateDatasetItem(ctx context.Context, item *domain.DatasetItem) error {
@@ -830,6 +878,62 @@ func (s *Store) ListDatasetItems(ctx context.Context, datasetID string) ([]*doma
 		items = append(items, &item)
 	}
 	return items, rows.Err()
+}
+
+func (s *Store) ListDatasetItemsPaginated(ctx context.Context, datasetID, cursor string, limit int) ([]*domain.DatasetItem, string, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	var rows *sql.Rows
+	var err error
+	if cursor != "" {
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT item_id, dataset_id, source_span_id, input, expected_output, created_at
+			 FROM dataset_items WHERE dataset_id = ? AND (created_at, item_id) > (?, ?)
+			 ORDER BY created_at ASC, item_id ASC LIMIT ?`,
+			datasetID, cursor, cursor,
+			limit+1, // fetch one extra to check if there are more pages
+		)
+	} else {
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT item_id, dataset_id, source_span_id, input, expected_output, created_at
+			 FROM dataset_items WHERE dataset_id = ?
+			 ORDER BY created_at ASC, item_id ASC LIMIT ?`,
+			datasetID,
+			limit+1,
+		)
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("sqlite: list dataset items paginated: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*domain.DatasetItem
+	for rows.Next() {
+		var item domain.DatasetItem
+		var createdAt string
+		if err := rows.Scan(&item.ItemID, &item.DatasetID, &item.SourceSpanID, &item.Input, &item.ExpectedOutput, &createdAt); err != nil {
+			return nil, "", fmt.Errorf("sqlite: scan dataset item: %w", err)
+		}
+		item.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		items = append(items, &item)
+	}
+
+	// Check if we have one extra row (means more pages exist).
+	hasNext := false
+	if len(items) > limit {
+		hasNext = true
+		items = items[:limit]
+	}
+
+	// Compute next cursor.
+	var nextCursor string
+	if hasNext && len(items) > 0 {
+		nextCursor = items[len(items)-1].ItemID
+	}
+
+	return items, nextCursor, rows.Err()
 }
 
 func (s *Store) CreateDatasetRun(ctx context.Context, run *domain.DatasetRun) error {
