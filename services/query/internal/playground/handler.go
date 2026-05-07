@@ -1,8 +1,8 @@
 package playground
 
 import (
-	"errors"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -115,8 +115,6 @@ func (h *PlaygroundHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 		output = resp.Choices[0].Message.Content
 	}
 
-	_ = judge.ChatResponse{} // ensure import is used
-
 	playgroundResp := Response{
 		Output:       output,
 		Model:        model,
@@ -157,5 +155,3 @@ func (h *PlaygroundHandler) resolvePrompt(
 	}
 	return nil, errProvideVersionOrLabel
 }
-
-

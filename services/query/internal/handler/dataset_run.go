@@ -51,12 +51,12 @@ type ListDatasetRunsResponse struct {
 
 // getRunResponse is returned by GET /api/v1/datasets/:id/runs/:runId.
 type getRunResponse struct {
-	RunID      string                `json:"run_id"`
-	DatasetID  string                `json:"dataset_id"`
-	EvalRuleID string                `json:"eval_rule_id"`
-	Status     string                `json:"status"`
-	CreatedAt  string                `json:"created_at"`
-	Items      []runItemResponse     `json:"items"`
+	RunID      string            `json:"run_id"`
+	DatasetID  string            `json:"dataset_id"`
+	EvalRuleID string            `json:"eval_rule_id"`
+	Status     string            `json:"status"`
+	CreatedAt  string            `json:"created_at"`
+	Items      []runItemResponse `json:"items"`
 }
 
 // runItemResponse represents a single scored item in a run detail response.
@@ -79,33 +79,10 @@ func (h *DatasetRunHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	datasetID := r.PathValue("id")
-	if datasetID == "" {
-		datasetID = extractDatasetID(r.URL.Path)
-	}
-	if datasetID == "" {
-		http.Error(w, "dataset ID is required", http.StatusBadRequest)
-		return
-	}
-
-	// Verify dataset exists and belongs to the project.
-	ds, err := h.Store.GetDataset(r.Context(), datasetID)
-	if err != nil {
-		if errors.Is(err, metadata.ErrNotFound) {
-			http.Error(w, "dataset not found", http.StatusNotFound)
-			return
-		}
-		http.Error(w, "store error", http.StatusInternalServerError)
-		return
-	}
-	if ds.ProjectID != projectID {
-		http.Error(w, "forbidden", http.StatusForbidden)
+	projectID, datasetID, authErr := h.authDataset(r)
+	if authErr != nil {
+		ae, _ := authErr.(*authDatasetError)
+		http.Error(w, ae.Message, ae.StatusCode)
 		return
 	}
 
@@ -211,12 +188,12 @@ func (h *DatasetRunHandler) scoreItem(
 ) error {
 	// Build variables from item data.
 	variables := map[string]string{
-		"input":            item.Input,
-		"expected_output":  item.ExpectedOutput,
-		"source_span_id":   item.SourceSpanID,
-		"eval_rule_id":     evalRule.RuleID,
-		"dataset_id":       item.DatasetID,
-		"dataset_run_id":   run.RunID,
+		"input":           item.Input,
+		"expected_output": item.ExpectedOutput,
+		"source_span_id":  item.SourceSpanID,
+		"eval_rule_id":    evalRule.RuleID,
+		"dataset_id":      item.DatasetID,
+		"dataset_run_id":  run.RunID,
 	}
 
 	// Interpolate the prompt template.
@@ -306,33 +283,10 @@ func (h *DatasetRunHandler) HandleListRuns(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	datasetID := r.PathValue("id")
-	if datasetID == "" {
-		datasetID = extractDatasetID(r.URL.Path)
-	}
-	if datasetID == "" {
-		http.Error(w, "dataset ID is required", http.StatusBadRequest)
-		return
-	}
-
-	// Verify dataset exists and belongs to the project.
-	ds, err := h.Store.GetDataset(r.Context(), datasetID)
-	if err != nil {
-		if errors.Is(err, metadata.ErrNotFound) {
-			http.Error(w, "dataset not found", http.StatusNotFound)
-			return
-		}
-		http.Error(w, "store error", http.StatusInternalServerError)
-		return
-	}
-	if ds.ProjectID != projectID {
-		http.Error(w, "forbidden", http.StatusForbidden)
+	_, datasetID, authErr := h.authDataset(r)
+	if authErr != nil {
+		ae, _ := authErr.(*authDatasetError)
+		http.Error(w, ae.Message, ae.StatusCode)
 		return
 	}
 
@@ -375,38 +329,19 @@ func (h *DatasetRunHandler) HandleGetRun(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	_, datasetID, authErr := h.authDataset(r)
+	if authErr != nil {
+		ae, _ := authErr.(*authDatasetError)
+		http.Error(w, ae.Message, ae.StatusCode)
 		return
 	}
 
-	datasetID := r.PathValue("id")
-	if datasetID == "" {
-		datasetID = extractDatasetID(r.URL.Path)
-	}
 	runID := r.PathValue("runId")
 	if runID == "" {
-		// Fallback for tests that don't use ServeMux pattern matching.
 		runID = extractRunID(r.URL.Path)
 	}
 	if runID == "" {
 		http.Error(w, "run ID is required", http.StatusBadRequest)
-		return
-	}
-
-	// Verify dataset exists and belongs to the project.
-	ds, err := h.Store.GetDataset(r.Context(), datasetID)
-	if err != nil {
-		if errors.Is(err, metadata.ErrNotFound) {
-			http.Error(w, "dataset not found", http.StatusNotFound)
-			return
-		}
-		http.Error(w, "store error", http.StatusInternalServerError)
-		return
-	}
-	if ds.ProjectID != projectID {
-		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -479,37 +414,19 @@ func (h *DatasetRunHandler) HandleGetRunStatus(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	_, datasetID, authErr := h.authDataset(r)
+	if authErr != nil {
+		ae, _ := authErr.(*authDatasetError)
+		http.Error(w, ae.Message, ae.StatusCode)
 		return
 	}
 
-	datasetID := r.PathValue("id")
-	if datasetID == "" {
-		datasetID = extractDatasetID(r.URL.Path)
-	}
 	runID := r.PathValue("runId")
 	if runID == "" {
 		runID = extractRunID(r.URL.Path)
 	}
 	if runID == "" {
 		http.Error(w, "run ID is required", http.StatusBadRequest)
-		return
-	}
-
-	// Verify dataset exists and belongs to the project.
-	ds, err := h.Store.GetDataset(r.Context(), datasetID)
-	if err != nil {
-		if errors.Is(err, metadata.ErrNotFound) {
-			http.Error(w, "dataset not found", http.StatusNotFound)
-			return
-		}
-		http.Error(w, "store error", http.StatusInternalServerError)
-		return
-	}
-	if ds.ProjectID != projectID {
-		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -537,6 +454,47 @@ func (h *DatasetRunHandler) HandleGetRunStatus(w http.ResponseWriter, r *http.Re
 }
 
 // ---- Helpers ----
+
+// authDatasetError represents an authentication or authorization failure
+// that should be returned as an HTTP error response.
+type authDatasetError struct {
+	Message    string
+	StatusCode int
+}
+
+func (e *authDatasetError) Error() string { return e.Message }
+
+// authDataset extracts the project ID from the request session, resolves
+// the dataset ID from the URL, verifies the dataset exists, and confirms
+// the dataset belongs to the requesting project. Returns project ID,
+// dataset ID, and nil on success. Returns an authDatasetError on failure.
+func (h *DatasetRunHandler) authDataset(r *http.Request) (string, string, error) {
+	projectID, ok := extractProjectID(h.SessionStore, r)
+	if !ok || projectID == "" {
+		return "", "", &authDatasetError{Message: "unauthorized", StatusCode: http.StatusUnauthorized}
+	}
+
+	datasetID := r.PathValue("id")
+	if datasetID == "" {
+		datasetID = extractDatasetID(r.URL.Path)
+	}
+	if datasetID == "" {
+		return "", "", &authDatasetError{Message: "dataset ID is required", StatusCode: http.StatusBadRequest}
+	}
+
+	ds, err := h.Store.GetDataset(r.Context(), datasetID)
+	if err != nil {
+		if errors.Is(err, metadata.ErrNotFound) {
+			return "", "", &authDatasetError{Message: "dataset not found", StatusCode: http.StatusNotFound}
+		}
+		return "", "", &authDatasetError{Message: "store error", StatusCode: http.StatusInternalServerError}
+	}
+	if ds.ProjectID != projectID {
+		return "", "", &authDatasetError{Message: "forbidden", StatusCode: http.StatusForbidden}
+	}
+
+	return projectID, datasetID, nil
+}
 
 // extractRunID extracts the run ID from a URL path like
 // "/api/v1/datasets/abc123/runs/xyz789" or "/api/v1/datasets/abc123/runs/xyz789/status".
