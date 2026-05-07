@@ -165,8 +165,8 @@ func TestMatchesFilter_MultipleConditions(t *testing.T) {
 	// Change one condition to fail.
 	model2 := "claude-sonnet-4-6"
 	f2 := domain.EvalFilter{
-		Kind:   &kind,
-		Model:  &model2,
+		Kind:       &kind,
+		Model:      &model2,
 		MinCostUSD: &minCost,
 	}
 	if matchesFilter(span, f2) {
@@ -511,10 +511,6 @@ func TestMatchesFilter_NestedANDInsideOR_NeitherMatches(t *testing.T) {
 // ---- Deeply nested structure ----
 
 func TestMatchesFilter_DeeplyNested(t *testing.T) {
-	// NOT: AND: OR: model==gpt-4o
-	// Span has model=claude, so:
-	//   OR matches (gpt-4o doesn't match, but wait, only one branch)
-	// Actually let me construct a clearer nested structure:
 	// OR: [AND: [kind==llm, model==gpt-4o], NOT: [model==claude]]
 	// Span: kind=llm, model=claude
 	//   AND branch: kind=llm (match) AND model=gpt-4o (fail) → fail

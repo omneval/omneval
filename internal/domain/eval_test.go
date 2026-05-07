@@ -5,11 +5,8 @@ import (
 	"testing"
 )
 
-// StringPtr returns a pointer to the given string.
-func StringPtr(s string) *string { return &s }
-
-// SpanKindPtr returns a pointer to the given SpanKind.
-func SpanKindPtr(k SpanKind) *SpanKind { return &k }
+// spanKindPtr returns a pointer to the given SpanKind.
+func spanKindPtr(k SpanKind) *SpanKind { return &k }
 
 func TestAttributeValue(t *testing.T) {
 	tests := []struct {
@@ -376,8 +373,8 @@ func TestEvalFilter_Matches_NestedANDInsideOR(t *testing.T) {
 func TestEvalFilter_JSON_RoundTripFlatFilter(t *testing.T) {
 	// Existing flat filter from Phase 1.
 	original := EvalFilter{
-		Model:     strPtr("gpt-4o"),
-		Kind:      SpanKindPtr(SpanKindLLM),
+		Model:      strPtr("gpt-4o"),
+		Kind:       spanKindPtr(SpanKindLLM),
 		MinCostUSD: floatPtr(0.01),
 		MaxCostUSD: floatPtr(1.0),
 	}
@@ -473,5 +470,5 @@ func TestEvalFilter_JSON_RoundTripNestedFilter(t *testing.T) {
 	}
 }
 
-func strPtr(s string) *string   { return &s }
+func strPtr(s string) *string     { return &s }
 func floatPtr(f float64) *float64 { return &f }

@@ -22,9 +22,10 @@ func extractProjectID(SessionStore SessionStore, r *http.Request) (string, bool)
 }
 
 // EvalRuleHandler handles eval rule CRUD endpoints:
-//   POST   /api/v1/eval-rules          — create an eval rule
-//   GET    /api/v1/eval-rules          — list all eval rules for the project
-//   DELETE /api/v1/eval-rules/:id      — delete an eval rule by ID
+//
+//	POST   /api/v1/eval-rules          — create an eval rule
+//	GET    /api/v1/eval-rules          — list all eval rules for the project
+//	DELETE /api/v1/eval-rules/:id      — delete an eval rule by ID
 type EvalRuleHandler struct {
 	Store        metadata.Store
 	SessionStore SessionStore
@@ -34,13 +35,13 @@ type EvalRuleHandler struct {
 
 // CreateEvalRuleRequest is the body accepted by POST /api/v1/eval-rules.
 type CreateEvalRuleRequest struct {
-	Name        string          `json:"name"`
-	JudgeModel  string          `json:"judge_model"`
-	PromptName  string          `json:"prompt_name"`
-	PromptVersion int64         `json:"prompt_version"`
-	SampleRate  float64         `json:"sample_rate"`
-	Enabled     bool            `json:"enabled"`
-	Filter      domain.EvalFilter `json:"filter"`
+	Name          string            `json:"name"`
+	JudgeModel    string            `json:"judge_model"`
+	PromptName    string            `json:"prompt_name"`
+	PromptVersion int64             `json:"prompt_version"`
+	SampleRate    float64           `json:"sample_rate"`
+	Enabled       bool              `json:"enabled"`
+	Filter        domain.EvalFilter `json:"filter"`
 }
 
 // ListEvalRulesResponse is returned by GET /api/v1/eval-rules.

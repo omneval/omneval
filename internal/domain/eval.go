@@ -24,15 +24,15 @@ import (
 // When and/or/not are absent/nil/empty, the filter behaves as a
 // flat AND of leaf conditions (backward-compatible with Phase 1).
 type EvalFilter struct {
-	Kind            *SpanKind            `json:"kind"`
-	Model           *string              `json:"model"`
-	ServiceName     *string              `json:"service_name"`
-	PromptName      *string              `json:"prompt_name"`
-	StatusCode      *string              `json:"status_code"`
-	MinCostUSD      *float64             `json:"min_cost_usd"`
-	MaxCostUSD      *float64             `json:"max_cost_usd"`
-	MinDurationMS   *int64               `json:"min_duration_ms"`
-	MaxDurationMS   *int64               `json:"max_duration_ms"`
+	Kind            *SpanKind              `json:"kind"`
+	Model           *string                `json:"model"`
+	ServiceName     *string                `json:"service_name"`
+	PromptName      *string                `json:"prompt_name"`
+	StatusCode      *string                `json:"status_code"`
+	MinCostUSD      *float64               `json:"min_cost_usd"`
+	MaxCostUSD      *float64               `json:"max_cost_usd"`
+	MinDurationMS   *int64                 `json:"min_duration_ms"`
+	MaxDurationMS   *int64                 `json:"max_duration_ms"`
 	AttributesMatch []AttributeRegexFilter `json:"attributes_match"`
 
 	// Boolean operators (recursive).
@@ -52,7 +52,6 @@ type AttributeRegexFilter struct {
 
 // CompilePatterns validates and compiles all regex patterns in the filter.
 // Call this at rule-load time (not per-span) for performance.
-// Recursively compiles patterns in nested AND/OR/NOT filters.
 func (f *EvalFilter) CompilePatterns() error {
 	for i, af := range f.AttributesMatch {
 		if af.Pattern == "" {
@@ -68,7 +67,10 @@ func (f *EvalFilter) CompilePatterns() error {
 			compiled: compiled,
 		}
 	}
-	// Recurse into AND/OR/NOT groups.
+	return f.compilePatternsRecursive()
+}
+
+func (f *EvalFilter) compilePatternsRecursive() error {
 	for _, sub := range f.And {
 		if err := sub.CompilePatterns(); err != nil {
 			return err
@@ -97,15 +99,18 @@ func (f *EvalFilter) ValidateDotPaths() error {
 			return fmt.Errorf("attributes_match key %q exceeds max depth of %d (got %d)", af.Key, maxDepth, len(parts))
 		}
 	}
-	// Recurse into AND/OR/NOT groups.
-	for _, sub := range f.And {
+	return f.validateDotPathsRecursive()
+}
+
+func (f *EvalFilter) validateDotPathsRecursive() error {
+	for i, sub := range f.And {
 		if err := sub.ValidateDotPaths(); err != nil {
-			return fmt.Errorf("and[%v]: %w", sub, err)
+			return fmt.Errorf("and[%d]: %w", i, err)
 		}
 	}
-	for _, sub := range f.Or {
+	for i, sub := range f.Or {
 		if err := sub.ValidateDotPaths(); err != nil {
-			return fmt.Errorf("or[%v]: %w", sub, err)
+			return fmt.Errorf("or[%d]: %w", i, err)
 		}
 	}
 	if f.Not != nil {
@@ -132,7 +137,10 @@ func (f *EvalFilter) Validate() error {
 	if err := f.CompilePatterns(); err != nil {
 		return err
 	}
-	// Recursively validate nested filters.
+	return f.validateRecursive()
+}
+
+func (f *EvalFilter) validateRecursive() error {
 	for i, sub := range f.And {
 		if err := sub.Validate(); err != nil {
 			return fmt.Errorf("and[%d]: %w", i, err)
@@ -249,48 +257,38 @@ type EvalJob struct {
 }
 
 // Matches checks if a span matches this EvalFilter.
-// The evaluation order is:
-//
-//	1. AND group: all sub-filters must match
-//	2. OR group: at least one sub-filter must match
-//	3. NOT group: sub-filter must NOT match
-//	4. Leaf conditions: all must match
-//
-// All groups are combined with AND logic.
+// Group evaluation order: AND (all must match), OR (at least one must match),
+// NOT (sub-filter must not match). Groups combine with AND logic.
 // When AND/OR/NOT are absent/nil/empty, only leaf conditions are evaluated
 // (backward-compatible with the flat AND-only Phase 1 structure).
 func (f *EvalFilter) Matches(span *Span) bool {
-	// 1. AND: all sub-filters must match.
-	if len(f.And) > 0 {
-		for _, sub := range f.And {
-			if !sub.Matches(span) {
-				return false
-			}
+	// AND: all sub-filters must match.
+	for _, sub := range f.And {
+		if !sub.Matches(span) {
+			return false
 		}
 	}
 
-	// 2. OR: at least one sub-filter must match.
+	// OR: at least one sub-filter must match.
 	if len(f.Or) > 0 {
-		anyMatch := false
+		matched := false
 		for _, sub := range f.Or {
 			if sub.Matches(span) {
-				anyMatch = true
+				matched = true
 				break
 			}
 		}
-		if !anyMatch {
+		if !matched {
 			return false
 		}
 	}
 
-	// 3. NOT: sub-filter must NOT match.
-	if f.Not != nil {
-		if f.Not.Matches(span) {
-			return false
-		}
+	// NOT: sub-filter must NOT match.
+	if f.Not != nil && f.Not.Matches(span) {
+		return false
 	}
 
-	// 4. Leaf conditions (AND of all).
+	// Leaf conditions: all must match.
 	if f.Kind != nil && span.Kind != *f.Kind {
 		return false
 	}

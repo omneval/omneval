@@ -241,8 +241,6 @@ func attributesJSON(attrs map[string]any) string {
 	return string(data)
 }
 
-
-
 // sampleRateDecides returns true if a span should be evaluated based on
 // the given sample rate (0.0–1.0). Always returns true for rate >= 1.0.
 func sampleRateDecides(rate float64) bool {
