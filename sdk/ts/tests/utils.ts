@@ -25,7 +25,6 @@ export function createResponse(
     body: null,
     bodyUsed: false,
     clone: () => createResponse(status, body),
-    bodyUnique: null,
     arrayBuffer: async () => new ArrayBuffer(0),
     blob: async () => new Blob(),
     formData: async () => new FormData(),

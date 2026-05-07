@@ -1,4 +1,5 @@
 import { GetPromptOptions, LanternConfig, PromptVersion, WriteScoreOptions } from "./types";
+import { generateTraceId } from "./id";
 
 const PROMPT_CACHE_TTL_MS = 30_000;
 
@@ -141,7 +142,4 @@ export class LanternClient {
   }
 }
 
-function generateTraceId(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
+

@@ -148,16 +148,21 @@ export class ManualTracer {
   }
 
   private findTraceId(spanId: string): string {
-    let currentId = spanId;
-    while (true) {
-      const tracked = this.pending.find((s) => s.span_id === currentId);
+    let currentSpanId = spanId;
+
+    for (let iteration = 0; iteration < this.pending.length; iteration++) {
+      const tracked = this.pending.find((s) => s.span_id === currentSpanId);
       if (!tracked) {
         return generateTraceId();
       }
       if (!tracked.parent_id) {
         return tracked.trace_id;
       }
-      currentId = tracked.parent_id;
+      currentSpanId = tracked.parent_id;
     }
+
+    // Safety: if we exhaust all pending spans without finding a root,
+    // generate a new trace ID to avoid infinite loops.
+    return generateTraceId();
   }
 }
