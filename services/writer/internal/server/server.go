@@ -3,12 +3,14 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -283,7 +285,7 @@ func s3SnapshotKey(cfg *config.Config) string {
 	if cfg.Storage.Region != "" {
 		parts = append([]string{cfg.Storage.Region}, parts...)
 	}
-	return parts[0]
+	return strings.Join(parts, "/")
 }
 
 // reconciliationStatus tracks the reconciliation state after a leader transition.
@@ -407,7 +409,7 @@ func runWithLeaderElection(
 
 		// If we lost leadership and fencing is enabled, close DuckDB immediately
 		// to prevent any window of dual-write.
-		if renewErr != nil && renewErr.Error() == "leader: lost leadership" {
+		if errors.Is(renewErr, leader.ErrLostLeadership) {
 			if cfg.Writer.LeaderElection.FencingEnabled {
 				slog.Warn("writer: lost leadership — closing DuckDB immediately to prevent dual-write")
 				db.Close()

@@ -127,9 +127,13 @@ func (e *LeaderElection) LeaderID() string {
 // LockTTL returns the configured lock TTL.
 func (e *LeaderElection) LockTTL() time.Duration { return e.ttl }
 
+// ErrLostLeadership is returned by RenewLoop when the leader lock is stolen
+// by another instance.
+var ErrLostLeadership = fmt.Errorf("leader: lost leadership")
+
 // RenewLoop periodically calls Renew until the context is cancelled
 // or this instance loses the lock. Returns the context error (usually
-// context.Canceled) or "lost leadership" when the lock is stolen.
+// context.Canceled) or ErrLostLeadership when the lock is stolen.
 func (e *LeaderElection) RenewLoop(ctx context.Context, interval time.Duration) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -144,7 +148,7 @@ func (e *LeaderElection) RenewLoop(ctx context.Context, interval time.Duration) 
 				return fmt.Errorf("leader: renew loop error: %w", err)
 			}
 			if !ok {
-				return fmt.Errorf("leader: lost leadership")
+				return ErrLostLeadership
 			}
 		}
 	}
