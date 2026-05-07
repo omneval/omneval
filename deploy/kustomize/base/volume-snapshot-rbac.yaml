@@ -1,0 +1,58 @@
+# RBAC resources for the VolumeSnapshot CronJob.
+#
+# The CronJob needs permissions to:
+#   - Get/List/Watch PVCs (to discover the source volume)
+#   - Create/Get/List/Watch VolumeSnapshot resources
+#   - Create/Get/List/Watch VolumeSnapshotContent resources
+#
+# Use a namespaced Role + RoleBinding instead of ClusterRole if your
+# cluster has namespace-scoped RBAC policies (e.g., OPA Gatekeeper).
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: lantern-volume-snapshot
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/component: writer
+    app.kubernetes.io/part-of: lantern
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: lantern-volume-snapshot
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/component: writer
+    app.kubernetes.io/part-of: lantern
+rules:
+  # Allow discovery of PVCs (to find source PV for snapshot)
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch"]
+  # Allow creating and managing VolumeSnapshot resources
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list", "watch", "create"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: lantern-volume-snapshot
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/component: writer
+    app.kubernetes.io/part-of: lantern
+subjects:
+  - kind: ServiceAccount
+    name: lantern-volume-snapshot
+roleRef:
+  kind: ClusterRole
+  name: lantern-volume-snapshot
+  apiGroup: rbac.authorization.k8s.io

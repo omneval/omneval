@@ -1,0 +1,23 @@
+# ConfigMap holding the VolumeSnapshotClass name.
+# Override this in overlays (e.g., production) to point to the correct
+# snapshot class for your cloud provider (e.g., gp3-volumesnapshot, csi-ec2).
+#
+# Example per-provider snapshot classes:
+#   AWS EBS:            ebs.csi.aws.com
+#   AWS EBS (gp3):      ebs-csi-gp3
+#   GCE PD:             pd.csi.storage.gke.io
+#   Azure Disk:         disk.csi.azure.com
+#   Cinder (OpenStack): cinder.csi.openstack.org
+#
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lantern-volume-snapshot-config
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/component: writer
+    app.kubernetes.io/part-of: lantern
+data:
+  # Name of the VolumeSnapshotClass to use for creating snapshots.
+  # Must match a pre-provisioned VolumeSnapshotClass in the cluster.
+  snapshot-class: ""

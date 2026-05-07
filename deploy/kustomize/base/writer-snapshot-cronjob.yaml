@@ -1,0 +1,92 @@
+# CronJob that creates a VolumeSnapshot of the writer PVC on a schedule.
+# Requires:
+#   1. A VolumeSnapshotClass (provisioned by the cluster storage driver)
+#   2. A ServiceAccount (lantern-volume-snapshot) with permissions to create
+#      VolumeSnapshot and VolumeSnapshotContent resources
+#   3. A ConfigMap (lantern-volume-snapshot-config) with the key
+#      "snapshot-class" pointing to the desired VolumeSnapshotClass name
+#
+# The CronJob uses a minimal kubectl container (bitnami/kubectl) to create
+# the VolumeSnapshot resource. Snapshots are tagged with lantern.io labels
+# for easy identification and cleanup.
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: writer-volume-snapshot
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/component: writer
+    app.kubernetes.io/part-of: lantern
+spec:
+  # Daily at 02:00 UTC
+  schedule: "0 2 * * *"
+  # Keep last 3 successful runs, 1 failed run
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  # Do not start a new job if the previous one is still running
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      # Give up after one failure (exponential backoff on next schedule)
+      backoffLimit: 1
+      template:
+        spec:
+          serviceAccountName: lantern-volume-snapshot
+          containers:
+            - name: snapshot
+              # Minimal kubectl image for creating VolumeSnapshot resources
+              image: bitnami/kubectl:latest
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+
+                  SNAPSHOT_NAME="lantern-writer-$(date +%Y%m%d-%H%M%S)"
+                  VOLUME_SNAPSHOT_CLASS="${VOLUME_SNAPSHOT_CLASS:?VOLUME_SNAPSHOT_CLASS is required}"
+                  PVC_NAME="${PVC_NAME:-data-writer-0}"
+                  NAMESPACE="${NAMESPACE:-lantern}"
+
+                  echo "Creating VolumeSnapshot $SNAPSHOT_NAME"
+                  echo "  Source PVC:       $PVC_NAME"
+                  echo "  Snapshot class:   $VOLUME_SNAPSHOT_CLASS"
+                  echo "  Namespace:        $NAMESPACE"
+
+                  # Get the source PVC to find its StorageClassName and VolumeHandle
+                  PVC_STORAGE_CLASS=$(kubectl get pvc "$PVC_NAME" -n "$NAMESPACE" -o jsonpath='{.spec.storageClassName}')
+                  SOURCE_PV=$(kubectl get pvc "$PVC_NAME" -n "$NAMESPACE" -o jsonpath='{.spec.volumeName}')
+                  echo "  PVC StorageClass: $PVC_STORAGE_CLASS"
+                  echo "  Source PV:        $SOURCE_PV"
+
+                  # Create the VolumeSnapshot
+                  kubectl create volumesnapshot "$SNAPSHOT_NAME" \
+                    --namespace "$NAMESPACE" \
+                    --selector statefulset.kubernetes.io/pod-name=writer-0 \
+                    --verbose 2>&1
+
+                  echo "Snapshot created successfully: $SNAPSHOT_NAME"
+                  kubectl get volumesnapshot "$SNAPSHOT_NAME" -n "$NAMESPACE" -o wide
+              env:
+                # VolumeSnapshotClass name from ConfigMap
+                - name: VOLUME_SNAPSHOT_CLASS
+                  valueFrom:
+                    configMapKeyRef:
+                      name: lantern-volume-snapshot-config
+                      key: snapshot-class
+                      optional: false
+                # PVC name (data-{writer-0} from StatefulSet volumeClaimTemplates)
+                - name: PVC_NAME
+                  value: "data-writer-0"
+                # Kubernetes namespace
+                - name: NAMESPACE
+                  value: "lantern"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 100m
+                  memory: 128Mi
+          restartPolicy: OnFailure

@@ -24,6 +24,9 @@ resources:
   - secret.yaml
   - ingest-deployment.yaml
   - writer-statefulset.yaml
+  - writer-snapshot-cronjob.yaml
+  - volume-snapshot-configmap.yaml
+  - volume-snapshot-rbac.yaml
   - query-deployment.yaml
   - eval-deployment.yaml
   - ingest-service.yaml

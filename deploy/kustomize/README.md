@@ -13,6 +13,9 @@ deploy/kustomize/
 │   ├── secret.yaml                # Secret: lantern-secret (credentials)
 │   ├── ingest-deployment.yaml     # Ingest API Deployment (port 8000)
 │   ├── writer-statefulset.yaml    # Writer StatefulSet with PVC (port 8001)
+│   ├── writer-snapshot-cronjob.yaml  # CronJob: PVC VolumeSnapshot (daily at 02:00 UTC)
+│   ├── volume-snapshot-configmap.yaml # ConfigMap: snapshot class configuration
+│   ├── volume-snapshot-rbac.yaml      # RBAC: ServiceAccount + ClusterRole for snapshots
 │   ├── query-deployment.yaml      # Query API Deployment (port 8002)
 │   ├── eval-deployment.yaml       # Eval Workers Deployment (no HTTP port)
 │   ├── ingest-service.yaml        # Ingest ClusterIP Service
@@ -214,6 +217,41 @@ patches:
         path: /spec/volumeClaimTemplates/0/spec/storageClassName
         value: fast-ssd
 ```
+
+### PVC snapshot configuration
+
+The `lantern-volume-snapshot-config` ConfigMap holds the `VolumeSnapshotClass`
+name. Override this in your overlay to match your cloud provider's snapshot
+class:
+
+```yaml
+# overlays/production/kustomization.yaml
+patches:
+  - target:
+      kind: ConfigMap
+      name: lantern-volume-snapshot-config
+    patch: |-
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: lantern-volume-snapshot-config
+      data:
+        snapshot-class: "ebs-csi-gp3"
+```
+
+Common snapshot class names by cloud provider:
+| Provider | Snapshot Class |
+|----------|---------------|
+| AWS EBS (gp3) | `ebs-csi-gp3` |
+| AWS EBS (io2) | `ebs-csi-io2` |
+| GCE PD | `pd.csi.storage.gke.io` |
+| Azure Disk | `disk.csi.azure.com` |
+| OpenStack Cinder | `cinder.csi.openstack.org` |
+
+The CronJob creates snapshots tagged with `lantern.io/backup-type=volume-snapshot`
+for easy identification and cleanup.
+
+See `docs/restore-from-snapshot.md` for full restore procedures.
 
 ## Architecture Notes
 

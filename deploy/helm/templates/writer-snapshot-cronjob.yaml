@@ -1,0 +1,155 @@
+{{- /*
+Writer VolumeSnapshot CronJob — periodic PVC backup using the
+Kubernetes VolumeSnapshot API.
+
+Creates a VolumeSnapshot of the writer PVC on a configurable schedule
+(default: daily at 02:00 UTC). This bounds hot-store data loss to the
+snapshot interval rather than the full recovery window.
+
+Requires:
+  - VolumeSnapshot CRDs installed (snapshot.storage.k8s.io/v1)
+  - A VolumeSnapshotClass provisioned by your cloud CSI driver
+  - Storage driver that supports volume snapshots (EBS, GCE PD, Azure Disk, etc.)
+*/ -}}
+{{- if .Values.writer.volumeSnapshot.enabled }}
+---
+# ServiceAccount for the CronJob (has permissions to create VolumeSnapshots)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-volume-snapshot
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: writer
+    app.kubernetes.io/part-of: lantern
+---
+# ClusterRole with permissions for VolumeSnapshot operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-volume-snapshot
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: writer
+    app.kubernetes.io/part-of: lantern
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list", "watch", "create"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents"]
+    verbs: ["get", "list", "watch"]
+---
+# Bind the ClusterRole to the ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-volume-snapshot
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: writer
+    app.kubernetes.io/part-of: lantern
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-volume-snapshot
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ .Release.Name }}-volume-snapshot
+  apiGroup: rbac.authorization.k8s.io
+---
+# ConfigMap holding the VolumeSnapshotClass name
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-volume-snapshot-config
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: writer
+    app.kubernetes.io/part-of: lantern
+data:
+  snapshot-class: {{ .Values.writer.volumeSnapshot.snapshotClass | quote }}
+---
+# CronJob that creates a VolumeSnapshot of the writer PVC
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-writer-volume-snapshot
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: writer
+    app.kubernetes.io/part-of: lantern
+spec:
+  schedule: {{ .Values.writer.volumeSnapshot.schedule | quote }}
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          serviceAccountName: {{ .Release.Name }}-volume-snapshot
+          containers:
+            - name: snapshot
+              image: bitnami/kubectl:latest
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+
+                  SNAPSHOT_NAME="lantern-writer-$(date +%Y%m%d-%H%M%S)"
+                  VOLUME_SNAPSHOT_CLASS="${VOLUME_SNAPSHOT_CLASS:?VOLUME_SNAPSHOT_CLASS is required}"
+                  PVC_NAME="${PVC_NAME:-{{ .Release.Name }}-writer-0}"
+                  NAMESPACE="{{ .Release.Namespace }}"
+
+                  echo "Creating VolumeSnapshot $SNAPSHOT_NAME"
+                  echo "  Source PVC:       $PVC_NAME"
+                  echo "  Snapshot class:   $VOLUME_SNAPSHOT_CLASS"
+                  echo "  Namespace:        $NAMESPACE"
+
+                  PVC_STORAGE_CLASS=$(kubectl get pvc "$PVC_NAME" -n "$NAMESPACE" -o jsonpath='{.spec.storageClassName}')
+                  SOURCE_PV=$(kubectl get pvc "$PVC_NAME" -n "$NAMESPACE" -o jsonpath='{.spec.volumeName}')
+                  echo "  PVC StorageClass: $PVC_STORAGE_CLASS"
+                  echo "  Source PV:        $SOURCE_PV"
+
+                  kubectl create volumesnapshot "$SNAPSHOT_NAME" \
+                    --namespace "$NAMESPACE" \
+                    --selector statefulset.kubernetes.io/pod-name="$PVC_NAME" \
+                    --verbose 2>&1
+
+                  echo "Snapshot created successfully: $SNAPSHOT_NAME"
+                  kubectl get volumesnapshot "$SNAPSHOT_NAME" -n "$NAMESPACE" -o wide
+              env:
+                - name: VOLUME_SNAPSHOT_CLASS
+                  valueFrom:
+                    configMapKeyRef:
+                      name: {{ .Release.Name }}-volume-snapshot-config
+                      key: snapshot-class
+                      optional: false
+                - name: PVC_NAME
+                  value: "{{ .Release.Name }}-writer-0"
+                - name: NAMESPACE
+                  value: "{{ .Release.Namespace }}"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 100m
+                  memory: 128Mi
+          restartPolicy: OnFailure
+{{- end }}
