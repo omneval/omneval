@@ -29,9 +29,12 @@ RUN npm install -g @mariozechner/pi-coding-agent
 
 USER agent
 
+# Install otel exporter as agent user so it lands in /home/agent/.pi/
+RUN pi install git:github.com/mprokopov/pi-otel-telemetry
+
 # Bake in git author identity so Pi's commits are never rejected.
 RUN git config --global user.name "Sandcastle Agent" \
- && git config --global user.email "agent@blosshomelab.com"
+  && git config --global user.email "agent@blosshomelab.com"
 
 WORKDIR /home/agent
 

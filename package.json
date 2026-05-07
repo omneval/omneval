@@ -8,6 +8,7 @@
   },
   "scripts": {
     "postinstall": "patch-package",
-    "sandcastle": "npx tsx ./.sandcastle/main.mts"
+    "sandcastle": "npx tsx ./.sandcastle/main.mts",
+    "build-docker": "npx sandcastle docker build-image"
   }
 }
