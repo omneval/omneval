@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { colors } from "@/theme";
 import { formatTime } from "@/utils/formatters";
+import { diffText, diffModelConfig, type DiffLine } from "@/utils/diff";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -73,6 +74,16 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
 
   // Label reassignment state: { promptName, label } -> new version
   const [labelAssignments, setLabelAssignments] = useState<Map<string, number>>(new Map());
+
+  // Diff panel state
+  const [showDiffPanel, setShowDiffPanel] = useState(false);
+  const [diffPromptName, setDiffPromptName] = useState("");
+  const [diffOldVersion, setDiffOldVersion] = useState(1);
+  const [diffNewVersion, setDiffNewVersion] = useState(2);
+  const [diffData, setDiffData] = useState<
+    { textDiff: DiffLine[]; modelDiff: { field: string; oldValue: string | number; newValue: string | number }[] }
+  | null
+  >(null);
 
   const fetchPrompts = async () => {
     setLoading(true);
@@ -175,6 +186,40 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
     } catch (e: unknown) {
       setCreateError(e instanceof Error ? e.message : "Unknown error");
     }
+  };
+
+  // ── Diff panel helpers ───────────────────────────────────────────
+
+  const openDiffPanel = (name: string, versions: PromptVersion[]) => {
+    if (versions.length === 0) return;
+    const maxVer = Math.max(...versions.map((v) => v.version));
+    setDiffPromptName(name);
+    setDiffOldVersion(1);
+    setDiffNewVersion(maxVer > 1 ? maxVer : 2);
+    setShowDiffPanel(true);
+    computeDiff(versions, 1, maxVer > 1 ? maxVer : 2);
+  };
+
+  const computeDiff = (
+    _versions: PromptVersion[],
+    oldVer: number,
+    newVer: number
+  ) => {
+    setDiffOldVersion(oldVer);
+    setDiffNewVersion(newVer);
+    const oldVerData = _versions.find((v) => v.version === oldVer);
+    const newVerData = _versions.find((v) => v.version === newVer);
+    const textDiff = diffText(
+      oldVerData?.template ?? "",
+      newVerData?.template ?? ""
+    );
+    const modelDiff = diffModelConfig(oldVerData, newVerData);
+    setDiffData({ textDiff, modelDiff });
+  };
+
+  const closeDiffPanel = () => {
+    setShowDiffPanel(false);
+    setDiffData(null);
   };
 
   // ── Render ───────────────────────────────────────────────────────
@@ -531,6 +576,25 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                                 );
                               })}
                             </div>
+
+                            {/* Compare versions button */}
+                            {versions.length >= 2 && (
+                              <button
+                                onClick={() => openDiffPanel(prompt.name, versions)}
+                                className="mt-2 flex items-center gap-1.5 text-xs font-medium rounded transition-colors"
+                                style={{
+                                  color: colors.accents.emberFlare,
+                                  backgroundColor: "transparent",
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(255,87,34,0.08)")}
+                                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                              >
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                  <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                                </svg>
+                                Compare versions
+                              </button>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -540,6 +604,216 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Diff Panel Overlay */}
+      {showDiffPanel && diffData && (
+        <div
+          className="fixed inset-0 z-50 flex justify-end"
+          style={{ backgroundColor: "rgba(0, 0, 0, 0.6)" }}
+          onClick={closeDiffPanel}
+        >
+          <div
+            className="flex flex-col h-full w-full max-w-3xl border-l overflow-hidden"
+            style={{ backgroundColor: colors.backgrounds.charcoalDepth }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b"
+              style={{ borderColor: colors.backgrounds.caveWall }}
+            >
+              <div>
+                <h2 className="text-sm font-semibold text-lantern-pure">
+                  Compare: {diffPromptName}
+                </h2>
+                <p className="text-xs text-lantern-ash mt-0.5">
+                  Version {diffOldVersion} vs {diffNewVersion}
+                </p>
+              </div>
+              <button
+                onClick={closeDiffPanel}
+                className="p-1.5 rounded transition-colors"
+                style={{ color: colors.typography.ashGrey }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.backgrounds.slightIllumination)}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+              >
+                <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+                  <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Version selectors */}
+            <div className="flex items-center gap-3 px-5 py-3 border-b"
+              style={{ borderColor: colors.backgrounds.caveWall }}
+            >
+              <span className="text-xs text-lantern-ash">From:</span>
+              <select
+                value={diffOldVersion}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value);
+                  computeDiff(versionData.get(diffPromptName) || [], v, diffNewVersion);
+                }}
+                className="text-xs px-2 py-1 rounded border outline-none"
+                style={{
+                  backgroundColor: colors.backgrounds.abyssBlack,
+                  borderColor: colors.backgrounds.caveWall,
+                  color: colors.typography.pureLight,
+                }}
+              >
+                <option value={0}>(empty baseline)</option>
+                {Array.from({ length: 50 }, (_, i) => i + 1).map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+
+              <span className="text-xs text-lantern-ash">To:</span>
+              <select
+                value={diffNewVersion}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value);
+                  computeDiff(versionData.get(diffPromptName) || [], diffOldVersion, v);
+                }}
+                className="text-xs px-2 py-1 rounded border outline-none"
+                style={{
+                  backgroundColor: colors.backgrounds.abyssBlack,
+                  borderColor: colors.backgrounds.caveWall,
+                  color: colors.typography.pureLight,
+                }}
+              >
+                {Array.from({ length: 50 }, (_, i) => i + 1).map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-auto">
+              {/* Text diff */}
+              <div className="px-5 py-4">
+                <h3 className="text-xs font-semibold text-lantern-ash mb-2 uppercase tracking-wider">Template Diff</h3>
+                <div
+                  className="font-mono text-xs rounded-md border overflow-auto"
+                  style={{
+                    backgroundColor: colors.backgrounds.abyssBlack,
+                    borderColor: colors.backgrounds.caveWall,
+                    maxHeight: "400px",
+                  }}
+                >
+                  {diffData.textDiff.map((line, idx) => {
+                    if (line.type === "header") {
+                      return (
+                        <div
+                          key={idx}
+                          className="px-3 py-1.5 text-xs font-medium border-b"
+                          style={{
+                            backgroundColor: colors.backgrounds.charcoalDepth,
+                            borderColor: colors.backgrounds.caveWall,
+                            color: colors.typography.ashGrey,
+                          }}
+                        >
+                          {line.text}
+                        </div>
+                      );
+                    }
+                    const bg =
+                      line.type === "added"
+                        ? "rgba(34, 197, 94, 0.08)"
+                        : line.type === "removed"
+                        ? "rgba(239, 68, 68, 0.08)"
+                        : "transparent";
+                    const text =
+                      line.type === "added"
+                        ? "#22c55e"
+                        : line.type === "removed"
+                        ? "#ef4444"
+                        : colors.typography.pureLight;
+                    const leftBorder =
+                      line.type === "added"
+                        ? "#22c55e"
+                        : line.type === "removed"
+                        ? "#ef4444"
+                        : colors.backgrounds.caveWall;
+                    return (
+                      <div
+                        key={idx}
+                        className="px-3 py-0.5 whitespace-pre-wrap break-all"
+                        style={{
+                          backgroundColor: bg,
+                          borderLeft: `3px solid ${leftBorder}`,
+                          color: text,
+                        }}
+                      >
+                        <span className="mr-2 select-none text-lantern-ash" style={{ opacity: 0.4, minWidth: "2ch", display: "inline-block", textAlign: "right" }}>
+                          {idx}
+                        </span>
+                        {line.type === "added" && <span className="mr-1">+</span>}
+                        {line.type === "removed" && <span className="mr-1">-</span>}
+                        {line.type === "unchanged" && <span className="mr-1"> </span>}
+                        {line.text}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Model config diff */}
+              {diffData.modelDiff.length > 0 && (
+                <div className="px-5 py-4 border-t"
+                  style={{ borderColor: colors.backgrounds.caveWall }}
+                >
+                  <h3 className="text-xs font-semibold text-lantern-ash mb-2 uppercase tracking-wider">Model Config Changes</h3>
+                  <div
+                    className="rounded-md border overflow-hidden"
+                    style={{
+                      backgroundColor: colors.backgrounds.abyssBlack,
+                      borderColor: colors.backgrounds.caveWall,
+                    }}
+                  >
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr style={{ backgroundColor: colors.backgrounds.charcoalDepth }}>
+                          <th className="px-4 py-2 text-left font-medium" style={{ color: colors.typography.ashGrey }}>Field</th>
+                          <th className="px-4 py-2 text-left font-medium" style={{ color: colors.typography.ashGrey }}>v{diffOldVersion}</th>
+                          <th className="px-4 py-2 text-left font-medium" style={{ color: colors.typography.ashGrey }}>v{diffNewVersion}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {diffData.modelDiff.map((d) => (
+                          <tr key={d.field}>
+                            <td className="px-4 py-2 font-medium" style={{ color: colors.typography.pureLight }}>
+                              {d.field}
+                            </td>
+                            <td className="px-4 py-2" style={{ color: "#ef4444", textDecoration: d.newValue !== d.oldValue ? "line-through" : undefined }}>
+                              {String(d.oldValue)}
+                            </td>
+                            <td className="px-4 py-2 font-medium" style={{ color: "#22c55e" }}>
+                              {String(d.newValue)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Legend */}
+              <div className="px-5 py-3 border-t flex gap-4"
+                style={{ borderColor: colors.backgrounds.caveWall }}
+              >
+                <span className="text-xs flex items-center gap-1.5">
+                  <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: "rgba(34,197,94,0.3)" }} />
+                  <span style={{ color: colors.typography.ashGrey }}>Added</span>
+                </span>
+                <span className="text-xs flex items-center gap-1.5">
+                  <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: "rgba(239,68,68,0.3)" }} />
+                  <span style={{ color: colors.typography.ashGrey }}>Removed</span>
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
