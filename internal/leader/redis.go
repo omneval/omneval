@@ -7,8 +7,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// NewOpsFromRedis creates leader.Ops from a go-redis client.
-// This bridges go-redis commands to the leader.Ops interface for production use.
+// NewOpsFromRedis returns Ops that delegate to the given go-redis client.
 func NewOpsFromRedis(client *redis.Client) Ops {
 	return Ops{
 		SetNX: func(ctx context.Context, key, value string, expiration time.Duration) (bool, error) {

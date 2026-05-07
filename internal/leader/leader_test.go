@@ -7,8 +7,6 @@ import (
 	"time"
 )
 
-// --- Test helpers: create a FakeOps that implements Ops via function fields ---
-
 // fakeState holds the shared state for fake Redis operations.
 type fakeState struct {
 	mu   sync.Mutex
@@ -59,7 +57,7 @@ func (s *fakeState) fakeDelIfMatch(_ context.Context, key, expected string) (boo
 	return false, nil
 }
 
-// newFakeOps creates a fresh Ops with a new internal state.
+// newFakeOps creates a fresh Ops backed by a new fakeState.
 func newFakeOps() Ops {
 	fs := &fakeState{}
 	return Ops{
@@ -70,41 +68,6 @@ func newFakeOps() Ops {
 		DelIfMatch: fs.fakeDelIfMatch,
 	}
 }
-
-// setLock manually sets the lock value for testing pre-existing lock state.
-func setLock(ops Ops, value string) {
-	// We need direct access to the state; use a type assertion on a wrapper.
-	// For simplicity, we'll set it through a helper.
-	// Actually, let's just make Ops embed a *fakeState.
-}
-
-// --- Alternative: use a struct that holds Ops + state ---
-
-// fakeLeaderOps wraps Ops with direct state access for testing.
-type fakeLeaderOps struct {
-	mu   sync.Mutex
-	lock string
-	ops  Ops
-}
-
-func newFakeLeaderOps() *fakeLeaderOps {
-	fs := &fakeState{}
-	return &fakeLeaderOps{
-		ops: Ops{
-			SetNX: fs.fakeSetNX,
-			Get:   fs.fakeGet,
-			Del:   fs.fakeDel,
-		},
-	}
-}
-
-func (f *fakeLeaderOps) setLock(value string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.lock = value
-}
-
-// --- Tests ---
 
 func TestAcquireLock_Success(t *testing.T) {
 	ops := newFakeOps()

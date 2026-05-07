@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"runtime"
 	"syscall"
 	"time"
 
@@ -261,8 +260,7 @@ func gracefulShutdown(srv *http.Server, timeout time.Duration) error {
 // runWithLeaderElection runs the pipeline only when this instance holds the leader lock.
 // It starts a background renew loop and retries acquisition if leadership is lost.
 func runWithLeaderElection(ctx context.Context, election *leader.LeaderElection, pl *pipeline.Pipeline) error {
-	slot := runtime.GOMAXPROCS(0)
-	rng := rand.New(rand.NewSource(time.Now().UnixNano() + int64(slot)))
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	for {
 		// Start renew loop in background.
