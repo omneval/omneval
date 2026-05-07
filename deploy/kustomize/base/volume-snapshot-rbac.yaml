@@ -52,6 +52,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: lantern-volume-snapshot
+    namespace: lantern
 roleRef:
   kind: ClusterRole
   name: lantern-volume-snapshot

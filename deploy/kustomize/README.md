@@ -248,9 +248,6 @@ Common snapshot class names by cloud provider:
 | Azure Disk | `disk.csi.azure.com` |
 | OpenStack Cinder | `cinder.csi.openstack.org` |
 
-The CronJob creates snapshots tagged with `lantern.io/backup-type=volume-snapshot`
-for easy identification and cleanup.
-
 See `docs/restore-from-snapshot.md` for full restore procedures.
 
 ## Architecture Notes

@@ -113,7 +113,7 @@ spec:
 
                   SNAPSHOT_NAME="lantern-writer-$(date +%Y%m%d-%H%M%S)"
                   VOLUME_SNAPSHOT_CLASS="${VOLUME_SNAPSHOT_CLASS:?VOLUME_SNAPSHOT_CLASS is required}"
-                  PVC_NAME="${PVC_NAME:-{{ .Release.Name }}-writer-0}"
+                  PVC_NAME="${PVC_NAME:-{{ .Release.Name }}-writer-data-0}"
                   NAMESPACE="{{ .Release.Namespace }}"
 
                   echo "Creating VolumeSnapshot $SNAPSHOT_NAME"
@@ -126,9 +126,11 @@ spec:
                   echo "  PVC StorageClass: $PVC_STORAGE_CLASS"
                   echo "  Source PV:        $SOURCE_PV"
 
+                  # Create the VolumeSnapshot from the PVC using the configured snapshot class
                   kubectl create volumesnapshot "$SNAPSHOT_NAME" \
                     --namespace "$NAMESPACE" \
-                    --selector statefulset.kubernetes.io/pod-name="$PVC_NAME" \
+                    --source=pvc/"$PVC_NAME" \
+                    --snapshotclass="$VOLUME_SNAPSHOT_CLASS" \
                     --verbose 2>&1
 
                   echo "Snapshot created successfully: $SNAPSHOT_NAME"
@@ -141,7 +143,7 @@ spec:
                       key: snapshot-class
                       optional: false
                 - name: PVC_NAME
-                  value: "{{ .Release.Name }}-writer-0"
+                  value: "{{ .Release.Name }}-writer-data-0"
                 - name: NAMESPACE
                   value: "{{ .Release.Namespace }}"
               resources:

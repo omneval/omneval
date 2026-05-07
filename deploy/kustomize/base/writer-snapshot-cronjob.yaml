@@ -5,10 +5,6 @@
 #      VolumeSnapshot and VolumeSnapshotContent resources
 #   3. A ConfigMap (lantern-volume-snapshot-config) with the key
 #      "snapshot-class" pointing to the desired VolumeSnapshotClass name
-#
-# The CronJob uses a minimal kubectl container (bitnami/kubectl) to create
-# the VolumeSnapshot resource. Snapshots are tagged with lantern.io labels
-# for easy identification and cleanup.
 
 apiVersion: batch/v1
 kind: CronJob
@@ -46,7 +42,7 @@ spec:
 
                   SNAPSHOT_NAME="lantern-writer-$(date +%Y%m%d-%H%M%S)"
                   VOLUME_SNAPSHOT_CLASS="${VOLUME_SNAPSHOT_CLASS:?VOLUME_SNAPSHOT_CLASS is required}"
-                  PVC_NAME="${PVC_NAME:-data-writer-0}"
+                  PVC_NAME="${PVC_NAME:-writer-data-0}"
                   NAMESPACE="${NAMESPACE:-lantern}"
 
                   echo "Creating VolumeSnapshot $SNAPSHOT_NAME"
@@ -60,10 +56,11 @@ spec:
                   echo "  PVC StorageClass: $PVC_STORAGE_CLASS"
                   echo "  Source PV:        $SOURCE_PV"
 
-                  # Create the VolumeSnapshot
+                  # Create the VolumeSnapshot from the PVC using the configured snapshot class
                   kubectl create volumesnapshot "$SNAPSHOT_NAME" \
                     --namespace "$NAMESPACE" \
-                    --selector statefulset.kubernetes.io/pod-name=writer-0 \
+                    --source=pvc/"$PVC_NAME" \
+                    --snapshotclass="$VOLUME_SNAPSHOT_CLASS" \
                     --verbose 2>&1
 
                   echo "Snapshot created successfully: $SNAPSHOT_NAME"
@@ -76,9 +73,9 @@ spec:
                       name: lantern-volume-snapshot-config
                       key: snapshot-class
                       optional: false
-                # PVC name (data-{writer-0} from StatefulSet volumeClaimTemplates)
+                # PVC name ({statefulset-name}-{volumeClaimTemplate-name}-{ordinal} from StatefulSet volumeClaimTemplates)
                 - name: PVC_NAME
-                  value: "data-writer-0"
+                  value: "writer-data-0"
                 # Kubernetes namespace
                 - name: NAMESPACE
                   value: "lantern"
