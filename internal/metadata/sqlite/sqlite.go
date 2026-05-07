@@ -737,6 +737,16 @@ func (s *Store) UpdateEvalRule(ctx context.Context, rule *domain.EvalRule) error
 	return nil
 }
 
+func (s *Store) DeleteEvalRule(ctx context.Context, ruleID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM eval_rules WHERE rule_id = ?`, ruleID,
+	)
+	if err != nil {
+		return fmt.Errorf("sqlite: delete eval rule: %w", err)
+	}
+	return nil
+}
+
 // ---- Datasets ----
 
 func (s *Store) CreateDataset(ctx context.Context, ds *domain.Dataset) error {

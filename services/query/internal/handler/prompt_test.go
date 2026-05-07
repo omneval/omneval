@@ -113,6 +113,7 @@ func (m *FakePromptStore) CreateEvalRule(ctx context.Context, r *domain.EvalRule
 func (m *FakePromptStore) GetEvalRule(ctx context.Context, id string) (*domain.EvalRule, error)             { return nil, metadata.ErrNotFound }
 func (m *FakePromptStore) ListEvalRules(ctx context.Context, projectID string) ([]*domain.EvalRule, error)  { return nil, nil }
 func (m *FakePromptStore) UpdateEvalRule(ctx context.Context, r *domain.EvalRule) error                     { return nil }
+func (m *FakePromptStore) DeleteEvalRule(ctx context.Context, ruleID string) error                          { return nil }
 func (m *FakePromptStore) CreateDataset(ctx context.Context, d *domain.Dataset) error                       { return nil }
 func (m *FakePromptStore) GetDataset(ctx context.Context, id string) (*domain.Dataset, error)               { return nil, metadata.ErrNotFound }
 func (m *FakePromptStore) CreateDatasetItem(ctx context.Context, i *domain.DatasetItem) error               { return nil }
@@ -632,6 +633,7 @@ func (e *ErrorPromptStore) CreateEvalRule(ctx context.Context, r *domain.EvalRul
 func (e *ErrorPromptStore) GetEvalRule(ctx context.Context, id string) (*domain.EvalRule, error)                           { return nil, metadata.ErrNotFound }
 func (e *ErrorPromptStore) ListEvalRules(ctx context.Context, projectID string) ([]*domain.EvalRule, error)               { return nil, nil }
 func (e *ErrorPromptStore) UpdateEvalRule(ctx context.Context, r *domain.EvalRule) error                                   { return nil }
+func (e *ErrorPromptStore) DeleteEvalRule(ctx context.Context, ruleID string) error                                        { return nil }
 func (e *ErrorPromptStore) CreateDataset(ctx context.Context, d *domain.Dataset) error                                     { return nil }
 func (e *ErrorPromptStore) GetDataset(ctx context.Context, id string) (*domain.Dataset, error)                             { return nil, metadata.ErrNotFound }
 func (e *ErrorPromptStore) CreateDatasetItem(ctx context.Context, i *domain.DatasetItem) error                             { return nil }

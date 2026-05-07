@@ -335,6 +335,16 @@ func (f *FakeMetadataStore) UpdateEvalRule(ctx context.Context, r *domain.EvalRu
 	return nil
 }
 
+func (f *FakeMetadataStore) DeleteEvalRule(ctx context.Context, ruleID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.evalRules[ruleID]; !ok {
+		return metadata.ErrNotFound
+	}
+	delete(f.evalRules, ruleID)
+	return nil
+}
+
 func (f *FakeMetadataStore) CreateDataset(ctx context.Context, d *domain.Dataset) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

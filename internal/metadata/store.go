@@ -56,6 +56,7 @@ type Store interface {
 	GetEvalRule(ctx context.Context, ruleID string) (*domain.EvalRule, error)
 	ListEvalRules(ctx context.Context, projectID string) ([]*domain.EvalRule, error)
 	UpdateEvalRule(ctx context.Context, rule *domain.EvalRule) error
+	DeleteEvalRule(ctx context.Context, ruleID string) error
 
 	// Datasets
 	CreateDataset(ctx context.Context, ds *domain.Dataset) error

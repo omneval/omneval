@@ -5,15 +5,15 @@ import "time"
 // EvalFilter is a conjunction (AND) of conditions matched against a Span
 // in-process by the Writer Service. Nil pointer fields are ignored.
 type EvalFilter struct {
-	Kind        *SpanKind
-	Model       *string
-	ServiceName *string
-	PromptName  *string
-	StatusCode  *string
-	MinCostUSD  *float64
-	MaxCostUSD  *float64
-	MinDurationMS *int64
-	MaxDurationMS *int64
+	Kind        *SpanKind `json:"kind"`
+	Model       *string   `json:"model"`
+	ServiceName *string   `json:"service_name"`
+	PromptName  *string   `json:"prompt_name"`
+	StatusCode  *string   `json:"status_code"`
+	MinCostUSD  *float64  `json:"min_cost_usd"`
+	MaxCostUSD  *float64  `json:"max_cost_usd"`
+	MinDurationMS *int64  `json:"min_duration_ms"`
+	MaxDurationMS *int64  `json:"max_duration_ms"`
 }
 
 // EvalRule defines when and how to run LLM-as-a-Judge evaluations.

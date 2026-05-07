@@ -179,6 +179,15 @@ func Run() error {
 		}
 	}
 
+	// Eval rules handler (requires metadata store).
+	var evalRuleHandler *handler.EvalRuleHandler
+	if store != nil {
+		evalRuleHandler = &handler.EvalRuleHandler{
+			Store:        store,
+			SessionStore: h,
+		}
+	}
+
 	// Build the router.
 	mux := http.NewServeMux()
 
@@ -200,6 +209,13 @@ func Run() error {
 		mux.HandleFunc("GET /api/v1/prompts/{name}", promptHandler.HandleGetPrompt)
 		mux.HandleFunc("GET /api/v1/prompts/{name}/versions", promptHandler.HandleListPromptVersions)
 		mux.HandleFunc("PUT /api/v1/prompts/{name}/labels/{label}", promptHandler.HandleSetLabel)
+	}
+
+	// Eval rules endpoints (require metadata store).
+	if evalRuleHandler != nil {
+		mux.HandleFunc("POST /api/v1/eval-rules", evalRuleHandler.HandleCreate)
+		mux.HandleFunc("GET /api/v1/eval-rules", evalRuleHandler.HandleList)
+		mux.HandleFunc("DELETE /api/v1/eval-rules/{id}", evalRuleHandler.HandleDelete)
 	}
 
 	// Score write endpoint (for eval worker score write-back).

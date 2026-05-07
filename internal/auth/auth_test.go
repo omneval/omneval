@@ -116,6 +116,7 @@ func (f *FakeMetadataStore) ListEvalRules(_ context.Context, _ string) ([]*domai
 	return nil, nil
 }
 func (f *FakeMetadataStore) UpdateEvalRule(_ context.Context, _ *domain.EvalRule) error { return nil }
+func (f *FakeMetadataStore) DeleteEvalRule(_ context.Context, _ string) error            { return nil }
 func (f *FakeMetadataStore) CreateDataset(_ context.Context, _ *domain.Dataset) error   { return nil }
 func (f *FakeMetadataStore) GetDataset(_ context.Context, _ string) (*domain.Dataset, error) {
 	return nil, metadata.ErrNotFound
