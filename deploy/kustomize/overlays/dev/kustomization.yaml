@@ -40,8 +40,8 @@ replicas:
   - name: writer
     count: 1
 
-# Development resource limits — small, for local/dev clusters
 patches:
+  # Reduce Ingest resource limits for dev clusters
   - target:
       kind: Deployment
       name: ingest
@@ -56,6 +56,7 @@ patches:
             cpu: 200m
             memory: 128Mi
 
+  # Reduce Writer resource limits for dev clusters
   - target:
       kind: StatefulSet
       name: writer
@@ -70,6 +71,7 @@ patches:
             cpu: 500m
             memory: 256Mi
 
+  # Reduce Query resource limits for dev clusters
   - target:
       kind: Deployment
       name: query
@@ -84,6 +86,7 @@ patches:
             cpu: 200m
             memory: 128Mi
 
+  # Reduce Eval resource limits for dev clusters
   - target:
       kind: Deployment
       name: eval
@@ -98,8 +101,7 @@ patches:
             cpu: 200m
             memory: 128Mi
 
-# Replace the Writer PVC with emptyDir (no persistent storage in dev)
-patches:
+  # Replace the Writer PVC with emptyDir (no persistent storage in dev)
   - target:
       kind: StatefulSet
       name: writer
