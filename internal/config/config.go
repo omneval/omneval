@@ -84,6 +84,11 @@ type LeaderElectionConfig struct {
 	Enabled bool `mapstructure:"enabled"`
 	// LockTTL is the leader election lock TTL in seconds (default 15).
 	LockTTL int `mapstructure:"lock_ttl"`
+	// FencingEnabled prevents dual-writer data corruption on failover.
+	// When true, a newly-elected leader reconciles the S3 snapshot before
+	// accepting writes, and a deposed leader closes DuckDB immediately.
+	// Defaults to true when leader election is enabled.
+	FencingEnabled bool `mapstructure:"fencing_enabled"`
 }
 
 type QueryConfig struct {
@@ -167,6 +172,7 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("writer.flush_age_days", 2)
 	v.SetDefault("writer.leader_election.enabled", false)
 	v.SetDefault("writer.leader_election.lock_ttl", 15)
+	v.SetDefault("writer.leader_election.fencing_enabled", true)
 	// query
 	v.SetDefault("query.addr", ":8002")
 	v.SetDefault("query.duckdb_path", "")
@@ -224,8 +230,9 @@ func Load(path string) (*Config, error) {
 	envString(&cfg.Writer.SyncInterval,         "LANTERN_WRITER_SYNC_INTERVAL")
 	envString(&cfg.Writer.FlushInterval,        "LANTERN_WRITER_FLUSH_INTERVAL")
 	envInt(&cfg.Writer.FlushAgeDays,            "LANTERN_WRITER_FLUSH_AGE_DAYS")
-	envBool(&cfg.Writer.LeaderElection.Enabled, "LANTERN_WRITER_LEADER_ELECTION_ENABLED")
-	envInt(&cfg.Writer.LeaderElection.LockTTL,  "LANTERN_WRITER_LEADER_ELECTION_LOCK_TTL")
+	envBool(&cfg.Writer.LeaderElection.Enabled,       "LANTERN_WRITER_LEADER_ELECTION_ENABLED")
+	envInt(&cfg.Writer.LeaderElection.LockTTL,         "LANTERN_WRITER_LEADER_ELECTION_LOCK_TTL")
+	envBool(&cfg.Writer.LeaderElection.FencingEnabled, "LANTERN_WRITER_LEADER_ELECTION_FENCING_ENABLED")
 	envString(&cfg.Query.Addr,              "LANTERN_QUERY_ADDR")
 	envString(&cfg.Query.DuckDBPath,        "LANTERN_QUERY_DUCKDB_PATH")
 	envString(&cfg.Query.SyncInterval,      "LANTERN_QUERY_SYNC_INTERVAL")

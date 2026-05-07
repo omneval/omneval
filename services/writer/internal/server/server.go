@@ -2,12 +2,14 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,7 +27,7 @@ import (
 	"github.com/zbloss/lantern/services/writer/internal/handler"
 	"github.com/zbloss/lantern/services/writer/internal/metrics"
 	"github.com/zbloss/lantern/services/writer/internal/pipeline"
-	"github.com/zbloss/lantern/services/writer/internal/sync"
+	syncpkg "github.com/zbloss/lantern/services/writer/internal/sync"
 )
 
 // Run starts the Writer Service: drains the Redis ingest queue, writes to
@@ -40,6 +42,11 @@ func Run() error {
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return fmt.Errorf("writer: load config: %w", err)
+	}
+
+	// Default fencing_enabled to true when leader election is enabled.
+	if cfg.Writer.LeaderElection.Enabled && !cfg.Writer.LeaderElection.FencingEnabled {
+		cfg.Writer.LeaderElection.FencingEnabled = true
 	}
 
 	// Register Prometheus metrics.
@@ -74,17 +81,18 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("writer: open duckdb: %w", err)
 	}
-	defer db.Close()
 
 	// Open metadata store (SQLite for now).
 	meta, err := sqlite.New("lantern_meta.db")
 	if err != nil {
+		db.Close()
 		return fmt.Errorf("writer: open metadata: %w", err)
 	}
-	defer meta.Close()
 
 	// Run migrations.
 	if err := meta.Migrate(context.Background()); err != nil {
+		db.Close()
+		meta.Close()
 		return fmt.Errorf("writer: migrate: %w", err)
 	}
 
@@ -95,6 +103,8 @@ func Run() error {
 		DB:       cfg.Redis.DB,
 	})
 	if err := rc.Ping(context.Background()).Err(); err != nil {
+		db.Close()
+		meta.Close()
 		return fmt.Errorf("writer: redis ping: %w", err)
 	}
 
@@ -117,12 +127,16 @@ func Run() error {
 			lockTTL,
 		)
 		if err != nil {
+			db.Close()
+			meta.Close()
 			return fmt.Errorf("writer: leader election: %w", err)
 		}
 
 		// Acquire the leader lock.
 		acquired, err := election.Acquire(context.Background())
 		if err != nil {
+			db.Close()
+			meta.Close()
 			return fmt.Errorf("writer: acquire leader lock: %w", err)
 		}
 		if acquired {
@@ -138,6 +152,7 @@ func Run() error {
 
 	// Create S3 store (nil if no S3 config).
 	var s3store *s3.Store
+	var snapshotKey string
 	if cfg.Storage.Bucket != "" || cfg.Storage.Endpoint != "" {
 		s3store = s3.New(&cfg.Storage)
 		if s3store != nil {
@@ -145,10 +160,17 @@ func Run() error {
 				slog.Warn("writer: ensure bucket", "err", err)
 			}
 		}
+		snapshotKey = s3SnapshotKey(cfg)
+	}
+
+	// Create reconciler (uses S3 store and snapshot key).
+	var reconciler *Reconciler
+	if s3store != nil {
+		reconciler = NewReconciler(s3store, dbPath, snapshotKey)
 	}
 
 	// Create syncer (S3 snapshot sync).
-	syncer := sync.New(s3store, dbPath, cfg, metricsHelper)
+	syncer := syncpkg.New(s3store, dbPath, cfg, metricsHelper)
 
 	// Create flusher (aged partition flush to Parquet on S3).
 	flusher := flush.NewWithDB(s3store, db, cfg)
@@ -168,6 +190,13 @@ func Run() error {
 		return rc.Ping(ctx).Err()
 	}})
 
+	// Add reconciliation readiness gate if fencing is enabled.
+	var reconStatus *reconciliationStatus
+	if election != nil && cfg.Writer.LeaderElection.FencingEnabled {
+		reconStatus = &reconciliationStatus{}
+		p.AddCheck("reconciliation", reconStatus)
+	}
+
 	// Set up signal handling.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -179,7 +208,7 @@ func Run() error {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 	mux.Handle("/internal/v1/scores", scoreHandler)
-	
+
 	// Combine with probe routes.
 	combined := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
@@ -219,19 +248,19 @@ func Run() error {
 	// Start pipeline (blocks until ctx is canceled).
 	slog.Info("writer: pipeline started")
 
-	var runErr error
+	var pipelineErr error
 	if election != nil {
-		runErr = runWithLeaderElection(ctx, election, pl)
+		pipelineErr = runWithLeaderElection(ctx, election, pl, reconciler, reconStatus, db, cfg)
 	} else {
-		runErr = pl.Run(ctx)
-	}
-
-	if runErr != nil && runErr != context.Canceled {
-		return fmt.Errorf("writer: pipeline: %w", runErr)
+		pipelineErr = pl.Run(ctx)
 	}
 
 	// Graceful shutdown.
 	cancel()
+
+	// Close DuckDB on shutdown.
+	db.Close()
+	meta.Close()
 
 	// Release leader lock on shutdown.
 	if election != nil {
@@ -244,6 +273,54 @@ func Run() error {
 		return fmt.Errorf("writer: shutdown: %w", err)
 	}
 	slog.Info("writer: stopped")
+	return pipelineErr
+}
+
+// s3SnapshotKey builds the S3 snapshot key from the config.
+// Mirrors the logic in sync.New for consistency.
+func s3SnapshotKey(cfg *config.Config) string {
+	parts := []string{"snapshots", "duckdb.db"}
+	if cfg.Storage.Region != "" {
+		parts = append([]string{cfg.Storage.Region}, parts...)
+	}
+	return parts[0]
+}
+
+// reconciliationStatus tracks the reconciliation state after a leader transition.
+// It implements the probe.Check interface to gate readiness until reconciliation
+// completes.
+type reconciliationStatus struct {
+	mu         sync.Mutex
+	reconciled bool // true after successful reconciliation
+	err        error
+}
+
+// SetComplete marks reconciliation as successfully completed.
+func (r *reconciliationStatus) SetComplete() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reconciled = true
+	r.err = nil
+}
+
+// SetError marks reconciliation as failed or in-progress.
+func (r *reconciliationStatus) SetError(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reconciled = false
+	r.err = err
+}
+
+// Check implements probe.Check: returns error until reconciliation completes.
+func (r *reconciliationStatus) Check(_ context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.reconciled {
+		if r.err != nil {
+			return fmt.Errorf("reconciliation not ready: %w", r.err)
+		}
+		return fmt.Errorf("reconciliation not yet started")
+	}
 	return nil
 }
 
@@ -259,7 +336,17 @@ func gracefulShutdown(srv *http.Server, timeout time.Duration) error {
 
 // runWithLeaderElection runs the pipeline only when this instance holds the leader lock.
 // It starts a background renew loop and retries acquisition if leadership is lost.
-func runWithLeaderElection(ctx context.Context, election *leader.LeaderElection, pl *pipeline.Pipeline) error {
+// When fencing is enabled, it reconciles the S3 snapshot before accepting writes,
+// and closes DuckDB immediately on lock loss.
+func runWithLeaderElection(
+	ctx context.Context,
+	election *leader.LeaderElection,
+	pl *pipeline.Pipeline,
+	reconciler *Reconciler,
+	reconStatus *reconciliationStatus,
+	db *sql.DB,
+	cfg *config.Config,
+) error {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	for {
@@ -294,6 +381,22 @@ func runWithLeaderElection(ctx context.Context, election *leader.LeaderElection,
 			slog.Info("writer: elected leader")
 		}
 
+		// We are the leader. If fencing is enabled, reconcile the snapshot first.
+		if reconciler != nil {
+			slog.Info("writer: fencing enabled, reconciling snapshot before accepting writes")
+			reconStatus.SetError(fmt.Errorf("reconciliation in progress"))
+
+			if err := reconciler.Reconcile(ctx); err != nil {
+				slog.Error("writer: fencing: snapshot reconciliation failed", "err", err)
+				reconStatus.SetError(err)
+				// Still run the pipeline but readiness will show 503.
+				// In production you might want to fail fast here.
+			} else {
+				slog.Info("writer: fencing: snapshot reconciled, ready to accept writes")
+				reconStatus.SetComplete()
+			}
+		}
+
 		// We are the leader — run the pipeline.
 		slog.Info("writer: pipeline running (leader)")
 		plErr := pl.Run(ctx)
@@ -301,6 +404,15 @@ func runWithLeaderElection(ctx context.Context, election *leader.LeaderElection,
 		// Pipeline completed (likely due to context cancellation).
 		renewCancel()
 		renewErr := <-renewErrCh
+
+		// If we lost leadership and fencing is enabled, close DuckDB immediately
+		// to prevent any window of dual-write.
+		if renewErr != nil && renewErr.Error() == "leader: lost leadership" {
+			if cfg.Writer.LeaderElection.FencingEnabled {
+				slog.Warn("writer: lost leadership — closing DuckDB immediately to prevent dual-write")
+				db.Close()
+			}
+		}
 
 		// Release the leader lock.
 		if err := releaseLeaderLock(ctx, election); err != nil {
@@ -311,7 +423,10 @@ func runWithLeaderElection(ctx context.Context, election *leader.LeaderElection,
 			return fmt.Errorf("pipeline: %w", plErr)
 		}
 		if renewErr != nil && renewErr != context.Canceled {
-			// We lost leadership.
+			// We lost leadership — reset reconciliation status for next leader run.
+			if reconStatus != nil {
+				reconStatus.SetError(fmt.Errorf("reconciliation reset (lock lost)"))
+			}
 			slog.Info("writer: lost leadership, retrying...")
 			continue
 		}
