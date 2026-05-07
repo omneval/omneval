@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: writer
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/component: writer
+spec:
+  serviceName: writer
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lantern
+      app.kubernetes.io/component: writer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: lantern
+        app.kubernetes.io/component: writer
+    spec:
+      containers:
+        - name: writer
+          image: lantern/app:latest
+          imagePullPolicy: IfNotPresent
+          command: ["lantern-writer"]
+          ports:
+            - name: http
+              containerPort: 8001
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          env:
+            - name: LANTERN_CONFIG
+              value: "/etc/lantern/lantern.yaml"
+            - name: LANTERN_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: lantern-secret
+                  key: redis-password
+                  optional: true
+            - name: LANTERN_STORAGE_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: lantern-secret
+                  key: storage-access-key
+                  optional: true
+            - name: LANTERN_STORAGE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: lantern-secret
+                  key: storage-secret-key
+                  optional: true
+          volumeMounts:
+            - name: config
+              mountPath: /etc/lantern
+              readOnly: true
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: lantern-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

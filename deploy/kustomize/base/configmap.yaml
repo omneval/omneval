@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lantern-config
+  labels:
+    app.kubernetes.io/name: lantern
+data:
+  lantern.yaml: |
+    database:
+      driver: sqlite
+    redis:
+      addr: lantern-redis-master:6379
+    storage: {}
+    auth:
+      session_ttl: 168h
+      secure_cookie: false
+    ingest:
+      addr: ":8000"
+      log_system_prompt: true
+      cors_allowed_origins:
+        - "*"
+    writer:
+      addr: ":8001"
+      duckdb_path: "/data/lantern.duckdb"
+      sync_interval: 30s
+      flush_interval: 30m
+      flush_age_days: 2
+      leader_election:
+        enabled: false
+        lock_ttl: 15
+    query:
+      addr: ":8002"
+      duckdb_path: "/tmp/lantern-snapshot.duckdb"
+      sync_interval: 30s
+    eval:
+      concurrency: 4
+      judge_timeout: 90s
+      retry_count: 3
+    metrics:
+      addr: ":9090"
+      disable_project_labels: false

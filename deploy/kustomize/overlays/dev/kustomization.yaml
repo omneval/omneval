@@ -1,0 +1,118 @@
+# Development overlay for Lantern
+#
+# Applies reduced resource requests, single replica, and emptyDir
+# storage (instead of PVC) for the Writer Service. Designed for
+# local development, minikube, kind, or small dev clusters.
+#
+# Usage:
+#   kustomize build deploy/kustomize/overlays/dev
+#
+# Flux CD example:
+#   apiVersion: kustomize.toolkit.fluxcd.io/v1
+#   kind: Kustomization
+#   metadata:
+#     name: lantern-dev
+#     namespace: flux-system
+#   spec:
+#     interval: 5m
+#     path: ./deploy/kustomize/overlays/dev
+#     prune: true
+#     sourceRef:
+#       kind: GitRepository
+#       name: flux-system
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namespace: lantern
+
+# Development replica counts — single replica per service
+replicas:
+  - name: ingest
+    count: 1
+  - name: query
+    count: 1
+  - name: eval
+    count: 1
+  - name: writer
+    count: 1
+
+# Development resource limits — small, for local/dev clusters
+patches:
+  - target:
+      kind: Deployment
+      name: ingest
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+  - target:
+      kind: StatefulSet
+      name: writer
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+
+  - target:
+      kind: Deployment
+      name: query
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+  - target:
+      kind: Deployment
+      name: eval
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+# Replace the Writer PVC with emptyDir (no persistent storage in dev)
+patches:
+  - target:
+      kind: StatefulSet
+      name: writer
+    patch: |
+      - op: replace
+        path: /spec/volumeClaimTemplates
+        value:
+          - metadata:
+              name: data
+            spec:
+              accessModes:
+                - ReadWriteOnce
+              storageClassName: ""
+              resources:
+                requests:
+                  storage: 1Gi

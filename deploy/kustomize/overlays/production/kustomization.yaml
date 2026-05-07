@@ -1,0 +1,115 @@
+# Production overlay for Lantern
+#
+# Applies production-grade replica counts and resource limits on top of
+# the Lantern kustomize base. Designed for use with Flux CD or ArgoCD
+# in a production Kubernetes cluster.
+#
+# Usage:
+#   kustomize build deploy/kustomize/overlays/production
+#
+# Flux CD example (flux-system/kustomization.yaml):
+#   apiVersion: kustomize.toolkit.fluxcd.io/v1
+#   kind: Kustomization
+#   metadata:
+#     name: lantern-production
+#     namespace: flux-system
+#   spec:
+#     interval: 10m
+#     path: ./deploy/kustomize/overlays/production
+#     prune: true
+#     sourceRef:
+#       kind: GitRepository
+#       name: flux-system
+#
+# ArgoCD example (argocd/application.yaml):
+#   apiVersion: argoproj.io/v1alpha1
+#   kind: Application
+#   metadata:
+#     name: lantern-production
+#     namespace: argocd
+#   spec:
+#     source:
+#       path: deploy/kustomize/overlays/production
+#       repoURL: https://github.com/<org>/lantern.git
+#       targetRevision: main
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namespace: lantern
+
+# Production replica counts
+replicas:
+  - name: ingest
+    count: 3
+  - name: query
+    count: 3
+  - name: eval
+    count: 4
+  - name: writer
+    count: 1
+
+# Production resource limits
+patches:
+  # Ingest: moderate resources, horizontal scale
+  - target:
+      kind: Deployment
+      name: ingest
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 512Mi
+
+  # Writer: highest resources (DuckDB operations), single replica
+  - target:
+      kind: StatefulSet
+      name: writer
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 1Gi
+
+  # Query: moderate resources, horizontal scale
+  - target:
+      kind: Deployment
+      name: query
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 512Mi
+
+  # Eval: moderate resources for LLM judge calls
+  - target:
+      kind: Deployment
+      name: eval
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 512Mi

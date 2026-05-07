@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lantern
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/part-of: lantern

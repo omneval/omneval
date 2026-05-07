@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: eval
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/component: eval
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/component: eval

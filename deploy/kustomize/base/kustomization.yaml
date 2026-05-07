@@ -1,0 +1,32 @@
+# Kustomize base for Lantern
+#
+# This base defines all Lantern services (ingest, writer, query, eval)
+# as Kubernetes Deployments, a StatefulSet (writer), Services, a ConfigMap,
+# and a Secret. It is designed to be layered with overlays for different
+# environments (production, dev, etc.) via GitOps tools like Flux CD or ArgoCD.
+#
+# Usage:
+#   kustomize build deploy/kustomize/base
+#   kustomize build deploy/kustomize/overlays/production
+#   kustomize build deploy/kustomize/overlays/dev
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: lantern
+
+commonLabels:
+  app.kubernetes.io/part-of: lantern
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secret.yaml
+  - ingest-deployment.yaml
+  - writer-statefulset.yaml
+  - query-deployment.yaml
+  - eval-deployment.yaml
+  - ingest-service.yaml
+  - writer-service.yaml
+  - query-service.yaml
+  - eval-service.yaml

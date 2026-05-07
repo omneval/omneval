@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: query
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/component: query
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lantern
+      app.kubernetes.io/component: query
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: lantern
+        app.kubernetes.io/component: query
+    spec:
+      containers:
+        - name: query
+          image: lantern/app:latest
+          imagePullPolicy: IfNotPresent
+          command: ["lantern-query"]
+          ports:
+            - name: http
+              containerPort: 8002
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          env:
+            - name: LANTERN_CONFIG
+              value: "/etc/lantern/lantern.yaml"
+            - name: LANTERN_AUTH_ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: lantern-secret
+                  key: admin-email
+                  optional: true
+            - name: LANTERN_AUTH_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: lantern-secret
+                  key: admin-password
+                  optional: true
+            - name: LANTERN_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: lantern-secret
+                  key: redis-password
+                  optional: true
+            - name: LANTERN_STORAGE_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: lantern-secret
+                  key: storage-access-key
+                  optional: true
+            - name: LANTERN_STORAGE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: lantern-secret
+                  key: storage-secret-key
+                  optional: true
+            - name: LANTERN_DATABASE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: lantern-secret
+                  key: postgres-dsn
+                  optional: true
+          volumeMounts:
+            - name: config
+              mountPath: /etc/lantern
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: lantern-config
