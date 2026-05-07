@@ -166,16 +166,16 @@ func (m *FakePromptStore) ListEvalRules(ctx context.Context, projectID string) (
 func (m *FakePromptStore) UpdateEvalRule(ctx context.Context, r *domain.EvalRule) error { return nil }
 func (m *FakePromptStore) DeleteEvalRule(ctx context.Context, ruleID string) error      { return nil }
 func (m *FakePromptStore) CreateDataset(ctx context.Context, d *domain.Dataset) error   { return nil }
-func (m *FakePromptStore) GetDataset(ctx context.Context, id string) (*domain.Dataset, error) {
-	return nil, metadata.ErrNotFound
-}
-func (m *FakePromptStore) CreateDatasetItem(ctx context.Context, i *domain.DatasetItem) error {
-	return nil
-}
 func (m *FakePromptStore) ListDatasets(ctx context.Context, projectID string) ([]*domain.Dataset, error) {
 	return nil, nil
 }
-func (m *FakePromptStore) DeleteDataset(ctx context.Context, id string) error { return nil }
+func (m *FakePromptStore) GetDataset(ctx context.Context, id string) (*domain.Dataset, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *FakePromptStore) DeleteDataset(ctx context.Context, datasetID string) error { return nil }
+func (m *FakePromptStore) CreateDatasetItem(ctx context.Context, i *domain.DatasetItem) error {
+	return nil
+}
 func (m *FakePromptStore) ListDatasetItems(ctx context.Context, datasetID string) ([]*domain.DatasetItem, error) {
 	return nil, nil
 }
