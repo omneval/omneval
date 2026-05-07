@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zbloss/lantern/internal/domain"
+	"github.com/zbloss/lantern/internal/judge"
 	"github.com/zbloss/lantern/services/query/internal/handler"
 )
 
@@ -76,7 +77,7 @@ func (h *PlaygroundHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Interpolate the template.
-	interpolated, missing := Interpolate(pv.Template, req.Variables)
+	interpolated, missing := judge.Interpolate(pv.Template, req.Variables)
 	if len(missing) > 0 {
 		http.Error(w, "missing required variables: "+strings.Join(missing, ", "), http.StatusBadRequest)
 		return
@@ -89,11 +90,11 @@ func (h *PlaygroundHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build chat messages.
-	messages := buildMessages(interpolated)
+	messages := judge.BuildJudgeMessages(interpolated)
 
 	// Call the LLM.
 	start := time.Now()
-	resp, err := h.LLMClient.Chat(r.Context(), ChatRequest{
+	resp, err := h.LLMClient.Chat(r.Context(), judge.ChatRequest{
 		Model:       model,
 		Messages:    messages,
 		Temperature: temperature,
@@ -113,6 +114,8 @@ func (h *PlaygroundHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 	if len(resp.Choices) > 0 {
 		output = resp.Choices[0].Message.Content
 	}
+
+	_ = judge.ChatResponse{} // ensure import is used
 
 	playgroundResp := Response{
 		Output:       output,

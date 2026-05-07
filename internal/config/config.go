@@ -100,6 +100,10 @@ type QueryConfig struct {
 	PlaygroundLLMBaseURL string `mapstructure:"playground_llm_base_url"`
 	// PlaygroundLLMAPIKey is the API key for the playground LLM.
 	PlaygroundLLMAPIKey string `mapstructure:"playground_llm_api_key"`
+	// JudgeLLMBaseURL is an OpenAI-compatible base URL for dataset run judge LLM calls.
+	JudgeLLMBaseURL string `mapstructure:"judge_llm_base_url"`
+	// JudgeLLMAPIKey is the API key for the dataset run judge LLM.
+	JudgeLLMAPIKey string `mapstructure:"judge_llm_api_key"`
 }
 
 type EvalConfig struct {
@@ -238,6 +242,8 @@ func Load(path string) (*Config, error) {
 	envString(&cfg.Query.SyncInterval,      "LANTERN_QUERY_SYNC_INTERVAL")
 	envString(&cfg.Query.PlaygroundLLMBaseURL, "LANTERN_QUERY_PLAYGROUND_LLM_BASE_URL")
 	envString(&cfg.Query.PlaygroundLLMAPIKey,  "LANTERN_QUERY_PLAYGROUND_LLM_API_KEY")
+	envString(&cfg.Query.JudgeLLMBaseURL, "LANTERN_QUERY_JUDGE_LLM_BASE_URL")
+	envString(&cfg.Query.JudgeLLMAPIKey,  "LANTERN_QUERY_JUDGE_LLM_API_KEY")
 	envString(&cfg.Eval.Addr,           "LANTERN_EVAL_ADDR")
 	envInt(&cfg.Eval.Concurrency,       "LANTERN_EVAL_CONCURRENCY")
 	envString(&cfg.Eval.LLMBaseURL,     "LANTERN_EVAL_LLM_BASE_URL")

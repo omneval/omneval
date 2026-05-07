@@ -26,9 +26,10 @@ type FakeMetadataStore struct {
 	promptVersions map[string]*domain.PromptVersion // key: projectID:name:version
 	promptLabels   map[string]*domain.PromptLabel   // key: projectID:name:label
 	evalRules      map[string]*domain.EvalRule
-	datasets       map[string]*domain.Dataset
-	datasetItems   map[string]*domain.DatasetItem
-	datasetRuns    map[string]*domain.DatasetRun
+	datasets         map[string]*domain.Dataset
+	datasetItems     map[string]*domain.DatasetItem
+	datasetRuns      map[string]*domain.DatasetRun
+	datasetRunItems  map[string]*domain.DatasetRunItem
 
 	// Counters for testing
 	CreateUserCalls      int
@@ -50,9 +51,10 @@ func NewFakeMetadataStore() *FakeMetadataStore {
 		promptVersions: make(map[string]*domain.PromptVersion),
 		promptLabels:   make(map[string]*domain.PromptLabel),
 		evalRules:      make(map[string]*domain.EvalRule),
-		datasets:       make(map[string]*domain.Dataset),
-		datasetItems:   make(map[string]*domain.DatasetItem),
-		datasetRuns:    make(map[string]*domain.DatasetRun),
+		datasets:         make(map[string]*domain.Dataset),
+		datasetItems:     make(map[string]*domain.DatasetItem),
+		datasetRuns:      make(map[string]*domain.DatasetRun),
+		datasetRunItems:  make(map[string]*domain.DatasetRunItem),
 	}
 }
 
@@ -490,7 +492,72 @@ func (f *FakeMetadataStore) GetDatasetRun(ctx context.Context, id string) (*doma
 	if !ok {
 		return nil, metadata.ErrNotFound
 	}
-	return run, nil
+	r := *run
+	return &r, nil
+}
+
+func (f *FakeMetadataStore) UpdateDatasetRun(ctx context.Context, run *domain.DatasetRun) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.datasetRuns[run.RunID]; !ok {
+		return metadata.ErrNotFound
+	}
+	f.datasetRuns[run.RunID] = run
+	return nil
+}
+
+func (f *FakeMetadataStore) ListDatasetRuns(ctx context.Context, datasetID string) ([]*domain.DatasetRun, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	var runs []*domain.DatasetRun
+	for _, run := range f.datasetRuns {
+		if run.DatasetID == datasetID {
+			cp := *run
+			runs = append(runs, &cp)
+		}
+	}
+	return runs, nil
+}
+
+func (f *FakeMetadataStore) CreateDatasetRunItem(ctx context.Context, item *domain.DatasetRunItem) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.datasetRunItems[item.RunItemID] = item
+	return nil
+}
+
+func (f *FakeMetadataStore) GetDatasetRunItem(ctx context.Context, id string) (*domain.DatasetRunItem, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	item, ok := f.datasetRunItems[id]
+	if !ok {
+		return nil, metadata.ErrNotFound
+	}
+	cp := *item
+	return &cp, nil
+}
+
+func (f *FakeMetadataStore) UpdateDatasetRunItem(ctx context.Context, item *domain.DatasetRunItem) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.datasetRunItems[item.RunItemID]; !ok {
+		return metadata.ErrNotFound
+	}
+	f.datasetRunItems[item.RunItemID] = item
+	return nil
+}
+
+func (f *FakeMetadataStore) ListDatasetRunItems(ctx context.Context, runID string) ([]*domain.DatasetRunItem, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	var items []*domain.DatasetRunItem
+	for _, item := range f.datasetRunItems {
+		if item.RunID == runID {
+			cp := *item
+			items = append(items, &cp)
+		}
+	}
+	return items, nil
 }
 
 // CheckPassword compares plaintext password against stored hash (uses bcrypt).

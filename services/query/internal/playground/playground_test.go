@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/zbloss/lantern/internal/domain"
+	"github.com/zbloss/lantern/internal/judge"
 	"github.com/zbloss/lantern/internal/metadata"
 	"github.com/zbloss/lantern/services/query/internal/handler"
 )
@@ -130,22 +131,22 @@ func TestInterpolate_WhitespaceInBraces(t *testing.T) {
 type FakeLLMClient struct {
 	mu sync.RWMutex
 	// responses is a queue of responses to return
-	responses []*ChatResponse
+	responses []*judge.ChatResponse
 	// errors is a queue of errors to return
 	errors []error
 	// calledRequests records the last request received
-	calledRequests []ChatRequest
+	calledRequests []judge.ChatRequest
 }
 
-func NewFakeLLMClient(responses ...*ChatResponse) *FakeLLMClient {
+func NewFakeLLMClient(responses ...*judge.ChatResponse) *FakeLLMClient {
 	return &FakeLLMClient{
 		responses:      responses,
 		errors:         []error{},
-		calledRequests: []ChatRequest{},
+		calledRequests: []judge.ChatRequest{},
 	}
 }
 
-func (f *FakeLLMClient) SetResponse(resp *ChatResponse) {
+func (f *FakeLLMClient) SetResponse(resp *judge.ChatResponse) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.responses = append(f.responses, resp)
@@ -157,7 +158,7 @@ func (f *FakeLLMClient) SetError(err error) {
 	f.errors = append(f.errors, err)
 }
 
-func (f *FakeLLMClient) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+func (f *FakeLLMClient) Chat(ctx context.Context, req judge.ChatRequest) (*judge.ChatResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -178,27 +179,27 @@ func (f *FakeLLMClient) Chat(ctx context.Context, req ChatRequest) (*ChatRespons
 	}
 
 	// Default response
-	return &ChatResponse{
-		Choices: []Choice{
+	return &judge.ChatResponse{
+		Choices: []judge.Choice{
 			{
-				Message: ChatMessage{
+				Message: judge.ChatMessage{
 					Role:    "assistant",
 					Content: "default response",
 				},
 			},
 		},
-		Usage: Usage{
+		Usage: judge.Usage{
 			PromptTokens:     10,
 			CompletionTokens: 5,
 		},
 	}, nil
 }
 
-func (f *FakeLLMClient) LastRequest() ChatRequest {
+func (f *FakeLLMClient) LastRequest() judge.ChatRequest {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if len(f.calledRequests) == 0 {
-		return ChatRequest{}
+		return judge.ChatRequest{}
 	}
 	return f.calledRequests[len(f.calledRequests)-1]
 }
@@ -370,6 +371,14 @@ func (m *fakePromptStore) CreateDatasetRun(ctx context.Context, r *domain.Datase
 func (m *fakePromptStore) GetDatasetRun(ctx context.Context, id string) (*domain.DatasetRun, error) {
 	return nil, metadata.ErrNotFound
 }
+func (m *fakePromptStore) UpdateDatasetRun(ctx context.Context, r *domain.DatasetRun) error       { return nil }
+func (m *fakePromptStore) ListDatasetRuns(ctx context.Context, datasetID string) ([]*domain.DatasetRun, error) { return nil, nil }
+func (m *fakePromptStore) CreateDatasetRunItem(ctx context.Context, i *domain.DatasetRunItem) error { return nil }
+func (m *fakePromptStore) GetDatasetRunItem(ctx context.Context, id string) (*domain.DatasetRunItem, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *fakePromptStore) UpdateDatasetRunItem(ctx context.Context, i *domain.DatasetRunItem) error { return nil }
+func (m *fakePromptStore) ListDatasetRunItems(ctx context.Context, runID string) ([]*domain.DatasetRunItem, error) { return nil, nil }
 func (m *fakePromptStore) Migrate(ctx context.Context) error { return nil }
 func (m *fakePromptStore) Close() error                      { return nil }
 
@@ -378,16 +387,16 @@ func (m *fakePromptStore) Close() error                      { return nil }
 func TestHandleRun_Success(t *testing.T) {
 	store := newFakePromptStore()
 	cache := handler.NewPromptCache(store)
-	fakeLLM := NewFakeLLMClient(&ChatResponse{
-		Choices: []Choice{
+	fakeLLM := NewFakeLLMClient(&judge.ChatResponse{
+		Choices: []judge.Choice{
 			{
-				Message: ChatMessage{
+				Message: judge.ChatMessage{
 					Role:    "assistant",
 					Content: "Hello Alice! Welcome to Wonderland!",
 				},
 			},
 		},
-		Usage: Usage{
+		Usage: judge.Usage{
 			PromptTokens:     20,
 			CompletionTokens: 8,
 		},
@@ -465,16 +474,16 @@ func TestHandleRun_Success(t *testing.T) {
 func TestHandleRun_ByLabel(t *testing.T) {
 	store := newFakePromptStore()
 	cache := handler.NewPromptCache(store)
-	fakeLLM := NewFakeLLMClient(&ChatResponse{
-		Choices: []Choice{
+	fakeLLM := NewFakeLLMClient(&judge.ChatResponse{
+		Choices: []judge.Choice{
 			{
-				Message: ChatMessage{
+				Message: judge.ChatMessage{
 					Role:    "assistant",
 					Content: "Hi there!",
 				},
 			},
 		},
-		Usage: Usage{PromptTokens: 5, CompletionTokens: 3},
+		Usage: judge.Usage{PromptTokens: 5, CompletionTokens: 3},
 	})
 
 	handler := &PlaygroundHandler{
@@ -530,13 +539,13 @@ func TestHandleRun_ByLabel(t *testing.T) {
 func TestHandleRun_ModelOverride(t *testing.T) {
 	store := newFakePromptStore()
 	cache := handler.NewPromptCache(store)
-	fakeLLM := NewFakeLLMClient(&ChatResponse{
-		Choices: []Choice{
+	fakeLLM := NewFakeLLMClient(&judge.ChatResponse{
+		Choices: []judge.Choice{
 			{
-				Message: ChatMessage{Content: "overridden"},
+				Message: judge.ChatMessage{Content: "overridden"},
 			},
 		},
-		Usage: Usage{PromptTokens: 5, CompletionTokens: 3},
+		Usage: judge.Usage{PromptTokens: 5, CompletionTokens: 3},
 	})
 
 	handler := &PlaygroundHandler{
@@ -592,9 +601,9 @@ func TestHandleRun_ModelOverride(t *testing.T) {
 func TestHandleRun_TemperatureOverride(t *testing.T) {
 	store := newFakePromptStore()
 	cache := handler.NewPromptCache(store)
-	fakeLLM := NewFakeLLMClient(&ChatResponse{
-		Choices: []Choice{{Message: ChatMessage{Content: "response"}}},
-		Usage:   Usage{PromptTokens: 5, CompletionTokens: 3},
+	fakeLLM := NewFakeLLMClient(&judge.ChatResponse{
+		Choices: []judge.Choice{{Message: judge.ChatMessage{Content: "response"}}},
+		Usage:   judge.Usage{PromptTokens: 5, CompletionTokens: 3},
 	})
 
 	handler := &PlaygroundHandler{
@@ -637,9 +646,9 @@ func TestHandleRun_TemperatureOverride(t *testing.T) {
 func TestHandleRun_MissingPromptName(t *testing.T) {
 	store := newFakePromptStore()
 	cache := handler.NewPromptCache(store)
-	fakeLLM := NewFakeLLMClient(&ChatResponse{
-		Choices: []Choice{{Message: ChatMessage{Content: "response"}}},
-		Usage:   Usage{PromptTokens: 5, CompletionTokens: 3},
+	fakeLLM := NewFakeLLMClient(&judge.ChatResponse{
+		Choices: []judge.Choice{{Message: judge.ChatMessage{Content: "response"}}},
+		Usage:   judge.Usage{PromptTokens: 5, CompletionTokens: 3},
 	})
 
 	handler := &PlaygroundHandler{
@@ -662,9 +671,9 @@ func TestHandleRun_MissingPromptName(t *testing.T) {
 func TestHandleRun_PromptNotFound(t *testing.T) {
 	store := newFakePromptStore()
 	cache := handler.NewPromptCache(store)
-	fakeLLM := NewFakeLLMClient(&ChatResponse{
-		Choices: []Choice{{Message: ChatMessage{Content: "response"}}},
-		Usage:   Usage{PromptTokens: 5, CompletionTokens: 3},
+	fakeLLM := NewFakeLLMClient(&judge.ChatResponse{
+		Choices: []judge.Choice{{Message: judge.ChatMessage{Content: "response"}}},
+		Usage:   judge.Usage{PromptTokens: 5, CompletionTokens: 3},
 	})
 
 	handler := &PlaygroundHandler{
@@ -687,9 +696,9 @@ func TestHandleRun_PromptNotFound(t *testing.T) {
 func TestHandleRun_MissingVariables(t *testing.T) {
 	store := newFakePromptStore()
 	cache := handler.NewPromptCache(store)
-	fakeLLM := NewFakeLLMClient(&ChatResponse{
-		Choices: []Choice{{Message: ChatMessage{Content: "response"}}},
-		Usage:   Usage{PromptTokens: 5, CompletionTokens: 3},
+	fakeLLM := NewFakeLLMClient(&judge.ChatResponse{
+		Choices: []judge.Choice{{Message: judge.ChatMessage{Content: "response"}}},
+		Usage:   judge.Usage{PromptTokens: 5, CompletionTokens: 3},
 	})
 
 	handler := &PlaygroundHandler{
@@ -721,9 +730,9 @@ func TestHandleRun_MissingVariables(t *testing.T) {
 func TestHandleRun_MissingVersionOrLabel(t *testing.T) {
 	store := newFakePromptStore()
 	cache := handler.NewPromptCache(store)
-	fakeLLM := NewFakeLLMClient(&ChatResponse{
-		Choices: []Choice{{Message: ChatMessage{Content: "response"}}},
-		Usage:   Usage{PromptTokens: 5, CompletionTokens: 3},
+	fakeLLM := NewFakeLLMClient(&judge.ChatResponse{
+		Choices: []judge.Choice{{Message: judge.ChatMessage{Content: "response"}}},
+		Usage:   judge.Usage{PromptTokens: 5, CompletionTokens: 3},
 	})
 
 	handler := &PlaygroundHandler{
@@ -816,9 +825,9 @@ func TestHandleRun_LLMCallFails(t *testing.T) {
 func TestHandleRun_MethodNotAllowed(t *testing.T) {
 	store := newFakePromptStore()
 	cache := handler.NewPromptCache(store)
-	fakeLLM := NewFakeLLMClient(&ChatResponse{
-		Choices: []Choice{{Message: ChatMessage{Content: "response"}}},
-		Usage:   Usage{PromptTokens: 5, CompletionTokens: 3},
+	fakeLLM := NewFakeLLMClient(&judge.ChatResponse{
+		Choices: []judge.Choice{{Message: judge.ChatMessage{Content: "response"}}},
+		Usage:   judge.Usage{PromptTokens: 5, CompletionTokens: 3},
 	})
 
 	handler := &PlaygroundHandler{
@@ -840,9 +849,9 @@ func TestHandleRun_MethodNotAllowed(t *testing.T) {
 func TestHandleRun_InvalidJSON(t *testing.T) {
 	store := newFakePromptStore()
 	cache := handler.NewPromptCache(store)
-	fakeLLM := NewFakeLLMClient(&ChatResponse{
-		Choices: []Choice{{Message: ChatMessage{Content: "response"}}},
-		Usage:   Usage{PromptTokens: 5, CompletionTokens: 3},
+	fakeLLM := NewFakeLLMClient(&judge.ChatResponse{
+		Choices: []judge.Choice{{Message: judge.ChatMessage{Content: "response"}}},
+		Usage:   judge.Usage{PromptTokens: 5, CompletionTokens: 3},
 	})
 
 	handler := &PlaygroundHandler{
@@ -864,9 +873,9 @@ func TestHandleRun_InvalidJSON(t *testing.T) {
 func TestHandleRun_BothOverrides(t *testing.T) {
 	store := newFakePromptStore()
 	cache := handler.NewPromptCache(store)
-	fakeLLM := NewFakeLLMClient(&ChatResponse{
-		Choices: []Choice{{Message: ChatMessage{Content: "response"}}},
-		Usage:   Usage{PromptTokens: 5, CompletionTokens: 3},
+	fakeLLM := NewFakeLLMClient(&judge.ChatResponse{
+		Choices: []judge.Choice{{Message: judge.ChatMessage{Content: "response"}}},
+		Usage:   judge.Usage{PromptTokens: 5, CompletionTokens: 3},
 	})
 
 	handler := &PlaygroundHandler{
@@ -921,9 +930,9 @@ func TestHandleRun_EmptyVariablesMap(t *testing.T) {
 	// An empty variables map is valid when the template has no {{variables}}.
 	store := newFakePromptStore()
 	cache := handler.NewPromptCache(store)
-	fakeLLM := NewFakeLLMClient(&ChatResponse{
-		Choices: []Choice{{Message: ChatMessage{Content: "plain response"}}},
-		Usage:   Usage{PromptTokens: 5, CompletionTokens: 3},
+	fakeLLM := NewFakeLLMClient(&judge.ChatResponse{
+		Choices: []judge.Choice{{Message: judge.ChatMessage{Content: "plain response"}}},
+		Usage:   judge.Usage{PromptTokens: 5, CompletionTokens: 3},
 	})
 
 	handler := &PlaygroundHandler{
@@ -956,9 +965,9 @@ func TestHandleRun_ProjectIDFromQuery(t *testing.T) {
 	// When SessionStore returns no project, fall back to query param.
 	store := newFakePromptStore()
 	cache := handler.NewPromptCache(store)
-	fakeLLM := NewFakeLLMClient(&ChatResponse{
-		Choices: []Choice{{Message: ChatMessage{Content: "response"}}},
-		Usage:   Usage{PromptTokens: 5, CompletionTokens: 3},
+	fakeLLM := NewFakeLLMClient(&judge.ChatResponse{
+		Choices: []judge.Choice{{Message: judge.ChatMessage{Content: "response"}}},
+		Usage:   judge.Usage{PromptTokens: 5, CompletionTokens: 3},
 	})
 
 	handler := &PlaygroundHandler{

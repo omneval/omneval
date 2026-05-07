@@ -982,6 +982,104 @@ func (s *Store) GetDatasetRun(ctx context.Context, runID string) (*domain.Datase
 	}, nil
 }
 
+func (s *Store) UpdateDatasetRun(ctx context.Context, run *domain.DatasetRun) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE dataset_runs SET status = ? WHERE run_id = ?`,
+		run.Status, run.RunID,
+	)
+	if err != nil {
+		return fmt.Errorf("sqlite: update dataset run: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ListDatasetRuns(ctx context.Context, datasetID string) ([]*domain.DatasetRun, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT run_id, dataset_id, eval_rule_id, prompt_version, status, created_at FROM dataset_runs WHERE dataset_id = ? ORDER BY created_at DESC`, datasetID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list dataset runs: %w", err)
+	}
+	defer rows.Close()
+
+	var runs []*domain.DatasetRun
+	for rows.Next() {
+		var run domain.DatasetRun
+		var createdAt string
+		if err := rows.Scan(&run.RunID, &run.DatasetID, &run.EvalRuleID, &run.PromptVersion, &run.Status, &createdAt); err != nil {
+			return nil, fmt.Errorf("sqlite: scan dataset run: %w", err)
+		}
+		t, _ := time.Parse(time.RFC3339, createdAt)
+		run.CreatedAt = t
+		runs = append(runs, &run)
+	}
+	return runs, rows.Err()
+}
+
+func (s *Store) CreateDatasetRunItem(ctx context.Context, item *domain.DatasetRunItem) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO dataset_run_items (run_item_id, run_id, item_id, score, reasoning, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		item.RunItemID, item.RunID, item.ItemID, item.Score, item.Reasoning, now,
+	)
+	if err != nil {
+		return fmt.Errorf("sqlite: create dataset run item: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) GetDatasetRunItem(ctx context.Context, id string) (*domain.DatasetRunItem, error) {
+	var item domain.DatasetRunItem
+	var createdAt string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT run_id, item_id, score, reasoning, created_at FROM dataset_run_items WHERE run_item_id = ?`, id,
+	).Scan(&item.RunID, &item.ItemID, &item.Score, &item.Reasoning, &createdAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, metadata.ErrNotFound
+		}
+		return nil, fmt.Errorf("sqlite: get dataset run item: %w", err)
+	}
+	t, _ := time.Parse(time.RFC3339, createdAt)
+	item.CreatedAt = t
+	return &item, nil
+}
+
+func (s *Store) UpdateDatasetRunItem(ctx context.Context, item *domain.DatasetRunItem) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE dataset_run_items SET score = ?, reasoning = ? WHERE run_item_id = ?`,
+		item.Score, item.Reasoning, item.RunItemID,
+	)
+	if err != nil {
+		return fmt.Errorf("sqlite: update dataset run item: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ListDatasetRunItems(ctx context.Context, runID string) ([]*domain.DatasetRunItem, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT run_item_id, run_id, item_id, score, reasoning, created_at FROM dataset_run_items WHERE run_id = ? ORDER BY created_at ASC`, runID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list dataset run items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*domain.DatasetRunItem
+	for rows.Next() {
+		var item domain.DatasetRunItem
+		var createdAt string
+		if err := rows.Scan(&item.RunItemID, &item.RunID, &item.ItemID, &item.Score, &item.Reasoning, &createdAt); err != nil {
+			return nil, fmt.Errorf("sqlite: scan dataset run item: %w", err)
+		}
+		t, _ := time.Parse(time.RFC3339, createdAt)
+		item.CreatedAt = t
+		items = append(items, &item)
+	}
+	return items, rows.Err()
+}
+
 // ---- Helper functions ----
 
 func boolToInt(b bool) int {

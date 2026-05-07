@@ -7,19 +7,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
+
+	"github.com/zbloss/lantern/internal/judge"
 )
 
 // Request is the JSON body for POST /api/v1/playground/run.
 type Request struct {
-	PromptName       string            `json:"prompt_name"`
-	Version          *int64            `json:"version,omitempty"`
-	Label            *string           `json:"label,omitempty"`
-	Variables        map[string]string `json:"variables"`
-	ModelOverride    *string           `json:"model_override,omitempty"`
-	TemperatureOverride *float64       `json:"temperature_override,omitempty"`
+	PromptName          string            `json:"prompt_name"`
+	Version             *int64            `json:"version,omitempty"`
+	Label               *string           `json:"label,omitempty"`
+	Variables           map[string]string `json:"variables"`
+	ModelOverride       *string           `json:"model_override,omitempty"`
+	TemperatureOverride *float64          `json:"temperature_override,omitempty"`
 }
 
 // Response is the JSON body returned by POST /api/v1/playground/run.
@@ -33,43 +34,12 @@ type Response struct {
 
 // LLMClient is the interface for calling an OpenAI-compatible chat completions endpoint.
 type LLMClient interface {
-	Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error)
-}
-
-// ChatRequest is the request sent to the OpenAI-compatible chat completions endpoint.
-type ChatRequest struct {
-	Model       string           `json:"model"`
-	Messages    []ChatMessage    `json:"messages"`
-	Temperature float64          `json:"temperature,omitempty"`
-	MaxTokens   int              `json:"max_tokens,omitempty"`
-}
-
-// ChatMessage represents a single message in a chat conversation.
-type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// ChatResponse is the response from the OpenAI-compatible chat completions endpoint.
-type ChatResponse struct {
-	Choices []Choice `json:"choices"`
-	Usage   Usage    `json:"usage"`
-}
-
-// Choice is a single choice in the chat response.
-type Choice struct {
-	Message ChatMessage `json:"message"`
-}
-
-// Usage contains token usage information.
-type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
+	Chat(ctx context.Context, req judge.ChatRequest) (*judge.ChatResponse, error)
 }
 
 // HTTPClient implements LLMClient by making actual HTTP requests.
 type HTTPClient struct {
-	client *http.Client
+	client  *http.Client
 	baseURL string
 	apiKey  string
 }
@@ -83,8 +53,14 @@ func NewHTTPClient(baseURL, apiKey string) *HTTPClient {
 	}
 }
 
+// Interpolate renders a template with variable substitutions.
+// Delegates to the shared judge package implementation.
+func Interpolate(template string, variables map[string]string) (string, []string) {
+	return judge.Interpolate(template, variables)
+}
+
 // Chat sends a chat completion request to the OpenAI-compatible endpoint.
-func (c *HTTPClient) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+func (c *HTTPClient) Chat(ctx context.Context, req judge.ChatRequest) (*judge.ChatResponse, error) {
 	payload := map[string]any{
 		"model":    req.Model,
 		"messages": req.Messages,
@@ -126,7 +102,7 @@ func (c *HTTPClient) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, 
 		return nil, fmt.Errorf("playground: upstream LLM error (status %d): %s", resp.StatusCode, string(body))
 	}
 
-	var apiResp ChatResponse
+	var apiResp judge.ChatResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		return nil, fmt.Errorf("playground: decode response: %w", err)
 	}
@@ -137,46 +113,3 @@ func (c *HTTPClient) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, 
 
 	return &apiResp, nil
 }
-
-// variableRegex matches {{variable}} patterns, allowing optional whitespace inside.
-var variableRegex = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}`)
-
-// Interpolate renders a template with variable substitutions.
-// Returns the interpolated string and a list of missing variable names.
-func Interpolate(template string, variables map[string]string) (string, []string) {
-	var missing []string
-
-	result := variableRegex.ReplaceAllStringFunc(template, func(match string) string {
-		// The regex group captures the variable name (without whitespace).
-		// Extract the captured group from the match.
-		submatches := variableRegex.FindStringSubmatch(match)
-		name := submatches[1]
-
-		val, ok := variables[name]
-		if !ok {
-			missing = append(missing, name)
-			return match // leave uninterpolated
-		}
-		return val
-	})
-
-	return result, missing
-}
-
-// buildMessages constructs OpenAI-compatible messages from an interpolated prompt template.
-// The template is assumed to already be interpolated with variable values.
-// We wrap it in a system + user message structure.
-func buildMessages(interpolatedTemplate string) []ChatMessage {
-	return []ChatMessage{
-		{
-			Role:    "system",
-			Content: "You are a helpful assistant.",
-		},
-		{
-			Role:    "user",
-			Content: interpolatedTemplate,
-		},
-	}
-}
-
-

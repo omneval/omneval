@@ -801,15 +801,109 @@ func (s *Store) GetDatasetRun(ctx context.Context, runID string) (*domain.Datase
 	var dr domain.DatasetRun
 	var createdAt time.Time
 	err := s.db.QueryRowContext(ctx,
-		`SELECT dataset_id, eval_rule_id, prompt_version, created_at FROM dataset_runs WHERE run_id = $1`, runID,
-	).Scan(&dr.DatasetID, &dr.EvalRuleID, &dr.PromptVersion, &createdAt)
+		`SELECT dataset_id, eval_rule_id, prompt_version, status, created_at FROM dataset_runs WHERE run_id = $1`, runID,
+	).Scan(&dr.DatasetID, &dr.EvalRuleID, &dr.PromptVersion, &dr.Status, &createdAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, metadata.ErrNotFound
 		}
 		return nil, fmt.Errorf("postgres: get dataset run: %w", err)
 	}
-	return &domain.DatasetRun{RunID: runID, DatasetID: dr.DatasetID, EvalRuleID: dr.EvalRuleID, PromptVersion: dr.PromptVersion, CreatedAt: createdAt}, nil
+	return &domain.DatasetRun{RunID: runID, DatasetID: dr.DatasetID, EvalRuleID: dr.EvalRuleID, PromptVersion: dr.PromptVersion, Status: dr.Status, CreatedAt: createdAt}, nil
+}
+
+func (s *Store) UpdateDatasetRun(ctx context.Context, run *domain.DatasetRun) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE dataset_runs SET status = $1 WHERE run_id = $2`,
+		run.Status, run.RunID,
+	)
+	if err != nil {
+		return fmt.Errorf("postgres: update dataset run: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ListDatasetRuns(ctx context.Context, datasetID string) ([]*domain.DatasetRun, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT run_id, dataset_id, eval_rule_id, prompt_version, status, created_at FROM dataset_runs WHERE dataset_id = $1 ORDER BY created_at DESC`, datasetID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: list dataset runs: %w", err)
+	}
+	defer rows.Close()
+
+	var runs []*domain.DatasetRun
+	for rows.Next() {
+		var run domain.DatasetRun
+		var createdAt time.Time
+		if err := rows.Scan(&run.RunID, &run.DatasetID, &run.EvalRuleID, &run.PromptVersion, &run.Status, &createdAt); err != nil {
+			return nil, fmt.Errorf("postgres: scan dataset run: %w", err)
+		}
+		run.CreatedAt = createdAt
+		runs = append(runs, &run)
+	}
+	return runs, rows.Err()
+}
+
+func (s *Store) CreateDatasetRunItem(ctx context.Context, item *domain.DatasetRunItem) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO dataset_run_items (run_item_id, run_id, item_id, score, reasoning, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		item.RunItemID, item.RunID, item.ItemID, item.Score, item.Reasoning, item.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("postgres: create dataset run item: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) GetDatasetRunItem(ctx context.Context, id string) (*domain.DatasetRunItem, error) {
+	var item domain.DatasetRunItem
+	var createdAt time.Time
+	err := s.db.QueryRowContext(ctx,
+		`SELECT run_id, item_id, score, reasoning, created_at FROM dataset_run_items WHERE run_item_id = $1`, id,
+	).Scan(&item.RunID, &item.ItemID, &item.Score, &item.Reasoning, &createdAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, metadata.ErrNotFound
+		}
+		return nil, fmt.Errorf("postgres: get dataset run item: %w", err)
+	}
+	item.CreatedAt = createdAt
+	return &item, nil
+}
+
+func (s *Store) UpdateDatasetRunItem(ctx context.Context, item *domain.DatasetRunItem) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE dataset_run_items SET score = $1, reasoning = $2 WHERE run_item_id = $3`,
+		item.Score, item.Reasoning, item.RunItemID,
+	)
+	if err != nil {
+		return fmt.Errorf("postgres: update dataset run item: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ListDatasetRunItems(ctx context.Context, runID string) ([]*domain.DatasetRunItem, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT run_item_id, run_id, item_id, score, reasoning, created_at FROM dataset_run_items WHERE run_id = $1 ORDER BY created_at ASC`, runID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: list dataset run items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*domain.DatasetRunItem
+	for rows.Next() {
+		var item domain.DatasetRunItem
+		var createdAt time.Time
+		if err := rows.Scan(&item.RunItemID, &item.RunID, &item.ItemID, &item.Score, &item.Reasoning, &createdAt); err != nil {
+			return nil, fmt.Errorf("postgres: scan dataset run item: %w", err)
+		}
+		item.CreatedAt = createdAt
+		items = append(items, &item)
+	}
+	return items, rows.Err()
 }
 
 // ---- Helper functions ----

@@ -143,6 +143,14 @@ func (f *FakeMetadataStore) CreateDatasetRun(_ context.Context, _ *domain.Datase
 func (f *FakeMetadataStore) GetDatasetRun(_ context.Context, _ string) (*domain.DatasetRun, error) {
 	return nil, metadata.ErrNotFound
 }
+func (f *FakeMetadataStore) UpdateDatasetRun(_ context.Context, _ *domain.DatasetRun) error       { return nil }
+func (f *FakeMetadataStore) ListDatasetRuns(_ context.Context, _ string) ([]*domain.DatasetRun, error) { return nil, nil }
+func (f *FakeMetadataStore) CreateDatasetRunItem(_ context.Context, _ *domain.DatasetRunItem) error { return nil }
+func (f *FakeMetadataStore) GetDatasetRunItem(_ context.Context, _ string) (*domain.DatasetRunItem, error) {
+	return nil, metadata.ErrNotFound
+}
+func (f *FakeMetadataStore) UpdateDatasetRunItem(_ context.Context, _ *domain.DatasetRunItem) error { return nil }
+func (f *FakeMetadataStore) ListDatasetRunItems(_ context.Context, _ string) ([]*domain.DatasetRunItem, error) { return nil, nil }
 func (f *FakeMetadataStore) Migrate(_ context.Context) error        { return nil }
 func (f *FakeMetadataStore) Close() error                           { return nil }
 func (f *FakeMetadataStore) CheckPassword(_ string, _ string) error { return nil }

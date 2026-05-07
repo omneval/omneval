@@ -188,6 +188,14 @@ func (m *FakePromptStore) CreateDatasetRun(ctx context.Context, r *domain.Datase
 func (m *FakePromptStore) GetDatasetRun(ctx context.Context, id string) (*domain.DatasetRun, error) {
 	return nil, metadata.ErrNotFound
 }
+func (m *FakePromptStore) UpdateDatasetRun(ctx context.Context, r *domain.DatasetRun) error       { return nil }
+func (m *FakePromptStore) ListDatasetRuns(ctx context.Context, datasetID string) ([]*domain.DatasetRun, error) { return nil, nil }
+func (m *FakePromptStore) CreateDatasetRunItem(ctx context.Context, i *domain.DatasetRunItem) error { return nil }
+func (m *FakePromptStore) GetDatasetRunItem(ctx context.Context, id string) (*domain.DatasetRunItem, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *FakePromptStore) UpdateDatasetRunItem(ctx context.Context, i *domain.DatasetRunItem) error { return nil }
+func (m *FakePromptStore) ListDatasetRunItems(ctx context.Context, runID string) ([]*domain.DatasetRunItem, error) { return nil, nil }
 func (m *FakePromptStore) Migrate(ctx context.Context) error { return nil }
 func (m *FakePromptStore) Close() error                      { return nil }
 

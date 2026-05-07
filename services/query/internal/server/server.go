@@ -242,6 +242,22 @@ func Run() error {
 		mux.HandleFunc("POST /api/v1/datasets/{id}/items", datasetHandler.HandleAddItems)
 		mux.HandleFunc("GET /api/v1/datasets/{id}/items", datasetHandler.HandleListItems)
 		mux.HandleFunc("DELETE /api/v1/datasets/{id}", datasetHandler.HandleDelete)
+
+		// Dataset run endpoints (require metadata store + judge LLM config).
+		var datasetRunHandler *handler.DatasetRunHandler
+		if cfg.Query.JudgeLLMBaseURL != "" && cfg.Query.JudgeLLMAPIKey != "" {
+			judgeClient := playground.NewHTTPClient(cfg.Query.JudgeLLMBaseURL, cfg.Query.JudgeLLMAPIKey)
+			datasetRunHandler = &handler.DatasetRunHandler{
+				Store:        store,
+				SessionStore: h,
+				JudgeClient:  judgeClient,
+				Cache:        promptCache,
+			}
+			mux.HandleFunc("POST /api/v1/datasets/{id}/runs", datasetRunHandler.HandleRun)
+			mux.HandleFunc("GET /api/v1/datasets/{id}/runs", datasetRunHandler.HandleListRuns)
+			mux.HandleFunc("GET /api/v1/datasets/{id}/runs/{runId}", datasetRunHandler.HandleGetRun)
+			mux.HandleFunc("GET /api/v1/datasets/{id}/runs/{runId}/status", datasetRunHandler.HandleGetRunStatus)
+		}
 	}
 
 	// Playground endpoint (requires metadata store + LLM config).

@@ -92,6 +92,7 @@ CREATE TABLE dataset_runs (
     dataset_id     TEXT    NOT NULL REFERENCES datasets(dataset_id),
     eval_rule_id   TEXT    NOT NULL REFERENCES eval_rules(rule_id),
     prompt_version INTEGER NOT NULL,
+    status         TEXT    NOT NULL DEFAULT 'pending',
     created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -99,7 +100,9 @@ CREATE TABLE dataset_run_items (
     run_item_id TEXT    PRIMARY KEY,
     run_id      TEXT    NOT NULL REFERENCES dataset_runs(run_id),
     item_id     TEXT    NOT NULL REFERENCES dataset_items(item_id),
-    score_id    TEXT
+    score       REAL    NOT NULL DEFAULT 0.0,
+    reasoning   TEXT,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX idx_sessions_user ON sessions (user_id);

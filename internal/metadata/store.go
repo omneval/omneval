@@ -69,6 +69,12 @@ type Store interface {
 	ListDatasetItemsPaginated(ctx context.Context, datasetID, cursor string, limit int) ([]*domain.DatasetItem, string, error)
 	CreateDatasetRun(ctx context.Context, run *domain.DatasetRun) error
 	GetDatasetRun(ctx context.Context, runID string) (*domain.DatasetRun, error)
+	UpdateDatasetRun(ctx context.Context, run *domain.DatasetRun) error
+	ListDatasetRuns(ctx context.Context, datasetID string) ([]*domain.DatasetRun, error)
+	CreateDatasetRunItem(ctx context.Context, item *domain.DatasetRunItem) error
+	GetDatasetRunItem(ctx context.Context, runItemID string) (*domain.DatasetRunItem, error)
+	UpdateDatasetRunItem(ctx context.Context, item *domain.DatasetRunItem) error
+	ListDatasetRunItems(ctx context.Context, runID string) ([]*domain.DatasetRunItem, error)
 
 	// Migrations
 	Migrate(ctx context.Context) error
