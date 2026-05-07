@@ -150,7 +150,7 @@ Phase 1 implementation progress. All Phase 1 slices are complete. Work is organi
 - [ ] Prompt diff/comparison view
 
 ### Playground
-- [ ] Prompt prompt-and-test interface
+- [ ] Prompt-and-test interface
 - [ ] Span output inspection with edit-and-replay
 
 ### Dataset curation UI
