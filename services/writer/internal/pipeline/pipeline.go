@@ -209,44 +209,9 @@ func (p *Pipeline) evalSpans(ctx context.Context, span *domain.Span, rules []dom
 }
 
 // matchesFilter checks if a span matches an EvalFilter.
+// Delegates to EvalFilter.Matches for recursive AND/OR/NOT evaluation.
 func matchesFilter(span *domain.Span, f domain.EvalFilter) bool {
-	if f.Kind != nil && span.Kind != *f.Kind {
-		return false
-	}
-	if f.Model != nil && span.Model != *f.Model {
-		return false
-	}
-	if f.ServiceName != nil && span.ServiceName != *f.ServiceName {
-		return false
-	}
-	if f.PromptName != nil && span.PromptName != *f.PromptName {
-		return false
-	}
-	if f.StatusCode != nil && span.StatusCode != *f.StatusCode {
-		return false
-	}
-	if f.MinCostUSD != nil && span.CostUSD < *f.MinCostUSD {
-		return false
-	}
-	if f.MaxCostUSD != nil && span.CostUSD > *f.MaxCostUSD {
-		return false
-	}
-	durationMS := int64(0)
-	if !span.StartTime.IsZero() && !span.EndTime.IsZero() {
-		durationMS = span.EndTime.Sub(span.StartTime).Milliseconds()
-	}
-	if f.MinDurationMS != nil && durationMS < *f.MinDurationMS {
-		return false
-	}
-	if f.MaxDurationMS != nil && durationMS > *f.MaxDurationMS {
-		return false
-	}
-	for _, af := range f.AttributesMatch {
-		if !domain.MatchesFilterAttributeRegex(span, af) {
-			return false
-		}
-	}
-	return true
+	return f.Matches(span)
 }
 
 // listEvalRules fetches all active eval rules for the project.
