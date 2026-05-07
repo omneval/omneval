@@ -4,6 +4,8 @@ Browser-compatible OpenTelemetry tracer and prompt client for [Lantern](https://
 
 Send spans, write scores, and fetch prompts — all using the native Fetch API. No Node.js dependencies required.
 
+For Node.js, use `@lantern/sdk/node` for automatic OpenTelemetry instrumentation of LLM frameworks.
+
 ## Quickstart
 
 ```bash
@@ -146,6 +148,58 @@ Forces export of all pending spans.
 ```ts
 await Lantern.flush();
 ```
+
+## Node.js — Automatic Tracing with OpenTelemetry
+
+For Node.js applications, use the `@lantern/sdk/node` entry point to configure automatic tracing of LLM frameworks (OpenAI, LangChain, etc.) via OpenTelemetry auto-instrumentation.
+
+```bash
+npm install @lantern/sdk
+npm install @opentelemetry/sdk-node @opentelemetry/exporter-trace-otlp-http
+npm install @opentelemetry/instrumentation-openai
+```
+
+```ts
+import { instrument } from "@lantern/sdk/node";
+
+// Configure the OTel tracer to export traces to Lantern
+const shutdown = instrument({
+  baseUrl: "http://localhost:3000",
+  apiKey: "ltn_proj_your_api_key",
+  serviceName: "my-llm-app",
+});
+
+// Now any OpenTelemetry-compatible auto-instrumentation works
+import { OpenAIInstrumentation } from "@opentelemetry/instrumentation-openai";
+// ... configure and use auto-instrumentation ...
+
+// On shutdown, flush remaining spans and stop
+await shutdown();
+process.exit(0);
+```
+
+### `instrument(options)`
+
+Configures OpenTelemetry in Node.js to export traces to Lantern.
+
+```ts
+const shutdown = instrument({
+  baseUrl: "http://localhost:3000",  // Required
+  apiKey?: "ltn_proj_...",            // Optional — sent as Authorization: Bearer
+  serviceName?: "my-app",             // Optional — service.name resource attribute
+});
+```
+
+**What it does:**
+1. Imports `@opentelemetry/sdk-node` and `@opentelemetry/exporter-trace-otlp-http`
+2. Creates a `NodeSDK` instance with an OTLP trace exporter
+3. Points the exporter at `{baseUrl}/v1/traces` with `Authorization: Bearer {apiKey}`
+4. Starts the SDK (which registers the global `TracerProvider`)
+5. Returns a `shutdown` function for graceful cleanup
+
+**Requirements:**
+- Node.js 18 or later
+- `@opentelemetry/sdk-node` and `@opentelemetry/exporter-trace-otlp-http` must be installed
 
 ## Browser Compatibility
 
