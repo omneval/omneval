@@ -1,23 +1,15 @@
 import { LanternSpan } from "./types";
 
-/**
- * SpanExporter sends spans to the Lantern ingest API via the Fetch API.
- * Browser-compatible — uses no Node.js APIs.
- */
 export class SpanExporter {
   private readonly baseUrl: string;
   private readonly apiKey?: string;
-  private readonly timeoutMs = 10_000;
+  private readonly timeoutMs = 10_000; // 10 seconds
 
   constructor(baseUrl: string, apiKey?: string) {
     this.baseUrl = baseUrl;
     this.apiKey = apiKey;
   }
 
-  /**
-   * Export spans as a batch POST request.
-   * Returns true if the request was accepted (2xx), false otherwise.
-   */
   async export(spans: LanternSpan[]): Promise<boolean> {
     if (spans.length === 0) {
       return true;
@@ -52,8 +44,6 @@ export class SpanExporter {
 
       return true;
     } catch {
-      // Network error or timeout — don't throw, just return false
-      // (browser environments may not have a live server)
       return false;
     }
   }

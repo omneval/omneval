@@ -1,51 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createLantern } from "../src/lantern";
-
-// Helper to create a mock fetch
-function mockFetch(
-  handler: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
-) {
-  const fn = vi.fn(handler);
-  vi.spyOn(global, "fetch").mockImplementation(fn as any);
-  return fn;
-}
-
-function createResponse(
-  status: number,
-  body?: any
-): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status === 200 ? "OK" : "Error",
-    headers: new Headers(),
-    json: async () => body,
-    text: async () => JSON.stringify(body ?? ""),
-    redirected: false,
-    type: "basic",
-    url: "",
-    body: null,
-    bodyUsed: false,
-    clone: () => createResponse(status, body),
-    bodyUnique: null,
-    arrayBuffer: async () => new ArrayBuffer(0),
-    blob: async () => new Blob(),
-    formData: async () => new FormData(),
-    bytes: async () => new Uint8Array(),
-  } as Response;
-}
+import { mockFetch, createResponse } from "./utils";
 
 describe("Lantern SDK Integration", () => {
-  let originalFetch: typeof global.fetch;
-
-  beforeEach(() => {
-    originalFetch = global.fetch;
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
-  });
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.restoreAllMocks());
 
   it("end-to-end: start span, set attributes, end span, export", async () => {
     const fetchSpy = mockFetch(async (url, init) => {

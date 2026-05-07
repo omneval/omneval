@@ -1,51 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { LanternClient } from "../src/client";
-
-// Helper to create a mock fetch
-function mockFetch(
-  handler: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
-) {
-  const fn = vi.fn(handler);
-  vi.spyOn(global, "fetch").mockImplementation(fn as any);
-  return fn;
-}
-
-function createResponse(
-  status: number,
-  body?: any
-): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status === 200 ? "OK" : "Error",
-    headers: new Headers(),
-    json: async () => body,
-    text: async () => JSON.stringify(body ?? ""),
-    redirected: false,
-    type: "basic",
-    url: "",
-    body: null,
-    bodyUsed: false,
-    clone: () => createResponse(status, body),
-    bodyUnique: null,
-    arrayBuffer: async () => new ArrayBuffer(0),
-    blob: async () => new Blob(),
-    formData: async () => new FormData(),
-    bytes: async () => new Uint8Array(),
-  } as Response;
-}
+import { mockFetch, createResponse } from "./utils";
 
 describe("LanternClient", () => {
-  let originalFetch: typeof global.fetch;
-
-  beforeEach(() => {
-    originalFetch = global.fetch;
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
-  });
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.restoreAllMocks());
 
   describe("getPrompt", () => {
     it("fetches a prompt by label", async () => {
@@ -208,44 +167,6 @@ describe("LanternClient", () => {
       const call = fetchSpy.mock.calls[0];
       const headers = (call[1] as RequestInit)?.headers as Record<string, string>;
       expect(headers["X-API-Key"]).toBe("ltn_proj_test");
-    });
-  });
-
-  describe("exportSpans", () => {
-    it("exports spans via POST /api/v1/spans", async () => {
-      const fetchSpy = mockFetch(async (url, init) => {
-        expect(url).toBe("http://localhost:3000/api/v1/spans");
-        const body = JSON.parse((init?.body as string) ?? "{}");
-        expect(body.spans).toHaveLength(1);
-        expect(body.spans[0].span_id).toBe("s1");
-        return createResponse(202);
-      });
-
-      const client = new LanternClient({ baseUrl: "http://localhost:3000" });
-      const result = await client.exportSpans([
-        { span_id: "s1", trace_id: "t1", name: "span-1" },
-      ]);
-
-      expect(result).toBe(true);
-      expect(fetchSpy).toHaveBeenCalledOnce();
-    });
-
-    it("returns true for empty span list", async () => {
-      const client = new LanternClient({ baseUrl: "http://localhost:3000" });
-      const result = await client.exportSpans([]);
-      expect(result).toBe(true);
-    });
-
-    it("returns false on network error", async () => {
-      mockFetch(async () => {
-        throw new Error("network error");
-      });
-
-      const client = new LanternClient({ baseUrl: "http://localhost:3000" });
-      const result = await client.exportSpans([
-        { span_id: "s1", trace_id: "t1", name: "span-1" },
-      ]);
-      expect(result).toBe(false);
     });
   });
 });

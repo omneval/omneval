@@ -2,9 +2,6 @@ import { generateSpanId, generateTraceId } from "./id";
 import { SpanExporter } from "./exporter";
 import { LanternSpan, SpanAttributes, SpanKind } from "./types";
 
-/**
- * A single span instance tracked in the manual tracer.
- */
 interface TrackedSpan {
   span_id: string;
   trace_id: string;
@@ -24,30 +21,18 @@ interface TrackedSpan {
 }
 
 /**
- * Manual tracer that tracks spans in-memory and exports them via the SpanExporter.
- * Browser-compatible — uses no Node.js APIs.
+ * Manual tracer that tracks spans in-memory and exports them via SpanExporter.
  */
 export class ManualTracer {
   private readonly exporter: SpanExporter;
   private pending: TrackedSpan[] = [];
-  private initialized = false;
 
   constructor(exporter: SpanExporter) {
     this.exporter = exporter;
   }
 
-  /**
-   * Initialize the tracer with a fresh span ID generator.
-   * Call once after Lantern.init() to set up the exporter.
-   */
-  init(): void {
-    this.initialized = true;
-  }
+  init(): void {}
 
-  /**
-   * Start a new span. Returns a span ID that must be passed to endSpan().
-   * Spans are exported synchronously (no batching).
-   */
   startSpan(
     name: string,
     options?: {
@@ -75,10 +60,6 @@ export class ManualTracer {
     return spanId;
   }
 
-  /**
-   * End a span by ID, optionally attaching output.
-   * All pending spans are exported after ending.
-   */
   async endSpan(
     spanId: string,
     options?: {
@@ -92,11 +73,7 @@ export class ManualTracer {
     }
 
     tracked.end_time = Date.now();
-
-    if (options?.output !== undefined) {
-      tracked.output = options.output;
-    }
-
+    tracked.output = options?.output;
     if (options?.attributes) {
       tracked.attributes = { ...tracked.attributes, ...options.attributes };
     }
@@ -104,10 +81,6 @@ export class ManualTracer {
     await this.flush();
   }
 
-  /**
-   * Flush all pending spans to the ingest API.
-   * Spans are sent as a single batch.
-   */
   async flush(): Promise<void> {
     if (this.pending.length === 0) {
       return;
@@ -135,15 +108,9 @@ export class ManualTracer {
 
     if (success) {
       this.pending = [];
-    } else {
-      // On failure, keep spans in pending for retry
-      // In a production SDK, this would use exponential backoff
     }
   }
 
-  /**
-   * Set the model name on the most recently started (not yet ended) span.
-   */
   setModel(spanId: string, model: string): void {
     const tracked = this.pending.find((s) => s.span_id === spanId);
     if (tracked) {
@@ -151,9 +118,6 @@ export class ManualTracer {
     }
   }
 
-  /**
-   * Set the input on the most recently started (not yet ended) span.
-   */
   setInput(spanId: string, input: string): void {
     const tracked = this.pending.find((s) => s.span_id === spanId);
     if (tracked) {
@@ -161,9 +125,6 @@ export class ManualTracer {
     }
   }
 
-  /**
-   * Set token counts on the most recently started (not yet ended) span.
-   */
   setTokens(spanId: string, inputTokens: number, outputTokens: number): void {
     const tracked = this.pending.find((s) => s.span_id === spanId);
     if (tracked) {
@@ -172,9 +133,6 @@ export class ManualTracer {
     }
   }
 
-  /**
-   * Set the prompt name/version on the most recently started span.
-   */
   setPrompt(
     spanId: string,
     name: string,
@@ -189,14 +147,17 @@ export class ManualTracer {
     }
   }
 
-  /**
-   * Find the trace ID for a span (walks up parent chain).
-   */
   private findTraceId(spanId: string): string {
-    const tracked = this.pending.find((s) => s.span_id === spanId);
-    if (tracked?.parent_id) {
-      return this.findTraceId(tracked.parent_id);
+    let currentId = spanId;
+    while (true) {
+      const tracked = this.pending.find((s) => s.span_id === currentId);
+      if (!tracked) {
+        return generateTraceId();
+      }
+      if (!tracked.parent_id) {
+        return tracked.trace_id;
+      }
+      currentId = tracked.parent_id;
     }
-    return tracked?.trace_id ?? generateTraceId();
   }
 }

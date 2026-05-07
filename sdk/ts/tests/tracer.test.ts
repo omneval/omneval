@@ -3,6 +3,22 @@ import { ManualTracer } from "../src/tracer";
 import { createLantern } from "../src/lantern";
 
 describe("ManualTracer", () => {
+  type ExportMock = {
+    export: (spans: any[]) => Promise<boolean>;
+  };
+
+  function createMockExporter(spansCollector: (spans: any[]) => void): ExportMock {
+    return {
+      export: async (spans) => {
+        spansCollector(spans);
+        return true;
+      },
+    };
+  }
+
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.restoreAllMocks());
+
   it("startSpan returns a 16-char hex span ID", () => {
     const tracer = new ManualTracer({ export: async () => true });
     tracer.init();
@@ -13,13 +29,7 @@ describe("ManualTracer", () => {
 
   it("endSpan sends spans to the exporter", async () => {
     let exportedSpans: any[] = [];
-    const mockExporter = {
-      export: async (spans: any[]) => {
-        exportedSpans = spans;
-        return true;
-      },
-    };
-    const tracer = new ManualTracer(mockExporter as any);
+    const tracer = new ManualTracer(createMockExporter((s) => { exportedSpans = s; }) as any);
     tracer.init();
 
     const spanId = tracer.startSpan("test.span");
@@ -32,13 +42,7 @@ describe("ManualTracer", () => {
 
   it("setModel attaches model to span", async () => {
     let exportedSpans: any[] = [];
-    const mockExporter = {
-      export: async (spans: any[]) => {
-        exportedSpans = spans;
-        return true;
-      },
-    };
-    const tracer = new ManualTracer(mockExporter as any);
+    const tracer = new ManualTracer(createMockExporter((s) => { exportedSpans = s; }) as any);
     tracer.init();
 
     const spanId = tracer.startSpan("test.span");
@@ -50,13 +54,7 @@ describe("ManualTracer", () => {
 
   it("setInput attaches input to span", async () => {
     let exportedSpans: any[] = [];
-    const mockExporter = {
-      export: async (spans: any[]) => {
-        exportedSpans = spans;
-        return true;
-      },
-    };
-    const tracer = new ManualTracer(mockExporter as any);
+    const tracer = new ManualTracer(createMockExporter((s) => { exportedSpans = s; }) as any);
     tracer.init();
 
     const spanId = tracer.startSpan("test.span");
@@ -68,13 +66,7 @@ describe("ManualTracer", () => {
 
   it("setTokens attaches token counts to span", async () => {
     let exportedSpans: any[] = [];
-    const mockExporter = {
-      export: async (spans: any[]) => {
-        exportedSpans = spans;
-        return true;
-      },
-    };
-    const tracer = new ManualTracer(mockExporter as any);
+    const tracer = new ManualTracer(createMockExporter((s) => { exportedSpans = s; }) as any);
     tracer.init();
 
     const spanId = tracer.startSpan("test.span");
@@ -87,13 +79,7 @@ describe("ManualTracer", () => {
 
   it("setPrompt attaches prompt name/version to span", async () => {
     let exportedSpans: any[] = [];
-    const mockExporter = {
-      export: async (spans: any[]) => {
-        exportedSpans = spans;
-        return true;
-      },
-    };
-    const tracer = new ManualTracer(mockExporter as any);
+    const tracer = new ManualTracer(createMockExporter((s) => { exportedSpans = s; }) as any);
     tracer.init();
 
     const spanId = tracer.startSpan("test.span");
@@ -106,13 +92,7 @@ describe("ManualTracer", () => {
 
   it("endSpan with output string", async () => {
     let exportedSpans: any[] = [];
-    const mockExporter = {
-      export: async (spans: any[]) => {
-        exportedSpans = spans;
-        return true;
-      },
-    };
-    const tracer = new ManualTracer(mockExporter as any);
+    const tracer = new ManualTracer(createMockExporter((s) => { exportedSpans = s; }) as any);
     tracer.init();
 
     const spanId = tracer.startSpan("test.span");
@@ -123,13 +103,7 @@ describe("ManualTracer", () => {
 
   it("endSpan ignores unknown span ID", async () => {
     let exportedSpans: any[] = [];
-    const mockExporter = {
-      export: async (spans: any[]) => {
-        exportedSpans = spans;
-        return true;
-      },
-    };
-    const tracer = new ManualTracer(mockExporter as any);
+    const tracer = new ManualTracer(createMockExporter((s) => { exportedSpans = s; }) as any);
     tracer.init();
 
     await tracer.endSpan("unknown-span-id");
@@ -138,13 +112,7 @@ describe("ManualTracer", () => {
 
   it("endSpan with attributes merges with startSpan attributes", async () => {
     let exportedSpans: any[] = [];
-    const mockExporter = {
-      export: async (spans: any[]) => {
-        exportedSpans = spans;
-        return true;
-      },
-    };
-    const tracer = new ManualTracer(mockExporter as any);
+    const tracer = new ManualTracer(createMockExporter((s) => { exportedSpans = s; }) as any);
     tracer.init();
 
     const spanId = tracer.startSpan("test.span", { attributes: { custom: "value" } });
@@ -158,13 +126,7 @@ describe("ManualTracer", () => {
 
   it("flush sends all pending spans in one batch", async () => {
     let exportedSpans: any[] = [];
-    const mockExporter = {
-      export: async (spans: any[]) => {
-        exportedSpans = spans;
-        return true;
-      },
-    };
-    const tracer = new ManualTracer(mockExporter as any);
+    const tracer = new ManualTracer(createMockExporter((s) => { exportedSpans = s; }) as any);
     tracer.init();
 
     tracer.startSpan("span-1");
@@ -177,13 +139,7 @@ describe("ManualTracer", () => {
 
   it("span includes start_time and end_time", async () => {
     let exportedSpans: any[] = [];
-    const mockExporter = {
-      export: async (spans: any[]) => {
-        exportedSpans = spans;
-        return true;
-      },
-    };
-    const tracer = new ManualTracer(mockExporter as any);
+    const tracer = new ManualTracer(createMockExporter((s) => { exportedSpans = s; }) as any);
     tracer.init();
 
     const spanId = tracer.startSpan("timed.span");
@@ -196,13 +152,7 @@ describe("ManualTracer", () => {
 
   it("span has trace_id matching the generated format", async () => {
     let exportedSpans: any[] = [];
-    const mockExporter = {
-      export: async (spans: any[]) => {
-        exportedSpans = spans;
-        return true;
-      },
-    };
-    const tracer = new ManualTracer(mockExporter as any);
+    const tracer = new ManualTracer(createMockExporter((s) => { exportedSpans = s; }) as any);
     tracer.init();
 
     const spanId = tracer.startSpan("trace.span");

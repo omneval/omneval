@@ -1,28 +1,15 @@
-import {
-  GetPromptOptions,
-  LanternConfig,
-  LanternSpan,
-  PromptVersion,
-  WriteScoreOptions,
-} from "./types";
+import { GetPromptOptions, LanternConfig, PromptVersion, WriteScoreOptions } from "./types";
 
-const PROMPT_CACHE_TTL_MS = 30_000; // 30 seconds, matching snapshot staleness window
+const PROMPT_CACHE_TTL_MS = 30_000;
 
-/**
- * LanternClient handles prompt fetch with caching and manual score writes.
- * Browser-compatible — uses the Fetch API exclusively.
- */
 export class LanternClient {
   private readonly baseUrl: string;
   private readonly apiKey?: string;
 
-  // Prompt caches
-  // label cache: key = name + "|" + label, value = { template, expiresAt }
   private readonly labelCache = new Map<
     string,
     { template: string; expiresAt: number }
   >();
-  // version cache: key = name + "|" + version, value = template (no TTL)
   private readonly versionCache = new Map<string, string>();
 
   constructor(config: LanternConfig) {
@@ -53,7 +40,8 @@ export class LanternClient {
     }
 
     // Cache miss — fetch from server
-    const pv = await this.fetchPromptFromServer(name, label);
+    const params = new URLSearchParams({ label });
+    const pv = await this.fetchPromptVersionFromServer(name, params);
     const template = pv.template;
 
     // Store in label cache with TTL
@@ -94,11 +82,9 @@ export class LanternClient {
       throw new Error("span_id is required");
     }
 
-    const traceId = this.generateTraceId();
-
     const score = {
       span_id: spanId,
-      trace_id: traceId,
+      trace_id: generateTraceId(),
       eval_name: options.name,
       value: options.value,
       reasoning: options.reasoning,
@@ -124,44 +110,13 @@ export class LanternClient {
     }
   }
 
-  /**
-   * Export a batch of spans via the Lantern ingest API.
-   */
-  async exportSpans(spans: LanternSpan[]): Promise<boolean> {
-    if (spans.length === 0) {
-      return true;
-    }
-
-    const url = `${this.baseUrl}/api/v1/spans`;
-    const body = JSON.stringify({ spans });
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (this.apiKey) {
-      headers["X-API-Key"] = this.apiKey;
-    }
-
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers,
-        body,
-      });
-
-      return response.ok;
-    } catch {
-      return false;
-    }
-  }
-
   // ---- Private helpers ----
 
-  private async fetchPromptFromServer(
+  private async fetchPromptVersionFromServer(
     name: string,
-    label: string
+    params: URLSearchParams
   ): Promise<PromptVersion> {
-    const url = `${this.baseUrl}/api/v1/prompts/${name}?label=${encodeURIComponent(label)}`;
+    const url = `${this.baseUrl}/api/v1/prompts/${name}?${params}`;
 
     const response = await fetch(url);
 
@@ -174,33 +129,19 @@ export class LanternClient {
       throw new Error(`get prompt: ${response.status}: ${body}`);
     }
 
-    const pv = (await response.json()) as PromptVersion;
-    return pv;
+    return (await response.json()) as PromptVersion;
   }
 
   private async fetchPromptByVersionFromServer(
     name: string,
     version: number
   ): Promise<PromptVersion> {
-    const url = `${this.baseUrl}/api/v1/prompts/${name}?version=${version}`;
-
-    const response = await fetch(url);
-
-    if (response.status === 404) {
-      throw new Error(`prompt not found: ${name}`);
-    }
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`get prompt: ${response.status}: ${body}`);
-    }
-
-    const pv = (await response.json()) as PromptVersion;
-    return pv;
+    const params = new URLSearchParams({ version: String(version) });
+    return this.fetchPromptVersionFromServer(name, params);
   }
+}
 
-  private generateTraceId(): string {
-    const bytes = crypto.getRandomValues(new Uint8Array(16));
-    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-  }
+function generateTraceId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
