@@ -49,7 +49,7 @@ interface Issue {
 const MODEL = "unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_M";
 
 // Maximum number of plan→execute→merge cycles before stopping.
-const MAX_ITERATIONS = 10;
+const MAX_ITERATIONS = 30;
 
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL ?? "";
 
