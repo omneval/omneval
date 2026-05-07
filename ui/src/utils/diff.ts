@@ -42,8 +42,6 @@ export function diffText(oldText: string, newText: string): DiffLine[] {
   const m = oldLines.length;
   const n = newLines.length;
 
-  if (m === 0 && n === 0) return [];
-
   // Build the LCS table
   const dp: number[][] = Array.from({ length: m + 1 }, () =>
     Array(n + 1).fill(0)

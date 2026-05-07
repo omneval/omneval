@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { colors } from "@/theme";
 import { formatTime } from "@/utils/formatters";
-import { diffText, diffModelConfig, type DiffLine } from "@/utils/diff";
+import { diffText, diffModelConfig, type DiffLine, type ModelConfigDiff } from "@/utils/diff";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -32,6 +32,8 @@ interface PromptsPageProps {
 // ── Labels ─────────────────────────────────────────────────────────
 
 const LABELS = ["production", "staging", "dev"] as const;
+
+const VERSION_OPTIONS = Array.from({ length: 50 }, (_, i) => i + 1);
 
 function labelColor(label: string): string {
   switch (label) {
@@ -81,7 +83,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
   const [diffOldVersion, setDiffOldVersion] = useState(1);
   const [diffNewVersion, setDiffNewVersion] = useState(2);
   const [diffData, setDiffData] = useState<
-    { textDiff: DiffLine[]; modelDiff: { field: string; oldValue: string | number; newValue: string | number }[] }
+    { textDiff: DiffLine[]; modelDiff: ModelConfigDiff[] }
   | null
   >(null);
 
@@ -194,21 +196,19 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
     if (versions.length === 0) return;
     const maxVer = Math.max(...versions.map((v) => v.version));
     setDiffPromptName(name);
-    setDiffOldVersion(1);
-    setDiffNewVersion(maxVer > 1 ? maxVer : 2);
     setShowDiffPanel(true);
     computeDiff(versions, 1, maxVer > 1 ? maxVer : 2);
   };
 
   const computeDiff = (
-    _versions: PromptVersion[],
+    versions: PromptVersion[],
     oldVer: number,
     newVer: number
   ) => {
     setDiffOldVersion(oldVer);
     setDiffNewVersion(newVer);
-    const oldVerData = _versions.find((v) => v.version === oldVer);
-    const newVerData = _versions.find((v) => v.version === newVer);
+    const oldVerData = versions.find((v) => v.version === oldVer);
+    const newVerData = versions.find((v) => v.version === newVer);
     const textDiff = diffText(
       oldVerData?.template ?? "",
       newVerData?.template ?? ""
@@ -663,7 +663,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 }}
               >
                 <option value={0}>(empty baseline)</option>
-                {Array.from({ length: 50 }, (_, i) => i + 1).map((v) => (
+                {VERSION_OPTIONS.map((v) => (
                   <option key={v} value={v}>{v}</option>
                 ))}
               </select>
@@ -682,7 +682,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                   color: colors.typography.pureLight,
                 }}
               >
-                {Array.from({ length: 50 }, (_, i) => i + 1).map((v) => (
+                {VERSION_OPTIONS.map((v) => (
                   <option key={v} value={v}>{v}</option>
                 ))}
               </select>
