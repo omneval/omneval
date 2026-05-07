@@ -1,0 +1,138 @@
+{{- /*
+Eval Workers Deployment — horizontally scalable.
+
+Drains the Redis eval queue, calls the judge LLM, and writes scores
+back to the Writer Service via REST with exponential backoff.
+No HTTP port — workers are consumers, not servers.
+*/ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-eval
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: eval
+    {{- with .Values.eval.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if not .Values.eval.autoscaling }}
+  replicas: {{ .Values.eval.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lantern
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: eval
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: lantern
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: eval
+        {{- with .Values.eval.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.eval.annotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.eval.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.eval.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.eval.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: eval
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["lantern-eval"]
+          env:
+            - name: LANTERN_CONFIG
+              value: "/etc/lantern/lantern.yaml"
+            {{- if .Values.redis.enabled }}
+            - name: LANTERN_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secret
+                  key: redis-password
+                  optional: true
+            {{- end }}
+            {{- if .Values.storage.endpoint }}
+            - name: LANTERN_STORAGE_ENDPOINT
+              value: {{ .Values.storage.endpoint | quote }}
+            {{- end }}
+            {{- if .Values.storage.bucket }}
+            - name: LANTERN_STORAGE_BUCKET
+              value: {{ .Values.storage.bucket | quote }}
+            {{- end }}
+            {{- if .Values.storage.region }}
+            - name: LANTERN_STORAGE_REGION
+              value: {{ .Values.storage.region | quote }}
+            {{- end }}
+            {{- if .Values.storage.accessKey }}
+            - name: LANTERN_STORAGE_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secret
+                  key: storage-access-key
+                  optional: true
+            {{- end }}
+            {{- if .Values.storage.secretKey }}
+            - name: LANTERN_STORAGE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secret
+                  key: storage-secret-key
+                  optional: true
+            {{- end }}
+            {{- if .Values.eval.llmBaseURL }}
+            - name: LANTERN_EVAL_LLM_BASE_URL
+              value: {{ .Values.eval.llmBaseURL | quote }}
+            {{- end }}
+            {{- if .Values.eval.llmModel }}
+            - name: LANTERN_EVAL_LLM_MODEL
+              value: {{ .Values.eval.llmModel | quote }}
+            {{- end }}
+            {{- if .Values.eval.llmAPIKey }}
+            - name: LANTERN_EVAL_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secret
+                  key: eval-llm-api-key
+                  optional: true
+            {{- end }}
+            {{- if .Values.database.dsn }}
+            - name: LANTERN_DATABASE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secret
+                  key: postgres-dsn
+                  optional: true
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/lantern
+              readOnly: true
+          livenessProbe:
+            exec:
+              command:
+                - cat
+                - /proc/1/status
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.eval.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-config

@@ -1,0 +1,30 @@
+{{- /*
+Query API Service — exposes the Query API port (8002) and metrics (9090).
+
+This is the primary ingress point for the UI and REST API.
+An optional Ingress resource (controlled by ingress.enabled) routes
+external traffic to this service.
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-query
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: query
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8002
+      targetPort: 8002
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: query

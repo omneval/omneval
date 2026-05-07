@@ -1,0 +1,23 @@
+apiVersion: v2
+name: lantern
+description: A self-hostable LLM/Agent tracing platform with DuckDB as the OLAP backend
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - tracing
+  - observability
+  - llm
+  - duckdb
+  - agent
+sources:
+  - https://github.com/zbloss/lantern
+dependencies:
+  - name: redis
+    version: 20.x.x
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled
+  - name: postgresql
+    version: 16.x.x
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled

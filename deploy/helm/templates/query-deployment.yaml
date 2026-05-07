@@ -1,0 +1,144 @@
+{{- /*
+Query API Deployment — fully stateless, horizontally scalable.
+
+Downloads the DuckDB snapshot from S3, polls for updates, and serves
+the REST API, analytics, prompt registry, auth, and embedded React SPA.
+No PVC — all data comes from S3 snapshot and metadata store.
+*/ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-query
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: query
+    {{- with .Values.query.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if not .Values.query.autoscaling }}
+  replicas: {{ .Values.query.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lantern
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: query
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: lantern
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: query
+        {{- with .Values.query.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.query.annotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.query.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.query.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.query.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: query
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["lantern-query"]
+          ports:
+            - name: http
+              containerPort: 8002
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          env:
+            - name: LANTERN_CONFIG
+              value: "/etc/lantern/lantern.yaml"
+            - name: LANTERN_AUTH_ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secret
+                  key: admin-email
+                  optional: true
+            - name: LANTERN_AUTH_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secret
+                  key: admin-password
+                  optional: true
+            {{- if .Values.redis.enabled }}
+            - name: LANTERN_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secret
+                  key: redis-password
+                  optional: true
+            {{- end }}
+            {{- with .Values.storage.endpoint }}
+            - name: LANTERN_STORAGE_ENDPOINT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.storage.bucket }}
+            - name: LANTERN_STORAGE_BUCKET
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.storage.region }}
+            - name: LANTERN_STORAGE_REGION
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if or .Values.storage.accessKey .Values.storage.endpoint }}
+            - name: LANTERN_STORAGE_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secret
+                  key: storage-access-key
+                  optional: true
+            - name: LANTERN_STORAGE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secret
+                  key: storage-secret-key
+                  optional: true
+            {{- end }}
+            {{- if .Values.database.dsn }}
+            - name: LANTERN_DATABASE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secret
+                  key: postgres-dsn
+                  optional: true
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/lantern
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.query.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-config

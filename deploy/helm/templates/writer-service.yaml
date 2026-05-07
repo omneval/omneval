@@ -1,0 +1,30 @@
+{{- /*
+Writer Service — exposes the score handler port (8001) and metrics (9090).
+
+The Writer is a StatefulSet with a single replica, so the service
+routes to that single pod. Eval Workers use this service for score
+write-back (internal-only, not exposed externally).
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-writer
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: writer
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8001
+      targetPort: 8001
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: writer

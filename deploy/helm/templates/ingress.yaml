@@ -1,0 +1,65 @@
+{{- /*
+Ingress — optional external routing for the Ingest API and Query API (UI).
+
+Controlled by ingress.enabled. Both hosts are optional — you may configure
+one, the other, or both independently. TLS is supported per-host.
+*/ -}}
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-ingress
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+spec:
+  {{- if or .Values.ingress.ingest.tls .Values.ingress.query.tls }}
+  tls:
+    {{- if .Values.ingress.ingest.tls }}
+    {{- range .Values.ingress.ingest.tls }}
+    - hosts:
+        - {{ .host | quote }}
+      secretName: {{ .secretName | default (printf "%s-ingest-tls" $.Release.Name) }}
+    {{- end }}
+    {{- end }}
+    {{- if .Values.ingress.query.tls }}
+    {{- range .Values.ingress.query.tls }}
+    - hosts:
+        - {{ .host | quote }}
+      secretName: {{ .secretName | default (printf "%s-query-tls" $.Release.Name) }}
+    {{- end }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- if .Values.ingress.ingest.host }}
+    - host: {{ .Values.ingress.ingest.host | quote }}
+      http:
+        paths:
+          {{- range .Values.ingress.ingest.paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ $.Release.Name }}-ingest
+                port:
+                  number: 8000
+          {{- end }}
+    {{- end }}
+    {{- if .Values.ingress.query.host }}
+    - host: {{ .Values.ingress.query.host | quote }}
+      http:
+        paths:
+          {{- range .Values.ingress.query.paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ $.Release.Name }}-query
+                port:
+                  number: 8002
+          {{- end }}
+    {{- end }}
+{{- end }}

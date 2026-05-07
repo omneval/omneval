@@ -1,0 +1,75 @@
+{{- /*
+Lantern YAML configuration ConfigMap.
+
+This ConfigMap holds the lantern.yaml configuration that all Lantern services
+share. Environment variable overrides in each Deployment handle per-service
+secrets (S3 credentials, admin credentials, LLM keys).
+*/ -}}
+{{- $corsOrigins := "" -}}
+{{- range $i, $origin := .Values.ingest.corsAllowedOrigins -}}
+  {{- if $i -}}
+    {{- $corsOrigins = print $corsOrigins ", " -}}
+  {{- end -}}
+  {{- $corsOrigins = print $corsOrigins $origin -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    {{- with .Values.ingest.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+data:
+  lantern.yaml: |
+    database:
+      driver: {{ .Values.database.driver }}
+      {{- if eq .Values.database.driver "postgres" }}
+      dsn: {{ .Values.database.dsn }}
+      {{- end }}
+    redis:
+      {{- if .Values.redis.enabled }}
+      addr: {{ .Release.Name }}-redis-master:6379
+      {{- end }}
+    storage:
+      {{- with .Values.storage.endpoint }}
+      endpoint: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.storage.bucket }}
+      bucket: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.storage.region }}
+      region: {{ . | quote }}
+      {{- end }}
+    auth:
+      session_ttl: {{ .Values.query.sessionTTL }}
+      secure_cookie: {{ .Values.query.secureCookie }}
+    ingest:
+      addr: {{ .Values.ingest.addr }}
+      log_system_prompt: {{ .Values.ingest.logSystemPrompt }}
+      cors_allowed_origins:
+        {{- range .Values.ingest.corsAllowedOrigins }}
+        - {{ . | quote }}
+        {{- end }}
+    writer:
+      addr: {{ .Values.writer.addr }}
+      duckdb_path: {{ .Values.writer.duckdbPath | quote }}
+      sync_interval: {{ .Values.writer.syncInterval }}
+      flush_interval: {{ .Values.writer.flushInterval }}
+      flush_age_days: {{ .Values.writer.flushAgeDays }}
+      leader_election:
+        enabled: {{ .Values.writer.leaderElection.enabled }}
+        lock_ttl: {{ .Values.writer.leaderElection.lockTTL }}
+    query:
+      addr: {{ .Values.query.addr }}
+      duckdb_path: {{ .Values.query.duckdbPath | quote }}
+      sync_interval: {{ .Values.query.syncInterval }}
+    eval:
+      concurrency: {{ .Values.eval.concurrency }}
+      judge_timeout: {{ .Values.eval.judgeTimeout }}
+      retry_count: {{ .Values.eval.retryCount }}
+    metrics:
+      addr: {{ .Values.metrics.addr }}
+      disable_project_labels: {{ .Values.metrics.disableProjectLabels }}

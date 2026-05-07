@@ -1,0 +1,266 @@
+# Lantern Helm Chart — Production Values
+#
+# This chart deploys the Lantern tracing platform to Kubernetes.
+# It includes all four Lantern services (ingest, writer, query, eval)
+# along with Redis and PostgreSQL as backing infrastructure via Bitnami charts.
+#
+# Usage:
+#   helm install lantern ./deploy/helm --values my-values.yaml
+#   helm template lantern ./deploy/helm --values my-values.yaml
+#   helm upgrade lantern ./deploy/helm --values my-values.yaml
+#
+# For a minimal demo with SQLite and no S3, set:
+#   database.driver: sqlite
+#   storage.bucket: ""
+#   storage.endpoint: ""
+#   postgresql.enabled: false
+#   redis.enabled: false  # (eval will not function)
+
+# ============================================================================
+# Image
+# ============================================================================
+image:
+  # Repository of the Lantern image (built via the multi-stage Dockerfile)
+  repository: lantern/app
+  # Tag — defaults to chart appVersion
+  tag: ""
+  # Image pull policy
+  pullPolicy: IfNotPresent
+
+# ============================================================================
+# Global settings
+# ============================================================================
+global:
+  # Common namespace for all sub-charts. Override per-chart via sub-chart conditions.
+  namespace: ""
+
+# ============================================================================
+# Ingest API (port 8000)
+# ============================================================================
+ingest:
+  replicas: 2
+  # Listen address (override via LANTERN_INGEST_ADDR)
+  addr: ":8000"
+  # Log system prompt in span input (override via LANTERN_INGEST_LOG_SYSTEM_PROMPT)
+  logSystemPrompt: true
+  # CORS allowed origins, comma-separated (override via LANTERN_INGEST_CORS_ALLOWED_ORIGINS)
+  corsAllowedOrigins:
+    - "*"
+  # Resource limits and requests
+  resources: {}
+    # limits:
+    #   cpu: 500m
+    #   memory: 256Mi
+    # requests:
+    #   cpu: 100m
+    #   memory: 128Mi
+  # Node selector, affinity, tolerations
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  # Annotations for service discovery
+  annotations: {}
+  # Pod labels
+  labels: {}
+
+# ============================================================================
+# Writer Service (port 8001)
+# ============================================================================
+writer:
+  replicas: 1
+  # Listen address for the score handler endpoint
+  addr: ":8001"
+  # Path to the DuckDB file on the PVC
+  duckdbPath: "/data/lantern.duckdb"
+  # Snapshot sync interval to S3 (override via LANTERN_WRITER_SYNC_INTERVAL)
+  syncInterval: "30s"
+  # Aged partition flush interval to Parquet on S3 (override via LANTERN_WRITER_FLUSH_INTERVAL)
+  flushInterval: "30m"
+  # Flush spans older than N days to cold storage (override via LANTERN_WRITER_FLUSH_AGE_DAYS)
+  flushAgeDays: 2
+  # Leader election configuration (for multi-replica HA)
+  leaderElection:
+    enabled: false
+    lockTTL: 15
+  # Resource limits and requests
+  resources: {}
+    # limits:
+    #   cpu: "1"
+    #   memory: 512Mi
+    # requests:
+    #   cpu: 200m
+    #   memory: 256Mi
+  # Node selector, affinity, tolerations
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  annotations: {}
+  labels: {}
+
+# Writer PVC configuration
+pvc:
+  # Size of the DuckDB volume
+  size: 10Gi
+  # Storage class (empty string uses the cluster default)
+  storageClass: ""
+  # Access mode — must be ReadWriteOnce for DuckDB
+  accessMode: ReadWriteOnce
+
+# ============================================================================
+# Query API (port 8002)
+# ============================================================================
+query:
+  replicas: 2
+  # Listen address (override via LANTERN_QUERY_ADDR)
+  addr: ":8002"
+  # Path to the DuckDB snapshot file (local, read from S3)
+  duckdbPath: "/tmp/lantern-snapshot.duckdb"
+  # Snapshot poll interval from S3 (override via LANTERN_QUERY_SYNC_INTERVAL)
+  syncInterval: "30s"
+  # Session cookie TTL (override via LANTERN_AUTH_SESSION_TTL)
+  sessionTTL: "168h"
+  # Secure cookie flag (override via LANTERN_AUTH_SECURE_COOKIE)
+  secureCookie: false
+  # Bootstrap admin user on first startup (override via LANTERN_AUTH_ADMIN_EMAIL / LANTERN_AUTH_ADMIN_PASSWORD)
+  # Set both adminEmail and adminPassword to auto-create the first admin user.
+  adminEmail: ""
+  adminPassword: ""
+  resources: {}
+    # limits:
+    #   cpu: 500m
+    #   memory: 256Mi
+    # requests:
+    #   cpu: 100m
+    #   memory: 128Mi
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  annotations: {}
+  labels: {}
+
+# ============================================================================
+# Eval Workers (port 8003)
+# ============================================================================
+eval:
+  replicas: 2
+  # Listen address (not used by eval workers — they are consumers, not servers)
+  addr: ":8003"
+  # Number of concurrent judge LLM calls
+  concurrency: 4
+  # Judge LLM base URL (OpenAI-compatible, override via LANTERN_EVAL_LLM_BASE_URL)
+  llmBaseURL: ""
+  # Judge LLM model name (override via LANTERN_EVAL_LLM_MODEL)
+  llmModel: "gpt-4"
+  # Judge LLM API key (override via LANTERN_EVAL_LLM_API_KEY)
+  llmAPIKey: ""
+  # Judge call timeout (override via LANTERN_EVAL_JUDGE_TIMEOUT)
+  judgeTimeout: "90s"
+  # Number of retries for failed judge calls
+  retryCount: 3
+  resources: {}
+    # limits:
+    #   cpu: 500m
+    #   memory: 256Mi
+    # requests:
+    #   cpu: 100m
+    #   memory: 128Mi
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  annotations: {}
+  labels: {}
+
+# ============================================================================
+# Storage (S3-compatible object store)
+# ============================================================================
+storage:
+  # S3 endpoint URL (e.g. http://minio:9000). If empty, no S3 integration.
+  endpoint: ""
+  # S3 bucket name (e.g. "lantern")
+  bucket: ""
+  # S3 region
+  region: "us-east-1"
+  # Access key ID (set via the lantern-secret Secret)
+  accessKey: ""
+  # Secret access key (set via the lantern-secret Secret)
+  secretKey: ""
+
+# ============================================================================
+# Metadata database (PostgreSQL)
+# ============================================================================
+database:
+  # Driver: "postgres" or "sqlite"
+  driver: "postgres"
+  # DSN — generated automatically from postgresql sub-chart when driver is postgres
+  # Override manually when using sqlite
+  dsn: ""
+
+# ============================================================================
+# Redis
+# ============================================================================
+redis:
+  enabled: true
+  auth:
+    enabled: false
+    password: ""
+  master:
+    persistence:
+      enabled: false
+  # Redis connection settings (overrides sub-chart defaults)
+  replicas: 1
+
+# ============================================================================
+# PostgreSQL
+# ============================================================================
+postgresql:
+  enabled: true
+  auth:
+    # Database username
+    username: lantern
+    # Database password
+    password: lantern
+    # Database name
+    database: lantern
+    # Secret key to use for the password
+    existingSecret: ""
+  primary:
+    persistence:
+      size: 10Gi
+    resources: {}
+      # limits:
+      #   cpu: 500m
+      #   memory: 256Mi
+      # requests:
+      #   cpu: 100m
+      #   memory: 128Mi
+
+# ============================================================================
+# Ingress (optional)
+# ============================================================================
+ingress:
+  enabled: false
+  # Class name (e.g. "nginx", "alb")
+  className: ""
+  # Ingest API ingress
+  ingest:
+    host: ""
+    paths:
+      - path: /
+        pathType: Prefix
+    tls: []
+  # Query API (UI) ingress
+  query:
+    host: ""
+    paths:
+      - path: /
+        pathType: Prefix
+    tls: []
+
+# ============================================================================
+# Metrics
+# ============================================================================
+metrics:
+  # Listen address for Prometheus /metrics endpoint (override via LANTERN_METRICS_ADDR)
+  addr: ":9090"
+  # Disable per-project label cardinality on all metrics
+  disableProjectLabels: false

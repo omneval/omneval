@@ -1,0 +1,25 @@
+{{- /*
+Eval Workers Service — exposes metrics port (9090) for Prometheus scraping.
+
+Eval workers do not serve HTTP requests (they are queue consumers),
+so this service only exposes the metrics endpoint for operational visibility.
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-eval
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: eval
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: eval
