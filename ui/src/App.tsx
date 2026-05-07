@@ -4,6 +4,8 @@ import TracesPage from "./pages/Traces";
 import TraceDetailPage from "./pages/TraceDetail";
 import DashboardPage from "./pages/Dashboard";
 import PromptsPage from "./pages/Prompts";
+import DatasetDetailPage from "./pages/DatasetDetail";
+import DatasetsPage from "./pages/Datasets";
 import Header from "./components/Header";
 import Layout from "./components/Layout";
 import { ToastProvider } from "./components/Toast";
@@ -22,6 +24,7 @@ type Page =
   | "judge-llm"
   | "human-annotation"
   | "datasets"
+  | "dataset-detail"
   | "settings";
 
 const NAV_MAP: Record<string, Page> = {
@@ -35,6 +38,7 @@ const NAV_MAP: Record<string, Page> = {
   "judge-llm": "judge-llm",
   "human-annotation": "human-annotation",
   datasets: "datasets",
+  "dataset-detail": "dataset-detail",
   settings: "settings",
 };
 
@@ -45,6 +49,7 @@ export default function App() {
   >([]);
   const [activeProject, setActiveProject] = useState<string>("");
   const [activeTraceId, setActiveTraceId] = useState<string>("");
+  const [activeDatasetId, setActiveDatasetId] = useState<string>("");
 
   const [timeRange, setTimeRange] = useState("1d");
   const [environment, setEnvironment] = useState("default");
@@ -100,6 +105,11 @@ export default function App() {
     if (route) setPage(route);
   };
 
+  const handleNavigateToDataset = (datasetId: string) => {
+    setActiveDatasetId(datasetId);
+    setPage("dataset-detail");
+  };
+
   // ── Login ──
   if (page === "login") {
     return <LoginPage onLogin={handleLogin} />;
@@ -144,10 +154,25 @@ export default function App() {
             {page === "prompts" && (
               <PromptsPage activeProject={activeProject} />
             )}
+            {page === "datasets" && (
+              <DatasetsPage
+                activeProject={activeProject}
+                onNavigateToDetail={handleNavigateToDataset}
+              />
+            )}
+            {page === "dataset-detail" && activeDatasetId && (
+              <DatasetDetailPage
+                datasetId={activeDatasetId}
+                activeProject={activeProject}
+                onBack={() => setPage("datasets")}
+              />
+            )}
             {page !== "dashboard" &&
               page !== "traces" &&
               page !== "trace-detail" &&
-              page !== "prompts" && (
+              page !== "prompts" &&
+              page !== "datasets" &&
+              page !== "dataset-detail" && (
                 <div className="flex flex-col items-center justify-center h-[60vh]">
                   <svg
                     width="48"
