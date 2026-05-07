@@ -4,6 +4,7 @@ import (
 	"errors"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/zbloss/lantern/internal/domain"
@@ -53,7 +54,7 @@ func (h *PlaygroundHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 	// Resolve the prompt version.
 	pv, err := h.resolvePrompt(projectID, req.PromptName, req.Version, req.Label)
 	if err != nil {
-		if err.Error() == "playground: provide version or label" {
+		if errors.Is(err, errProvideVersionOrLabel) {
 			http.Error(w, "provide version or label", http.StatusBadRequest)
 			return
 		}
@@ -77,7 +78,7 @@ func (h *PlaygroundHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 	// Interpolate the template.
 	interpolated, missing := Interpolate(pv.Template, req.Variables)
 	if len(missing) > 0 {
-		http.Error(w, "missing required variables: "+joinStrings(missing), http.StatusBadRequest)
+		http.Error(w, "missing required variables: "+strings.Join(missing, ", "), http.StatusBadRequest)
 		return
 	}
 
@@ -115,14 +116,11 @@ func (h *PlaygroundHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 
 	playgroundResp := Response{
 		Output:       output,
-		Model:        resp.Choices[0].Message.Role, // fallback; model name from request
+		Model:        model,
 		InputTokens:  resp.Usage.PromptTokens,
 		OutputTokens: resp.Usage.CompletionTokens,
 		DurationMs:   durationMs,
 	}
-
-	// Use the requested model name for the response.
-	playgroundResp.Model = model
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(playgroundResp); err != nil {
@@ -157,14 +155,4 @@ func (h *PlaygroundHandler) resolvePrompt(
 	return nil, errProvideVersionOrLabel
 }
 
-// joinStrings joins a slice of strings with ", ".
-func joinStrings(s []string) string {
-	result := ""
-	for i, v := range s {
-		if i > 0 {
-			result += ", "
-		}
-		result += v
-	}
-	return result
-}
+

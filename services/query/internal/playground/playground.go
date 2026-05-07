@@ -10,9 +10,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/services/query/internal/handler"
 )
 
 // Request is the JSON body for POST /api/v1/playground/run.
@@ -182,19 +179,4 @@ func buildMessages(interpolatedTemplate string) []ChatMessage {
 	}
 }
 
-// resolvePrompt fetches a prompt version from the cache, resolving by version or label.
-func resolvePrompt(
-	cache *handler.PromptCache,
-	projectID string,
-	name string,
-	version *int64,
-	label *string,
-) (*domain.PromptVersion, error) {
-	if version != nil && *version > 0 {
-		return cache.GetVersion(nil, projectID, name, *version)
-	}
-	if label != nil && *label != "" {
-		return cache.GetLabel(nil, projectID, name, *label)
-	}
-	return nil, fmt.Errorf("playground: provide version or label")
-}
+
