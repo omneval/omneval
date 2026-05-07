@@ -18,7 +18,7 @@ import (
 
 // FakePromptStore implements metadata.Store for prompt-only operations.
 type FakePromptStore struct {
-	mu   sync.RWMutex
+	mu             sync.RWMutex
 	promptVersions map[string]*domain.PromptVersion
 	promptLabels   map[string]*domain.PromptLabel
 }
@@ -115,38 +115,74 @@ func (m *FakePromptStore) SetPromptLabel(ctx context.Context, label *domain.Prom
 }
 
 // ---- Metadata.Store interface stubs (not used by tests) ----
-func (m *FakePromptStore) CreateOrganization(ctx context.Context, o *domain.Organization) error              { return nil }
-func (m *FakePromptStore) GetOrganization(ctx context.Context, id string) (*domain.Organization, error)     { return nil, metadata.ErrNotFound }
-func (m *FakePromptStore) CreateProject(ctx context.Context, p *domain.Project) error                       { return nil }
-func (m *FakePromptStore) GetProject(ctx context.Context, id string) (*domain.Project, error)               { return nil, metadata.ErrNotFound }
-func (m *FakePromptStore) ListProjects(ctx context.Context, orgID string) ([]*domain.Project, error)        { return nil, nil }
-func (m *FakePromptStore) CreateUser(ctx context.Context, u *domain.User) error                             { return nil }
-func (m *FakePromptStore) GetUserByEmail(ctx context.Context, email string) (*domain.User, error)           { return nil, metadata.ErrNotFound }
-func (m *FakePromptStore) GetUserByID(ctx context.Context, userID string) (*domain.User, error)             { return nil, metadata.ErrNotFound }
-func (m *FakePromptStore) CountUsers(ctx context.Context) (int, error)                                      { return 0, nil }
-func (m *FakePromptStore) UpdateUserPassword(ctx context.Context, userID, passwordHash string) error        { return nil }
-func (m *FakePromptStore) CheckPassword(hashed, plaintext string) error                                     { return nil }
-func (m *FakePromptStore) ListUsers(ctx context.Context, orgID string) ([]*domain.User, error)              { return nil, nil }
-func (m *FakePromptStore) CreateSession(ctx context.Context, s *domain.Session) error                       { return nil }
-func (m *FakePromptStore) GetSession(ctx context.Context, id string) (*domain.Session, error)               { return nil, metadata.ErrNotFound }
-func (m *FakePromptStore) DeleteSession(ctx context.Context, id string) error                               { return nil }
-func (m *FakePromptStore) CreateAPIKey(ctx context.Context, k *domain.APIKey) error                         { return nil }
-func (m *FakePromptStore) GetAPIKeyByHash(ctx context.Context, hash string) (*domain.APIKey, error)         { return nil, metadata.ErrNotFound }
-func (m *FakePromptStore) RevokeAPIKey(ctx context.Context, keyID string) error                             { return nil }
-func (m *FakePromptStore) ListAPIKeys(ctx context.Context, projectID string) ([]*domain.APIKey, error)      { return nil, nil }
-func (m *FakePromptStore) CreateEvalRule(ctx context.Context, r *domain.EvalRule) error                     { return nil }
-func (m *FakePromptStore) GetEvalRule(ctx context.Context, id string) (*domain.EvalRule, error)             { return nil, metadata.ErrNotFound }
-func (m *FakePromptStore) ListEvalRules(ctx context.Context, projectID string) ([]*domain.EvalRule, error)  { return nil, nil }
-func (m *FakePromptStore) UpdateEvalRule(ctx context.Context, r *domain.EvalRule) error                     { return nil }
-func (m *FakePromptStore) DeleteEvalRule(ctx context.Context, ruleID string) error                          { return nil }
-func (m *FakePromptStore) CreateDataset(ctx context.Context, d *domain.Dataset) error                       { return nil }
-func (m *FakePromptStore) GetDataset(ctx context.Context, id string) (*domain.Dataset, error)               { return nil, metadata.ErrNotFound }
-func (m *FakePromptStore) CreateDatasetItem(ctx context.Context, i *domain.DatasetItem) error               { return nil }
-func (m *FakePromptStore) ListDatasetItems(ctx context.Context, datasetID string) ([]*domain.DatasetItem, error) { return nil, nil }
-func (m *FakePromptStore) CreateDatasetRun(ctx context.Context, r *domain.DatasetRun) error                 { return nil }
-func (m *FakePromptStore) GetDatasetRun(ctx context.Context, id string) (*domain.DatasetRun, error)         { return nil, metadata.ErrNotFound }
-func (m *FakePromptStore) Migrate(ctx context.Context) error                                                { return nil }
-func (m *FakePromptStore) Close() error                                                                     { return nil }
+func (m *FakePromptStore) CreateOrganization(ctx context.Context, o *domain.Organization) error {
+	return nil
+}
+func (m *FakePromptStore) GetOrganization(ctx context.Context, id string) (*domain.Organization, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *FakePromptStore) CreateProject(ctx context.Context, p *domain.Project) error { return nil }
+func (m *FakePromptStore) GetProject(ctx context.Context, id string) (*domain.Project, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *FakePromptStore) ListProjects(ctx context.Context, orgID string) ([]*domain.Project, error) {
+	return nil, nil
+}
+func (m *FakePromptStore) CreateUser(ctx context.Context, u *domain.User) error { return nil }
+func (m *FakePromptStore) GetUserByEmail(ctx context.Context, email string) (*domain.User, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *FakePromptStore) GetUserByID(ctx context.Context, userID string) (*domain.User, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *FakePromptStore) CountUsers(ctx context.Context) (int, error) { return 0, nil }
+func (m *FakePromptStore) UpdateUserPassword(ctx context.Context, userID, passwordHash string) error {
+	return nil
+}
+func (m *FakePromptStore) CheckPassword(hashed, plaintext string) error { return nil }
+func (m *FakePromptStore) ListUsers(ctx context.Context, orgID string) ([]*domain.User, error) {
+	return nil, nil
+}
+func (m *FakePromptStore) CreateSession(ctx context.Context, s *domain.Session) error { return nil }
+func (m *FakePromptStore) GetSession(ctx context.Context, id string) (*domain.Session, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *FakePromptStore) DeleteSession(ctx context.Context, id string) error       { return nil }
+func (m *FakePromptStore) CreateAPIKey(ctx context.Context, k *domain.APIKey) error { return nil }
+func (m *FakePromptStore) GetAPIKeyByHash(ctx context.Context, hash string) (*domain.APIKey, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *FakePromptStore) RevokeAPIKey(ctx context.Context, keyID string) error { return nil }
+func (m *FakePromptStore) ListAPIKeys(ctx context.Context, projectID string) ([]*domain.APIKey, error) {
+	return nil, nil
+}
+func (m *FakePromptStore) CreateEvalRule(ctx context.Context, r *domain.EvalRule) error { return nil }
+func (m *FakePromptStore) GetEvalRule(ctx context.Context, id string) (*domain.EvalRule, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *FakePromptStore) ListEvalRules(ctx context.Context, projectID string) ([]*domain.EvalRule, error) {
+	return nil, nil
+}
+func (m *FakePromptStore) UpdateEvalRule(ctx context.Context, r *domain.EvalRule) error { return nil }
+func (m *FakePromptStore) DeleteEvalRule(ctx context.Context, ruleID string) error      { return nil }
+func (m *FakePromptStore) CreateDataset(ctx context.Context, d *domain.Dataset) error   { return nil }
+func (m *FakePromptStore) GetDataset(ctx context.Context, id string) (*domain.Dataset, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *FakePromptStore) CreateDatasetItem(ctx context.Context, i *domain.DatasetItem) error {
+	return nil
+}
+func (m *FakePromptStore) ListDatasetItems(ctx context.Context, datasetID string) ([]*domain.DatasetItem, error) {
+	return nil, nil
+}
+func (m *FakePromptStore) CreateDatasetRun(ctx context.Context, r *domain.DatasetRun) error {
+	return nil
+}
+func (m *FakePromptStore) GetDatasetRun(ctx context.Context, id string) (*domain.DatasetRun, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *FakePromptStore) Migrate(ctx context.Context) error { return nil }
+func (m *FakePromptStore) Close() error                      { return nil }
 
 // ---- Tests ----
 
@@ -154,8 +190,8 @@ func TestPromptHandler_CreatePrompt(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:     store,
-		Cache:     cache,
+		Store:        store,
+		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -180,8 +216,8 @@ func TestPromptHandler_CreatePrompt_Conflict(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:     store,
-		Cache:     cache,
+		Store:        store,
+		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -216,14 +252,14 @@ func TestPromptHandler_GetPromptByVersion(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:     store,
-		Cache:     cache,
+		Store: store,
+		Cache: cache,
 	}
 
 	// Pre-seed a version.
 	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
 		VersionID: "v1", ProjectID: "test-proj", Name: "greeting", Version: 1,
-		Template: "Hello {{name}}!",
+		Template:    "Hello {{name}}!",
 		ModelConfig: domain.PromptModelConfig{Model: "gpt-4", Temperature: 0.7, MaxTokens: 256},
 	})
 
@@ -259,19 +295,19 @@ func TestPromptHandler_GetPrompt_ByLabel(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:     store,
-		Cache:     cache,
+		Store: store,
+		Cache: cache,
 	}
 
 	// Pre-seed versions and label.
 	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
 		VersionID: "v1", ProjectID: "test-proj", Name: "greeting", Version: 1,
-		Template: "Old greeting",
+		Template:    "Old greeting",
 		ModelConfig: domain.PromptModelConfig{Model: "gpt-3.5"},
 	})
 	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
 		VersionID: "v2", ProjectID: "test-proj", Name: "greeting", Version: 2,
-		Template: "New greeting",
+		Template:    "New greeting",
 		ModelConfig: domain.PromptModelConfig{Model: "gpt-4"},
 	})
 	store.SetPromptLabel(context.Background(), &domain.PromptLabel{
@@ -308,8 +344,8 @@ func TestPromptHandler_AssignLabel(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:     store,
-		Cache:     cache,
+		Store: store,
+		Cache: cache,
 	}
 
 	// Pre-seed version 1 and 2.
@@ -350,7 +386,7 @@ func TestPromptCache_VersionCacheHit(t *testing.T) {
 	store := newFakePromptStore()
 	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
 		VersionID: "v1", ProjectID: "test-proj", Name: "greeting", Version: 1,
-		Template: "Hello {{name}}!",
+		Template:    "Hello {{name}}!",
 		ModelConfig: domain.PromptModelConfig{Model: "gpt-4", Temperature: 0.7, MaxTokens: 256},
 	})
 
@@ -380,7 +416,7 @@ func TestPromptCache_LabelCacheTTL(t *testing.T) {
 	store := newFakePromptStore()
 	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
 		VersionID: "v1", ProjectID: "test-proj", Name: "greeting", Version: 1,
-		Template: "Hello {{name}}!",
+		Template:    "Hello {{name}}!",
 		ModelConfig: domain.PromptModelConfig{Model: "gpt-4"},
 	})
 	store.SetPromptLabel(context.Background(), &domain.PromptLabel{
@@ -419,9 +455,9 @@ func TestPromptCache_VersionCacheNeverEvicts(t *testing.T) {
 	store := newFakePromptStore()
 	for i := int64(1); i <= 100; i++ {
 		store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
-			VersionID: "v" + string(rune('0'+i)),
+			VersionID: "v" + strconv.FormatInt(i, 10),
 			ProjectID: "test-proj", Name: "greeting", Version: i,
-			Template: "version " + string(rune('0'+i)),
+			Template:    "version " + strconv.FormatInt(i, 10),
 			ModelConfig: domain.PromptModelConfig{Model: "gpt-4"},
 		})
 	}
@@ -506,8 +542,8 @@ func TestPromptHandler_CreatePrompt_AuthRequired(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:     store,
-		Cache:     cache,
+		Store: store,
+		Cache: cache,
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(`{}`))
@@ -524,8 +560,8 @@ func TestPromptHandler_CreatePrompt_MethodNotAllowed(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:     store,
-		Cache:     cache,
+		Store: store,
+		Cache: cache,
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts", nil)
@@ -542,8 +578,8 @@ func TestPromptHandler_GetPrompt_MissingName(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:     store,
-		Cache:     cache,
+		Store: store,
+		Cache: cache,
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts?version=1&project_id=test-proj", nil)
@@ -560,8 +596,8 @@ func TestPromptHandler_GetPrompt_VersionOrLabelRequired(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:     store,
-		Cache:     cache,
+		Store: store,
+		Cache: cache,
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting", nil)
@@ -578,8 +614,8 @@ func TestPromptHandler_GetPrompt_NotFound(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:     store,
-		Cache:     cache,
+		Store: store,
+		Cache: cache,
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/nonexistent?version=1&project_id=test-proj", nil)
@@ -596,8 +632,8 @@ func TestPromptHandler_SetLabel_MethodNotAllowed(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:     store,
-		Cache:     cache,
+		Store: store,
+		Cache: cache,
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/prompts/greeting/labels/production", nil)
@@ -614,8 +650,8 @@ func TestPromptHandler_SetLabel_BadRequest(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:     store,
-		Cache:     cache,
+		Store: store,
+		Cache: cache,
 	}
 
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/prompts/greeting/labels/production", strings.NewReader(`{invalid json`))
@@ -627,74 +663,31 @@ func TestPromptHandler_SetLabel_BadRequest(t *testing.T) {
 	}
 }
 
-// ErrorPromptStore always returns errors for prompt operations.
-type ErrorPromptStore struct{}
-
-func (e *ErrorPromptStore) CreatePromptVersion(ctx context.Context, pv *domain.PromptVersion) error { return errors.New("store error") }
-func (e *ErrorPromptStore) GetPromptVersion(ctx context.Context, projectID, name string, version int64) (*domain.PromptVersion, error) {
-	return nil, errors.New("store error")
-}
-func (e *ErrorPromptStore) GetPromptByLabel(ctx context.Context, projectID, name, label string) (*domain.PromptVersion, error) {
-	return nil, errors.New("store error")
-}
-func (e *ErrorPromptStore) ListPromptVersions(ctx context.Context, projectID, name string) ([]*domain.PromptVersion, error) { return nil, nil }
-func (e *ErrorPromptStore) ListPromptNames(ctx context.Context, projectID string) ([]string, error)                      { return nil, nil }
-func (e *ErrorPromptStore) SetPromptLabel(ctx context.Context, label *domain.PromptLabel) error                           { return errors.New("store error") }
-func (e *ErrorPromptStore) CreateOrganization(ctx context.Context, o *domain.Organization) error                           { return nil }
-func (e *ErrorPromptStore) GetOrganization(ctx context.Context, id string) (*domain.Organization, error)                   { return nil, metadata.ErrNotFound }
-func (e *ErrorPromptStore) CreateProject(ctx context.Context, p *domain.Project) error                                     { return nil }
-func (e *ErrorPromptStore) GetProject(ctx context.Context, id string) (*domain.Project, error)                             { return nil, metadata.ErrNotFound }
-func (e *ErrorPromptStore) ListProjects(ctx context.Context, orgID string) ([]*domain.Project, error)                      { return nil, nil }
-func (e *ErrorPromptStore) CreateUser(ctx context.Context, u *domain.User) error                                           { return nil }
-func (e *ErrorPromptStore) GetUserByEmail(ctx context.Context, email string) (*domain.User, error)                         { return nil, metadata.ErrNotFound }
-func (e *ErrorPromptStore) ListUsers(ctx context.Context, orgID string) ([]*domain.User, error)                            { return nil, nil }
-func (e *ErrorPromptStore) CreateSession(ctx context.Context, s *domain.Session) error                                     { return nil }
-func (e *ErrorPromptStore) GetSession(ctx context.Context, id string) (*domain.Session, error)                             { return nil, metadata.ErrNotFound }
-func (e *ErrorPromptStore) DeleteSession(ctx context.Context, id string) error                                             { return nil }
-func (e *ErrorPromptStore) CreateAPIKey(ctx context.Context, k *domain.APIKey) error                                       { return nil }
-func (e *ErrorPromptStore) GetAPIKeyByHash(ctx context.Context, hash string) (*domain.APIKey, error)                       { return nil, metadata.ErrNotFound }
-func (e *ErrorPromptStore) RevokeAPIKey(ctx context.Context, keyID string) error                                           { return nil }
-func (e *ErrorPromptStore) ListAPIKeys(ctx context.Context, projectID string) ([]*domain.APIKey, error)                   { return nil, nil }
-func (e *ErrorPromptStore) CreateEvalRule(ctx context.Context, r *domain.EvalRule) error                                   { return nil }
-func (e *ErrorPromptStore) GetEvalRule(ctx context.Context, id string) (*domain.EvalRule, error)                           { return nil, metadata.ErrNotFound }
-func (e *ErrorPromptStore) ListEvalRules(ctx context.Context, projectID string) ([]*domain.EvalRule, error)               { return nil, nil }
-func (e *ErrorPromptStore) UpdateEvalRule(ctx context.Context, r *domain.EvalRule) error                                   { return nil }
-func (e *ErrorPromptStore) DeleteEvalRule(ctx context.Context, ruleID string) error                                        { return nil }
-func (e *ErrorPromptStore) CreateDataset(ctx context.Context, d *domain.Dataset) error                                     { return nil }
-func (e *ErrorPromptStore) GetDataset(ctx context.Context, id string) (*domain.Dataset, error)                             { return nil, metadata.ErrNotFound }
-func (e *ErrorPromptStore) CreateDatasetItem(ctx context.Context, i *domain.DatasetItem) error                             { return nil }
-func (e *ErrorPromptStore) ListDatasetItems(ctx context.Context, datasetID string) ([]*domain.DatasetItem, error)         { return nil, nil }
-func (e *ErrorPromptStore) CreateDatasetRun(ctx context.Context, r *domain.DatasetRun) error                               { return nil }
-func (e *ErrorPromptStore) GetDatasetRun(ctx context.Context, id string) (*domain.DatasetRun, error)                       { return nil, metadata.ErrNotFound }
-func (e *ErrorPromptStore) Migrate(ctx context.Context) error                                                              { return nil }
-func (e *ErrorPromptStore) Close() error                                                                                   { return nil }
-
-
 // ---- HandleListPrompts tests ----
 
 func TestPromptHandler_ListPrompts(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:     store,
-		Cache:     cache,
+		Store:        store,
+		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
 	// Pre-seed two prompts with multiple versions.
 	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
 		VersionID: "v1", ProjectID: "test-proj", Name: "greeting", Version: 1,
-		Template: "Hello {{name}}!",
+		Template:    "Hello {{name}}!",
 		ModelConfig: domain.PromptModelConfig{Model: "gpt-3.5", Temperature: 0.5, MaxTokens: 128},
 	})
 	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
 		VersionID: "v2", ProjectID: "test-proj", Name: "greeting", Version: 2,
-		Template: "Hi {{name}}!",
+		Template:    "Hi {{name}}!",
 		ModelConfig: domain.PromptModelConfig{Model: "gpt-4", Temperature: 0.7, MaxTokens: 256},
 	})
 	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
 		VersionID: "v3", ProjectID: "test-proj", Name: "summarize", Version: 1,
-		Template: "Summarize: {{text}}",
+		Template:    "Summarize: {{text}}",
 		ModelConfig: domain.PromptModelConfig{Model: "claude-3", Temperature: 0.0, MaxTokens: 512},
 	})
 
@@ -758,8 +751,8 @@ func TestPromptHandler_ListPrompts_Empty(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:     store,
-		Cache:     cache,
+		Store:        store,
+		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "empty-proj"},
 	}
 
@@ -785,8 +778,8 @@ func TestPromptHandler_ListPrompts_MethodNotAllowed(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:     store,
-		Cache:     cache,
+		Store: store,
+		Cache: cache,
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(`{}`))
@@ -802,8 +795,8 @@ func TestPromptHandler_ListPrompts_MissingProjectID(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:     store,
-		Cache:     cache,
+		Store: store,
+		Cache: cache,
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts", nil)

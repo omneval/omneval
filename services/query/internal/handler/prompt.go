@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,8 +16,6 @@ import (
 	"github.com/zbloss/lantern/internal/domain"
 	"github.com/zbloss/lantern/internal/metadata"
 )
-
-
 
 // PromptHandler handles prompt registry endpoints:
 //   GET    /api/v1/prompts                       — list all prompt names with latest versions and labels
@@ -93,10 +92,12 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 
 	if err := h.Store.CreatePromptVersion(r.Context(), pv); err != nil {
 		// Duplicate key is also a conflict (409), not a generic error.
-		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "duplicate") {
+		errStr := err.Error()
+		if strings.Contains(errStr, "UNIQUE") || strings.Contains(errStr, "duplicate") {
 			http.Error(w, "version already exists", http.StatusConflict)
 			return
 		}
+		slog.Error("query: create prompt version", "project_id", projectID, "name", pv.Name, "err", err)
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
 	}
@@ -151,6 +152,7 @@ func (h *PromptHandler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "prompt not found", http.StatusNotFound)
 			return
 		}
+		slog.Error("query: get prompt", "name", name, "err", getErr)
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
 	}
@@ -161,9 +163,9 @@ func (h *PromptHandler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) 
 
 // promptListItem represents a prompt name with its latest version and active labels.
 type promptListItem struct {
-	Name          string            `json:"name"`
-	LatestVersion int64             `json:"latest_version"`
-	Labels        map[string]int64  `json:"labels"`
+	Name          string           `json:"name"`
+	LatestVersion int64            `json:"latest_version"`
+	Labels        map[string]int64 `json:"labels"`
 }
 
 // HandleListPrompts handles GET /api/v1/prompts.
@@ -190,7 +192,8 @@ func (h *PromptHandler) HandleListPrompts(w http.ResponseWriter, r *http.Request
 
 	names, err := h.Store.ListPromptNames(r.Context(), projectID)
 	if err != nil {
-		http.Error(w, "store error: "+err.Error(), http.StatusInternalServerError)
+		slog.Error("query: list prompt names", "project_id", projectID, "err", err)
+		http.Error(w, "store error", http.StatusInternalServerError)
 		return
 	}
 
@@ -199,7 +202,8 @@ func (h *PromptHandler) HandleListPrompts(w http.ResponseWriter, r *http.Request
 		// Get all versions for this prompt to find the latest.
 		versions, err := h.Store.ListPromptVersions(r.Context(), projectID, name)
 		if err != nil {
-			continue // skip prompts with errors
+			slog.Warn("query: list prompt versions", "project_id", projectID, "name", name, "err", err)
+			continue
 		}
 
 		var latestVersion int64
@@ -270,7 +274,13 @@ func (h *PromptHandler) HandleSetLabel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate the version exists.
-	projectID := r.URL.Query().Get("project_id")
+	var projectID string
+	if h.SessionStore != nil {
+		projectID, _ = h.SessionStore.ProjectID(r)
+	}
+	if projectID == "" {
+		projectID = r.URL.Query().Get("project_id")
+	}
 	_, err := h.Store.GetPromptVersion(r.Context(), projectID, name, req.Version)
 	if err != nil {
 		if errors.Is(err, metadata.ErrNotFound) {
@@ -289,6 +299,7 @@ func (h *PromptHandler) HandleSetLabel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if setErr := h.Store.SetPromptLabel(r.Context(), pl); setErr != nil {
+		slog.Error("query: set prompt label", "project_id", projectID, "name", name, "label", label, "err", setErr)
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
 	}
@@ -443,7 +454,8 @@ func (h *PromptHandler) HandleListPromptVersions(w http.ResponseWriter, r *http.
 
 	versions, err := h.Store.ListPromptVersions(r.Context(), projectID, name)
 	if err != nil {
-		http.Error(w, "store error: "+err.Error(), http.StatusInternalServerError)
+		slog.Error("query: list prompt versions", "project_id", projectID, "name", name, "err", err)
+		http.Error(w, "store error", http.StatusInternalServerError)
 		return
 	}
 
@@ -480,5 +492,3 @@ func extractPromptLabelPath(path string) []string {
 	}
 	return nil
 }
-
-
