@@ -67,27 +67,25 @@ spec:
                   key: redis-password
                   optional: true
             {{- end }}
-            {{- if .Values.storage.endpoint }}
+            {{- with .Values.storage.endpoint }}
             - name: LANTERN_STORAGE_ENDPOINT
-              value: {{ .Values.storage.endpoint | quote }}
+              value: {{ . | quote }}
             {{- end }}
-            {{- if .Values.storage.bucket }}
+            {{- with .Values.storage.bucket }}
             - name: LANTERN_STORAGE_BUCKET
-              value: {{ .Values.storage.bucket | quote }}
+              value: {{ . | quote }}
             {{- end }}
-            {{- if .Values.storage.region }}
+            {{- with .Values.storage.region }}
             - name: LANTERN_STORAGE_REGION
-              value: {{ .Values.storage.region | quote }}
+              value: {{ . | quote }}
             {{- end }}
-            {{- if .Values.storage.accessKey }}
+            {{- if or .Values.storage.accessKey .Values.storage.endpoint }}
             - name: LANTERN_STORAGE_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Release.Name }}-secret
                   key: storage-access-key
                   optional: true
-            {{- end }}
-            {{- if .Values.storage.secretKey }}
             - name: LANTERN_STORAGE_SECRET_KEY
               valueFrom:
                 secretKeyRef:

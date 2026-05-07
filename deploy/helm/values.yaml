@@ -27,14 +27,7 @@ image:
   # Image pull policy
   pullPolicy: IfNotPresent
 
-# ============================================================================
-# Global settings
-# ============================================================================
-global:
-  # Common namespace for all sub-charts. Override per-chart via sub-chart conditions.
-  namespace: ""
 
-# ============================================================================
 # Ingest API (port 8000)
 # ============================================================================
 ingest:
@@ -139,12 +132,10 @@ query:
   labels: {}
 
 # ============================================================================
-# Eval Workers (port 8003)
+# Eval Workers (queue consumer)
 # ============================================================================
 eval:
   replicas: 2
-  # Listen address (not used by eval workers — they are consumers, not servers)
-  addr: ":8003"
   # Number of concurrent judge LLM calls
   concurrency: 4
   # Judge LLM base URL (OpenAI-compatible, override via LANTERN_EVAL_LLM_BASE_URL)

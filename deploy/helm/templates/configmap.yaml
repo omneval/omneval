@@ -5,13 +5,6 @@ This ConfigMap holds the lantern.yaml configuration that all Lantern services
 share. Environment variable overrides in each Deployment handle per-service
 secrets (S3 credentials, admin credentials, LLM keys).
 */ -}}
-{{- $corsOrigins := "" -}}
-{{- range $i, $origin := .Values.ingest.corsAllowedOrigins -}}
-  {{- if $i -}}
-    {{- $corsOrigins = print $corsOrigins ", " -}}
-  {{- end -}}
-  {{- $corsOrigins = print $corsOrigins $origin -}}
-{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
