@@ -241,7 +241,6 @@ func matchesFilter(span *domain.Span, f domain.EvalFilter) bool {
 	if f.MaxDurationMS != nil && durationMS > *f.MaxDurationMS {
 		return false
 	}
-	// Evaluate attributes match conditions (AND logic).
 	for _, af := range f.AttributesMatch {
 		if !domain.MatchesFilterAttributeRegex(span, af) {
 			return false

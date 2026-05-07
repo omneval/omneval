@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -178,79 +177,6 @@ func TestMatchesFilter_MultipleConditions(t *testing.T) {
 func strPtr(s string) *string {
 	return &s
 }
-
-// ---- AttributeRegexFilter validation tests ----
-
-func TestEvalFilter_CompilePatterns_Valid(t *testing.T) {
-	f := domain.EvalFilter{
-		AttributesMatch: []domain.AttributeRegexFilter{
-			{Key: "user_id", Pattern: `.*-123$`},
-		},
-	}
-	if err := f.CompilePatterns(); err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
-}
-
-func TestEvalFilter_CompilePatterns_Invalid(t *testing.T) {
-	f := domain.EvalFilter{
-		AttributesMatch: []domain.AttributeRegexFilter{
-			{Key: "user_id", Pattern: `[invalid`},
-		},
-	}
-	err := f.CompilePatterns()
-	if err == nil {
-		t.Fatal("expected error for invalid pattern")
-	}
-	if !strings.Contains(err.Error(), "invalid pattern") {
-		t.Errorf("expected 'invalid pattern' in error, got: %v", err)
-	}
-}
-
-func TestEvalFilter_CompilePatterns_EmptyPattern(t *testing.T) {
-	f := domain.EvalFilter{
-		AttributesMatch: []domain.AttributeRegexFilter{
-			{Key: "user_id", Pattern: ""},
-		},
-	}
-	if err := f.CompilePatterns(); err != nil {
-		t.Fatalf("expected no error for empty pattern, got: %v", err)
-	}
-}
-
-func TestEvalFilter_ValidateDotPaths_MaxDepth(t *testing.T) {
-	f := domain.EvalFilter{
-		AttributesMatch: []domain.AttributeRegexFilter{
-			{Key: "a.b.c.d.e", Pattern: `.*`}, // depth 5, OK
-		},
-	}
-	if err := f.ValidateDotPaths(); err != nil {
-		t.Fatalf("depth 5 should be OK, got: %v", err)
-	}
-
-	f2 := domain.EvalFilter{
-		AttributesMatch: []domain.AttributeRegexFilter{
-			{Key: "a.b.c.d.e.f", Pattern: `.*`}, // depth 6, too deep
-		},
-	}
-	err := f2.ValidateDotPaths()
-	if err == nil {
-		t.Fatal("expected error for depth > 5")
-	}
-}
-
-func TestEvalFilter_ValidateDotPaths_TopLevel(t *testing.T) {
-	f := domain.EvalFilter{
-		AttributesMatch: []domain.AttributeRegexFilter{
-			{Key: "user_id", Pattern: `.*`},
-		},
-	}
-	if err := f.ValidateDotPaths(); err != nil {
-		t.Fatalf("top-level key should pass, got: %v", err)
-	}
-}
-
-// ---- AttributeRegexFilter tests ----
 
 func TestMatchesFilter_AttributesMatch_TopLevel(t *testing.T) {
 	span := &domain.Span{

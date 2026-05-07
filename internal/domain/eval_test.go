@@ -4,191 +4,203 @@ import (
 	"testing"
 )
 
-func TestAttributeValue_TopLevelKey(t *testing.T) {
-	span := &Span{Attributes: map[string]any{"user_id": "abc-123"}}
-	got := attributeValue(span, "user_id")
-	if got != "abc-123" {
-		t.Errorf("got %q, want %q", got, "abc-123")
-	}
-}
-
-func TestAttributeValue_TopLevelKeyNil(t *testing.T) {
-	span := &Span{Attributes: map[string]any{}}
-	got := attributeValue(span, "user_id")
-	if got != "" {
-		t.Errorf("got %q, want empty", got)
-	}
-}
-
-func TestAttributeValue_TopLevelKeyNilValue(t *testing.T) {
-	span := &Span{Attributes: map[string]any{"user_id": nil}}
-	got := attributeValue(span, "user_id")
-	if got != "" {
-		t.Errorf("got %q, want empty", got)
-	}
-}
-
-func TestAttributeValue_NestedDotPath(t *testing.T) {
-	span := &Span{Attributes: map[string]any{
-		"metadata": `{"user_id": "usr-456"}`,
-	}}
-	got := attributeValue(span, "metadata.user_id")
-	if got != "usr-456" {
-		t.Errorf("got %q, want %q", got, "usr-456")
-	}
-}
-
-func TestAttributeValue_NestedDepth3(t *testing.T) {
-	span := &Span{Attributes: map[string]any{
-		"a": `{"b": {"c": "deep-value"}}`,
-	}}
-	got := attributeValue(span, "a.b.c")
-	if got != "deep-value" {
-		t.Errorf("got %q, want %q", got, "deep-value")
-	}
-}
-
-func TestAttributeValue_NestedDepth5(t *testing.T) {
-	span := &Span{Attributes: map[string]any{
-		"a": `{"b": {"c": {"d": {"e": "max-depth"}}}}`,
-	}}
-	got := attributeValue(span, "a.b.c.d.e")
-	if got != "max-depth" {
-		t.Errorf("got %q, want %q", got, "max-depth")
-	}
-}
-
-func TestAttributeValue_MissingIntermediate(t *testing.T) {
-	span := &Span{Attributes: map[string]any{
-		"metadata": `{"user_id": "abc"}`,
-	}}
-	got := attributeValue(span, "metadata.extra")
-	if got != "" {
-		t.Errorf("got %q, want empty", got)
-	}
-}
-
-func TestAttributeValue_NonJSONIntermediate(t *testing.T) {
-	span := &Span{Attributes: map[string]any{
-		"metadata": "just-a-string",
-	}}
-	got := attributeValue(span, "metadata.user_id")
-	if got != "" {
-		t.Errorf("got %q, want empty", got)
-	}
-}
-
-func TestAttributeValue_NonStringIntermediate(t *testing.T) {
-	span := &Span{Attributes: map[string]any{
-		"metadata": `{"count": 42}`,
-	}}
-	got := attributeValue(span, "metadata.count")
-	// Should return "42" (formatted float64)
-	if got != "42" {
-		t.Errorf("got %q, want %q", got, "42")
-	}
-}
-
-func TestAttributeValue_NilAttributes(t *testing.T) {
-	span := &Span{Attributes: nil}
-	got := attributeValue(span, "user_id")
-	if got != "" {
-		t.Errorf("got %q, want empty", got)
-	}
-}
-
-func TestEvalFilter_CompilePatterns_NoError(t *testing.T) {
-	f := EvalFilter{
-		AttributesMatch: []AttributeRegexFilter{
-			{Key: "user_id", Pattern: `.*-123$`},
-			{Key: "tier", Pattern: `premium|basic`},
+func TestAttributeValue(t *testing.T) {
+	tests := []struct {
+		name   string
+		attrs  map[string]any
+		key    string
+		expect string
+	}{
+		{
+			name:   "top-level key",
+			attrs:  map[string]any{"user_id": "abc-123"},
+			key:    "user_id",
+			expect: "abc-123",
+		},
+		{
+			name:   "top-level key missing",
+			attrs:  map[string]any{},
+			key:    "user_id",
+			expect: "",
+		},
+		{
+			name:   "top-level key nil value",
+			attrs:  map[string]any{"user_id": nil},
+			key:    "user_id",
+			expect: "",
+		},
+		{
+			name: "nested dot path",
+			attrs: map[string]any{
+				"metadata": `{"user_id": "usr-456"}`,
+			},
+			key:    "metadata.user_id",
+			expect: "usr-456",
+		},
+		{
+			name: "nested depth 3",
+			attrs: map[string]any{
+				"a": `{"b": {"c": "deep-value"}}`,
+			},
+			key:    "a.b.c",
+			expect: "deep-value",
+		},
+		{
+			name: "nested depth 5",
+			attrs: map[string]any{
+				"a": `{"b": {"c": {"d": {"e": "max-depth"}}}}`,
+			},
+			key:    "a.b.c.d.e",
+			expect: "max-depth",
+		},
+		{
+			name: "missing intermediate key",
+			attrs: map[string]any{
+				"metadata": `{"user_id": "abc"}`,
+			},
+			key:    "metadata.extra",
+			expect: "",
+		},
+		{
+			name: "non-JSON intermediate",
+			attrs: map[string]any{
+				"metadata": "just-a-string",
+			},
+			key:    "metadata.user_id",
+			expect: "",
+		},
+		{
+			name: "non-string intermediate value",
+			attrs: map[string]any{
+				"metadata": `{"count": 42}`,
+			},
+			key:    "metadata.count",
+			expect: "42",
+		},
+		{
+			name:   "nil attributes",
+			attrs:  nil,
+			key:    "user_id",
+			expect: "",
 		},
 	}
-	if err := f.CompilePatterns(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			span := &Span{Attributes: tt.attrs}
+			got := attributeValue(span, tt.key)
+			if got != tt.expect {
+				t.Errorf("got %q, want %q", got, tt.expect)
+			}
+		})
 	}
 }
 
-func TestEvalFilter_CompilePatterns_Error(t *testing.T) {
-	f := EvalFilter{
-		AttributesMatch: []AttributeRegexFilter{
-			{Key: "user_id", Pattern: `[invalid`},
+func TestEvalFilter_CompilePatterns(t *testing.T) {
+	tests := []struct {
+		name    string
+		filters []AttributeRegexFilter
+		wantErr bool
+	}{
+		{
+			name: "valid patterns",
+			filters: []AttributeRegexFilter{
+				{Key: "user_id", Pattern: `.*-123$`},
+				{Key: "tier", Pattern: `premium|basic`},
+			},
+			wantErr: false,
+		},
+		{
+			name: "empty pattern",
+			filters: []AttributeRegexFilter{
+				{Key: "user_id", Pattern: ""},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid pattern",
+			filters: []AttributeRegexFilter{
+				{Key: "user_id", Pattern: `[invalid`},
+			},
+			wantErr: true,
 		},
 	}
-	err := f.CompilePatterns()
-	if err == nil {
-		t.Fatal("expected error for invalid pattern")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := EvalFilter{AttributesMatch: tt.filters}
+			err := f.CompilePatterns()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("CompilePatterns() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
-func TestEvalFilter_CompilePatterns_EmptyPattern(t *testing.T) {
-	f := EvalFilter{
-		AttributesMatch: []AttributeRegexFilter{
-			{Key: "user_id", Pattern: ""},
+func TestEvalFilter_ValidateDotPaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		key     string
+		wantErr bool
+	}{
+		{name: "top-level key", key: "user_id", wantErr: false},
+		{name: "depth 5 OK", key: "a.b.c.d.e", wantErr: false},
+		{name: "depth 6 exceeds limit", key: "a.b.c.d.e.f", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := EvalFilter{
+				AttributesMatch: []AttributeRegexFilter{
+					{Key: tt.key, Pattern: `.*`},
+				},
+			}
+			err := f.ValidateDotPaths()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateDotPaths() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestMatchesFilterAttributeRegex(t *testing.T) {
+	tests := []struct {
+		name  string
+		attrs map[string]any
+		af    AttributeRegexFilter
+		want  bool
+	}{
+		{
+			name: "match",
+			attrs: map[string]any{
+				"metadata": `{"user_id": "abc-123"}`,
+			},
+			af:   AttributeRegexFilter{Key: "metadata.user_id", Pattern: `abc-123`},
+			want: true,
+		},
+		{
+			name: "no match",
+			attrs: map[string]any{
+				"metadata": `{"user_id": "xyz-789"}`,
+			},
+			af:   AttributeRegexFilter{Key: "metadata.user_id", Pattern: `abc-123`},
+			want: false,
+		},
+		{
+			name:  "missing key",
+			attrs: map[string]any{},
+			af:    AttributeRegexFilter{Key: "user_id", Pattern: `.*`},
+			want:  false,
 		},
 	}
-	if err := f.CompilePatterns(); err != nil {
-		t.Fatalf("unexpected error for empty pattern: %v", err)
-	}
-}
 
-func TestEvalFilter_ValidateDotPaths_MaxDepth5OK(t *testing.T) {
-	f := EvalFilter{
-		AttributesMatch: []AttributeRegexFilter{
-			{Key: "a.b.c.d.e", Pattern: `.*`}, // 5 segments, OK
-		},
-	}
-	if err := f.ValidateDotPaths(); err != nil {
-		t.Fatalf("depth 5 should be OK: %v", err)
-	}
-}
-
-func TestEvalFilter_ValidateDotPaths_MaxDepth6Fails(t *testing.T) {
-	f := EvalFilter{
-		AttributesMatch: []AttributeRegexFilter{
-			{Key: "a.b.c.d.e.f", Pattern: `.*`}, // 6 segments, too deep
-		},
-	}
-	if err := f.ValidateDotPaths(); err == nil {
-		t.Fatal("expected error for depth > 5")
-	}
-}
-
-func TestEvalFilter_ValidateDotPaths_TopLevelOK(t *testing.T) {
-	f := EvalFilter{
-		AttributesMatch: []AttributeRegexFilter{
-			{Key: "user_id", Pattern: `.*`},
-		},
-	}
-	if err := f.ValidateDotPaths(); err != nil {
-		t.Fatalf("top-level key should pass: %v", err)
-	}
-}
-
-func TestMatchesFilterAttributeRegex_Match(t *testing.T) {
-	span := &Span{Attributes: map[string]any{
-		"metadata": `{"user_id": "abc-123"}`,
-	}}
-	af := AttributeRegexFilter{Key: "metadata.user_id", Pattern: `abc-123`}
-	if !MatchesFilterAttributeRegex(span, af) {
-		t.Error("expected match")
-	}
-}
-
-func TestMatchesFilterAttributeRegex_NoMatch(t *testing.T) {
-	span := &Span{Attributes: map[string]any{
-		"metadata": `{"user_id": "xyz-789"}`,
-	}}
-	af := AttributeRegexFilter{Key: "metadata.user_id", Pattern: `abc-123`}
-	if MatchesFilterAttributeRegex(span, af) {
-		t.Error("expected no match")
-	}
-}
-
-func TestMatchesFilterAttributeRegex_MissingKey(t *testing.T) {
-	span := &Span{Attributes: map[string]any{}}
-	af := AttributeRegexFilter{Key: "user_id", Pattern: `.*`}
-	if MatchesFilterAttributeRegex(span, af) {
-		t.Error("expected no match for missing key")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			span := &Span{Attributes: tt.attrs}
+			got := MatchesFilterAttributeRegex(span, tt.af)
+			if got != tt.want {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

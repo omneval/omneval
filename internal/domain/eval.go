@@ -37,7 +37,7 @@ type AttributeRegexFilter struct {
 func (f *EvalFilter) CompilePatterns() error {
 	for i, af := range f.AttributesMatch {
 		if af.Pattern == "" {
-			continue // empty pattern matches nothing; skip
+			continue
 		}
 		compiled, err := regexp.Compile(af.Pattern)
 		if err != nil {
@@ -84,14 +84,11 @@ func attributeValue(span *Span, key string) string {
 		return fmt.Sprintf("%v", val)
 	}
 
-	// Multi-segment path — traverse via JSON objects.
 	var current any = attrs[parts[0]]
 
 	for _, seg := range parts[1:] {
-		// Try to treat current as a map to look up the next segment.
 		obj, ok := current.(map[string]any)
 		if !ok {
-			// current is not a JSON object — try to parse it as JSON string.
 			strVal, ok := current.(string)
 			if !ok {
 				return ""
@@ -108,14 +105,12 @@ func attributeValue(span *Span, key string) string {
 		current = next
 	}
 
-	// Final value — if it's a string, return it; otherwise stringify.
 	switch v := current.(type) {
 	case string:
 		return v
 	case float64, bool, nil:
 		return fmt.Sprintf("%v", v)
 	default:
-		// Complex type (array, nested object) — stringify.
 		data, err := json.Marshal(current)
 		if err != nil {
 			return ""
