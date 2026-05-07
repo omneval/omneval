@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	redisgo "github.com/redis/go-redis/v9"
 	"github.com/zbloss/lantern/internal/config"
 	"github.com/zbloss/lantern/internal/duckdb"
+	"github.com/zbloss/lantern/internal/leader"
 	"github.com/zbloss/lantern/internal/metadata/sqlite"
 	"github.com/zbloss/lantern/internal/pricing"
 	"github.com/zbloss/lantern/internal/probe"
@@ -96,9 +99,40 @@ func Run() error {
 		return fmt.Errorf("writer: redis ping: %w", err)
 	}
 
+	// Resolve hostname for leader election instance ID.
+	hostname, _ := os.Hostname()
+
 	// Create queue clients.
 	ingestQ := qredis.NewIngestQueue(rc)
 	evalQ := qredis.NewEvalQueue(rc)
+
+	// Create leader election (if enabled).
+	var election *leader.LeaderElection
+	if cfg.Writer.LeaderElection.Enabled {
+		lockTTL := time.Duration(cfg.Writer.LeaderElection.LockTTL) * time.Second
+		ops := leader.NewOpsFromRedis(rc)
+		election, err = leader.NewLeaderElection(
+			ops,
+			"lantern:writer:leader",
+			fmt.Sprintf("writer-%s-%d", hostname, os.Getpid()),
+			lockTTL,
+		)
+		if err != nil {
+			return fmt.Errorf("writer: leader election: %w", err)
+		}
+
+		// Acquire the leader lock.
+		acquired, err := election.Acquire(context.Background())
+		if err != nil {
+			return fmt.Errorf("writer: acquire leader lock: %w", err)
+		}
+		if acquired {
+			slog.Info("writer: elected leader")
+		} else {
+			slog.Info("writer: not leader, waiting for lock",
+				"current_leader", election.LeaderID())
+		}
+	}
 
 	// Create pipeline.
 	pl := pipeline.New(ingestQ, db, pricingTable, meta, evalQ, metricsHelper)
@@ -185,16 +219,28 @@ func Run() error {
 
 	// Start pipeline (blocks until ctx is canceled).
 	slog.Info("writer: pipeline started")
-	if err := pl.Run(ctx); err != nil {
-		cancel()
-		if shutdownErr := gracefulShutdown(scoreServer, 30*time.Second); shutdownErr != nil {
-			return fmt.Errorf("writer: pipeline shutdown: %w", shutdownErr)
-		}
-		return fmt.Errorf("writer: pipeline: %w", err)
+
+	var runErr error
+	if election != nil {
+		runErr = runWithLeaderElection(ctx, election, pl)
+	} else {
+		runErr = pl.Run(ctx)
+	}
+
+	if runErr != nil && runErr != context.Canceled {
+		return fmt.Errorf("writer: pipeline: %w", runErr)
 	}
 
 	// Graceful shutdown.
 	cancel()
+
+	// Release leader lock on shutdown.
+	if election != nil {
+		if err := releaseLeaderLock(ctx, election); err != nil {
+			slog.Warn("writer: failed to release leader lock", "err", err)
+		}
+	}
+
 	if err := gracefulShutdown(scoreServer, 30*time.Second); err != nil {
 		return fmt.Errorf("writer: shutdown: %w", err)
 	}
@@ -208,6 +254,85 @@ func gracefulShutdown(srv *http.Server, timeout time.Duration) error {
 	defer shutdownCancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("server shutdown: %w", err)
+	}
+	return nil
+}
+
+// runWithLeaderElection runs the pipeline only when this instance holds the leader lock.
+// It starts a background renew loop and retries acquisition if leadership is lost.
+func runWithLeaderElection(ctx context.Context, election *leader.LeaderElection, pl *pipeline.Pipeline) error {
+	slot := runtime.GOMAXPROCS(0)
+	rng := rand.New(rand.NewSource(time.Now().UnixNano() + int64(slot)))
+
+	for {
+		// Start renew loop in background.
+		renewCtx, renewCancel := context.WithCancel(ctx)
+		renewErrCh := make(chan error, 1)
+		go func() {
+			renewErrCh <- election.RenewLoop(renewCtx, leader.RenewIntervalDefault)
+		}()
+
+		// If we're not already the leader, try to acquire.
+		if !election.IsLeader() {
+			acquired, err := election.Acquire(ctx)
+			if err != nil {
+				renewCancel()
+				<-renewErrCh
+				return fmt.Errorf("leader election: acquire: %w", err)
+			}
+			if !acquired {
+				renewCancel()
+				<-renewErrCh
+				// Wait with jitter before retrying.
+				wait := time.Duration(rng.Intn(3)+1) * time.Second
+				slog.Info("writer: not leader, retrying in", "seconds", wait)
+				select {
+				case <-time.After(wait):
+					continue
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			slog.Info("writer: elected leader")
+		}
+
+		// We are the leader — run the pipeline.
+		slog.Info("writer: pipeline running (leader)")
+		plErr := pl.Run(ctx)
+
+		// Pipeline completed (likely due to context cancellation).
+		renewCancel()
+		renewErr := <-renewErrCh
+
+		// Release the leader lock.
+		if err := releaseLeaderLock(ctx, election); err != nil {
+			slog.Warn("writer: failed to release leader lock", "err", err)
+		}
+
+		if plErr != nil && plErr != context.Canceled {
+			return fmt.Errorf("pipeline: %w", plErr)
+		}
+		if renewErr != nil && renewErr != context.Canceled {
+			// We lost leadership.
+			slog.Info("writer: lost leadership, retrying...")
+			continue
+		}
+
+		return ctx.Err()
+	}
+}
+
+// releaseLeaderLock releases the leader lock gracefully.
+func releaseLeaderLock(ctx context.Context, election *leader.LeaderElection) error {
+	releaseCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	released, err := election.Release(releaseCtx)
+	if err != nil {
+		return fmt.Errorf("leader: release: %w", err)
+	}
+	if released {
+		slog.Info("writer: released leader lock")
 	}
 	return nil
 }

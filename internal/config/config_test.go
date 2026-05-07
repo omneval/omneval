@@ -30,6 +30,8 @@ func TestLoad_Defaults(t *testing.T) {
 		{"writer.sync_interval", cfg.Writer.SyncInterval, "30s"},
 		{"writer.flush_interval", cfg.Writer.FlushInterval, "30m"},
 		{"writer.flush_age_days", cfg.Writer.FlushAgeDays, 2},
+		{"writer.leader_election.enabled", cfg.Writer.LeaderElection.Enabled, false},
+		{"writer.leader_election.lock_ttl", cfg.Writer.LeaderElection.LockTTL, 15},
 		{"query.addr", cfg.Query.Addr, ":8002"},
 		{"query.sync_interval", cfg.Query.SyncInterval, "30s"},
 		{"eval.addr", cfg.Eval.Addr, ":8003"},

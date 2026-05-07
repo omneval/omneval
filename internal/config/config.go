@@ -74,6 +74,16 @@ type WriterConfig struct {
 	SyncInterval  string `mapstructure:"sync_interval"`  // default "30s"
 	FlushInterval string `mapstructure:"flush_interval"` // default "30m"
 	FlushAgeDays  int    `mapstructure:"flush_age_days"` // default 2
+	// LeaderElection enables Redis-based leader election for multi-replica HA.
+	// When enabled, only the leader processes the ingest queue and writes to DuckDB.
+	LeaderElection LeaderElectionConfig `mapstructure:"leader_election"`
+}
+
+type LeaderElectionConfig struct {
+	// Enabled enables leader election (default false for single-replica deployments).
+	Enabled bool `mapstructure:"enabled"`
+	// LockTTL is the leader election lock TTL in seconds (default 15).
+	LockTTL int `mapstructure:"lock_ttl"`
 }
 
 type QueryConfig struct {
@@ -150,6 +160,8 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("writer.sync_interval", "30s")
 	v.SetDefault("writer.flush_interval", "30m")
 	v.SetDefault("writer.flush_age_days", 2)
+	v.SetDefault("writer.leader_election.enabled", false)
+	v.SetDefault("writer.leader_election.lock_ttl", 15)
 	// query
 	v.SetDefault("query.addr", ":8002")
 	v.SetDefault("query.duckdb_path", "")
@@ -200,11 +212,13 @@ func Load(path string) (*Config, error) {
 	if v := os.Getenv("LANTERN_INGEST_CORS_ALLOWED_ORIGINS"); v != "" {
 		cfg.Ingest.CORSAllowedOrigins = strings.Split(v, ",")
 	}
-	envString(&cfg.Writer.Addr,         "LANTERN_WRITER_ADDR")
-	envString(&cfg.Writer.DuckDBPath,   "LANTERN_WRITER_DUCKDB_PATH")
-	envString(&cfg.Writer.SyncInterval, "LANTERN_WRITER_SYNC_INTERVAL")
-	envString(&cfg.Writer.FlushInterval,"LANTERN_WRITER_FLUSH_INTERVAL")
-	envInt(&cfg.Writer.FlushAgeDays,    "LANTERN_WRITER_FLUSH_AGE_DAYS")
+	envString(&cfg.Writer.Addr,                 "LANTERN_WRITER_ADDR")
+	envString(&cfg.Writer.DuckDBPath,           "LANTERN_WRITER_DUCKDB_PATH")
+	envString(&cfg.Writer.SyncInterval,         "LANTERN_WRITER_SYNC_INTERVAL")
+	envString(&cfg.Writer.FlushInterval,        "LANTERN_WRITER_FLUSH_INTERVAL")
+	envInt(&cfg.Writer.FlushAgeDays,            "LANTERN_WRITER_FLUSH_AGE_DAYS")
+	envBool(&cfg.Writer.LeaderElection.Enabled, "LANTERN_WRITER_LEADER_ELECTION_ENABLED")
+	envInt(&cfg.Writer.LeaderElection.LockTTL,  "LANTERN_WRITER_LEADER_ELECTION_LOCK_TTL")
 	envString(&cfg.Query.Addr,          "LANTERN_QUERY_ADDR")
 	envString(&cfg.Query.DuckDBPath,    "LANTERN_QUERY_DUCKDB_PATH")
 	envString(&cfg.Query.SyncInterval,  "LANTERN_QUERY_SYNC_INTERVAL")
