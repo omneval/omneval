@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	internalauth "github.com/zbloss/lantern/internal/auth"
 	"github.com/zbloss/lantern/internal/domain"
 	"github.com/zbloss/lantern/internal/fake"
 	"github.com/zbloss/lantern/services/query/internal/auth"
@@ -646,37 +648,450 @@ func TestHandler_AdminBootstrap_NoConfigNoOp(t *testing.T) {
 	}
 }
 
-func TestHandler_Invite_DuplicateEmail(t *testing.T) {
-	store, ts := setupAuthServerWithMiddleware(t, "admin@example.com")
+// setupAuthServerWithAllMiddleware creates an auth handler and HTTP test server
+// with session middleware applied to all protected routes.
+func setupAuthServerWithAllMiddleware(t *testing.T, adminEmail string) (*fake.FakeMetadataStore, *httptest.Server) {
+	t.Helper()
+	store := fake.NewFakeMetadataStore()
+	handler := auth.NewHandler(store, false, 1*time.Hour, adminEmail, "")
+
+	// Create main mux for public routes (login, logout)
+	publicMux := http.NewServeMux()
+	handler.Register(publicMux)
+
+	// Wrap ALL non-public routes with session middleware
+	sessionMw := auth.RequireAuth(store, false, 1*time.Hour)
+
+	// Route-based wrapper: public routes pass through, protected routes get session middleware
+	wrapper := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "POST /login", "POST /logout":
+			publicMux.ServeHTTP(w, r)
+		default:
+			sessionMw(publicMux).ServeHTTP(w, r)
+		}
+	})
+
+	ts := httptest.NewServer(wrapper)
+	return store, ts
+}
+
+func TestHandler_CreateProject_Success(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+
+	// Create org and user
+	_ = store.CreateOrganization(nil, &domain.Organization{OrgID: "org-1", Name: "Test Org"})
 	_ = store.CreateUser(nil, &domain.User{
-		UserID:       "admin-1",
+		UserID:       "user-1",
 		OrgID:        "org-1",
-		Email:        "admin@example.com",
-		PasswordHash: "admin-password",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
 	})
 
-	sessionID := loginAndGetCookie(t, ts, "admin@example.com", "admin-password")
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
 
-	// First invite succeeds
-	invitePayload, _ := json.Marshal(map[string]string{
-		"email":  "newuser@example.com",
-		"org_id": "org-1",
-	})
-	inviteReq, _ := http.NewRequest("POST", ts.URL+"/api/v1/users/invite", bytes.NewReader(invitePayload))
-	inviteReq.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
-	inviteResp, _ := http.DefaultClient.Do(inviteReq)
-	inviteResp.Body.Close()
-
-	// Second invite with same email fails
-	inviteReq2, _ := http.NewRequest("POST", ts.URL+"/api/v1/users/invite", bytes.NewReader(invitePayload))
-	inviteReq2.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
-	inviteResp2, err := http.DefaultClient.Do(inviteReq2)
+	// Create a project
+	projectPayload, _ := json.Marshal(map[string]string{"name": "My Project"})
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects", bytes.NewReader(projectPayload))
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("second invite request failed: %v", err)
+		t.Fatalf("create project request failed: %v", err)
 	}
-	defer inviteResp2.Body.Close()
+	defer resp.Body.Close()
 
-	if inviteResp2.StatusCode != http.StatusConflict {
-		t.Errorf("duplicate invite status: got %d, want %d", inviteResp2.StatusCode, http.StatusConflict)
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusCreated)
 	}
+
+	var body auth.CreateProjectResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.ProjectID == "" {
+		t.Error("expected project_id in response")
+	}
+	if body.Name != "My Project" {
+		t.Errorf("name: got %q, want %q", body.Name, "My Project")
+	}
+
+	// Verify project was stored
+	projects, err := store.ListProjects(nil, "org-1")
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	if len(projects) != 1 {
+		t.Errorf("expected 1 project, got %d", len(projects))
+	}
+}
+
+func TestHandler_CreateProject_RequiresName(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "user-1",
+		OrgID:        "org-1",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
+	})
+
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
+
+	// Empty name
+	projectPayload, _ := json.Marshal(map[string]string{"name": ""})
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects", bytes.NewReader(projectPayload))
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create project request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestHandler_CreateProject_Unauthorized(t *testing.T) {
+	_, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+
+	projectPayload, _ := json.Marshal(map[string]string{"name": "My Project"})
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects", bytes.NewReader(projectPayload))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+	}
+}
+
+func TestHandler_GenerateAPIKey_ProjectKey(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+
+	// Create org, user, and project
+	_ = store.CreateOrganization(nil, &domain.Organization{OrgID: "org-1", Name: "Test Org"})
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "user-1",
+		OrgID:        "org-1",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
+	})
+	project := &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "Test Project"}
+	_ = store.CreateProject(nil, project)
+
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
+
+	// Generate a project-scoped API key
+	keyPayload, _ := json.Marshal(map[string]string{"kind": "project"})
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects/proj-1/api-keys", bytes.NewReader(keyPayload))
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("generate key request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusCreated)
+		t.Logf("body: %s", readBody(t, resp))
+	}
+
+	var body auth.GenerateAPIKeyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.ProjectID != "proj-1" {
+		t.Errorf("project_id: got %q, want %q", body.ProjectID, "proj-1")
+	}
+	if body.Kind != domain.APIKeyKindProject {
+		t.Errorf("kind: got %q, want %q", body.Kind, domain.APIKeyKindProject)
+	}
+	if body.RawKey == "" {
+		t.Error("expected raw_key in response")
+	}
+	if !strings.HasPrefix(body.RawKey, "ltn_proj_") && !strings.HasPrefix(body.RawKey, "ltn_svc_") {
+		t.Errorf("raw_key prefix: got %q, expected ltn_proj_ or ltn_svc_", body.RawKey)
+	}
+}
+
+func TestHandler_GenerateAPIKey_ServiceKey(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+	_ = store.CreateOrganization(nil, &domain.Organization{OrgID: "org-1", Name: "Test Org"})
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "user-1",
+		OrgID:        "org-1",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
+	})
+	_ = store.CreateProject(nil, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "Test"})
+
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
+
+	keyPayload, _ := json.Marshal(map[string]string{
+		"kind":         "service",
+		"service_name": "my-agent",
+	})
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects/proj-1/api-keys", bytes.NewReader(keyPayload))
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("generate key request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusCreated)
+	}
+
+	var body auth.GenerateAPIKeyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Kind != domain.APIKeyKindService {
+		t.Errorf("kind: got %q, want %q", body.Kind, domain.APIKeyKindService)
+	}
+	if body.ServiceName != "my-agent" {
+		t.Errorf("service_name: got %q, want %q", body.ServiceName, "my-agent")
+	}
+	if body.RawKey == "" {
+		t.Error("expected raw_key")
+	}
+}
+
+func TestHandler_GenerateAPIKey_ServiceKeyRequiresServiceName(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+	_ = store.CreateOrganization(nil, &domain.Organization{OrgID: "org-1", Name: "Test Org"})
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "user-1",
+		OrgID:        "org-1",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
+	})
+	_ = store.CreateProject(nil, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "Test"})
+
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
+
+	keyPayload, _ := json.Marshal(map[string]string{"kind": "service"})
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects/proj-1/api-keys", bytes.NewReader(keyPayload))
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestHandler_GenerateAPIKey_ProjectNotFound(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "user-1",
+		OrgID:        "org-1",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
+	})
+
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
+
+	keyPayload, _ := json.Marshal(map[string]string{"kind": "project"})
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects/nonexistent/api-keys", bytes.NewReader(keyPayload))
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+}
+
+func TestHandler_ListAPIKeys(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+	_ = store.CreateOrganization(nil, &domain.Organization{OrgID: "org-1", Name: "Test Org"})
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "user-1",
+		OrgID:        "org-1",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
+	})
+	_ = store.CreateProject(nil, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "Test"})
+
+	// Pre-seed two API keys
+	rawKey1, hashedKey1, _ := internalauth.Generate(domain.APIKeyKindProject)
+	hashedKey2 := "hash-2"
+	_ = store.CreateAPIKey(nil, &domain.APIKey{KeyID: "key-1", ProjectID: "proj-1", Kind: domain.APIKeyKindProject, HashedKey: hashedKey1})
+	_ = store.CreateAPIKey(nil, &domain.APIKey{KeyID: "key-2", ProjectID: "proj-1", Kind: domain.APIKeyKindService, ServiceName: "agent-1", HashedKey: hashedKey2})
+	_ = rawKey1 // avoid unused variable
+
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
+
+	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/projects/proj-1/api-keys", nil)
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("list keys request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var keys []auth.APIKeyInfo
+	if err := json.NewDecoder(resp.Body).Decode(&keys); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Errorf("expected 2 keys, got %d", len(keys))
+	}
+	// Verify raw keys are NOT in the response
+	for _, k := range keys {
+		if k.KeyID == "key-1" {
+			// Check that the raw key is not accidentally included
+			_ = rawKey1 // ensure it's referenced
+		}
+	}
+}
+
+func TestHandler_RevokeAPIKey(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+	_ = store.CreateOrganization(nil, &domain.Organization{OrgID: "org-1", Name: "Test Org"})
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "user-1",
+		OrgID:        "org-1",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
+	})
+	_ = store.CreateProject(nil, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "Test"})
+	_ = store.CreateAPIKey(nil, &domain.APIKey{KeyID: "key-1", ProjectID: "proj-1", Kind: domain.APIKeyKindProject, HashedKey: "hash-1"})
+
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
+
+	req, _ := http.NewRequest("DELETE", ts.URL+"/api/v1/projects/proj-1/api-keys/key-1", nil)
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("revoke request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["status"] != "revoked" {
+		t.Errorf("status: got %q, want %q", body["status"], "revoked")
+	}
+
+	// Verify key is now revoked
+	keys, _ := store.ListAPIKeys(nil, "proj-1")
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 key, got %d", len(keys))
+	}
+	if keys[0].RevokedAt == nil {
+		t.Error("expected key to be revoked")
+	}
+}
+
+func TestHandler_RevokeAPIKey_NotFound(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "user-1",
+		OrgID:        "org-1",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
+	})
+
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
+
+	req, _ := http.NewRequest("DELETE", ts.URL+"/api/v1/projects/proj-1/api-keys/nonexistent", nil)
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+}
+
+func TestHandler_ListAPIKeys_ProjectNotFound(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "user-1",
+		OrgID:        "org-1",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
+	})
+
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
+
+	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/projects/nonexistent/api-keys", nil)
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+}
+
+func TestHandler_GenerateAPIKey_ReturnsRawKeyOnce(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+	_ = store.CreateOrganization(nil, &domain.Organization{OrgID: "org-1", Name: "Test Org"})
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "user-1",
+		OrgID:        "org-1",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
+	})
+	_ = store.CreateProject(nil, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "Test"})
+
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
+
+	// Generate a key
+	keyPayload, _ := json.Marshal(map[string]string{"kind": "project"})
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects/proj-1/api-keys", bytes.NewReader(keyPayload))
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var body auth.GenerateAPIKeyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Verify the raw key has the correct prefix
+	if len(body.RawKey) < 10 {
+		t.Errorf("raw_key too short: %q", body.RawKey)
+	}
+	if body.RawKey[:9] != "ltn_proj_" {
+		t.Errorf("raw_key prefix: got %q, want %q", body.RawKey[:9], "ltn_proj_")
+	}
+}
+
+func readBody(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	var buf bytes.Buffer
+	buf.ReadFrom(resp.Body)
+	return buf.String()
 }

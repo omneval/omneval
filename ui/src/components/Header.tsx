@@ -2,10 +2,17 @@ import { useState } from "react";
 
 // ── Types ──────────────────────────────────────────────────────────
 
+interface Project {
+  project_id: string;
+  name: string;
+  org_id: string;
+}
+
 interface HeaderProps {
   activeProject: string;
-  projects: { project_id: string; name: string; org_id: string }[];
+  projects: Project[];
   onProjectChange: (id: string) => void;
+  onNewProject: () => void;
   timeRange: string;
   onTimeRangeChange: (range: string) => void;
   environment: string;
@@ -126,6 +133,7 @@ export default function Header({
   activeProject,
   projects,
   onProjectChange,
+  onNewProject,
   timeRange,
   onTimeRangeChange,
   environment,
@@ -138,7 +146,16 @@ export default function Header({
       style={{ height: "3rem" }}
     >
       {/* Left: project selector */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onNewProject}
+          className="p-1.5 rounded-md text-lantern-ash hover:text-lantern-pure hover:bg-lantern-bg-illumination transition-colors"
+          title="New project"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M7 1v12M1 7h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
         <Dropdown
           label="Project"
           value={activeProject}

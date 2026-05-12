@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/zbloss/lantern/internal/auth"
 	"github.com/zbloss/lantern/internal/domain"
 	"github.com/zbloss/lantern/internal/metadata"
 	"github.com/rs/xid"
@@ -44,6 +46,42 @@ type PasswordChangeRequest struct {
 	NewPassword     string `json:"new_password"`
 }
 
+// CreateProjectRequest is the body accepted by POST /api/v1/projects.
+type CreateProjectRequest struct {
+	Name string `json:"name"`
+}
+
+// CreateProjectResponse is returned by POST /api/v1/projects on success.
+type CreateProjectResponse struct {
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
+}
+
+// GenerateAPIKeyRequest is the body accepted by POST /api/v1/projects/{id}/api-keys.
+type GenerateAPIKeyRequest struct {
+	Kind        domain.APIKeyKind `json:"kind"`
+	ServiceName string            `json:"service_name,omitempty"` // required for service-scoped keys
+}
+
+// GenerateAPIKeyResponse is returned by POST /api/v1/projects/{id}/api-keys on success.
+type GenerateAPIKeyResponse struct {
+	KeyID       string            `json:"key_id"`
+	ProjectID   string            `json:"project_id"`
+	Kind        domain.APIKeyKind `json:"kind"`
+	ServiceName string            `json:"service_name,omitempty"`
+	RawKey      string            `json:"raw_key"`      // shown only once
+	CreatedAt   time.Time         `json:"created_at"`
+}
+
+// APIKeyInfo represents an API key as returned by list endpoints (never raw key).
+type APIKeyInfo struct {
+	KeyID       string            `json:"key_id"`
+	Kind        domain.APIKeyKind `json:"kind"`
+	ServiceName string            `json:"service_name,omitempty"`
+	CreatedAt   time.Time         `json:"created_at"`
+	RevokedAt   *time.Time        `json:"revoked_at,omitempty"`
+}
+
 // Handler handles authentication endpoints.
 type Handler struct {
 	store         metadata.Store
@@ -71,6 +109,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/users/invite", h.Invite)
 	mux.HandleFunc("PUT /api/v1/users/me/password", h.ChangePassword)
 	mux.HandleFunc("GET /api/v1/projects", h.HandleProjects)
+	mux.HandleFunc("POST /api/v1/projects", h.HandleCreateProject)
+	mux.HandleFunc("POST /api/v1/projects/{id}/api-keys", h.HandleGenerateAPIKey)
+	mux.HandleFunc("GET /api/v1/projects/{id}/api-keys", h.HandleListAPIKeys)
+	mux.HandleFunc("DELETE /api/v1/projects/{id}/api-keys/{keyId}", h.HandleRevokeAPIKey)
 }
 
 // BootstrapAdmin creates the initial admin user if no users exist and
@@ -200,6 +242,234 @@ func (h *Handler) HandleProjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, projects)
+}
+
+// HandleCreateProject handles POST /api/v1/projects.
+// Creates a new project for the authenticated user's organization.
+func (h *Handler) HandleCreateProject(w http.ResponseWriter, r *http.Request) {
+	user := CurrentUserFromContext(r)
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	// Parse request body
+	var req CreateProjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	if req.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+
+	// Look up the user to get their org ID
+	u, err := h.store.GetUserByID(r.Context(), user.UserID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to look up user"})
+		return
+	}
+
+	// Create the project
+	projectID := xid.New().String()
+	project := &domain.Project{
+		ProjectID: projectID,
+		OrgID:     u.OrgID,
+		Name:      req.Name,
+		CreatedAt: time.Now().UTC(),
+	}
+
+	if err := h.store.CreateProject(r.Context(), project); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create project"})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, CreateProjectResponse{
+		ProjectID: project.ProjectID,
+		Name:      project.Name,
+	})
+}
+
+// HandleGenerateAPIKey handles POST /api/v1/projects/{id}/api-keys.
+// Generates a new API key for the specified project.
+func (h *Handler) HandleGenerateAPIKey(w http.ResponseWriter, r *http.Request) {
+	user := CurrentUserFromContext(r)
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	// Extract project ID from URL path: /api/v1/projects/{id}/api-keys
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/projects/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid project ID"})
+		return
+	}
+	projectID := parts[0]
+
+	// Parse request body
+	var req GenerateAPIKeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	// Validate kind
+	if req.Kind != domain.APIKeyKindProject && req.Kind != domain.APIKeyKindService {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "kind must be 'project' or 'service'"})
+		return
+	}
+
+	// Service-scoped keys require a service name
+	if req.Kind == domain.APIKeyKindService && req.ServiceName == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "service_name is required for service-scoped keys"})
+		return
+	}
+
+	// Verify project exists
+	_, err := h.store.GetProject(r.Context(), projectID)
+	if err != nil {
+		if errors.Is(err, metadata.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to look up project"})
+		return
+	}
+
+	// Generate the API key
+	rawKey, hashedKey, err := auth.Generate(req.Kind)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate key"})
+		return
+	}
+
+	// Create the key record
+	keyID := xid.New().String()
+	apiKey := &domain.APIKey{
+		KeyID:       keyID,
+		ProjectID:   projectID,
+		Kind:        req.Kind,
+		ServiceName: req.ServiceName,
+		HashedKey:   hashedKey,
+		CreatedAt:   time.Now().UTC(),
+	}
+
+	if err := h.store.CreateAPIKey(r.Context(), apiKey); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store key"})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, GenerateAPIKeyResponse{
+		KeyID:       keyID,
+		ProjectID:   projectID,
+		Kind:        req.Kind,
+		ServiceName: req.ServiceName,
+		RawKey:      rawKey,
+		CreatedAt:   apiKey.CreatedAt,
+	})
+}
+
+// HandleListAPIKeys handles GET /api/v1/projects/{id}/api-keys.
+// Lists all API keys for the specified project (never returns raw keys).
+func (h *Handler) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
+	user := CurrentUserFromContext(r)
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	// Extract project ID from URL path: /api/v1/projects/{id}/api-keys
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/projects/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid project ID"})
+		return
+	}
+	projectID := parts[0]
+
+	// Verify project exists
+	_, err := h.store.GetProject(r.Context(), projectID)
+	if err != nil {
+		if errors.Is(err, metadata.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to look up project"})
+		return
+	}
+
+	// List API keys for the project
+	keys, err := h.store.ListAPIKeys(r.Context(), projectID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list API keys"})
+		return
+	}
+
+	// Convert to public-facing format (strip hashed key)
+	result := make([]APIKeyInfo, len(keys))
+	for i, k := range keys {
+		result[i] = APIKeyInfo{
+			KeyID:       k.KeyID,
+			Kind:        k.Kind,
+			ServiceName: k.ServiceName,
+			CreatedAt:   k.CreatedAt,
+			RevokedAt:   k.RevokedAt,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// HandleRevokeAPIKey handles DELETE /api/v1/projects/{id}/api-keys/{keyId}.
+// Revokes (deletes) an API key for the specified project.
+func (h *Handler) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
+	user := CurrentUserFromContext(r)
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	// Extract project ID and key ID from URL path
+	// /api/v1/projects/{id}/api-keys/{keyId}
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/projects/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 3 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
+		return
+	}
+	projectID := parts[0]
+	keyID := parts[2]
+
+	// Verify the key belongs to this project
+	keys, err := h.store.ListAPIKeys(r.Context(), projectID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to look up keys"})
+		return
+	}
+
+	found := false
+	for _, k := range keys {
+		if k.KeyID == keyID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "API key not found"})
+		return
+	}
+
+	// Revoke the key
+	if err := h.store.RevokeAPIKey(r.Context(), keyID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to revoke key"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
 // Invite handles POST /api/v1/users/invite (admin only). Creates a new user
