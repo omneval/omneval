@@ -10,14 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
 	"github.com/zbloss/lantern/internal/fake"
 	"github.com/zbloss/lantern/services/query/internal/auth"
 )
 
-// setupTestMuxWithMiddleware builds the same mux that server.go should build
-// — public routes unprotected, /api/v1/ routes protected by session middleware.
-// This mirrors the fix: all protected API routes wrapped with RequireAuth.
+// setupTestMuxWithMiddleware builds a mux that mirrors server.go's router:
+// public routes pass through without auth, /api/v1/ routes require session middleware.
 func setupTestMuxWithMiddleware(t *testing.T) *httptest.Server {
 	t.Helper()
 
@@ -27,11 +25,9 @@ func setupTestMuxWithMiddleware(t *testing.T) *httptest.Server {
 
 	sessionMw := auth.RequireAuth(store, false, 1*time.Hour)
 
-	// Build the mux the way server.go does.
 	mux := http.NewServeMux()
-	h.Register(mux) // login, logout, invite, change-password, projects
+	h.Register(mux)
 
-	// Add a dummy span query handler (requires auth).
 	mux.HandleFunc("POST /api/v1/spans/query", func(w http.ResponseWriter, r *http.Request) {
 		if auth.CurrentUserFromContext(r) == nil {
 			json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
@@ -39,51 +35,27 @@ func setupTestMuxWithMiddleware(t *testing.T) *httptest.Server {
 		}
 		json.NewEncoder(w).Encode(map[string]string{"spans": "ok"})
 	})
-
-	// Dummy score handler (no auth — eval worker endpoint).
 	mux.HandleFunc("POST /api/v1/scores", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
-
-	// Dummy metrics handler.
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
 	})
-
-	// SPA fallback.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// The key fix: wrap all /api/v1/ routes (except /api/v1/scores) with session middleware.
 	wrapper := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-
-		// Public endpoints: no auth needed
-		switch {
-		case path == "/login" || path == "/logout",
-			strings.HasPrefix(path, "/healthz"),
-			strings.HasPrefix(path, "/readyz"),
-			path == "/metrics":
+		if IsPublicAPIPath(r.URL.Path) {
 			mux.ServeHTTP(w, r)
 			return
 		}
-
-		// /api/v1/scores is internal (eval worker write-back), no auth
-		if path == "/api/v1/scores" {
-			mux.ServeHTTP(w, r)
-			return
-		}
-
-		// Everything else under /api/v1/ requires auth.
-		if strings.HasPrefix(path, "/api/v1/") {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/") {
 			sessionMw(mux).ServeHTTP(w, r)
 			return
 		}
-
-		// SPA fallback
 		mux.ServeHTTP(w, r)
 	})
 
@@ -117,36 +89,50 @@ func loginAndGetCookie(t *testing.T, ts *httptest.Server, email, password string
 func TestPublicRoutes_AvailableWithoutAuth(t *testing.T) {
 	ts := setupTestMuxWithMiddleware(t)
 
-	// POST /login should work without a session cookie.
-	resp, err := http.Post(ts.URL+"/login", "application/json",
-		bytes.NewReader([]byte(`{"email":"admin@example.com","password":"admin-password"}`)))
-	if err != nil {
-		t.Fatalf("login request: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("POST /login: status %d, want %d", resp.StatusCode, http.StatusOK)
-	}
+	t.Run("login", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/login", "application/json",
+			bytes.NewReader([]byte(`{"email":"admin@example.com","password":"admin-password"}`)))
+		if err != nil {
+			t.Fatalf("login request: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("POST /login: status %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+	})
 
-	// GET /metrics should work without a session cookie.
-	resp, err = http.Get(ts.URL + "/metrics")
-	if err != nil {
-		t.Fatalf("metrics request: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("GET /metrics: status %d, want %d", resp.StatusCode, http.StatusOK)
-	}
+	t.Run("metrics", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/metrics")
+		if err != nil {
+			t.Fatalf("metrics request: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET /metrics: status %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+	})
 
-	// GET /healthz should work without a session cookie (should NOT return 401).
-	resp, err = http.Get(ts.URL + "/healthz")
-	if err != nil {
-		t.Fatalf("healthz request: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusUnauthorized {
-		t.Errorf("GET /healthz: got 401 unauthorized, should be 200 or 503")
-	}
+	t.Run("healthz", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/healthz")
+		if err != nil {
+			t.Fatalf("healthz request: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusUnauthorized {
+			t.Errorf("GET /healthz: got 401 unauthorized, should be 200 or 503")
+		}
+	})
+
+	t.Run("readyz", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/readyz")
+		if err != nil {
+			t.Fatalf("readyz request: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusUnauthorized {
+			t.Errorf("GET /readyz: got 401 unauthorized, should be 200 or 503")
+		}
+	})
 }
 
 func TestProtectedAPI_Returns401WithoutAuth(t *testing.T) {
@@ -268,84 +254,44 @@ func TestScoresEndpoint_NoAuthRequired(t *testing.T) {
 	}
 }
 
-func TestLogin_StillWorksWithoutAuth(t *testing.T) {
-	ts := setupTestMuxWithMiddleware(t)
+func TestPublicAPIPathClassification(t *testing.T) {
+	t.Parallel()
 
-	payload, _ := json.Marshal(map[string]string{
-		"email":    "admin@example.com",
-		"password": "admin-password",
-	})
-	req, _ := http.NewRequest("POST", ts.URL+"/login", bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
+	cases := []struct {
+		path  string
+		want  bool
+		label string
+	}{
+		// Explicitly public.
+		{"/login", true, "login"},
+		{"/logout", true, "logout"},
+		{"/healthz", true, "healthz"},
+		{"/readyz", true, "readyz"},
+		{"/metrics", true, "metrics"},
+		{"/api/v1/scores", true, "scores"},
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("login request: %v", err)
-	}
-	defer resp.Body.Close()
+		// Prefix variants of health endpoints.
+		{"/healthz/ready", true, "healthz prefix"},
+		{"/healthz/ping", true, "healthz deep prefix"},
+		{"/readyz/ok", true, "readyz prefix"},
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("POST /login: status %d, want %d", resp.StatusCode, http.StatusOK)
-	}
-}
+		// Protected API routes.
+		{"/api/v1/spans/query", false, "spans query"},
+		{"/api/v1/projects", false, "projects"},
+		{"/api/v1/datasets", false, "datasets"},
 
-func TestLogout_StillWorksWithoutAuth(t *testing.T) {
-	ts := setupTestMuxWithMiddleware(t)
-
-	sessionID := loginAndGetCookie(t, ts, "admin@example.com", "admin-password")
-
-	// Logout should work with a valid cookie.
-	req, _ := http.NewRequest("POST", ts.URL+"/logout", nil)
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("logout request: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("POST /logout: status %d, want %d", resp.StatusCode, http.StatusOK)
-	}
-}
-
-// TestSessionMiddleware_IsApplied verifies that RequireAuth is called in server.go
-// and wraps the mux with session validation. This is the key acceptance criterion.
-func TestSessionMiddleware_IsApplied(t *testing.T) {
-	// Create a minimal mux to test that RequireAuth wraps handlers.
-	store := fake.NewFakeMetadataStore()
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /test", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	// Apply RequireAuth middleware.
-	sessionMw := auth.RequireAuth(store, false, 1*time.Hour)
-	wrapped := sessionMw(mux)
-
-	// Without cookie — should get 401.
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-	wrapped.ServeHTTP(w, req)
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("unauthenticated: status %d, want %d", w.Code, http.StatusUnauthorized)
+		// UI routes (not /api/v1/).
+		{"/", false, "spa root"},
+		{"/static/app.js", false, "static file"},
 	}
 
-	// With valid session cookie — should get 200.
-	_ = store.CreateUser(nil, &domain.User{
-		UserID: "u1", OrgID: "org1", Email: "test@test.com",
-		PasswordHash: "pass",
-	})
-	sessionID := "test-session"
-	_ = store.CreateSession(nil, &domain.Session{
-		SessionID: sessionID,
-		UserID:    "u1",
-		ExpiresAt: time.Now().Add(1 * time.Hour),
-	})
-	req2 := httptest.NewRequest("GET", "/test", nil)
-	req2.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
-	w2 := httptest.NewRecorder()
-	wrapped.ServeHTTP(w2, req2)
-	if w2.Code != http.StatusOK {
-		t.Errorf("authenticated: status %d, want %d", w2.Code, http.StatusOK)
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			t.Parallel()
+			got := IsPublicAPIPath(tc.path)
+			if got != tc.want {
+				t.Errorf("IsPublicAPIPath(%q): got %v, want %v", tc.path, got, tc.want)
+			}
+		})
 	}
 }

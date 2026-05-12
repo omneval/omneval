@@ -70,6 +70,31 @@ func serveUI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// publicAPIPaths is the set of API and service paths that bypass session
+// authentication. The router treats anything in this set as public.
+var publicAPIPaths = map[string]struct{}{
+	"/login":        {},
+	"/logout":       {},
+	"/healthz":      {},
+	"/readyz":       {},
+	"/metrics":      {},
+	"/api/v1/scores": {},
+}
+
+// IsPublicAPIPath reports whether the given path is a public API route
+// that does not require authentication.
+func IsPublicAPIPath(path string) bool {
+	// Direct match for known public endpoints.
+	if _, ok := publicAPIPaths[path]; ok {
+		return true
+	}
+	// Prefix match for health check variants like /healthz/readyz.
+	if strings.HasPrefix(path, "/healthz") || strings.HasPrefix(path, "/readyz") {
+		return true
+	}
+	return false
+}
+
 // Run starts the Query API: opens the DuckDB snapshot from S3 and the
 // metadata store, bootstraps the admin user, and serves auth, span,
 // analytics, prompt, and metrics endpoints.
@@ -276,26 +301,17 @@ func Run() error {
 	// NOTE: GET /api/v1/projects is already registered by h.Register(mux) above.
 	mux.HandleFunc("/", serveUI)
 
-	// Apply session middleware to all protected API routes.
-	// Public routes (/login, /logout, /healthz, /readyz, /metrics, /api/v1/scores,
-	// and SPA fallback /) pass through without auth.
-	// All other /api/v1/ routes require a valid session cookie.
 	sessionMw := auth.RequireAuth(store, cfg.Auth.SecureCookie, sessionTTL)
 	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		// Public endpoints: no auth needed.
-		switch {
-		case path == "/login" || path == "/logout",
-			strings.HasPrefix(path, "/healthz"),
-			strings.HasPrefix(path, "/readyz"),
-			path == "/metrics",
-			path == "/api/v1/scores":
+		// Public routes bypass authentication entirely.
+		if IsPublicAPIPath(path) {
 			mux.ServeHTTP(w, r)
 			return
 		}
 
-		// Everything else under /api/v1/ requires authentication.
+		// Protected API routes require a valid session cookie.
 		if strings.HasPrefix(path, "/api/v1/") {
 			sessionMw(mux).ServeHTTP(w, r)
 			return
