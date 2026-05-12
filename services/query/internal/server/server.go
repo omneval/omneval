@@ -305,7 +305,7 @@ func Run() error {
 	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		// Public routes bypass authentication entirely.
+// Public routes bypass authentication entirely.
 		if IsPublicAPIPath(path) {
 			mux.ServeHTTP(w, r)
 			return
