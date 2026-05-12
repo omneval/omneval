@@ -69,22 +69,22 @@ def trace(fn: F) -> F:
 
 
 def set_input(span: Span, input_value: str) -> None:
-    """Attach input data to the active span."""
+    """Attach input data to the span as the 'lantern.input' attribute."""
     span.set_attribute("lantern.input", input_value)
 
 
 def set_output(span: Span, output_value: str) -> None:
-    """Attach output data to the active span."""
+    """Attach output data to the span as the 'lantern.output' attribute."""
     span.set_attribute("lantern.output", output_value)
 
 
 def set_model(span: Span, model: str) -> None:
-    """Attach model name to the active span."""
+    """Attach model name to the span as the 'gen_ai.request.model' attribute."""
     span.set_attribute("gen_ai.request.model", model)
 
 
 def set_tokens(span: Span, input_tokens: int, output_tokens: int) -> None:
-    """Attach input and output token counts to the active span."""
+    """Attach token counts to the span as 'gen_ai.usage.input_tokens' and 'gen_ai.usage.output_tokens'."""
     span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
     span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
 

@@ -1,58 +1,55 @@
 """Tests for top-level exports in lantern_sdk.__init__.py."""
-import inspect
+from unittest import mock
+
+from lantern_sdk.trace import trace
+
+# OTel imports used by test helpers.
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter as _OTelInMemoryExporter,
+)
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+
+# All functions re-exported from lantern_sdk.trace at the package level.
+_EXPORTED_FUNCTIONS = [
+    "set_input",
+    "set_output",
+    "set_model",
+    "set_tokens",
+    "get_active_span",
+]
 
 
 class TestTopLevelExports:
     """Verify key helper functions are accessible from the top-level lantern_sdk package."""
 
-    def test_set_input_is_exported(self):
-        """set_input is accessible as lantern_sdk.set_input."""
-        import lantern_sdk
-        assert hasattr(lantern_sdk, "set_input")
-        assert callable(lantern_sdk.set_input)
-
-    def test_set_output_is_exported(self):
-        """set_output is accessible as lantern_sdk.set_output."""
-        import lantern_sdk
-        assert hasattr(lantern_sdk, "set_output")
-        assert callable(lantern_sdk.set_output)
-
-    def test_set_model_is_exported(self):
-        """set_model is accessible as lantern_sdk.set_model."""
-        import lantern_sdk
-        assert hasattr(lantern_sdk, "set_model")
-        assert callable(lantern_sdk.set_model)
-
-    def test_set_tokens_is_exported(self):
-        """set_tokens is accessible as lantern_sdk.set_tokens."""
-        import lantern_sdk
-        assert hasattr(lantern_sdk, "set_tokens")
-        assert callable(lantern_sdk.set_tokens)
-
-    def test_get_active_span_is_exported(self):
-        """get_active_span is accessible as lantern_sdk.get_active_span."""
-        import lantern_sdk
-        assert hasattr(lantern_sdk, "get_active_span")
-        assert callable(lantern_sdk.get_active_span)
-
-    def test_all_exports_are_callable(self):
-        """All symbols in __all__ that are functions should be callable."""
-        import lantern_sdk
-        for name in ["set_input", "set_output", "set_model", "set_tokens", "get_active_span"]:
-            assert name in dir(lantern_sdk), f"{name} not in dir(lantern_sdk)"
-
-    def test_usage_pattern_without_internal_imports(self):
-        """The acceptance-criterion usage pattern works without internal imports."""
-        import lantern_sdk
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-        from unittest import mock
-
-        # Set up a test provider
-        exporter = InMemorySpanExporter()
+    def _make_test_provider(self):
+        """Create a TracerProvider with an in-memory exporter for testing."""
+        exporter = _OTelInMemoryExporter()
         provider = TracerProvider()
         provider.add_span_processor(SimpleSpanProcessor(exporter))
+        return provider, exporter
+
+    def test_exported_functions_are_accessible_and_callable(self):
+        """All functions from lantern_sdk.trace are accessible and callable."""
+        import lantern_sdk
+
+        for name in _EXPORTED_FUNCTIONS:
+            assert hasattr(lantern_sdk, name), f"{name} not exported at package level"
+            func = getattr(lantern_sdk, name)
+            assert callable(func), f"{name} is not callable"
+
+    def test_get_active_span_returns_none_outside_decorator(self):
+        """get_active_span returns None when called outside a decorated function."""
+        import lantern_sdk
+
+        assert lantern_sdk.get_active_span() is None
+
+    def test_usage_pattern_works_without_internal_imports(self):
+        """The acceptance-criterion usage pattern works without internal imports."""
+        import lantern_sdk
+
+        provider, exporter = self._make_test_provider()
 
         old_provider = lantern_sdk.exporter._tracer_provider
         try:
@@ -74,7 +71,6 @@ class TestTopLevelExports:
                 spans = exporter.get_finished_spans()
                 assert len(spans) >= 1
 
-                # Verify the span has the expected attributes.
                 span = spans[0]
                 assert span.attributes.get("gen_ai.request.model") == "gpt-4o"
                 assert span.attributes.get("lantern.input") == "hello"
@@ -82,17 +78,11 @@ class TestTopLevelExports:
         finally:
             lantern_sdk.exporter._tracer_provider = old_provider
 
-    def test_set_tokens_usage(self):
-        """set_tokens sets input and output token attributes on a span."""
+    def test_set_tokens_sets_span_attributes(self):
+        """set_tokens attaches input and output token counts to a span."""
         import lantern_sdk
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-        from unittest import mock
 
-        exporter = InMemorySpanExporter()
-        provider = TracerProvider()
-        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        provider, exporter = self._make_test_provider()
 
         old_provider = lantern_sdk.exporter._tracer_provider
         try:
@@ -115,9 +105,3 @@ class TestTopLevelExports:
                 assert span.attributes.get("gen_ai.usage.output_tokens") == 50
         finally:
             lantern_sdk.exporter._tracer_provider = old_provider
-
-    def test_get_active_span_returns_none_when_no_decorator(self):
-        """get_active_span returns None outside a decorated function."""
-        import lantern_sdk
-        result = lantern_sdk.get_active_span()
-        assert result is None
