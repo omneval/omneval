@@ -16,6 +16,8 @@ describe("Branding Theme", () => {
       { name: "softGlow", category: "accents" },
       { name: "flicker", category: "accents" },
       { name: "deepHeat", category: "accents" },
+      { name: "dangerRed", category: "accents" },
+      { name: "dangerLight", category: "accents" },
       { name: "pureLight", category: "typography" },
       { name: "ashGrey", category: "typography" },
     ];
@@ -41,6 +43,8 @@ describe("Branding Theme", () => {
       expect(accent).toHaveProperty("softGlow");
       expect(accent).toHaveProperty("flicker");
       expect(accent).toHaveProperty("deepHeat");
+      expect(accent).toHaveProperty("dangerRed");
+      expect(accent).toHaveProperty("dangerLight");
     });
 
     it("has all expected typography colors", () => {
@@ -94,6 +98,14 @@ describe("Branding Theme", () => {
 
     it("deepHeat is #E64A19", () => {
       expect(colors.accents.deepHeat).toBe("#E64A19");
+    });
+
+    it("dangerRed is #EF4444", () => {
+      expect(colors.accents.dangerRed).toBe("#EF4444");
+    });
+
+    it("dangerLight is #FCA5A5", () => {
+      expect(colors.accents.dangerLight).toBe("#FCA5A5");
     });
 
     it("pureLight is #FFFFFF", () => {
@@ -162,6 +174,8 @@ describe("Branding Theme", () => {
       expect(colors.cssVariables["--lantern-bg-charcoal"]).toBe("#0D0D0D");
       expect(colors.cssVariables["--lantern-accent-ember"]).toBe("#FF5722");
       expect(colors.cssVariables["--lantern-text-pure"]).toBe("#FFFFFF");
+      expect(colors.cssVariables["--lantern-accent-danger"]).toBe("#EF4444");
+      expect(colors.cssVariables["--lantern-accent-danger-light"]).toBe("#FCA5A5");
     });
   });
 });

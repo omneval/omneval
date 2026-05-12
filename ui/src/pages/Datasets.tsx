@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { colors } from "@/theme";
+import { ErrorBanner } from "@/components/ErrorBanner";
 import { formatTime } from "@/utils/formatters";
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -101,11 +102,7 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
         <h1 className="text-base font-semibold text-lantern-pure">Datasets</h1>
         <button
           onClick={() => setShowNewForm(true)}
-          className="text-xs px-3 py-1.5 rounded transition-colors"
-          style={{
-            background: colors.accents.emberFlare,
-            color: colors.typography.pureLight,
-          }}
+          className="btn-primary text-xs py-1.5"
         >
           + New Dataset
         </button>
@@ -122,9 +119,8 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder="Dataset name"
-              className="text-xs px-3 py-1.5 rounded border outline-none flex-1"
+              className="text-xs px-3 py-1.5 rounded border outline-none flex-1 bg-black/40"
               style={{
-                backgroundColor: colors.backgrounds.abyssBlack,
                 borderColor: colors.backgrounds.caveWall,
                 color: colors.typography.pureLight,
               }}
@@ -140,11 +136,7 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
             <button
               onClick={handleCreate}
               disabled={!newName.trim() || creating}
-              className="text-xs px-3 py-1.5 rounded transition-colors disabled:opacity-50"
-              style={{
-                background: colors.accents.emberFlare,
-                color: colors.typography.pureLight,
-              }}
+              className="btn-primary text-xs py-1.5 disabled:opacity-50"
             >
               {creating ? "Creating…" : "Create"}
             </button>
@@ -154,18 +146,12 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
                 setNewName("");
                 setCreateError(null);
               }}
-              className="text-xs px-3 py-1.5 rounded border transition-colors"
-              style={{
-                borderColor: colors.backgrounds.caveWall,
-                color: colors.typography.ashGrey,
-              }}
+              className="btn-secondary text-xs py-1.5"
             >
               Cancel
             </button>
           </div>
-          {createError && (
-            <div className="text-xs text-red-400 mt-1">{createError}</div>
-          )}
+          {createError && <ErrorBanner message={createError} />}
         </div>
       )}
 
@@ -179,7 +165,7 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
             </svg>
           </div>
         ) : error ? (
-          <div className="text-xs text-red-400 py-4 text-center">{error}</div>
+          <ErrorBanner message={error} />
         ) : datasets.length === 0 ? (
           <div className="text-xs text-lantern-ash py-8 text-center">
             No datasets found. Create one to evaluate model outputs.
@@ -234,21 +220,13 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
                       <button
                         onClick={() => handleDelete(ds.dataset_id)}
                         disabled={deleting === ds.dataset_id}
-                        className="text-xs px-2 py-1 rounded transition-colors"
-                        style={{
-                          backgroundColor: "#F44336",
-                          color: "#fff",
-                        }}
+                        className="btn-destructive text-xs py-1 disabled:opacity-50"
                       >
                         {deleting === ds.dataset_id ? "…" : "Delete"}
                       </button>
                       <button
                         onClick={() => setDeleteConfirmId(null)}
-                        className="text-xs px-2 py-1 rounded border"
-                        style={{
-                          borderColor: colors.backgrounds.caveWall,
-                          color: colors.typography.ashGrey,
-                        }}
+                        className="btn-secondary text-xs py-1"
                       >
                         Cancel
                       </button>
@@ -256,10 +234,8 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
                   ) : (
                     <button
                       onClick={() => setDeleteConfirmId(ds.dataset_id)}
-                      className="text-xs px-2 py-1 rounded transition-colors opacity-0 group-hover:opacity-100"
-                      style={{
-                        color: "#F44336",
-                      }}
+                      className="text-xs px-2 py-1 rounded transition-colors opacity-0 group-hover:opacity-100 btn-destructive"
+                      style={{ background: 'transparent', border: 'none' }}
                     >
                       Delete
                     </button>

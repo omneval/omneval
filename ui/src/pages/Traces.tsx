@@ -222,10 +222,10 @@ function FilterSection({
               />
               <button
                 onClick={handleApply}
-                className="text-xs px-2 py-1 rounded transition-colors"
+                className="text-xs px-2 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
                 style={{
                   background: colors.accents.emberFlare,
-                  color: colors.typography.pureLight,
+                  boxShadow: "0 1px 4px rgba(255, 87, 34, 0.2)",
                 }}
               >
                 Apply
@@ -244,10 +244,10 @@ function FilterSection({
               />
               <button
                 onClick={handleApply}
-                className="text-xs px-2 py-1 rounded transition-colors"
+                className="text-xs px-2 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
                 style={{
                   background: colors.accents.emberFlare,
-                  color: colors.typography.pureLight,
+                  boxShadow: "0 1px 4px rgba(255, 87, 34, 0.2)",
                 }}
               >
                 Apply
@@ -294,21 +294,26 @@ function PaginationControls({
       </div>
       <div className="flex items-center gap-2">
         <button
-          disabled={loading}
-          className="text-sm px-3 py-1.5 rounded transition-colors disabled:opacity-50"
+          disabled={loading || !hasMore}
+          className="text-sm px-4 py-1.5 rounded-md font-medium text-white transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed hover:brightness-110 active:brightness-90"
           style={{
-            background: colors.accents.emberFlare,
-            color: colors.typography.pureLight,
-            opacity: loading ? 0.6 : 1,
-          }}
-          onMouseEnter={(e) => {
-            if (!loading) (e.currentTarget as HTMLElement).style.background = colors.accents.softGlow;
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLElement).style.background = colors.accents.emberFlare;
+            background: hasMore ? colors.accents.emberFlare : colors.backgrounds.caveWall,
+            boxShadow: hasMore ? "0 2px 8px rgba(255, 87, 34, 0.25)" : "none",
           }}
         >
-          {loading ? "Loading..." : hasMore ? "Load Next Page" : "No more data"}
+          {loading ? (
+            <span className="flex items-center gap-2">
+              <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Loading...
+            </span>
+          ) : hasMore ? (
+            "Load Next Page"
+          ) : (
+            "No more data"
+          )}
         </button>
       </div>
     </div>
@@ -622,24 +627,23 @@ export default function TracesPage({
 
           {/* Column toggles */}
           <div className="flex items-center gap-1">
-            {columns.map((col) => (
-              <button
-                key={col.key}
-                onClick={() => toggleColumn(col.key as keyof typeof columnVisibility)}
-                className="w-6 h-6 flex items-center justify-center rounded text-xs font-bold transition-colors"
-                style={{
-                  background: columnVisibility[col.key as keyof typeof columnVisibility]
-                    ? colors.accents.emberFlare
-                    : colors.backgrounds.caveWall,
-                  color: columnVisibility[col.key as keyof typeof columnVisibility]
-                    ? colors.typography.pureLight
-                    : colors.typography.ashGrey,
-                }}
-                title={`Toggle ${col.label}`}
-              >
-                {col.label.slice(0, 2).toUpperCase()}
-              </button>
-            ))}
+            {columns.map((col) => {
+              const isVisible = columnVisibility[col.key as keyof typeof columnVisibility];
+              return (
+                <button
+                  key={col.key}
+                  onClick={() => toggleColumn(col.key as keyof typeof columnVisibility)}
+                  className={`w-7 h-7 flex items-center justify-center rounded-md text-xs font-semibold transition-all duration-150 border ${
+                    isVisible
+                      ? "border-lantern-ember bg-lantern-accent-ember-glow text-lantern-ember"
+                      : "border-lantern-bg-cave text-lantern-ash/60 hover:text-lantern-pure hover:border-lantern-bg-illumination"
+                  }`}
+                  title={`Toggle ${col.label}`}
+                >
+                  {col.label.slice(0, 2).toUpperCase()}
+                </button>
+              );
+            })}
           </div>
         </div>
 

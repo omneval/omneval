@@ -206,15 +206,21 @@ function SectionAccordion({
   }
 
   return (
-    <div className="mb-2">
+    <div className="mb-1">
       {label && (
-        <button
-          onClick={() => setOpen(!open)}
-          className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs font-medium text-lantern-ash hover:text-lantern-pure transition-colors"
-        >
-          <ChevronIcon open={open} />
-          {label.toUpperCase()}
-        </button>
+        <>
+          <button
+            onClick={() => setOpen(!open)}
+            className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs font-semibold tracking-wide text-lantern-ash/70 hover:text-lantern-pure transition-colors"
+          >
+            <ChevronIcon open={open} />
+            {label.toUpperCase()}
+          </button>
+          <div
+            className="h-px mx-2"
+            style={{ background: "rgba(45, 45, 45, 0.6)" }}
+          />
+        </>
       )}
       {open && (
         <div className="space-y-0.5">

@@ -59,10 +59,17 @@
     background: var(--lantern-accent-flicker-hover-strong);
   }
 
+  /* ── Card elevation ─────────────────────────────────── */
   .card {
     background: var(--lantern-bg-charcoal);
     border: 1px solid var(--lantern-bg-cave);
     border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+    transition: box-shadow 0.15s ease;
+  }
+
+  .card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.4);
   }
 
   .card-header {
@@ -71,5 +78,142 @@
     font-size: 0.875rem;
     font-weight: 500;
     color: var(--lantern-text-pure);
+  }
+
+  /* ── Button hierarchy ───────────────────────────────── */
+
+  /* Primary button — brand ember color */
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #ffffff;
+    background: var(--lantern-accent-ember);
+    box-shadow: 0 2px 8px rgba(255, 87, 34, 0.25);
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background: var(--lantern-accent-glow);
+    box-shadow: 0 4px 12px rgba(255, 87, 34, 0.35);
+  }
+
+  .btn-primary:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Secondary button — gray outline */
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--lantern-text-ash);
+    background: transparent;
+    border: 1px solid var(--lantern-bg-cave);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-secondary:hover {
+    color: var(--lantern-text-pure);
+    border-color: var(--lantern-accent-glow);
+    background: var(--lantern-accent-flicker-hover);
+  }
+
+  .btn-secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Destructive button — red */
+  .btn-destructive {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #FCA5A5;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-destructive:hover {
+    background: rgba(239, 68, 68, 0.25);
+    border-color: rgba(239, 68, 68, 0.5);
+    color: #FECACA;
+  }
+
+  /* Ghost button — minimal, for tertiary actions */
+  .btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--lantern-text-ash);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-ghost:hover {
+    color: var(--lantern-text-pure);
+    background: var(--lantern-accent-flicker-hover);
+  }
+
+  /* ── Empty state ────────────────────────────────────── */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 1rem;
+    text-align: center;
+  }
+
+  .empty-state-icon {
+    width: 48px;
+    height: 48px;
+    color: var(--lantern-bg-cave);
+    margin-bottom: 0.75rem;
+  }
+
+  .empty-state-title {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--lantern-text-ash);
+  }
+
+  .empty-state-description {
+    font-size: 0.75rem;
+    color: var(--lantern-text-ash);
+    opacity: 0.7;
+    margin-top: 0.25rem;
   }
 }

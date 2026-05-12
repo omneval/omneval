@@ -58,6 +58,8 @@ export type ColorName =
   | "softGlow"
   | "flicker"
   | "deepHeat"
+  | "dangerRed"
+  | "dangerLight"
   // typography
   | "pureLight"
   | "ashGrey";
@@ -84,6 +86,8 @@ const baseColors = {
     softGlow: "#FF8A65",
     flicker: "#FFCCBC",
     deepHeat: "#E64A19",
+    dangerRed: "#EF4444",
+    dangerLight: "#FCA5A5",
   },
   typography: {
     pureLight: "#FFFFFF",
@@ -98,6 +102,8 @@ const baseColors = {
     "--lantern-accent-glow": "#FF8A65",
     "--lantern-accent-flicker": "#FFCCBC",
     "--lantern-accent-heat": "#E64A19",
+    "--lantern-accent-danger": "#EF4444",
+    "--lantern-accent-danger-light": "#FCA5A5",
     "--lantern-text-pure": "#FFFFFF",
     "--lantern-text-ash": "#A1A1AA",
   },

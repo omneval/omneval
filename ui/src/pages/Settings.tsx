@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useToast } from "@/components/Toast";
+import { colors } from "@/theme";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -53,7 +54,7 @@ function KeyCard({
           <span
             className={`text-xs px-1.5 py-0.5 rounded font-medium ${
               apiKey.kind === "service"
-                ? "text-lantern-frost bg-lantern-accent-frost-glow"
+                ? "text-lantern-ember bg-lantern-accent-ember-glow"
                 : "text-lantern-ash bg-lantern-bg-illumination"
             }`}
           >
@@ -77,7 +78,7 @@ function KeyCard({
       {!isRevoked && (
         <button
           onClick={() => onRevoke(apiKey.key_id)}
-          className="ml-3 px-3 py-1.5 text-xs rounded-md bg-lantern-bg-illumination border border-lantern-bg-cave text-lantern-ash hover:border-lantern-accent-ember hover:text-lantern-ember transition-colors"
+          className="ml-3 btn-destructive text-xs py-1"
         >
           Revoke
         </button>
@@ -160,7 +161,7 @@ function GenerateKeyDialog({
             This is the only time your key will be shown. Store it securely.
           </p>
           <div className="bg-lantern-bg-charcoal border border-lantern-bg-cave rounded-md p-3 mb-4">
-            <code className="text-sm font-mono text-lantern-frost break-all">
+            <code className="text-sm font-mono text-lantern-pure break-all">
               {rawKey}
             </code>
           </div>
@@ -171,17 +172,21 @@ function GenerateKeyDialog({
                 onGenerated(rawKey);
                 handleClose();
               }}
-              className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+              className={`flex-1 px-3 py-2 rounded-md text-sm font-medium text-white transition-all duration-150 hover:brightness-110 ${
                 copied
-                  ? "bg-lantern-accent-frost-glow text-lantern-frost"
-                  : "bg-lantern-bg-illumination border border-lantern-bg-cave text-lantern-pure hover:border-lantern-accent-frost"
+                  ? ""
+                  : "bg-lantern-bg-illumination border border-lantern-bg-cave text-lantern-pure hover:border-lantern-accent-ember hover:text-lantern-ember"
               }`}
+              style={copied ? {
+                background: colors.accents.emberFlare,
+                boxShadow: "0 2px 8px rgba(255, 87, 34, 0.25)",
+              } : undefined}
             >
               {copied ? "Copied!" : "Copy Key"}
             </button>
             <button
               onClick={handleClose}
-              className="px-3 py-2 rounded-md text-sm bg-lantern-bg-illumination border border-lantern-bg-cave text-lantern-ash hover:text-lantern-pure transition-colors"
+              className="btn-secondary text-sm py-1.5"
             >
               Close
             </button>
@@ -211,7 +216,7 @@ function GenerateKeyDialog({
                 value={serviceName}
                 onChange={(e) => setServiceName(e.target.value)}
                 placeholder="e.g. my-agent"
-                className="w-full px-3 py-2 rounded-md bg-lantern-bg-abyss border border-lantern-bg-cave text-lantern-pure placeholder-lantern-ash focus:outline-none focus:border-lantern-accent-frost"
+                className="w-full px-3 py-2 rounded-md bg-black/40 border border-lantern-bg-cave text-lantern-pure placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-[#FF5722] focus:border-transparent transition-all"
                 required
                 autoFocus
               />
@@ -221,14 +226,14 @@ function GenerateKeyDialog({
             <button
               type="submit"
               disabled={loading || (kind === "service" && serviceName.trim() === "")}
-              className="flex-1 px-3 py-2 rounded-md text-sm font-medium bg-lantern-accent-frost-glow text-lantern-frost hover:bg-lantern-accent-frost transition-colors disabled:opacity-50"
+              className="flex-1 btn-primary text-sm py-1.5 disabled:opacity-50"
             >
               {loading ? "Generating..." : "Generate Key"}
             </button>
             <button
               type="button"
               onClick={handleClose}
-              className="px-3 py-2 rounded-md text-sm bg-lantern-bg-illumination border border-lantern-bg-cave text-lantern-ash hover:text-lantern-pure transition-colors"
+              className="btn-secondary text-sm py-1.5"
             >
               Cancel
             </button>
@@ -296,7 +301,7 @@ export function NewProjectModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. my-agent"
-              className="w-full px-3 py-2 rounded-md bg-lantern-bg-abyss border border-lantern-bg-cave text-lantern-pure placeholder-lantern-ash focus:outline-none focus:border-lantern-accent-frost"
+              className="w-full px-3 py-2 rounded-md bg-black/40 border border-lantern-bg-cave text-lantern-pure placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-[#FF5722] focus:border-transparent transition-all"
               required
               autoFocus
             />
@@ -305,14 +310,14 @@ export function NewProjectModal({
             <button
               type="submit"
               disabled={loading || name.trim() === ""}
-              className="flex-1 px-3 py-2 rounded-md text-sm font-medium bg-lantern-accent-frost-glow text-lantern-frost hover:bg-lantern-accent-frost transition-colors disabled:opacity-50"
+              className="flex-1 btn-primary text-sm py-1.5 disabled:opacity-50"
             >
               {loading ? "Creating..." : "Create Project"}
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="px-3 py-2 rounded-md text-sm bg-lantern-bg-illumination border border-lantern-bg-cave text-lantern-ash hover:text-lantern-pure transition-colors"
+              className="btn-secondary text-sm py-1.5"
             >
               Cancel
             </button>
@@ -425,13 +430,13 @@ export default function SettingsPage({
         <div className="flex gap-2 mb-4">
           <button
             onClick={() => setGenerateKind("project")}
-            className="px-3 py-2 rounded-md text-sm font-medium bg-lantern-accent-frost-glow text-lantern-frost hover:bg-lantern-accent-frost transition-colors"
+            className="btn-primary text-sm py-1.5"
           >
             + New Project Key
           </button>
           <button
             onClick={() => setGenerateKind("service")}
-            className="px-3 py-2 rounded-md text-sm font-medium bg-lantern-accent-frost-glow text-lantern-frost hover:bg-lantern-accent-frost transition-colors"
+            className="btn-primary text-sm py-1.5"
           >
             + New Service Key
           </button>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { colors } from "@/theme";
+import { ErrorBanner } from "@/components/ErrorBanner";
 import { formatTime, formatDuration } from "@/utils/formatters";
 import { useToast } from "@/components/Toast";
 import SaveToDatasetModal from "@/components/SaveToDatasetModal";
@@ -112,37 +113,11 @@ export default function TraceDetailPage({
 
   if (error || !trace) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3">
-        <svg
-          width="48"
-          height="48"
-          viewBox="0 0 48 48"
-          fill="none"
-          className="text-lantern-ash opacity-50"
-        >
-          <path
-            d="M24 8a16 16 0 100 32 16 16 0 000-32z"
-            stroke="currentColor"
-            strokeWidth="2"
-          />
-          <path
-            d="M24 16v10M24 30v2"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </svg>
-        <p className="text-sm text-lantern-ash">{error ?? "Trace not found"}</p>
-        <button
-          onClick={onBack}
-          className="text-xs px-3 py-1.5 rounded border transition-colors"
-          style={{
-            borderColor: colors.backgrounds.caveWall,
-            color: colors.typography.ashGrey,
-          }}
-        >
-          Back to Traces
-        </button>
+      <div className="flex flex-col items-center justify-center h-full gap-4 py-8">
+        <ErrorBanner
+          message={error ?? "Trace not found"}
+          onDismiss={onBack}
+        />
       </div>
     );
   }

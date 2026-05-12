@@ -165,7 +165,7 @@ export default function Header({
                   label: p.name,
                   value: p.project_id,
                 }))
-              : [{ label: "No projects", value: "" }]
+              : [{ label: "No projects yet", value: "" }]
           }
           onChange={onProjectChange}
         />

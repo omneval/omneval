@@ -29,6 +29,8 @@
   --lantern-accent-glow: #FF8A65;
   --lantern-accent-flicker: #FFCCBC;
   --lantern-accent-heat: #E64A19;
+  --lantern-accent-danger: #EF4444;
+  --lantern-accent-danger-light: #FCA5A5;
 
   /* ── Illumination: Typography ─────────────────────────── */
   --lantern-text-pure: #FFFFFF;
@@ -64,5 +66,7 @@
   /** Secondary accent */
   --lantern-secondary: var(--lantern-accent-glow);
   /** Error / critical alert */
-  --lantern-danger: var(--lantern-accent-heat);
+  --lantern-danger: var(--lantern-accent-danger);
+  /** Error light text */
+  --lantern-danger-light: var(--lantern-accent-danger-light);
 }

@@ -94,8 +94,8 @@ function ToastItem({ toast, onRemove }: { toast: Toast; onRemove: () => void }) 
   }, []);
 
   const bgMap: Record<ToastType, string> = {
-    success: colors.accents.emberFlare,
-    error: "#ef4444",
+    success: "#059669",  // emerald green for success
+    error: "#dc2626",   // red for error
     info: colors.accents.softGlow,
   };
 
