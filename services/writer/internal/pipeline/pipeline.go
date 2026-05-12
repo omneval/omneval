@@ -40,6 +40,8 @@ type Pipeline struct {
 	store   metadata.Store
 	evalQ   queue.EvalQueue
 	metrics *metrics.WriterMetrics
+	// writeErr, if set, causes writeSpans to return this error (test only).
+	writeErr error
 }
 
 // New creates a new Pipeline.
@@ -63,6 +65,8 @@ func New(
 
 // Run blocks until ctx is canceled. It continuously dequeues spans from Redis,
 // writes them to DuckDB, computes cost, matches eval rules, and enqueues eval jobs.
+// On non-fatal errors (dequeue, write, eval rule listing), the pipeline logs
+// the error and continues processing subsequent batches instead of crashing.
 func (p *Pipeline) Run(ctx context.Context) error {
 	for {
 		select {
@@ -73,20 +77,33 @@ func (p *Pipeline) Run(ctx context.Context) error {
 
 		spans, err := p.ingest.Dequeue(ctx)
 		if err != nil {
-			return fmt.Errorf("pipeline: dequeue: %w", err)
+			slog.ErrorContext(ctx, "dequeue failed, continuing",
+				"err", err)
+			if p.metrics != nil {
+				p.metrics.RecordDequeueError()
+			}
+			continue
 		}
 		if spans == nil {
 			continue // timeout, no spans
 		}
 
 		if err := p.writeSpans(ctx, spans); err != nil {
-			return fmt.Errorf("pipeline: write spans: %w", err)
+			slog.ErrorContext(ctx, "write spans failed, skipping batch",
+				"span_count", len(spans),
+				"err", err)
+			if p.metrics != nil {
+				p.metrics.RecordWriteError()
+			}
+			continue
 		}
 
 		// Evaluate eval rules against written spans.
 		rules, err := p.listEvalRules(ctx)
 		if err != nil {
-			return fmt.Errorf("pipeline: list eval rules: %w", err)
+			slog.ErrorContext(ctx, "list eval rules failed, skipping eval",
+				"err", err)
+			continue
 		}
 
 		for _, span := range spans {
@@ -97,6 +114,9 @@ func (p *Pipeline) Run(ctx context.Context) error {
 
 // writeSpans writes a batch of spans to DuckDB using INSERT OR REPLACE.
 func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
+	if p.writeErr != nil {
+		return p.writeErr
+	}
 	if len(spans) == 0 {
 		return nil
 	}

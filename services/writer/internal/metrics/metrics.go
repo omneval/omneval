@@ -48,6 +48,24 @@ var (
 		},
 		[]string{"project_id"},
 	)
+
+	// DequeueErrors counts total dequeue failures from the Redis ingest queue.
+	DequeueErrors = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "lantern_writer",
+			Name:      "dequeue_errors_total",
+			Help:      "Total number of errors encountered when dequeuing from the Redis ingest queue.",
+		},
+	)
+
+	// WriteErrors counts total DuckDB write failures.
+	WriteErrors = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "lantern_writer",
+			Name:      "write_errors_total",
+			Help:      "Total number of errors encountered when writing spans to DuckDB.",
+		},
+	)
 )
 
 // Register registers all Prometheus metric families to the global registry.
@@ -63,6 +81,12 @@ func Register(disableProjectLabels bool) error {
 	}
 	if err := prometheus.Register(ArchiveSpans); err != nil {
 		return fmt.Errorf("register archive spans: %w", err)
+	}
+	if err := prometheus.Register(DequeueErrors); err != nil {
+		return fmt.Errorf("register dequeue errors: %w", err)
+	}
+	if err := prometheus.Register(WriteErrors); err != nil {
+		return fmt.Errorf("register write errors: %w", err)
 	}
 	return nil
 }
@@ -107,4 +131,14 @@ func (m *WriterMetrics) RecordArchiveSpans(projectID string, count int) {
 		return
 	}
 	ArchiveSpans.WithLabelValues(projectID).Add(float64(count))
+}
+
+// RecordDequeueError increments the dequeue error counter.
+func (m *WriterMetrics) RecordDequeueError() {
+	DequeueErrors.Inc()
+}
+
+// RecordWriteError increments the write error counter.
+func (m *WriterMetrics) RecordWriteError() {
+	WriteErrors.Inc()
 }
