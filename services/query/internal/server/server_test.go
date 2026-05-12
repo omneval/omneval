@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zbloss/lantern/internal/domain"
 	"github.com/zbloss/lantern/internal/fake"
 	"github.com/zbloss/lantern/services/query/internal/auth"
 )
