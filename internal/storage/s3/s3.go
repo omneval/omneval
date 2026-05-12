@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
+	"strings"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -27,12 +29,18 @@ func New(cfg *config.StorageConfig) *Store {
 		return nil
 	}
 
-	client, err := minio.New(cfg.Endpoint, &minio.Options{
+	// Strip http:// or https:// scheme — minio.New expects bare host:port.
+	endpoint := strings.TrimPrefix(cfg.Endpoint, "http://")
+	endpoint = strings.TrimPrefix(endpoint, "https://")
+	secure := !strings.HasPrefix(cfg.Endpoint, "http://")
+
+	client, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
-		Secure: !hasHTTPPrefix(cfg.Endpoint),
+		Secure: secure,
 		Region: cfg.Region,
 	})
 	if err != nil {
+		log.Printf("WARN s3: minio client creation failed endpoint=%s err=%v", cfg.Endpoint, err)
 		return nil
 	}
 
@@ -156,7 +164,4 @@ func (s *Store) EnsureBucket(ctx context.Context) error {
 	return nil
 }
 
-// hasHTTPPrefix returns true if the endpoint starts with "http://".
-func hasHTTPPrefix(endpoint string) bool {
-	return len(endpoint) > 7 && endpoint[:7] == "http://"
-}
+
