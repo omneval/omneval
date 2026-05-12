@@ -19,6 +19,8 @@ import (
 	"github.com/zbloss/lantern/internal/config"
 	"github.com/zbloss/lantern/internal/duckdb"
 	"github.com/zbloss/lantern/internal/leader"
+	"github.com/zbloss/lantern/internal/metadata"
+	"github.com/zbloss/lantern/internal/metadata/postgres"
 	"github.com/zbloss/lantern/internal/metadata/sqlite"
 	"github.com/zbloss/lantern/internal/pricing"
 	"github.com/zbloss/lantern/internal/probe"
@@ -83,18 +85,11 @@ func Run() error {
 		return fmt.Errorf("writer: open duckdb: %w", err)
 	}
 
-	// Open metadata store (SQLite for now).
-	meta, err := sqlite.New("lantern_meta.db")
+	// Open metadata store based on configured database driver.
+	meta, err := openMetadataStore(cfg)
 	if err != nil {
 		db.Close()
 		return fmt.Errorf("writer: open metadata: %w", err)
-	}
-
-	// Run migrations.
-	if err := meta.Migrate(context.Background()); err != nil {
-		db.Close()
-		meta.Close()
-		return fmt.Errorf("writer: migrate: %w", err)
 	}
 
 	// Connect to Redis.
@@ -463,4 +458,45 @@ func releaseLeaderLock(ctx context.Context, election *leader.LeaderElection) err
 		slog.Info("writer: released leader lock")
 	}
 	return nil
+}
+
+// openMetadataStore creates a metadata store from config.
+// It supports "sqlite" and "postgres" drivers, matching the query and
+// ingest services. When driver is empty or "sqlite", it uses SQLite.
+func openMetadataStore(cfg *config.Config) (metadata.Store, error) {
+	driver := cfg.Database.Driver
+	dsn := cfg.Database.DSN
+
+	switch driver {
+	case "", "sqlite":
+		if dsn == "" {
+			dsn = "lantern_meta.db"
+		}
+		slog.Info("writer: opening SQLite metadata store", "path", dsn)
+		store, err := sqlite.New(dsn)
+		if err != nil {
+			return nil, err
+		}
+		if err := store.Migrate(context.Background()); err != nil {
+			store.Close()
+			return nil, fmt.Errorf("writer: migrate: %w", err)
+		}
+		return store, nil
+	case "postgres":
+		if dsn == "" {
+			return nil, fmt.Errorf("writer: postgres driver requires database.dsn")
+		}
+		slog.Info("writer: opening Postgres metadata store", "dsn", dsn)
+		store, err := postgres.New(dsn)
+		if err != nil {
+			return nil, fmt.Errorf("writer: postgres metadata store: %w", err)
+		}
+		if err := store.Migrate(context.Background()); err != nil {
+			store.Close()
+			return nil, fmt.Errorf("writer: migrate: %w", err)
+		}
+		return store, nil
+	default:
+		return nil, fmt.Errorf("metadata: unknown driver: %s", driver)
+	}
 }
