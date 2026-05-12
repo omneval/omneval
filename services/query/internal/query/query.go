@@ -252,15 +252,21 @@ func (q *SpanQuery) buildWhereClause() ([]any, string) {
 	clauses = append(clauses, "start_time >= ? AND start_time <= ?")
 	args = append(args, q.from, q.to)
 
-	// User-provided filters.
+	// Special filters (e.g., bookmarked) require custom SQL beyond simple
+	// column comparisons. These are validated separately by compileSpecialFilter.
 	for _, f := range q.filters {
-		// Handle special fields (bookmarked) that need custom SQL.
 		if _, ok := specialFilterFields[f.Field]; ok {
 			compiled, specialArgs := q.compileSpecialFilter(f)
 			if compiled != "" {
 				clauses = append(clauses, compiled)
 				args = append(args, specialArgs...)
 			}
+		}
+	}
+
+	// Regular filters map directly to span column comparisons.
+	for _, f := range q.filters {
+		if _, ok := specialFilterFields[f.Field]; ok {
 			continue
 		}
 		compiled, a, err := compileFilter(f)
@@ -338,15 +344,15 @@ func compileFilter(f SpanQueryFilter) (sql string, args []any, err error) {
 	return fmt.Sprintf("%s %s ?", field, opSymbol), args, nil
 }
 
-// compileSpecialFilter handles non-column filters that need custom SQL.
-// Currently supports "bookmarked" which checks the bookmarks table.
-// Returns (sqlClause, args) — projectID is passed as a parameterized arg.
+// compileSpecialFilter generates SQL for non-column filters that require
+// custom logic beyond simple column comparisons. Currently only supports
+// "bookmarked", which checks the bookmarks table for existence.
+//
+// The caller (buildWhereClause) guarantees that the filter field is a known
+// special field. This method returns an empty string for unsupported
+// operators or values, causing the filter to be silently skipped.
 func (q *SpanQuery) compileSpecialFilter(f SpanQueryFilter) (string, []any) {
-	if f.Field != "bookmarked" {
-		return "", nil
-	}
-
-	// Only "eq" operator is supported for bookmarked.
+	// Only equality operator is supported for bookmarked filters.
 	if FilterOp(f.Op) != OpEq {
 		return "", nil
 	}
@@ -356,11 +362,11 @@ func (q *SpanQuery) compileSpecialFilter(f SpanQueryFilter) (string, []any) {
 		return "", nil
 	}
 
-	// projectID is injected from the authenticated session — never from client input.
-	if bookmarked {
-		return "EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)", []any{q.projectID}
+	sqlClause := "EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)"
+	if !bookmarked {
+		sqlClause = "NOT EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)"
 	}
-	return "NOT EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)", []any{q.projectID}
+	return sqlClause, []any{q.projectID}
 }
 
 // validateFilter checks that a SpanQueryFilter has a valid field and operator.

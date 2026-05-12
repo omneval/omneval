@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/zbloss/lantern/internal/storage"
@@ -32,12 +33,6 @@ func TestCompileSpecialFilter_Bookmarked(t *testing.T) {
 		{
 			name:     "unsupported operator",
 			filter:   SpanQueryFilter{Field: "bookmarked", Op: "neq", Value: true},
-			wantSQL:  "",
-			wantArgs: nil,
-		},
-		{
-			name:     "unsupported field",
-			filter:   SpanQueryFilter{Field: "unknown", Op: "eq", Value: true},
 			wantSQL:  "",
 			wantArgs: nil,
 		},
@@ -103,7 +98,7 @@ func TestSpanQuery_BookmarkedFilterInWhereClause(t *testing.T) {
 	_, where := q.buildWhereClause()
 
 	wantClause := "EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)"
-	if !containsStr(where, wantClause) {
+	if !strings.Contains(where, wantClause) {
 		t.Errorf("WHERE clause missing bookmark filter.\nGot: %s\nWant substring: %s", where, wantClause)
 	}
 }
@@ -119,18 +114,9 @@ func TestSpanQuery_BookmarkedFalseFilterInWhereClause(t *testing.T) {
 	_, where := q.buildWhereClause()
 
 	wantClause := "NOT EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)"
-	if !containsStr(where, wantClause) {
+	if !strings.Contains(where, wantClause) {
 		t.Errorf("WHERE clause missing unbookmarked filter.\nGot: %s\nWant substring: %s", where, wantClause)
 	}
-}
-
-func containsStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func TestNewSpanQuery_NilS3Store(t *testing.T) {
