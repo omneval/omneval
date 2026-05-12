@@ -102,7 +102,7 @@ func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
 			model, input, output, input_tokens, output_tokens, cost_usd,
 			prompt_name, prompt_version,
 			status_code, status_message, attributes
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("pipeline: prepare: %w", err)

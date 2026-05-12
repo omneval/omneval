@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -601,5 +602,84 @@ func TestMatchesFilter_EmptyNOTMatchesAll(t *testing.T) {
 	f := domain.EvalFilter{Not: nil}
 	if !matchesFilter(span, f) {
 		t.Error("expected match: nil NOT matches all")
+	}
+}
+
+// TestWriteSpans_SQLPlaceholderCount verifies the INSERT statement has
+// the same number of column names and VALUES placeholders (issue #53).
+func TestWriteSpans_SQLPlaceholderCount(t *testing.T) {
+	stmtSQL := `
+		INSERT OR REPLACE INTO spans (
+			span_id, trace_id, parent_id, project_id, service_name,
+			name, kind, start_time, end_time,
+			model, input, output, input_tokens, output_tokens, cost_usd,
+			prompt_name, prompt_version,
+			status_code, status_message, attributes
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	// Extract column list: everything between first '(' after INTO spans
+	colStart := strings.Index(stmtSQL, "INTO spans (")
+	if colStart == -1 {
+		t.Fatal("could not find column list in SQL")
+	}
+	colStart += len("INTO spans (")
+
+	// Find matching closing paren
+	depth := 1
+	colEnd := colStart
+	for i := colStart; i < len(stmtSQL); i++ {
+		if stmtSQL[i] == '(' {
+			depth++
+		} else if stmtSQL[i] == ')' {
+			depth--
+			if depth == 0 {
+				colEnd = i
+				break
+			}
+		}
+	}
+	colList := stmtSQL[colStart:colEnd]
+	columns := strings.FieldsFunc(colList, func(r rune) bool { return r == ',' })
+	for i := range columns {
+		columns[i] = strings.TrimSpace(columns[i])
+	}
+
+	// Extract VALUES clause
+	valStart := strings.Index(stmtSQL, "VALUES (")
+	if valStart == -1 {
+		t.Fatal("could not find VALUES clause in SQL")
+	}
+	valStart += len("VALUES (")
+
+	// Find matching closing paren
+	depth = 1
+	valEnd := valStart
+	for i := valStart; i < len(stmtSQL); i++ {
+		if stmtSQL[i] == '(' {
+			depth++
+		} else if stmtSQL[i] == ')' {
+			depth--
+			if depth == 0 {
+				valEnd = i
+				break
+			}
+		}
+	}
+	valList := stmtSQL[valStart:valEnd]
+	placeholders := strings.FieldsFunc(valList, func(r rune) bool { return r == ',' })
+	for i := range placeholders {
+		placeholders[i] = strings.TrimSpace(placeholders[i])
+	}
+
+	if len(columns) != len(placeholders) {
+		t.Errorf("column/placeholder mismatch: %d columns but %d placeholders", len(columns), len(placeholders))
+		for i, col := range columns {
+			if i < len(placeholders) {
+				t.Logf("  col[%d] = %s vs val[%d] = %s", i, col, i, placeholders[i])
+			} else {
+				t.Logf("  col[%d] = %s (no matching placeholder)", i, col)
+			}
+		}
 	}
 }
