@@ -322,6 +322,38 @@ func TestAPIKey_Revoke(t *testing.T) {
 	}
 }
 
+func TestAPIKey_GetByHash_NilServiceName(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(ctx, t)
+	defer s.Close()
+
+	now := time.Now().UTC()
+	s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp"})
+	s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1"})
+
+	// Insert a project-scoped key with truly NULL service_name via raw SQL
+	// (domain.APIKey{} would default to empty string, not NULL)
+	_, err := s.DB().ExecContext(ctx,
+		`INSERT INTO api_keys (key_id, project_id, kind, service_name, hashed_key, created_at)
+		 VALUES ('key-null', 'proj-1', 'project', NULL, 'sha256hash-null', $1)`,
+		now,
+	)
+	if err != nil {
+		t.Fatalf("insert NULL service_name: %v", err)
+	}
+
+	got, err := s.GetAPIKeyByHash(ctx, "sha256hash-null")
+	if err != nil {
+		t.Fatalf("get api key with NULL service_name: %v", err)
+	}
+	if got.KeyID != "key-null" || got.Kind != domain.APIKeyKindProject {
+		t.Errorf("unexpected key: %v", got)
+	}
+	if got.ServiceName != "" {
+		t.Errorf("expected empty string for nil service_name, got %q", got.ServiceName)
+	}
+}
+
 func TestAPIKey_ListByProject(t *testing.T) {
 	ctx := context.Background()
 	s := openTestStore(ctx, t)
