@@ -18,6 +18,20 @@ import (
 	"github.com/zbloss/lantern/services/writer/internal/metrics"
 )
 
+// insertSpansSQL is the INSERT OR REPLACE statement for the DuckDB spans table.
+// Columns: span_id, trace_id, parent_id, project_id, service_name, name, kind,
+// start_time, end_time, model, input, output, input_tokens, output_tokens,
+// cost_usd, prompt_name, prompt_version, status_code, status_message, attributes.
+const insertSpansSQL = `
+	INSERT OR REPLACE INTO spans (
+		span_id, trace_id, parent_id, project_id, service_name,
+		name, kind, start_time, end_time,
+		model, input, output, input_tokens, output_tokens, cost_usd,
+		prompt_name, prompt_version,
+		status_code, status_message, attributes
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
 // Pipeline drains the Redis ingest queue and batches writes into DuckDB.
 type Pipeline struct {
 	ingest  queue.IngestQueue
@@ -95,15 +109,7 @@ func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(ctx, `
-		INSERT OR REPLACE INTO spans (
-			span_id, trace_id, parent_id, project_id, service_name,
-			name, kind, start_time, end_time,
-			model, input, output, input_tokens, output_tokens, cost_usd,
-			prompt_name, prompt_version,
-			status_code, status_message, attributes
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`)
+	stmt, err := tx.PrepareContext(ctx, insertSpansSQL)
 	if err != nil {
 		return fmt.Errorf("pipeline: prepare: %w", err)
 	}
@@ -179,7 +185,7 @@ func (p *Pipeline) evalSpans(ctx context.Context, span *domain.Span, rules []dom
 		if !rule.Enabled {
 			continue
 		}
-		if !matchesFilter(span, rule.Filter) {
+		if !rule.Filter.Matches(span) {
 			continue
 		}
 		// Sample based on sample rate.
@@ -206,12 +212,6 @@ func (p *Pipeline) evalSpans(ctx context.Context, span *domain.Span, rules []dom
 			}
 		}
 	}
-}
-
-// matchesFilter checks if a span matches an EvalFilter.
-// Delegates to EvalFilter.Matches for recursive AND/OR/NOT evaluation.
-func matchesFilter(span *domain.Span, f domain.EvalFilter) bool {
-	return f.Matches(span)
 }
 
 // listEvalRules fetches all active eval rules for the project.
@@ -241,8 +241,9 @@ func attributesJSON(attrs map[string]any) string {
 	return string(data)
 }
 
-// sampleRateDecides returns true if a span should be evaluated based on
-// the given sample rate (0.0–1.0). Always returns true for rate >= 1.0.
+// sampleRateDecides returns true when a span is selected for sampling
+// based on the given sample rate (0.0–1.0). For rate >= 1.0, always returns true.
+// The caller inverts the result to decide whether to enqueue an eval job.
 func sampleRateDecides(rate float64) bool {
 	if rate >= 1.0 {
 		return true

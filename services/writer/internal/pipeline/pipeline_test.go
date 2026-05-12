@@ -16,7 +16,7 @@ func TestMatchesFilter_AllNil(t *testing.T) {
 		ProjectID: "proj-1",
 	}
 	f := domain.EvalFilter{}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match with empty filter")
 	}
 }
@@ -25,13 +25,13 @@ func TestMatchesFilter_Kind(t *testing.T) {
 	span := &domain.Span{Kind: domain.SpanKindLLM}
 	kind := domain.SpanKindTool
 	f := domain.EvalFilter{Kind: &kind}
-	if matchesFilter(span, f) {
+	if f.Matches(span) {
 		t.Error("expected no match for wrong kind")
 	}
 
 	kind2 := domain.SpanKindLLM
 	f2 := domain.EvalFilter{Kind: &kind2}
-	if !matchesFilter(span, f2) {
+	if !f2.Matches(span) {
 		t.Error("expected match for correct kind")
 	}
 }
@@ -39,12 +39,12 @@ func TestMatchesFilter_Kind(t *testing.T) {
 func TestMatchesFilter_Model(t *testing.T) {
 	span := &domain.Span{Model: "gpt-4o"}
 	f := domain.EvalFilter{Model: strPtr("gpt-4o")}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match for model")
 	}
 
 	f2 := domain.EvalFilter{Model: strPtr("claude-sonnet-4-6")}
-	if matchesFilter(span, f2) {
+	if f2.Matches(span) {
 		t.Error("expected no match for different model")
 	}
 }
@@ -52,7 +52,7 @@ func TestMatchesFilter_Model(t *testing.T) {
 func TestMatchesFilter_ServiceName(t *testing.T) {
 	span := &domain.Span{ServiceName: "my-service"}
 	f := domain.EvalFilter{ServiceName: strPtr("my-service")}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match for service name")
 	}
 }
@@ -60,7 +60,7 @@ func TestMatchesFilter_ServiceName(t *testing.T) {
 func TestMatchesFilter_PromptName(t *testing.T) {
 	span := &domain.Span{PromptName: "chat-prompt"}
 	f := domain.EvalFilter{PromptName: strPtr("chat-prompt")}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match for prompt name")
 	}
 }
@@ -68,7 +68,7 @@ func TestMatchesFilter_PromptName(t *testing.T) {
 func TestMatchesFilter_StatusCode(t *testing.T) {
 	span := &domain.Span{StatusCode: "ok"}
 	f := domain.EvalFilter{StatusCode: strPtr("ok")}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match for status code")
 	}
 }
@@ -77,13 +77,13 @@ func TestMatchesFilter_MinCost(t *testing.T) {
 	span := &domain.Span{CostUSD: 0.05}
 	min := 0.01
 	f := domain.EvalFilter{MinCostUSD: &min}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match for min cost")
 	}
 
 	min2 := 0.1
 	f2 := domain.EvalFilter{MinCostUSD: &min2}
-	if matchesFilter(span, f2) {
+	if f2.Matches(span) {
 		t.Error("expected no match, cost below min")
 	}
 }
@@ -92,13 +92,13 @@ func TestMatchesFilter_MaxCost(t *testing.T) {
 	span := &domain.Span{CostUSD: 0.05}
 	max := 0.1
 	f := domain.EvalFilter{MaxCostUSD: &max}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match for max cost")
 	}
 
 	max2 := 0.01
 	f2 := domain.EvalFilter{MaxCostUSD: &max2}
-	if matchesFilter(span, f2) {
+	if f2.Matches(span) {
 		t.Error("expected no match, cost above max")
 	}
 }
@@ -110,13 +110,13 @@ func TestMatchesFilter_MinDurationMS(t *testing.T) {
 
 	minDur := int64(1000)
 	f := domain.EvalFilter{MinDurationMS: &minDur}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match for min duration")
 	}
 
 	minDur2 := int64(3000)
 	f2 := domain.EvalFilter{MinDurationMS: &minDur2}
-	if matchesFilter(span, f2) {
+	if f2.Matches(span) {
 		t.Error("expected no match, duration below min")
 	}
 }
@@ -128,13 +128,13 @@ func TestMatchesFilter_MaxDurationMS(t *testing.T) {
 
 	maxDur := int64(5000)
 	f := domain.EvalFilter{MaxDurationMS: &maxDur}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match for max duration")
 	}
 
 	maxDur2 := int64(500)
 	f2 := domain.EvalFilter{MaxDurationMS: &maxDur2}
-	if matchesFilter(span, f2) {
+	if f2.Matches(span) {
 		t.Error("expected no match, duration above max")
 	}
 }
@@ -159,7 +159,7 @@ func TestMatchesFilter_MultipleConditions(t *testing.T) {
 		MinCostUSD: &minCost,
 		MaxCostUSD: &maxCost,
 	}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match for multiple conditions")
 	}
 
@@ -170,7 +170,7 @@ func TestMatchesFilter_MultipleConditions(t *testing.T) {
 		Model:      &model2,
 		MinCostUSD: &minCost,
 	}
-	if matchesFilter(span, f2) {
+	if f2.Matches(span) {
 		t.Error("expected no match, wrong model")
 	}
 }
@@ -191,7 +191,7 @@ func TestMatchesFilter_AttributesMatch_TopLevel(t *testing.T) {
 			{Key: "user_id", Pattern: pattern},
 		},
 	}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match for top-level key")
 	}
 
@@ -201,7 +201,7 @@ func TestMatchesFilter_AttributesMatch_TopLevel(t *testing.T) {
 			{Key: "user_id", Pattern: pattern2},
 		},
 	}
-	if matchesFilter(span, f2) {
+	if f2.Matches(span) {
 		t.Error("expected no match, pattern doesn't match value")
 	}
 }
@@ -218,7 +218,7 @@ func TestMatchesFilter_AttributesMatch_NestedDotPath(t *testing.T) {
 			{Key: "metadata.user_id", Pattern: `usr-456`},
 		},
 	}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match for dot-notation path")
 	}
 
@@ -227,7 +227,7 @@ func TestMatchesFilter_AttributesMatch_NestedDotPath(t *testing.T) {
 			{Key: "metadata.tier", Pattern: `premium`},
 		},
 	}
-	if !matchesFilter(span, f2) {
+	if !f2.Matches(span) {
 		t.Error("expected match for nested key 'tier'")
 	}
 }
@@ -244,7 +244,7 @@ func TestMatchesFilter_AttributesMatch_NestedDepth3(t *testing.T) {
 			{Key: "a.b.c", Pattern: `deep-value`},
 		},
 	}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match for depth-3 dot path")
 	}
 }
@@ -262,7 +262,7 @@ func TestMatchesFilter_AttributesMatch_MissingIntermediateKey(t *testing.T) {
 			{Key: "metadata.extra", Pattern: `.*`},
 		},
 	}
-	if matchesFilter(span, f) {
+	if f.Matches(span) {
 		t.Error("expected no match for missing intermediate key")
 	}
 }
@@ -277,7 +277,7 @@ func TestMatchesFilter_AttributesMatch_MissingTopLevelKey(t *testing.T) {
 			{Key: "nonexistent", Pattern: `.*`},
 		},
 	}
-	if matchesFilter(span, f) {
+	if f.Matches(span) {
 		t.Error("expected no match for missing top-level key")
 	}
 }
@@ -294,7 +294,7 @@ func TestMatchesFilter_AttributesMatch_NonObjectIntermediate(t *testing.T) {
 			{Key: "metadata.user_id", Pattern: `.*`},
 		},
 	}
-	if matchesFilter(span, f) {
+	if f.Matches(span) {
 		t.Error("expected no match for non-object intermediate")
 	}
 }
@@ -309,7 +309,7 @@ func TestMatchesFilter_AttributesMatch_AttributesNil(t *testing.T) {
 			{Key: "user_id", Pattern: `.*`},
 		},
 	}
-	if matchesFilter(span, f) {
+	if f.Matches(span) {
 		t.Error("expected no match when attributes is nil")
 	}
 }
@@ -328,7 +328,7 @@ func TestMatchesFilter_AttributesMatch_MultipleConditionsAllMatch(t *testing.T) 
 			{Key: "metadata.user_id", Pattern: `abc-123`},
 		},
 	}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match for multiple conditions all matching")
 	}
 }
@@ -347,7 +347,7 @@ func TestMatchesFilter_AttributesMatch_MultipleConditionsOneFails(t *testing.T) 
 			{Key: "metadata.user_id", Pattern: `abc-123`},
 		},
 	}
-	if matchesFilter(span, f) {
+	if f.Matches(span) {
 		t.Error("expected no match, one condition fails")
 	}
 }
@@ -366,7 +366,7 @@ func TestMatchesFilter_OR_TwoLeafConditions(t *testing.T) {
 			{Model: &model2},
 		},
 	}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match: span model matches first OR branch")
 	}
 }
@@ -382,7 +382,7 @@ func TestMatchesFilter_OR_NeitherBranchMatches(t *testing.T) {
 			{Model: &model2},
 		},
 	}
-	if matchesFilter(span, f) {
+	if f.Matches(span) {
 		t.Error("expected no match: span model matches neither OR branch")
 	}
 }
@@ -402,7 +402,7 @@ func TestMatchesFilter_OR_CombinedWithTopLevelAnd(t *testing.T) {
 			{Model: &model2},
 		},
 	}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match: kind matches AND Or branch matches")
 	}
 }
@@ -419,7 +419,7 @@ func TestMatchesFilter_NOT(t *testing.T) {
 			Model: &model,
 		},
 	}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match: span model is NOT gpt-4o")
 	}
 }
@@ -434,7 +434,7 @@ func TestMatchesFilter_NOT_Fails(t *testing.T) {
 			Model: &model,
 		},
 	}
-	if matchesFilter(span, f) {
+	if f.Matches(span) {
 		t.Error("expected no match: span model IS gpt-4o, so NOT should reject")
 	}
 }
@@ -451,7 +451,7 @@ func TestMatchesFilter_NOT_CombinedWithTopLevel(t *testing.T) {
 			Model: &model,
 		},
 	}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match: kind is llm and model is NOT gpt-4o")
 	}
 }
@@ -479,7 +479,7 @@ func TestMatchesFilter_NestedANDInsideOR(t *testing.T) {
 			},
 		},
 	}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match: second AND branch matches")
 	}
 }
@@ -504,7 +504,7 @@ func TestMatchesFilter_NestedANDInsideOR_NeitherMatches(t *testing.T) {
 			},
 		},
 	}
-	if matchesFilter(span, f) {
+	if f.Matches(span) {
 		t.Error("expected no match: neither AND branch matches (wrong model for llm, wrong kind for tool)")
 	}
 }
@@ -535,7 +535,7 @@ func TestMatchesFilter_DeeplyNested(t *testing.T) {
 			},
 		},
 	}
-	if matchesFilter(span, f) {
+	if f.Matches(span) {
 		t.Error("expected no match: neither OR branch matches")
 	}
 }
@@ -562,7 +562,7 @@ func TestMatchesFilter_DeeplyNested_Matches(t *testing.T) {
 			},
 		},
 	}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match: at least one OR branch matches")
 	}
 }
@@ -572,7 +572,7 @@ func TestMatchesFilter_DeeplyNested_Matches(t *testing.T) {
 func TestMatchesFilter_EmptyFilter(t *testing.T) {
 	span := &domain.Span{Model: "anything"}
 	f := domain.EvalFilter{}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match: empty filter matches all spans")
 	}
 }
@@ -581,7 +581,7 @@ func TestMatchesFilter_EmptyANDMatchesAll(t *testing.T) {
 	// Empty AND array is invalid, so skip this. Instead test nil AND.
 	span := &domain.Span{Model: "anything"}
 	f := domain.EvalFilter{And: nil}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match: nil AND matches all")
 	}
 }
@@ -590,7 +590,7 @@ func TestMatchesFilter_EmptyORMatchesAll(t *testing.T) {
 	// Empty OR array is invalid, so skip this. Instead test nil OR.
 	span := &domain.Span{Model: "anything"}
 	f := domain.EvalFilter{Or: nil}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match: nil OR matches all")
 	}
 }
@@ -600,7 +600,7 @@ func TestMatchesFilter_EmptyNOTMatchesAll(t *testing.T) {
 	// The filter should match all spans (empty filter behavior).
 	span := &domain.Span{Model: "anything"}
 	f := domain.EvalFilter{Not: nil}
-	if !matchesFilter(span, f) {
+	if !f.Matches(span) {
 		t.Error("expected match: nil NOT matches all")
 	}
 }
@@ -608,15 +608,7 @@ func TestMatchesFilter_EmptyNOTMatchesAll(t *testing.T) {
 // TestWriteSpans_SQLPlaceholderCount verifies the INSERT statement has
 // the same number of column names and VALUES placeholders (issue #53).
 func TestWriteSpans_SQLPlaceholderCount(t *testing.T) {
-	stmtSQL := `
-		INSERT OR REPLACE INTO spans (
-			span_id, trace_id, parent_id, project_id, service_name,
-			name, kind, start_time, end_time,
-			model, input, output, input_tokens, output_tokens, cost_usd,
-			prompt_name, prompt_version,
-			status_code, status_message, attributes
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
+	stmtSQL := insertSpansSQL
 
 	// Extract column list: everything between first '(' after INTO spans
 	colStart := strings.Index(stmtSQL, "INTO spans (")
