@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/minio/minio-go/v7"
@@ -40,7 +40,7 @@ func New(cfg *config.StorageConfig) *Store {
 		Region: cfg.Region,
 	})
 	if err != nil {
-		log.Printf("WARN s3: minio client creation failed endpoint=%s err=%v", cfg.Endpoint, err)
+		slog.Warn("s3: minio client creation failed", "endpoint", cfg.Endpoint, "err", err)
 		return nil
 	}
 
