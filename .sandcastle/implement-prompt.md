@@ -63,7 +63,7 @@ If the task is not complete, leave a comment on the issue with what was done and
 
 Do not close the issue — this will be done by the merge agent.
 
-Once complete, output <promise>COMPLETE</promise>.
+Once complete, YOU MUST output exactly <promise>COMPLETE</promise>.
 
 # FINAL RULES
 

@@ -209,7 +209,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   try {
     const implement = await sandbox.run({
       name: "implementer",
-      maxIterations: 100,
+      maxIterations: 50,
       agent,
       promptFile: "./.sandcastle/implement-prompt.md",
       promptArgs: {
@@ -222,7 +222,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     if (implement.commits.length > 0) {
       await sandbox.run({
         name: "reviewer",
-        maxIterations: 1,
+        maxIterations: 2,
         agent,
         promptFile: "./.sandcastle/review-prompt.md",
         promptArgs: { BRANCH: issue.branch },
@@ -268,7 +268,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     hooks: mergerHooks,
     sandbox: docker(),
     name: "merger",
-    maxIterations: 1,
+    maxIterations: 2,
     agent,
     promptFile: "./.sandcastle/merge-prompt.md",
     promptArgs: {

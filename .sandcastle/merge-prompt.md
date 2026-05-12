@@ -30,4 +30,4 @@ Here are all the issues:
 
 {{ISSUES}}
 
-Once you've merged everything you can, output <promise>COMPLETE</promise>.
+Once you've merged everything you can, YOU MUST output exactly <promise>COMPLETE</promise>.

@@ -1,0 +1,49 @@
+{
+  "issues": [
+    {
+      "id": "53",
+      "title": "Writer crashes on span ingestion -- INSERT has 20 columns but 19 VALUES placeholders",
+      "branch": "sandcastle/issue-53-fix-writer-insert-placeholder"
+    },
+    {
+      "id": "54",
+      "title": "S3 client silently fails when endpoint includes http:// scheme",
+      "branch": "sandcastle/issue-54-strip-s3-endpoint-scheme"
+    },
+    {
+      "id": "55",
+      "title": "Session middleware never applied to API routes",
+      "branch": "sandcastle/issue-55-apply-session-middleware"
+    },
+    {
+      "id": "56",
+      "title": "Postgres GetAPIKeyByHash fails with NULL service_name",
+      "branch": "sandcastle/issue-56-fix-null-servicename-scan"
+    },
+    {
+      "id": "60",
+      "title": "Writer and query service use different S3 snapshot key paths",
+      "branch": "sandcastle/issue-60-fix-s3-snapshot-key-mismatch"
+    },
+    {
+      "id": "61",
+      "title": "Writer uses hardcoded in-memory SQLite instead of configured Postgres",
+      "branch": "sandcastle/issue-61-writer-use-configured-database"
+    },
+    {
+      "id": "62",
+      "title": "Spans permanently lost when writer crashes mid-batch",
+      "branch": "sandcastle/issue-62-writer-crash-recovery-retry"
+    },
+    {
+      "id": "58",
+      "title": "Python SDK missing top-level exports",
+      "branch": "sandcastle/issue-58-python-sdk-top-level-exports"
+    },
+    {
+      "id": "59",
+      "title": "Web UI needs significant visual polish",
+      "branch": "sandcastle/issue-59-ui-visual-polish"
+    }
+  ]
+}
