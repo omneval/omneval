@@ -56,20 +56,6 @@ function HomeIcon() {
   );
 }
 
-function ChartIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-      <path
-        d="M3 15V8m3 7V5m3 10V9m3 6V3"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 function PromptIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
@@ -311,7 +297,7 @@ export default function Sidebar({ collapsed, onToggle, active, onNavigate, onLog
             active={active}
             onNavigate={onNavigate}
             collapsed={collapsed}
-            defaultOpen={section.label === "" || section.label === "Observability"}
+            defaultOpen={section.label === ""}
           />
         ))}
       </nav>

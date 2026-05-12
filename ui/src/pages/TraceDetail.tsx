@@ -124,8 +124,6 @@ export default function TraceDetailPage({
     );
   }
 
-  const totalTokens = (span: Span) => span.input_tokens + span.output_tokens;
-
   // Determine span color based on kind
   const kindColor: Record<string, string> = {
     llm: colors.accents.emberFlare,

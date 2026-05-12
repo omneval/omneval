@@ -4,6 +4,52 @@ interface BreadcrumbProps {
   items: { label: string; onClick?: () => void }[];
 }
 
+function SeparatorArrow() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 16 16"
+      fill="none"
+      className="flex-shrink-0 opacity-50"
+      style={{ color: colors.typography.ashGrey }}
+    >
+      <path
+        d="M6 4l4 4-4 4"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function BreadcrumbButton({
+  label,
+  onClick,
+  isLast,
+}: {
+  label: string;
+  onClick?: () => void;
+  isLast: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`transition-colors ${
+        isLast
+          ? "text-lantern-pure font-medium"
+          : "text-lantern-ash hover:text-lantern-pure"
+      }`}
+      disabled={isLast}
+      aria-current={isLast ? "page" : undefined}
+    >
+      {label}
+    </button>
+  );
+}
+
 export default function Breadcrumb({ items }: BreadcrumbProps) {
   if (items.length === 0) return null;
 
@@ -13,55 +59,26 @@ export default function Breadcrumb({ items }: BreadcrumbProps) {
         const isLast = index === items.length - 1;
         const handleClick = isLast ? undefined : item.onClick;
 
-        if (index > 0) {
+        if (index === 0) {
           return (
-            <div key={index} className="flex items-center gap-1">
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="none"
-                className="flex-shrink-0 opacity-50"
-                style={{ color: colors.typography.ashGrey }}
-              >
-                <path
-                  d="M6 4l4 4-4 4"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <button
-                onClick={handleClick}
-                className={`transition-colors ${
-                  isLast
-                    ? "text-lantern-pure font-medium"
-                    : "text-lantern-ash hover:text-lantern-pure"
-                }`}
-                disabled={isLast}
-                aria-current={isLast ? "page" : undefined}
-              >
-                {item.label}
-              </button>
-            </div>
+            <BreadcrumbButton
+              key={item.label}
+              label={item.label}
+              onClick={handleClick}
+              isLast={isLast}
+            />
           );
         }
 
         return (
-          <button
-            key={item.label}
-            onClick={handleClick}
-            className={`transition-colors ${
-              isLast
-                ? "text-lantern-pure font-medium"
-                : "text-lantern-ash hover:text-lantern-pure"
-            }`}
-            disabled={isLast}
-            aria-current={isLast ? "page" : undefined}
-          >
-            {item.label}
-          </button>
+          <div key={index} className="flex items-center gap-1">
+            <SeparatorArrow />
+            <BreadcrumbButton
+              label={item.label}
+              onClick={handleClick}
+              isLast={isLast}
+            />
+          </div>
         );
       })}
     </nav>

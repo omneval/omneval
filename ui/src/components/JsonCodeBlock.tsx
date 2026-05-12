@@ -6,32 +6,41 @@ interface JsonCodeBlockProps {
   maxHeight?: number;
 }
 
-function highlightJson(json: string): string {
-  // Basic JSON syntax highlighting with regex
-  return json
+function escapeHtml(value: string): string {
+  return value
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(
-      /(".*?"(?!\w):)/g,
-      '<span style="color: var(--lantern-accent-glow)">"$1</span>:'
-    )
-    .replace(
-      /:\s*("(?:[^"\\]|\\.)*")/g,
-      ': <span style="color: var(--lantern-accent-flicker)">$1</span>'
-    )
-    .replace(
-      /:\s*(\d+\.?\d*)/g,
-      ': <span style="color: #82AAFF">$1</span>'
-    )
-    .replace(
-      /:\s*(true|false)/g,
-      ': <span style="color: #C792EA">$1</span>'
-    )
-    .replace(
-      /:\s*(null)/g,
-      ': <span style="color: #C792EA">$1</span>'
-    );
+    .replace(/>/g, "&gt;");
+}
+
+function highlightJson(json: string): string {
+  let escaped = escapeHtml(json);
+
+  // Highlight JSON keys (quoted strings followed by colon)
+  escaped = escaped.replace(
+    /(".*?"(?!\w):)/g,
+    '<span style="color: var(--lantern-accent-glow)">"$1</span>:'
+  );
+
+  // Highlight JSON string values
+  escaped = escaped.replace(
+    /:\s*("(?:[^"\\]|\\.)*")/g,
+    ': <span style="color: var(--lantern-accent-flicker)">$1</span>'
+  );
+
+  // Highlight JSON numbers
+  escaped = escaped.replace(
+    /:\s*(\d+\.?\d*)/g,
+    ': <span style="color: #82AAFF">$1</span>'
+  );
+
+  // Highlight JSON booleans and null
+  escaped = escaped.replace(
+    /:\s*(true|false|null)/g,
+    ': <span style="color: #C792EA">$1</span>'
+  );
+
+  return escaped;
 }
 
 export default function JsonCodeBlock({
@@ -47,17 +56,15 @@ export default function JsonCodeBlock({
     );
   }
 
-  let parsedJson: string;
   let rawOutput: string;
 
   try {
     const obj = JSON.parse(value);
-    parsedJson = JSON.stringify(obj, null, 2);
-    rawOutput = highlightJson(parsedJson);
+    const pretty = JSON.stringify(obj, null, 2);
+    rawOutput = highlightJson(pretty);
   } catch {
-    // If it's not valid JSON, show as plain text
-    parsedJson = value;
-    rawOutput = value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    // Not valid JSON — show as escaped plain text
+    rawOutput = escapeHtml(value);
   }
 
   return (
