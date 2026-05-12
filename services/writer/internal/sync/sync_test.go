@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-
 	"github.com/zbloss/lantern/internal/config"
 	"github.com/zbloss/lantern/internal/storage"
 	"github.com/zbloss/lantern/services/writer/internal/metrics"

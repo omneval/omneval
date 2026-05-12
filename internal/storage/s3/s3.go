@@ -170,5 +170,3 @@ func (s *Store) EnsureBucket(ctx context.Context) error {
 	}
 	return nil
 }
-
-

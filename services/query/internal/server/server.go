@@ -15,8 +15,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	_ "github.com/marcboeker/go-duckdb/v2"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/zbloss/lantern/internal/config"
 	"github.com/zbloss/lantern/internal/metadata"
 	metadatapg "github.com/zbloss/lantern/internal/metadata/postgres"
@@ -73,11 +73,11 @@ func serveUI(w http.ResponseWriter, r *http.Request) {
 // publicAPIPaths is the set of API and service paths that bypass session
 // authentication. The router treats anything in this set as public.
 var publicAPIPaths = map[string]struct{}{
-	"/login":        {},
-	"/logout":       {},
-	"/healthz":      {},
-	"/readyz":       {},
-	"/metrics":      {},
+	"/login":         {},
+	"/logout":        {},
+	"/healthz":       {},
+	"/readyz":        {},
+	"/metrics":       {},
 	"/api/v1/scores": {},
 }
 
@@ -157,8 +157,9 @@ func Run() error {
 			return fmt.Errorf("query: download snapshot: %w", err)
 		}
 		slog.Info("query: snapshot downloaded from S3", "path", dbPath)
+		// Try to get the last modified time from S3.
 		if stat, err := s3Store.Stat(context.Background(), s3.SnapshotKey()); err == nil && stat != nil {
-		snapshotLastModified = stat.LastModified
+			snapshotLastModified = stat.LastModified
 		}
 	} else {
 		slog.Info("query: no S3 configured, skipping snapshot download")
@@ -304,7 +305,7 @@ func Run() error {
 	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-// Public routes bypass authentication entirely.
+		// Public routes bypass authentication entirely.
 		if IsPublicAPIPath(path) {
 			mux.ServeHTTP(w, r)
 			return
