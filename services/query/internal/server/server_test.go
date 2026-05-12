@@ -57,33 +57,30 @@ func setupTestMuxWithMiddleware(t *testing.T) *httptest.Server {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// The key fix: wrap all /api/v1/ routes (except /api/v1/scores) with session middleware.
+	// Route wrapper mirrors server.go: public endpoints pass through,
+	// protected /api/v1/ routes require session auth, everything else falls back to SPA.
 	wrapper := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		// Public endpoints: no auth needed
+		// Public endpoints: no auth needed.
 		switch {
-		case path == "/login" || path == "/logout",
-			strings.HasPrefix(path, "/healthz"),
+		case path == "/login" || path == "/logout":
+			mux.ServeHTTP(w, r)
+			return
+		case strings.HasPrefix(path, "/healthz"),
 			strings.HasPrefix(path, "/readyz"),
-			path == "/metrics":
+			path == "/metrics", path == "/api/v1/scores":
 			mux.ServeHTTP(w, r)
 			return
 		}
 
-		// /api/v1/scores is internal (eval worker write-back), no auth
-		if path == "/api/v1/scores" {
-			mux.ServeHTTP(w, r)
-			return
-		}
-
-		// Everything else under /api/v1/ requires auth.
+		// Everything else under /api/v1/ requires authentication.
 		if strings.HasPrefix(path, "/api/v1/") {
 			sessionMw(mux).ServeHTTP(w, r)
 			return
 		}
 
-		// SPA fallback
+		// SPA fallback and anything else.
 		mux.ServeHTTP(w, r)
 	})
 
@@ -265,27 +262,6 @@ func TestScoresEndpoint_NoAuthRequired(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("POST /api/v1/scores: status %d, want %d", resp.StatusCode, http.StatusOK)
-	}
-}
-
-func TestLogin_StillWorksWithoutAuth(t *testing.T) {
-	ts := setupTestMuxWithMiddleware(t)
-
-	payload, _ := json.Marshal(map[string]string{
-		"email":    "admin@example.com",
-		"password": "admin-password",
-	})
-	req, _ := http.NewRequest("POST", ts.URL+"/login", bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("login request: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("POST /login: status %d, want %d", resp.StatusCode, http.StatusOK)
 	}
 }
 

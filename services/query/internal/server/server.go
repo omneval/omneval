@@ -286,11 +286,12 @@ func Run() error {
 
 		// Public endpoints: no auth needed.
 		switch {
-		case path == "/login" || path == "/logout",
-			strings.HasPrefix(path, "/healthz"),
+		case path == "/login" || path == "/logout":
+			mux.ServeHTTP(w, r)
+			return
+		case strings.HasPrefix(path, "/healthz"),
 			strings.HasPrefix(path, "/readyz"),
-			path == "/metrics",
-			path == "/api/v1/scores":
+			path == "/metrics", path == "/api/v1/scores":
 			mux.ServeHTTP(w, r)
 			return
 		}
