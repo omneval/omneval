@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -265,7 +266,7 @@ func Run() error {
 		mux.HandleFunc("POST /api/v1/playground/run", playgroundHandler.HandleRun)
 	}
 
-	// Score write endpoint (for eval worker score write-back).
+	// Score write endpoint (for eval worker score write-back, no auth required).
 	mux.HandleFunc("POST /api/v1/scores", handler.NewScoreHandler(db).ServeHTTP)
 
 	// Prometheus metrics.
@@ -274,6 +275,35 @@ func Run() error {
 	// Serve embedded UI for all other routes (SPA fallback to index.html).
 	// NOTE: GET /api/v1/projects is already registered by h.Register(mux) above.
 	mux.HandleFunc("/", serveUI)
+
+	// Apply session middleware to all protected API routes.
+	// Public routes (/login, /logout, /healthz, /readyz, /metrics, /api/v1/scores,
+	// and SPA fallback /) pass through without auth.
+	// All other /api/v1/ routes require a valid session cookie.
+	sessionMw := auth.RequireAuth(store, cfg.Auth.SecureCookie, sessionTTL)
+	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Public endpoints: no auth needed.
+		switch {
+		case path == "/login" || path == "/logout",
+			strings.HasPrefix(path, "/healthz"),
+			strings.HasPrefix(path, "/readyz"),
+			path == "/metrics",
+			path == "/api/v1/scores":
+			mux.ServeHTTP(w, r)
+			return
+		}
+
+		// Everything else under /api/v1/ requires authentication.
+		if strings.HasPrefix(path, "/api/v1/") {
+			sessionMw(mux).ServeHTTP(w, r)
+			return
+		}
+
+		// SPA fallback and anything else.
+		mux.ServeHTTP(w, r)
+	})
 
 	// Start S3 snapshot poller (separate goroutine).
 	if s3Store != nil {
@@ -314,7 +344,7 @@ func Run() error {
 		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 			p.Router().ServeHTTP(w, r)
 		} else {
-			mux.ServeHTTP(w, r)
+			router.ServeHTTP(w, r)
 		}
 	})
 
