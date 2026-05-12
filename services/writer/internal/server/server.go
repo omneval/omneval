@@ -469,34 +469,46 @@ func openMetadataStore(cfg *config.Config) (metadata.Store, error) {
 
 	switch driver {
 	case "", "sqlite":
-		if dsn == "" {
-			dsn = "lantern_meta.db"
-		}
-		slog.Info("writer: opening SQLite metadata store", "path", dsn)
-		store, err := sqlite.New(dsn)
-		if err != nil {
-			return nil, err
-		}
-		if err := store.Migrate(context.Background()); err != nil {
-			store.Close()
-			return nil, fmt.Errorf("writer: migrate: %w", err)
-		}
-		return store, nil
+		return openSQLiteStore(dsn, "lantern_meta.db")
 	case "postgres":
-		if dsn == "" {
-			return nil, fmt.Errorf("writer: postgres driver requires database.dsn")
-		}
-		slog.Info("writer: opening Postgres metadata store", "dsn", dsn)
-		store, err := postgres.New(dsn)
-		if err != nil {
-			return nil, fmt.Errorf("writer: postgres metadata store: %w", err)
-		}
-		if err := store.Migrate(context.Background()); err != nil {
-			store.Close()
-			return nil, fmt.Errorf("writer: migrate: %w", err)
-		}
-		return store, nil
+		return openPostgresStore(dsn)
 	default:
-		return nil, fmt.Errorf("metadata: unknown driver: %s", driver)
+		return nil, fmt.Errorf("writer: unknown database driver: %s", driver)
 	}
+}
+
+// openSQLiteStore creates and migrates a SQLite metadata store, resolving the
+// default DSN when none is configured.
+func openSQLiteStore(dsn, defaultDSN string) (metadata.Store, error) {
+	if dsn == "" {
+		dsn = defaultDSN
+	}
+	slog.Info("writer: opening SQLite metadata store", "path", dsn)
+	store, err := sqlite.New(dsn)
+	if err != nil {
+		return nil, err
+	}
+	if err := store.Migrate(context.Background()); err != nil {
+		store.Close()
+		return nil, fmt.Errorf("writer: migrate: %w", err)
+	}
+	return store, nil
+}
+
+// openPostgresStore creates and migrates a Postgres metadata store.
+// It requires a non-empty DSN.
+func openPostgresStore(dsn string) (metadata.Store, error) {
+	if dsn == "" {
+		return nil, fmt.Errorf("writer: postgres driver requires database.dsn")
+	}
+	slog.Info("writer: opening Postgres metadata store", "dsn", dsn)
+	store, err := postgres.New(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("writer: postgres metadata store: %w", err)
+	}
+	if err := store.Migrate(context.Background()); err != nil {
+		store.Close()
+		return nil, fmt.Errorf("writer: migrate: %w", err)
+	}
+	return store, nil
 }
