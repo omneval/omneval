@@ -143,6 +143,13 @@ func (s *Store) Stat(_ context.Context, key string) (*storage.ObjectStat, error)
 	}, nil
 }
 
+// SnapshotKey returns the S3 key for the DuckDB snapshot file.
+// The key is always "snapshots/duckdb.db" — the region is an S3 bucket
+// property, not an object key property.
+func SnapshotKey() string {
+	return "snapshots/duckdb.db"
+}
+
 // EnsureBucket creates the bucket if it does not exist.
 func (s *Store) EnsureBucket(ctx context.Context) error {
 	if s == nil || s.client == nil {

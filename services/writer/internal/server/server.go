@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -24,7 +23,7 @@ import (
 	"github.com/zbloss/lantern/internal/pricing"
 	"github.com/zbloss/lantern/internal/probe"
 	qredis "github.com/zbloss/lantern/internal/queue/redis"
-	"github.com/zbloss/lantern/internal/storage/s3"
+	s3pkg "github.com/zbloss/lantern/internal/storage/s3"
 	"github.com/zbloss/lantern/services/writer/internal/flush"
 	"github.com/zbloss/lantern/services/writer/internal/handler"
 	"github.com/zbloss/lantern/services/writer/internal/metrics"
@@ -153,16 +152,16 @@ func Run() error {
 	pl := pipeline.New(ingestQ, db, pricingTable, meta, evalQ, metricsHelper)
 
 	// Create S3 store (nil if no S3 config).
-	var s3store *s3.Store
+	var s3store *s3pkg.Store
 	var snapshotKey string
 	if cfg.Storage.Bucket != "" || cfg.Storage.Endpoint != "" {
-		s3store = s3.New(&cfg.Storage)
+		s3store = s3pkg.New(&cfg.Storage)
 		if s3store != nil {
 			if err := s3store.EnsureBucket(context.Background()); err != nil {
 				slog.Warn("writer: ensure bucket", "err", err)
 			}
 		}
-		snapshotKey = s3SnapshotKey(cfg)
+		snapshotKey = s3pkg.SnapshotKey()
 	}
 
 	// Create reconciler (uses S3 store and snapshot key).
@@ -276,16 +275,6 @@ func Run() error {
 	}
 	slog.Info("writer: stopped")
 	return pipelineErr
-}
-
-// s3SnapshotKey builds the S3 snapshot key from the config.
-// Mirrors the logic in sync.New for consistency.
-func s3SnapshotKey(cfg *config.Config) string {
-	parts := []string{"snapshots", "duckdb.db"}
-	if cfg.Storage.Region != "" {
-		parts = append([]string{cfg.Storage.Region}, parts...)
-	}
-	return strings.Join(parts, "/")
 }
 
 // reconciliationStatus tracks the reconciliation state after a leader transition.

@@ -151,7 +151,7 @@ func TestDoSync_Success(t *testing.T) {
 	if len(store.puts) != 1 {
 		t.Fatalf("expected 1 put, got %d", len(store.puts))
 	}
-	expectedKey := filepath.Join("us-west-2", "snapshots", "duckdb.db")
+	expectedKey := "snapshots/duckdb.db"
 	if store.puts[0].key != expectedKey {
 		t.Errorf("key: got %q, want %q", store.puts[0].key, expectedKey)
 	}

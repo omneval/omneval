@@ -23,7 +23,7 @@ import (
 	"github.com/zbloss/lantern/internal/metadata/sqlite"
 	"github.com/zbloss/lantern/internal/probe"
 	"github.com/zbloss/lantern/internal/storage"
-	"github.com/zbloss/lantern/internal/storage/s3"
+	s3 "github.com/zbloss/lantern/internal/storage/s3"
 	"github.com/zbloss/lantern/services/query/internal/auth"
 	"github.com/zbloss/lantern/services/query/internal/handler"
 	"github.com/zbloss/lantern/services/query/internal/metrics"
@@ -157,9 +157,8 @@ func Run() error {
 			return fmt.Errorf("query: download snapshot: %w", err)
 		}
 		slog.Info("query: snapshot downloaded from S3", "path", dbPath)
-		// Try to get the last modified time from S3.
-		if stat, err := s3Store.Stat(context.Background(), "snapshots/duckdb.db"); err == nil && stat != nil {
-			snapshotLastModified = stat.LastModified
+		if stat, err := s3Store.Stat(context.Background(), s3.SnapshotKey()); err == nil && stat != nil {
+		snapshotLastModified = stat.LastModified
 		}
 	} else {
 		slog.Info("query: no S3 configured, skipping snapshot download")
@@ -413,7 +412,7 @@ func downloadSnapshot(ctx context.Context, store storage.ObjectStore, dbPath str
 	}
 
 	// Get the latest snapshot from S3.
-	snapshotKey := "snapshots/duckdb.db"
+	snapshotKey := s3.SnapshotKey()
 	reader, err := store.Get(ctx, snapshotKey)
 	if err != nil {
 		return fmt.Errorf("snapshot: get %s: %w", snapshotKey, err)
@@ -448,7 +447,7 @@ func downloadSnapshot(ctx context.Context, store storage.ObjectStore, dbPath str
 
 // pollAndDownload checks if the S3 snapshot has changed and re-downloads if needed.
 func pollAndDownload(ctx context.Context, store storage.ObjectStore, dbPath string, lastModified *time.Time) error {
-	snapshotKey := "snapshots/duckdb.db"
+	snapshotKey := s3.SnapshotKey()
 
 	// Stat the S3 object to check for changes.
 	info, err := store.Stat(ctx, snapshotKey)

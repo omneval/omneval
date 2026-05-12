@@ -4,11 +4,11 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/zbloss/lantern/internal/config"
 	"github.com/zbloss/lantern/internal/storage"
+	s3 "github.com/zbloss/lantern/internal/storage/s3"
 	"github.com/zbloss/lantern/services/writer/internal/metrics"
 )
 
@@ -35,16 +35,7 @@ func New(
 		syncInterval = 30 * time.Second
 	}
 
-	snapshotKey := cfg.Storage.Bucket
-	if cfg.Storage.Bucket != "" {
-		parts := []string{"snapshots", "duckdb.db"}
-		if cfg.Storage.Region != "" {
-			parts = append([]string{cfg.Storage.Region}, parts...)
-		}
-		snapshotKey = strings.Join(parts, "/")
-	} else {
-		snapshotKey = "duckdb:snapshot"
-	}
+	snapshotKey := s3.SnapshotKey()
 
 	return &Syncer{
 		store:        store,
