@@ -28,21 +28,26 @@ const (
 type spanField string
 
 const (
-	fieldProjectID     spanField = "project_id"
-	fieldTraceID       spanField = "trace_id"
-	fieldSpanID        spanField = "span_id"
-	fieldServiceName   spanField = "service_name"
-	fieldName          spanField = "name"
-	fieldKind          spanField = "kind"
-	fieldModel         spanField = "model"
-	fieldStartTime     spanField = "start_time"
-	fieldEndTime       spanField = "end_time"
-	fieldInputTokens   spanField = "input_tokens"
-	fieldOutputTokens  spanField = "output_tokens"
-	fieldCostUSD       spanField = "cost_usd"
-	fieldPromptName    spanField = "prompt_name"
-	fieldStatusCode    spanField = "status_code"
+	fieldProjectID    spanField = "project_id"
+	fieldTraceID      spanField = "trace_id"
+	fieldSpanID       spanField = "span_id"
+	fieldServiceName  spanField = "service_name"
+	fieldName         spanField = "name"
+	fieldKind         spanField = "kind"
+	fieldModel        spanField = "model"
+	fieldStartTime    spanField = "start_time"
+	fieldEndTime      spanField = "end_time"
+	fieldInputTokens  spanField = "input_tokens"
+	fieldOutputTokens spanField = "output_tokens"
+	fieldCostUSD      spanField = "cost_usd"
+	fieldPromptName   spanField = "prompt_name"
+	fieldStatusCode   spanField = "status_code"
 )
+
+// specialFilterFields are filter fields handled specially (not simple column comparisons).
+var specialFilterFields = map[string]struct{}{
+	"bookmarked": {},
+}
 
 // allSpanFields is the full allowlist of valid span fields.
 var allSpanFields = map[spanField]struct{}{
@@ -132,7 +137,7 @@ type SpanQuery struct {
 	cursor     cursor.Cursor
 	limit      int
 	s3Store    storage.ObjectStore // nil when S3 not configured
-	snapshotDB string               // local DuckDB snapshot path
+	snapshotDB string              // local DuckDB snapshot path
 }
 
 // EffectiveLimit returns the limit actually used by this query. This is the
@@ -249,6 +254,15 @@ func (q *SpanQuery) buildWhereClause() ([]any, string) {
 
 	// User-provided filters.
 	for _, f := range q.filters {
+		// Handle special fields (bookmarked) that need custom SQL.
+		if _, ok := specialFilterFields[f.Field]; ok {
+			compiled, specialArgs := q.compileSpecialFilter(f)
+			if compiled != "" {
+				clauses = append(clauses, compiled)
+				args = append(args, specialArgs...)
+			}
+			continue
+		}
 		compiled, a, err := compileFilter(f)
 		if err != nil {
 			continue // Skip invalid filters rather than failing the whole query.
@@ -324,10 +338,38 @@ func compileFilter(f SpanQueryFilter) (sql string, args []any, err error) {
 	return fmt.Sprintf("%s %s ?", field, opSymbol), args, nil
 }
 
+// compileSpecialFilter handles non-column filters that need custom SQL.
+// Currently supports "bookmarked" which checks the bookmarks table.
+// Returns (sqlClause, args) — projectID is passed as a parameterized arg.
+func (q *SpanQuery) compileSpecialFilter(f SpanQueryFilter) (string, []any) {
+	if f.Field != "bookmarked" {
+		return "", nil
+	}
+
+	// Only "eq" operator is supported for bookmarked.
+	if FilterOp(f.Op) != OpEq {
+		return "", nil
+	}
+
+	bookmarked, ok := f.Value.(bool)
+	if !ok {
+		return "", nil
+	}
+
+	// projectID is injected from the authenticated session — never from client input.
+	if bookmarked {
+		return "EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)", []any{q.projectID}
+	}
+	return "NOT EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)", []any{q.projectID}
+}
+
 // validateFilter checks that a SpanQueryFilter has a valid field and operator.
+// Special fields (like "bookmarked") bypass the spanFields allowlist.
 func validateFilter(f SpanQueryFilter) error {
 	if _, ok := allSpanFields[spanField(f.Field)]; !ok {
-		return fmt.Errorf("unknown field %q", f.Field)
+		if _, ok := specialFilterFields[f.Field]; !ok {
+			return fmt.Errorf("unknown field %q", f.Field)
+		}
 	}
 	if _, ok := validOps[FilterOp(f.Op)]; !ok {
 		return fmt.Errorf("unknown operator %q", f.Op)
@@ -421,10 +463,10 @@ func ScanRows(rows [][]any) ([]*domain.Span, error) {
 
 // SpanResponse is the JSON body returned by POST /api/v1/spans/query.
 type SpanResponse struct {
-	Spans  []*domain.Span `json:"spans"`
-	Next   string         `json:"next,omitempty"`
-	Total  int64          `json:"total,omitempty"`
-	Limit  int            `json:"limit"`
+	Spans []*domain.Span `json:"spans"`
+	Next  string         `json:"next,omitempty"`
+	Total int64          `json:"total,omitempty"`
+	Limit int            `json:"limit"`
 }
 
 // CountSQL returns a COUNT(*) query for the same filter set.

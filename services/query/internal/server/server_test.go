@@ -36,6 +36,13 @@ func setupTestMuxWithMiddleware(t *testing.T) *httptest.Server {
 		}
 		json.NewEncoder(w).Encode(map[string]string{"spans": "ok"})
 	})
+	mux.HandleFunc("POST /api/v1/traces/{traceId}/bookmark", func(w http.ResponseWriter, r *http.Request) {
+		if auth.CurrentUserFromContext(r) == nil {
+			json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]bool{"bookmarked": true})
+	})
 	mux.HandleFunc("POST /api/v1/scores", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
@@ -154,6 +161,9 @@ func TestProtectedAPI_Returns401WithoutAuth(t *testing.T) {
 
 		// Span query.
 		{"POST", "/api/v1/spans/query"},
+
+		// Trace bookmark.
+		{"POST", "/api/v1/traces/trace-1/bookmark"},
 
 		// Prompt routes.
 		{"GET", "/api/v1/prompts"},

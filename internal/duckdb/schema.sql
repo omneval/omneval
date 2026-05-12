@@ -31,6 +31,13 @@ CREATE TABLE IF NOT EXISTS spans (
 CREATE INDEX IF NOT EXISTS idx_spans_project_time
     ON spans (project_id, start_time);
 
+CREATE TABLE IF NOT EXISTS bookmarks (
+    trace_id       VARCHAR      NOT NULL,
+    project_id     VARCHAR      NOT NULL,
+    created_at     TIMESTAMPTZ  NOT NULL,
+    PRIMARY KEY (trace_id, project_id)
+);
+
 CREATE TABLE IF NOT EXISTS scores (
     score_id       VARCHAR      NOT NULL PRIMARY KEY,
     span_id        VARCHAR      NOT NULL,

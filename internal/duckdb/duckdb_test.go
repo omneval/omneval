@@ -156,6 +156,40 @@ func TestUpsert_Idempotent(t *testing.T) {
 	}
 }
 
+func TestBookmarksTableExists(t *testing.T) {
+	db, err := Open("test_bookmarks.db")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	defer os.Remove("test_bookmarks.db")
+
+	// Verify the bookmarks table exists.
+	var count int
+	err = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM bookmarks").Scan(&count)
+	if err != nil {
+		t.Fatalf("querying bookmarks table: %v", err)
+	}
+
+	// Insert a bookmark.
+	_, err = db.ExecContext(context.Background(), `
+		INSERT INTO bookmarks (trace_id, project_id, created_at)
+		VALUES (?, ?, ?)
+	`, "trace-1", "proj-1", time.Now())
+	if err != nil {
+		t.Fatalf("insert bookmark: %v", err)
+	}
+
+	// Verify count.
+	err = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM bookmarks").Scan(&count)
+	if err != nil {
+		t.Fatalf("query bookmarks: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("bookmarks count: got %d, want 1", count)
+	}
+}
+
 func cleanupTestFiles(t *testing.T, paths ...string) {
 	for _, p := range paths {
 		if err := os.Remove(p); err != nil {

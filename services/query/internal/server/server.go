@@ -194,6 +194,12 @@ func Run() error {
 		SessionStore: h,
 	}
 
+	// Bookmark handler (toggle trace bookmarks).
+	bookmarkHandler := &handler.BookmarkHandler{
+		DB:           db,
+		SessionStore: h,
+	}
+
 	// Prompt registry handler (requires metadata store).
 	var promptHandler *handler.PromptHandler
 	var promptCache *handler.PromptCache
@@ -239,6 +245,9 @@ func Run() error {
 
 	// Trace detail waterfall.
 	mux.HandleFunc("GET /api/v1/traces/{traceId}", spanHandler.HandleTraceDetail)
+
+	// Trace bookmark toggle.
+	mux.HandleFunc("POST /api/v1/traces/{traceId}/bookmark", bookmarkHandler.HandleBookmark)
 
 	// Prompt Registry endpoints (require metadata store).
 	if promptHandler != nil {
