@@ -355,7 +355,6 @@ func runWithLeaderElection(
 
 		// Reconcile the S3 snapshot before accepting writes (if fencing is enabled).
 		if err := reconcileLeaderSnapshot(ctx, reconciler, reconStatus); err != nil {
-			// Still run the pipeline but readiness will show 503.
 			slog.Warn("writer: snapshot reconciliation non-fatal", "err", err)
 		}
 
@@ -461,8 +460,7 @@ func releaseLeaderLock(ctx context.Context, election *leader.LeaderElection) err
 }
 
 // openMetadataStore creates a metadata store from config.
-// It supports "sqlite" and "postgres" drivers, matching the query and
-// ingest services. When driver is empty or "sqlite", it uses SQLite.
+// It supports "sqlite" and "postgres" drivers. When driver is empty or "sqlite", it uses SQLite.
 func openMetadataStore(cfg *config.Config) (metadata.Store, error) {
 	driver := cfg.Database.Driver
 	dsn := cfg.Database.DSN

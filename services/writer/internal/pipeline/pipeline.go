@@ -85,7 +85,7 @@ func (p *Pipeline) Run(ctx context.Context) error {
 			continue
 		}
 		if spans == nil {
-			continue // timeout, no spans
+			continue
 		}
 
 		if err := p.writeSpans(ctx, spans); err != nil {
@@ -98,7 +98,7 @@ func (p *Pipeline) Run(ctx context.Context) error {
 			continue
 		}
 
-		// Evaluate eval rules against written spans.
+
 		rules, err := p.listEvalRules(ctx)
 		if err != nil {
 			slog.ErrorContext(ctx, "list eval rules failed, skipping eval",
@@ -137,7 +137,7 @@ func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
 
 	now := time.Now()
 	for _, span := range spans {
-		// Pre-compute cost.
+
 		cost := p.pricing.Cost(span.Model, span.InputTokens, span.OutputTokens)
 		span.CostUSD = cost
 
@@ -186,7 +186,7 @@ func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
 		elapsed := time.Since(start).Seconds()
 		p.metrics.RecordDuckDBWriteDuration(elapsed)
 
-		// Count by project.
+
 		projectCounts := make(map[string]int)
 		for _, span := range spans {
 			projectCounts[span.ProjectID]++
@@ -208,11 +208,11 @@ func (p *Pipeline) evalSpans(ctx context.Context, span *domain.Span, rules []dom
 		if !rule.Filter.Matches(span) {
 			continue
 		}
-		// Sample based on sample rate.
+
 		if rule.SampleRate <= 0.0 {
 			continue
 		}
-		if !sampleRateDecides(rule.SampleRate) {
+		if !isSampled(rule.SampleRate) {
 			job := &domain.EvalJob{
 				JobID:         idgen.Generate(),
 				RuleID:        rule.RuleID,
@@ -251,7 +251,7 @@ func (p *Pipeline) listEvalRules(ctx context.Context) ([]domain.EvalRule, error)
 }
 
 func attributesJSON(attrs map[string]any) string {
-	if attrs == nil || len(attrs) == 0 {
+	if len(attrs) == 0 {
 		return "null"
 	}
 	data, err := json.Marshal(attrs)
@@ -261,10 +261,9 @@ func attributesJSON(attrs map[string]any) string {
 	return string(data)
 }
 
-// sampleRateDecides returns true when a span is selected for sampling
+// isSampled returns true when a span is selected for sampling
 // based on the given sample rate (0.0–1.0). For rate >= 1.0, always returns true.
-// The caller inverts the result to decide whether to enqueue an eval job.
-func sampleRateDecides(rate float64) bool {
+func isSampled(rate float64) bool {
 	if rate >= 1.0 {
 		return true
 	}
