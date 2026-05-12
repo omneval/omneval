@@ -253,7 +253,6 @@ func (h *Handler) HandleCreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse request body
 	var req CreateProjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -265,14 +264,12 @@ func (h *Handler) HandleCreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up the user to get their org ID
 	u, err := h.store.GetUserByID(r.Context(), user.UserID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to look up user"})
 		return
 	}
 
-	// Create the project
 	projectID := xid.New().String()
 	project := &domain.Project{
 		ProjectID: projectID,
@@ -292,6 +289,21 @@ func (h *Handler) HandleCreateProject(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// parseProjectID extracts the project ID from a URL path like
+// "/api/v1/projects/{id}/api-keys" or "/api/v1/projects/{id}/api-keys/{keyId}".
+func parseProjectID(path string) (string, bool) {
+	prefix := "/api/v1/projects/"
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	rest := path[len(prefix):]
+	idx := strings.Index(rest, "/")
+	if idx == -1 {
+		return "", false
+	}
+	return rest[:idx], true
+}
+
 // HandleGenerateAPIKey handles POST /api/v1/projects/{id}/api-keys.
 // Generates a new API key for the specified project.
 func (h *Handler) HandleGenerateAPIKey(w http.ResponseWriter, r *http.Request) {
@@ -301,16 +313,12 @@ func (h *Handler) HandleGenerateAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract project ID from URL path: /api/v1/projects/{id}/api-keys
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/projects/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
+	projectID, ok := parseProjectID(r.URL.Path)
+	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid project ID"})
 		return
 	}
-	projectID := parts[0]
 
-	// Parse request body
 	var req GenerateAPIKeyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -382,16 +390,12 @@ func (h *Handler) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract project ID from URL path: /api/v1/projects/{id}/api-keys
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/projects/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
+	projectID, ok := parseProjectID(r.URL.Path)
+	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid project ID"})
 		return
 	}
-	projectID := parts[0]
 
-	// Verify project exists
 	_, err := h.store.GetProject(r.Context(), projectID)
 	if err != nil {
 		if errors.Is(err, metadata.ErrNotFound) {
@@ -425,7 +429,7 @@ func (h *Handler) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleRevokeAPIKey handles DELETE /api/v1/projects/{id}/api-keys/{keyId}.
-// Revokes (deletes) an API key for the specified project.
+// Revokes an API key for the specified project.
 func (h *Handler) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 	user := CurrentUserFromContext(r)
 	if user == nil {
@@ -433,7 +437,6 @@ func (h *Handler) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract project ID and key ID from URL path
 	// /api/v1/projects/{id}/api-keys/{keyId}
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/projects/")
 	parts := strings.Split(path, "/")
@@ -444,14 +447,14 @@ func (h *Handler) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 	projectID := parts[0]
 	keyID := parts[2]
 
-	// Verify the key belongs to this project
+	// Verify the key belongs to this project.
 	keys, err := h.store.ListAPIKeys(r.Context(), projectID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to look up keys"})
 		return
 	}
 
-	found := false
+	var found bool
 	for _, k := range keys {
 		if k.KeyID == keyID {
 			found = true
@@ -463,7 +466,6 @@ func (h *Handler) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Revoke the key
 	if err := h.store.RevokeAPIKey(r.Context(), keyID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to revoke key"})
 		return

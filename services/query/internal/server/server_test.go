@@ -145,6 +145,10 @@ func TestProtectedAPI_Returns401WithoutAuth(t *testing.T) {
 	}{
 		// Auth handler protected routes.
 		{"GET", "/api/v1/projects"},
+		{"POST", "/api/v1/projects"},
+		{"POST", "/api/v1/projects/proj-1/api-keys"},
+		{"GET", "/api/v1/projects/proj-1/api-keys"},
+		{"DELETE", "/api/v1/projects/proj-1/api-keys/key-1"},
 		{"POST", "/api/v1/users/invite"},
 		{"PUT", "/api/v1/users/me/password"},
 

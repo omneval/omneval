@@ -928,7 +928,7 @@ func TestHandler_ListAPIKeys(t *testing.T) {
 	hashedKey2 := "hash-2"
 	_ = store.CreateAPIKey(nil, &domain.APIKey{KeyID: "key-1", ProjectID: "proj-1", Kind: domain.APIKeyKindProject, HashedKey: hashedKey1})
 	_ = store.CreateAPIKey(nil, &domain.APIKey{KeyID: "key-2", ProjectID: "proj-1", Kind: domain.APIKeyKindService, ServiceName: "agent-1", HashedKey: hashedKey2})
-	_ = rawKey1 // avoid unused variable
+	_ = rawKey1 // compiler: rawKey1 is intentionally unused (only the hash is stored in the DB)
 
 	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
 
@@ -950,13 +950,6 @@ func TestHandler_ListAPIKeys(t *testing.T) {
 	}
 	if len(keys) != 2 {
 		t.Errorf("expected 2 keys, got %d", len(keys))
-	}
-	// Verify raw keys are NOT in the response
-	for _, k := range keys {
-		if k.KeyID == "key-1" {
-			// Check that the raw key is not accidentally included
-			_ = rawKey1 // ensure it's referenced
-		}
 	}
 }
 
