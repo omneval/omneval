@@ -98,7 +98,6 @@ func (p *Pipeline) Run(ctx context.Context) error {
 			continue
 		}
 
-
 		rules, err := p.listEvalRules(ctx)
 		if err != nil {
 			slog.ErrorContext(ctx, "list eval rules failed, skipping eval",
@@ -185,7 +184,6 @@ func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
 	if p.metrics != nil {
 		elapsed := time.Since(start).Seconds()
 		p.metrics.RecordDuckDBWriteDuration(elapsed)
-
 
 		projectCounts := make(map[string]int)
 		for _, span := range spans {
