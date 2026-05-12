@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { colors } from "@/theme";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import Breadcrumb from "@/components/Breadcrumb";
+import JsonCodeBlock from "@/components/JsonCodeBlock";
 import { formatTime, formatDuration } from "@/utils/formatters";
 import { useToast } from "@/components/Toast";
 import SaveToDatasetModal from "@/components/SaveToDatasetModal";
@@ -133,34 +135,40 @@ export default function TraceDetailPage({
     internal: colors.typography.ashGrey,
   };
 
+  const [expandedSpanId, setExpandedSpanId] = useState<string | null>(null);
+
   return (
     <div className="flex flex-col h-full" style={{ background: colors.backgrounds.abyssBlack }}>
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b"
+      {/* Header with breadcrumb */}
+      <div className="flex flex-col gap-2 px-4 py-3 border-b"
         style={{ borderColor: colors.backgrounds.caveWall }}
       >
-        <button
-          onClick={onBack}
-          className="flex items-center gap-1.5 text-sm px-2 py-1 rounded transition-colors"
-          style={{ color: colors.typography.ashGrey }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = colors.typography.pureLight)}
-          onMouseLeave={(e) => (e.currentTarget.style.color = colors.typography.ashGrey)}
-        >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <path
-              d="M10 3l-5 5 5 5"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-          Back
-        </button>
-        <div className="flex-1" />
-        <div className="flex items-center gap-3 text-xs text-lantern-ash">
-          <span>
-            Trace: <span className="font-mono text-lantern-pure">{traceId}</span>
+        <Breadcrumb items={[
+          { label: "Traces", onClick: onBack },
+          { label: `Trace: ${traceId.slice(0, 8)}…` },
+        ]} />
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-sm px-2 py-1 rounded transition-colors"
+            style={{ color: colors.typography.ashGrey }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = colors.typography.pureLight)}
+            onMouseLeave={(e) => (e.currentTarget.style.color = colors.typography.ashGrey)}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M10 3l-5 5 5 5"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Back
+          </button>
+          <div className="flex-1" />
+          <span className="text-xs text-lantern-ash">
+            <span className="font-mono text-lantern-pure">{traceId}</span>
           </span>
         </div>
       </div>
@@ -222,6 +230,12 @@ export default function TraceDetailPage({
                       output: span.output,
                     });
                   }}
+                  isExpanded={expandedSpanId === child.span_id}
+                  onToggleExpand={() =>
+                    setExpandedSpanId(
+                      expandedSpanId === child.span_id ? null : child.span_id
+                    )
+                  }
                 />
               ))}
             </div>
@@ -255,15 +269,20 @@ function SpanRow({
   depth,
   kindColor,
   onShowSaveModal,
+  isExpanded,
+  onToggleExpand,
 }: {
   span: Span;
   depth: number;
   kindColor: Record<string, string>;
   onShowSaveModal: (span: Span) => void;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
 }) {
-  const [expanded, setExpanded] = useState(depth <= 1);
+  const [treeExpanded, setTreeExpanded] = useState(depth <= 1);
   const hasChildren = span.children && span.children.length > 0;
   const hasInput = span.input && span.input.length > 0;
+  const hasOutput = span.output && span.output.length > 0;
 
   const indentPx = depth * 20 + 12;
 
@@ -283,19 +302,22 @@ function SpanRow({
         {/* Expand/collapse toggle */}
         {hasChildren ? (
           <button
-            onClick={() => setExpanded(!expanded)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setTreeExpanded(!treeExpanded);
+            }}
             className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded transition-colors"
             style={{ color: colors.typography.ashGrey }}
             onMouseEnter={(e) => (e.currentTarget.style.color = colors.typography.pureLight)}
             onMouseLeave={(e) => (e.currentTarget.style.color = colors.typography.ashGrey)}
-            aria-label={expanded ? "Collapse" : "Expand"}
+            aria-label={treeExpanded ? "Collapse" : "Expand"}
           >
             <svg
               width="12"
               height="12"
               viewBox="0 0 12 12"
               fill="none"
-              className={`transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
+              className={`transition-transform duration-200 ${treeExpanded ? "rotate-90" : ""}`}
             >
               <path
                 d="M4.5 3l3 3-3 3"
@@ -309,6 +331,29 @@ function SpanRow({
         ) : (
           <div className="w-5 h-5 flex-shrink-0" />
         )}
+
+        {/* Detail toggle */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleExpand();
+          }}
+          className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded transition-colors"
+          style={{
+            color: isExpanded ? colors.accents.emberFlare : colors.typography.ashGrey,
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = colors.typography.pureLight)}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = isExpanded
+              ? colors.accents.emberFlare
+              : colors.typography.ashGrey;
+          }}
+          aria-label={isExpanded ? "Hide details" : "Show details"}
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+            <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
 
         {/* Kind indicator */}
         <div
@@ -340,7 +385,10 @@ function SpanRow({
         {/* Save to dataset button — only for spans with non-empty input */}
         {hasInput && (
           <button
-            onClick={() => onShowSaveModal(span)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onShowSaveModal(span);
+            }}
             className="flex-shrink-0 text-xs px-2 py-1 rounded transition-colors opacity-0 group-hover:opacity-100"
             style={{
               background: colors.accents.emberFlare,
@@ -378,8 +426,60 @@ function SpanRow({
         )}
       </div>
 
+      {/* Detail panel with JSON code blocks */}
+      {isExpanded && (
+        <div
+          className="px-3 pb-3 ml-3"
+          style={{
+            borderLeft: `1px solid ${colors.backgrounds.caveWall}`,
+            marginLeft: `${indentPx + 12}px`,
+          }}
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {hasInput && (
+              <JsonCodeBlock value={span.input!} label="Input" maxHeight={200} />
+            )}
+            {hasOutput && (
+              <JsonCodeBlock value={span.output!} label="Output" maxHeight={200} />
+            )}
+          </div>
+          {span.scores && span.scores.length > 0 && (
+            <div className="mt-3">
+              <div
+                className="text-xs font-medium mb-1"
+                style={{ color: colors.typography.ashGrey }}
+              >
+                Scores
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {span.scores.map((score) => (
+                  <span
+                    key={score.eval_name}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                    style={{
+                      background: score.value >= 0.8
+                        ? "rgba(76, 175, 80, 0.15)"
+                        : score.value >= 0.5
+                          ? "rgba(255, 193, 7, 0.15)"
+                          : "rgba(244, 67, 54, 0.15)",
+                      color: score.value >= 0.8
+                        ? "#4CAF50"
+                        : score.value >= 0.5
+                          ? "#FFC107"
+                          : "#F44336",
+                    }}
+                  >
+                    {score.eval_name}: {score.value.toFixed(2)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Children */}
-      {expanded && hasChildren && (
+      {treeExpanded && hasChildren && (
         <div
           className="pl-3"
           style={{ borderLeft: `1px solid ${colors.backgrounds.caveWall}` }}
@@ -391,6 +491,8 @@ function SpanRow({
               depth={depth + 1}
               kindColor={kindColor}
               onShowSaveModal={onShowSaveModal}
+              isExpanded={isExpanded && child.span_id === span.span_id}
+              onToggleExpand={() => onToggleExpand()}
             />
           ))}
         </div>

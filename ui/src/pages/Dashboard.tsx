@@ -51,7 +51,12 @@ function getDefaultFromTo(): { from: string; to: string } {
 
 // ── Empty State ────────────────────────────────────────────────────
 
-function EmptyState({ title, description }: { title: string; description: string }) {
+function EmptyState({ title, description, action, actionLabel }: {
+  title: string;
+  description: string;
+  action?: () => void;
+  actionLabel?: string;
+}) {
   return (
     <div className="flex flex-col items-center justify-center py-12 px-4">
       <svg
@@ -64,15 +69,27 @@ function EmptyState({ title, description }: { title: string; description: string
         <rect x="8" y="8" width="32" height="32" rx="4" stroke="currentColor" strokeWidth="2" />
         <path d="M18 24h12M24 18v12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
       </svg>
-      <p className="text-sm font-medium text-lantern-text-ash">{title}</p>
-      <p className="text-xs text-lantern-text-ash mt-1 opacity-70">{description}</p>
+      <p className="text-sm font-medium text-lantern-pure">{title}</p>
+      <p className="text-xs text-lantern-ash mt-1 opacity-70">{description}</p>
+      {action && actionLabel && (
+        <button
+          onClick={action}
+          className="mt-3 px-3 py-1.5 text-xs rounded-md font-medium transition-colors"
+          style={{
+            background: colors.accents.emberFlare,
+            color: colors.typography.pureLight,
+          }}
+        >
+          {actionLabel}
+        </button>
+      )}
     </div>
   );
 }
 
 // ── Card Wrapper ───────────────────────────────────────────────────
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function Card({ title, children, subtitle }: { title: string; children: React.ReactNode; subtitle?: string }) {
   return (
     <div
       className="card"
@@ -86,7 +103,12 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
         className="card-header"
         style={{ borderBottom: `1px solid ${colors.backgrounds.caveWall}` }}
       >
-        {title}
+        <div className="flex items-center justify-between">
+          <span>{title}</span>
+          {subtitle && (
+            <span className="text-xs font-normal text-lantern-ash opacity-60">{subtitle}</span>
+          )}
+        </div>
       </div>
       <div className="p-4">{children}</div>
     </div>
@@ -119,9 +141,11 @@ function TracesByNameChart({ data, loading }: { data: TracesByNameData[]; loadin
 
   if (data.length === 0) {
     return (
-      <div className="text-center py-8 text-lantern-ash text-sm">
-        No trace data available
-      </div>
+      <EmptyState
+        title="No traces yet"
+        description="Send your first trace to see model breakdown here"
+        actionLabel="View Traces"
+      />
     );
   }
 
@@ -235,7 +259,7 @@ function ModelCostsTable({ data, loading }: { data: CostData[]; loading: boolean
   }
 
   if (data.length === 0) {
-    return <EmptyState title="No Cost Data" description="No model usage data available for this time range" />;
+    return <EmptyState title="No cost data yet" description="Cost breakdown will appear once traces are ingested" />;
   }
 
   return (
@@ -310,7 +334,11 @@ function ScoresWidget({ loading }: { loading: boolean }) {
   }
 
   return (
-    <EmptyState title="No Scores Yet" description="Evaluation scores will appear here once eval rules fire" />
+    <EmptyState
+      title="No scores yet"
+      description="Configure evaluation rules to start scoring traces"
+      actionLabel="Go to Settings"
+    />
   );
 }
 
@@ -351,7 +379,10 @@ function ModelUsageWidget({ loading }: { loading: boolean }) {
           </button>
         ))}
       </div>
-      <EmptyState title="No Model Usage Data" description="Model usage metrics will appear here" />
+      <EmptyState
+        title="No usage data yet"
+        description="Token counts will appear once traces are ingested"
+      />
     </div>
   );
 }
@@ -639,32 +670,32 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
       {/* ── 6-Widget Grid ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
         {/* 1. Traces by Name (Horizontal Bar) */}
-        <Card title="Traces by Name">
+        <Card title="Traces by Model" subtitle="count">
           <TracesByNameChart data={tracesByName} loading={loading} />
         </Card>
 
         {/* 2. Model Costs (Data Table) */}
-        <Card title="Model Costs">
+        <Card title="Cost by Model" subtitle="USD">
           <ModelCostsTable data={modelCosts} loading={loading} />
         </Card>
 
         {/* 3. Scores (Empty State) */}
-        <Card title="Scores">
+        <Card title="Eval Scores" subtitle="score (0–1)">
           <ScoresWidget loading={loading} />
         </Card>
 
         {/* 4. Traces by Time (Line Graph) */}
-        <Card title="Traces by Time">
+        <Card title="Traces over Time" subtitle="count/hour">
           <TracesByTimeChart data={tracesByTime} loading={loading} />
         </Card>
 
         {/* 5. Model Usage (Tabbed Empty State) */}
-        <Card title="Model Usage">
+        <Card title="Token Usage" subtitle="input + output tokens">
           <ModelUsageWidget loading={loading} />
         </Card>
 
         {/* 6. User Consumption (Horizontal Bar) */}
-        <Card title="User Consumption">
+        <Card title="User Consumption" subtitle="traces per user">
           <UserConsumptionChart data={userConsumption} loading={loading} />
         </Card>
       </div>

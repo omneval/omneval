@@ -17,6 +17,7 @@ interface SidebarProps {
   onToggle: () => void;
   active: string;
   onNavigate: (id: string) => void;
+  onLogout?: () => void;
 }
 
 // ── Icons (SVG) ────────────────────────────────────────────────────
@@ -134,27 +135,16 @@ const NAV_SECTIONS: {
       { id: "dashboard", label: "Dashboard", section: "home", icon: <HomeIcon /> },
     ],
   },
-  {
-    label: "Observability",
-    items: [
-      { id: "traces", label: "Traces", section: "dashboards", icon: <ChartIcon /> },
-      { id: "sessions", label: "Sessions", section: "dashboards", icon: <ChartIcon /> },
-      { id: "users", label: "Users", section: "dashboards", icon: <ChartIcon /> },
-    ],
-  },
+
   {
     label: "Prompts",
     items: [
       { id: "prompts", label: "Prompts", section: "prompts", icon: <PromptIcon /> },
-      { id: "playground", label: "Playground", section: "prompts", icon: <PromptIcon /> },
     ],
   },
   {
     label: "Evaluation",
     items: [
-      { id: "scores", label: "Scores", section: "eval", icon: <EvalIcon /> },
-      { id: "judge-llm", label: "LLM-as-a-Judge", section: "eval", icon: <EvalIcon /> },
-      { id: "human-annotation", label: "Human Annotation", section: "eval", icon: <EvalIcon /> },
       { id: "datasets", label: "Datasets", section: "eval", icon: <EvalIcon /> },
     ],
   },
@@ -275,7 +265,7 @@ function NavItemButton({
 
 // ── Sidebar Component ──────────────────────────────────────────────
 
-export default function Sidebar({ collapsed, onToggle, active, onNavigate }: SidebarProps) {
+export default function Sidebar({ collapsed, onToggle, active, onNavigate, onLogout }: SidebarProps) {
   return (
     <aside
       className={`flex flex-col bg-lantern-bg-charcoal border-r border-lantern-bg-cave transition-all duration-200 ${
@@ -353,6 +343,23 @@ export default function Sidebar({ collapsed, onToggle, active, onNavigate }: Sid
             title="Settings"
           >
             <SettingsIcon />
+          </button>
+        </div>
+      )}
+
+      {/* User section with logout */}
+      {!collapsed && (
+        <div className="border-t border-lantern-bg-cave py-2 px-3">
+          <button
+            onClick={onLogout}
+            className="flex items-center gap-2 w-full text-sm text-lantern-ash hover:text-lantern-pure transition-colors px-2 py-1.5 rounded-md hover:bg-lantern-bg-illumination"
+            title="Logout"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M7 13H3a1 1 0 01-1-1V4a1 1 0 011-1h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M10 8h5M13 5l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span>Logout</span>
           </button>
         </div>
       )}

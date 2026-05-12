@@ -17,7 +17,7 @@ interface HeaderProps {
   onTimeRangeChange: (range: string) => void;
   environment: string;
   onEnvironmentChange: (env: string) => void;
-  onLogout: () => void;
+  onLogout?: () => void;
 }
 
 interface TimeRangeOption {
@@ -138,7 +138,6 @@ export default function Header({
   onTimeRangeChange,
   environment,
   onEnvironmentChange,
-  onLogout,
 }: HeaderProps) {
   return (
     <header
@@ -183,21 +182,11 @@ export default function Header({
           options={ENVIRONMENTS.map((e) => ({ label: e, value: e }))}
           onChange={onEnvironmentChange}
         />
-
-        <EnvironmentBadge env={environment} />
       </div>
 
-      {/* Right: user / logout */}
+      {/* Right: environment info only — logout in sidebar */}
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2 text-sm text-lantern-ash">
-          <span className="hidden sm:inline">User</span>
-          <button
-            onClick={onLogout}
-            className="px-3 py-1 text-sm rounded-md bg-lantern-bg-illumination border border-lantern-bg-cave text-lantern-ash hover:border-lantern-accent-ember hover:text-lantern-ember transition-all duration-150"
-          >
-            Logout
-          </button>
-        </div>
+        <EnvironmentBadge env={environment} />
       </div>
     </header>
   );

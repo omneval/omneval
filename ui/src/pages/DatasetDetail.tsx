@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { colors } from "@/theme";
+import Breadcrumb from "@/components/Breadcrumb";
 import { formatTime } from "@/utils/formatters";
 import { truncate } from "@/utils/formatters";
 
@@ -806,29 +807,35 @@ export default function DatasetDetail({ datasetId, activeProject, onBack }: Data
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b"
+      {/* Header with breadcrumb */}
+      <div className="flex flex-col gap-1.5 px-6 py-4 border-b"
         style={{ borderColor: colors.backgrounds.caveWall }}
       >
-        <button
-          onClick={onBack}
-          className="p-1 rounded transition-colors"
-          style={{ color: colors.typography.ashGrey }}
-          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.backgrounds.slightIllumination)}
-          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-          aria-label="Back"
-        >
-          <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
-            <path d="M10 2L5 8l5 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-        <div>
-          <h1 className="text-base font-semibold text-lantern-pure">
-            {dataset.name}
-          </h1>
-          <p className="text-xs text-lantern-ash mt-0.5">
-            {dataset.item_count} item{dataset.item_count !== 1 ? "s" : ""} · Created {formatTime(dataset.created_at)}
-          </p>
+        <Breadcrumb items={[
+          { label: "Datasets", onClick: onBack },
+          { label: dataset.name },
+        ]} />
+        <div className="flex items-center gap-4">
+          <button
+            onClick={onBack}
+            className="p-1 rounded transition-colors"
+            style={{ color: colors.typography.ashGrey }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.backgrounds.slightIllumination)}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+            aria-label="Back"
+          >
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+              <path d="M10 2L5 8l5 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <div>
+            <h1 className="text-base font-semibold text-lantern-pure">
+              {dataset.name}
+            </h1>
+            <p className="text-xs text-lantern-ash mt-0.5">
+              {dataset.item_count} item{dataset.item_count !== 1 ? "s" : ""} · Created {formatTime(dataset.created_at)}
+            </p>
+          </div>
         </div>
       </div>
 
