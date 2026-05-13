@@ -34,6 +34,16 @@ type CreateDatasetRequest struct {
 	Name string `json:"name"`
 }
 
+// AddDatasetItemsBatchRequest is the body accepted by POST /api/v1/datasets/:id/items/batch.
+type AddDatasetItemsBatchRequest struct {
+	Items []AddDatasetItemRequest `json:"items"`
+}
+
+// AddDatasetItemsBatchResponse is returned by the batch items endpoint.
+type AddDatasetItemsBatchResponse struct {
+	Created int `json:"created"`
+}
+
 // datasetListItem represents a dataset in the list endpoint response.
 // Each entry includes its item count.
 type datasetListItem struct {
@@ -274,6 +284,79 @@ func (h *DatasetHandler) HandleAddItems(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(item)
+}
+
+// HandleAddItemsBatch handles POST /api/v1/datasets/:id/items/batch.
+func (h *DatasetHandler) HandleAddItemsBatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	projectID, ok := extractProjectID(h.SessionStore, r)
+	if !ok || projectID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	datasetID := r.PathValue("id")
+	if datasetID == "" {
+		datasetID = extractDatasetID(r.URL.Path)
+	}
+	if datasetID == "" {
+		http.Error(w, "dataset ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify dataset exists and belongs to the project.
+	ds, err := h.Store.GetDataset(r.Context(), datasetID)
+	if err != nil {
+		if errors.Is(err, metadata.ErrNotFound) {
+			http.Error(w, "dataset not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "store error", http.StatusInternalServerError)
+		return
+	}
+	if ds.ProjectID != projectID {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	var req AddDatasetItemsBatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Items) == 0 {
+		http.Error(w, "items array is required", http.StatusBadRequest)
+		return
+	}
+
+	created := 0
+	for _, itemReq := range req.Items {
+		if itemReq.Input == "" {
+			continue
+		}
+		item := &domain.DatasetItem{
+			ItemID:         uuid.New().String(),
+			DatasetID:      datasetID,
+			SourceSpanID:   itemReq.SourceSpanID,
+			Input:          itemReq.Input,
+			ExpectedOutput: itemReq.ExpectedOutput,
+			CreatedAt:      time.Now().UTC(),
+		}
+		if err := h.Store.CreateDatasetItem(r.Context(), item); err != nil {
+			http.Error(w, "store error", http.StatusInternalServerError)
+			return
+		}
+		created++
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(AddDatasetItemsBatchResponse{Created: created})
 }
 
 // HandleListItems handles GET /api/v1/datasets/:id/items.

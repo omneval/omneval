@@ -552,6 +552,208 @@ func TestDatasetHandler_AddItems_InvalidJSON(t *testing.T) {
 	}
 }
 
+// ---- Tests for HandleAddItemsBatch ----
+
+func TestDatasetHandler_AddItemsBatch(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &DatasetHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	ds := &domain.Dataset{DatasetID: uuid.New().String(), ProjectID: "test-proj", Name: "my-ds"}
+	store.CreateDataset(context.Background(), ds)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/datasets/"+ds.DatasetID+"/items/batch", strings.NewReader(`{
+		"items": [
+			{"input": "hello", "expected_output": "hi"},
+			{"input": "world", "expected_output": "earth"}
+		]
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleAddItemsBatch(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp AddDatasetItemsBatchResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.Created != 2 {
+		t.Errorf("created count: got %d, want 2", resp.Created)
+	}
+}
+
+func TestDatasetHandler_AddItemsBatch_EmptyItems(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &DatasetHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	ds := &domain.Dataset{DatasetID: uuid.New().String(), ProjectID: "test-proj", Name: "my-ds"}
+	store.CreateDataset(context.Background(), ds)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/datasets/"+ds.DatasetID+"/items/batch", strings.NewReader(`{"items": []}`))
+	w := httptest.NewRecorder()
+	handler.HandleAddItemsBatch(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestDatasetHandler_AddItemsBatch_SkipsEmptyInput(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &DatasetHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	ds := &domain.Dataset{DatasetID: uuid.New().String(), ProjectID: "test-proj", Name: "my-ds"}
+	store.CreateDataset(context.Background(), ds)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/datasets/"+ds.DatasetID+"/items/batch", strings.NewReader(`{
+		"items": [
+			{"input": "valid", "expected_output": "yes"},
+			{"input": "", "expected_output": "no"},
+			{"input": "also valid"}
+		]
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleAddItemsBatch(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusCreated)
+	}
+
+	var resp AddDatasetItemsBatchResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Only 2 items created (empty input skipped)
+	if resp.Created != 2 {
+		t.Errorf("created count: got %d, want 2", resp.Created)
+	}
+
+	// Verify only 2 items exist in store
+	items, err := store.ListDatasetItems(context.Background(), ds.DatasetID)
+	if err != nil {
+		t.Fatalf("ListDatasetItems: %v", err)
+	}
+	if len(items) != 2 {
+		t.Errorf("store items count: got %d, want 2", len(items))
+	}
+}
+
+func TestDatasetHandler_AddItemsBatch_AuthRequired(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &DatasetHandler{
+		Store: store,
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/datasets/some-id/items/batch", strings.NewReader(`{"items": [{"input": "hello"}]}`))
+	w := httptest.NewRecorder()
+	handler.HandleAddItemsBatch(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestDatasetHandler_AddItemsBatch_DatasetNotFound(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &DatasetHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/datasets/nonexistent/items/batch", strings.NewReader(`{"items": [{"input": "hello"}]}`))
+	w := httptest.NewRecorder()
+	handler.HandleAddItemsBatch(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestDatasetHandler_AddItemsBatch_Forbidden(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &DatasetHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	otherDS := &domain.Dataset{DatasetID: uuid.New().String(), ProjectID: "other-proj", Name: "other"}
+	store.CreateDataset(context.Background(), otherDS)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/datasets/"+otherDS.DatasetID+"/items/batch", strings.NewReader(`{"items": [{"input": "hello"}]}`))
+	w := httptest.NewRecorder()
+	handler.HandleAddItemsBatch(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusForbidden)
+	}
+}
+
+func TestDatasetHandler_AddItemsBatch_MethodNotAllowed(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &DatasetHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	ds := &domain.Dataset{DatasetID: uuid.New().String(), ProjectID: "test-proj", Name: "my-ds"}
+	store.CreateDataset(context.Background(), ds)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/datasets/"+ds.DatasetID+"/items/batch", nil)
+	w := httptest.NewRecorder()
+	handler.HandleAddItemsBatch(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestDatasetHandler_AddItemsBatch_WithSourceSpanID(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &DatasetHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	ds := &domain.Dataset{DatasetID: uuid.New().String(), ProjectID: "test-proj", Name: "my-ds"}
+	store.CreateDataset(context.Background(), ds)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/datasets/"+ds.DatasetID+"/items/batch", strings.NewReader(`{
+		"items": [{
+			"input": "hello",
+			"source_span_id": "span-abc-123"
+		}]
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleAddItemsBatch(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusCreated)
+	}
+
+	items, err := store.ListDatasetItems(context.Background(), ds.DatasetID)
+	if err != nil {
+		t.Fatalf("ListDatasetItems: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items count: got %d, want 1", len(items))
+	}
+	if items[0].SourceSpanID != "span-abc-123" {
+		t.Errorf("source_span_id: got %q, want %q", items[0].SourceSpanID, "span-abc-123")
+	}
+}
+
 // ---- Tests for HandleListItems ----
 
 func TestDatasetHandler_ListItems(t *testing.T) {

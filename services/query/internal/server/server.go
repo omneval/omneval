@@ -275,6 +275,7 @@ func Run() error {
 		mux.HandleFunc("GET /api/v1/datasets", datasetHandler.HandleList)
 		mux.HandleFunc("GET /api/v1/datasets/{id}", datasetHandler.HandleGet)
 		mux.HandleFunc("POST /api/v1/datasets/{id}/items", datasetHandler.HandleAddItems)
+		mux.HandleFunc("POST /api/v1/datasets/{id}/items/batch", datasetHandler.HandleAddItemsBatch)
 		mux.HandleFunc("GET /api/v1/datasets/{id}/items", datasetHandler.HandleListItems)
 		mux.HandleFunc("DELETE /api/v1/datasets/{id}", datasetHandler.HandleDelete)
 
