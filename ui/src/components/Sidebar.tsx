@@ -255,7 +255,7 @@ function NavItemButton({
       {/* Orange left border for active state */}
       {isActive && (
         <span
-          className="absolute left-0 w-0.5 h-full bg-lantern-ember rounded-r"
+          className="absolute left-0 h-full bg-lantern-ember rounded-r"
           style={{ width: "2px" }}
         />
       )}
