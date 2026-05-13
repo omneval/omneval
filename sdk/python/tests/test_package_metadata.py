@@ -1,62 +1,53 @@
 """Tests for package metadata and standalone installability."""
+import importlib.metadata
+
+
+def _extract_package_name(requirement: str) -> str:
+    """Extract the base package name from a pip requirement specifier.
+
+    E.g. 'opentelemetry-sdk>=1.20' -> 'opentelemetry-sdk'.
+    """
+    for separator in (">=", "==", "<=", ">", "<", "~=", "!"):
+        requirement = requirement.split(separator)[0]
+    return requirement.strip()
+
 
 class TestPackageMetadata:
     """Verify the package is properly configured for PyPI publishing."""
 
     def test_pyproject_has_correct_name(self):
         """Package name is 'lantern-sdk' (with hyphen for pip install)."""
-        import importlib.metadata
-
         metadata = importlib.metadata.metadata("lantern-sdk")
         assert metadata["Name"] == "lantern-sdk"
 
     def test_pyproject_has_version(self):
         """Package has a non-empty version set."""
-        import importlib.metadata
-
         version = importlib.metadata.version("lantern-sdk")
         assert version and version != "0.0.0"
 
     def test_pyproject_has_python_requires(self):
         """Package specifies minimum Python version."""
-        import importlib.metadata
-
         requires_python = importlib.metadata.metadata("lantern-sdk").get("Requires-Python", "")
         assert requires_python
 
     def test_dependencies_are_present(self):
         """Required dependencies are declared and installable."""
-        import importlib.metadata
-
         dist = importlib.metadata.distribution("lantern-sdk")
         requires = dist.requires or []
 
-        dep_names = [
-            r.split(">=")[0].split("==")[0].split("<=")[0].split(">")[0].split("<")[0].split("~=")[0]
-            for r in requires
-        ]
+        dep_names = [_extract_package_name(r) for r in requires]
 
-        # Check required dependencies
         assert any("opentelemetry-sdk" in d for d in dep_names)
         assert any("opentelemetry-exporter-otlp-proto-http" in d for d in dep_names)
         assert any("requests" in d for d in dep_names)
 
     def test_dev_dependencies_are_present(self):
         """Development dependencies are declared."""
-        import importlib.metadata
-
         dist = importlib.metadata.distribution("lantern-sdk")
         requires = dist.requires or []
 
-        dev_deps = [
-            r for r in requires
-            if "extra == 'dev'" in r
-        ]
-
-        dev_dep_names = [
-            r.split(">=")[0].split("==")[0].split("<=")[0].split(">")[0].split("<")[0].split("~=")[0]
-            for r in dev_deps
-        ]
+        dev_deps = [r for r in requires if "extra == 'dev'" in r]
+        dev_dep_names = [_extract_package_name(r) for r in dev_deps]
 
         assert any("pytest" in d for d in dev_dep_names)
         assert any("responses" in d for d in dev_dep_names)
@@ -83,6 +74,7 @@ class TestPackageMetadata:
         dist_dir = os.path.join(os.path.dirname(__file__), "..", "dist")
         if not os.path.exists(dist_dir):
             import subprocess
+
             subprocess.run(
                 ["python3", "-m", "build", "--wheel", "--outdir", dist_dir],
                 cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -110,6 +102,7 @@ class TestPackageMetadata:
     def test_readme_exists_and_has_install_instructions(self):
         """README.md exists and contains pip/uv install instructions."""
         import os
+
         readme_path = os.path.join(os.path.dirname(__file__), "..", "README.md")
         assert os.path.exists(readme_path), "README.md not found"
 
@@ -120,8 +113,6 @@ class TestPackageMetadata:
 
     def test_package_has_license(self):
         """Package declares a license (required for PyPI publishing)."""
-        import importlib.metadata
-
         metadata = importlib.metadata.metadata("lantern-sdk")
         license_field = metadata.get("License-Expression", "") or metadata.get("License", "")
         assert license_field, "Package must declare a license for PyPI publishing"
@@ -129,8 +120,6 @@ class TestPackageMetadata:
 
     def test_package_has_classifiers(self):
         """Package has PyPI-relevant classifiers."""
-        import importlib.metadata
-
         dist = importlib.metadata.distribution("lantern-sdk")
         classifiers = dist.metadata.get_all("Classifier") or []
 
