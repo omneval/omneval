@@ -3,8 +3,6 @@ import { colors } from "@/theme";
 import { formatTime } from "@/utils/formatters";
 import { truncate } from "@/utils/formatters";
 
-// ── Types ──────────────────────────────────────────────────────────
-
 interface EvalRule {
   RuleID: string;
   ProjectID: string;
@@ -44,17 +42,25 @@ interface CreateEvalRuleRequest {
   filter: EvalFilter;
 }
 
-interface ApiResponse {
-  rules: EvalRule[];
-}
-
-// ── Props ──────────────────────────────────────────────────────────
-
 interface EvalRulesPageProps {
   activeProject: string;
 }
 
-// ── SpanKind options ───────────────────────────────────────────────
+interface NewRuleFormState {
+  ruleName: string;
+  judgeModel: string;
+  promptName: string;
+  promptVersion: number;
+  sampleRate: number;
+  filterKind: string;
+  filterModel: string;
+  filterService: string;
+  filterStatus: string;
+  filterMinCost: string;
+  filterMaxCost: string;
+  filterMinDuration: string;
+  filterMaxDuration: string;
+}
 
 const SPAN_KINDS = [
   { value: "llm", label: "LLM" },
@@ -66,29 +72,238 @@ const SPAN_KINDS = [
 
 const STATUS_CODES = ["OK", "ERROR", "CANCELLED", "UNKNOWN"] as const;
 
-// ── Component ──────────────────────────────────────────────────────
+const defaultFormState: NewRuleFormState = {
+  ruleName: "",
+  judgeModel: "gpt-4",
+  promptName: "",
+  promptVersion: 1,
+  sampleRate: 100,
+  filterKind: "",
+  filterModel: "",
+  filterService: "",
+  filterStatus: "",
+  filterMinCost: "",
+  filterMaxCost: "",
+  filterMinDuration: "",
+  filterMaxDuration: "",
+};
+
+function StatusBadge({ enabled }: { enabled: boolean }) {
+  if (enabled) {
+    return (
+      <span
+        className="text-xs px-2 py-0.5 rounded font-medium"
+        style={{ backgroundColor: "rgba(34,197,94,0.1)", color: "#22c55e" }}
+      >
+        Enabled
+      </span>
+    );
+  }
+  return (
+    <span
+      className="text-xs px-2 py-0.5 rounded font-medium"
+      style={{ backgroundColor: "rgba(161,161,170,0.1)", color: colors.typography.ashGrey }}
+    >
+      Disabled
+    </span>
+  );
+}
+
+function buildFilter(form: NewRuleFormState): EvalFilter {
+  const filter: EvalFilter = {};
+  if (form.filterKind) filter.kind = form.filterKind;
+  if (form.filterModel) filter.model = form.filterModel;
+  if (form.filterService) filter.service_name = form.filterService;
+  if (form.filterStatus) filter.status_code = form.filterStatus;
+  if (form.filterMinCost) filter.min_cost_usd = parseFloat(form.filterMinCost);
+  if (form.filterMaxCost) filter.max_cost_usd = parseFloat(form.filterMaxCost);
+  if (form.filterMinDuration) filter.min_duration_ms = parseInt(form.filterMinDuration);
+  if (form.filterMaxDuration) filter.max_duration_ms = parseInt(form.filterMaxDuration);
+  return filter;
+}
+
+function sampleRatePercent(rate: number): string {
+  return `${(rate * 100).toFixed(0)}%`;
+}
+
+function filterDisplayText(filter: EvalFilter): string {
+  const parts: string[] = [];
+  if (filter.kind) parts.push(`kind=${filter.kind}`);
+  if (filter.model) parts.push(`model=${filter.model}`);
+  if (filter.service_name) parts.push(`service=${filter.service_name}`);
+  if (filter.status_code) parts.push(`status=${filter.status_code}`);
+  if (filter.min_cost_usd !== undefined) parts.push(`min_cost=$${filter.min_cost_usd}`);
+  if (filter.max_cost_usd !== undefined) parts.push(`max_cost=$${filter.max_cost_usd}`);
+  if (filter.min_duration_ms !== undefined) parts.push(`min_dur=${filter.min_duration_ms}ms`);
+  if (filter.max_duration_ms !== undefined) parts.push(`max_dur=${filter.max_duration_ms}ms`);
+  if (filter.attributes_match && filter.attributes_match.length > 0) {
+    parts.push(`attrs=${filter.attributes_match.length}`);
+  }
+  return parts.join(", ") || "no filter";
+}
+
+function FormField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label className="block text-xs text-lantern-ash mb-1">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function StyledInput({
+  value,
+  onChange,
+  ...rest
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange"> & {
+  onChange: React.ChangeEventHandler<HTMLInputElement>;
+}) {
+  return (
+    <input
+      value={value}
+      onChange={onChange}
+      className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
+      style={{
+        backgroundColor: colors.backgrounds.abyssBlack,
+        borderColor: colors.backgrounds.caveWall,
+        color: colors.typography.pureLight,
+      }}
+      {...rest}
+    />
+  );
+}
+
+function StyledSelect({
+  value,
+  onChange,
+  children,
+  ...rest
+}: Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "onChange"> & {
+  onChange: React.ChangeEventHandler<HTMLSelectElement>;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={onChange}
+      className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
+      style={{
+        backgroundColor: colors.backgrounds.abyssBlack,
+        borderColor: colors.backgrounds.caveWall,
+        color: colors.typography.pureLight,
+      }}
+      {...rest}
+    >
+      {children}
+    </select>
+  );
+}
+
+function ActionButton({
+  children,
+  onClick,
+  variant = "primary",
+  onMouseEnterStyle,
+  onMouseLeaveStyle,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  variant?: "primary" | "secondary";
+  onMouseEnterStyle?: React.CSSProperties;
+  onMouseLeaveStyle?: React.CSSProperties;
+}) {
+  const baseStyle: React.CSSProperties =
+    variant === "primary"
+      ? { backgroundColor: colors.accents.emberFlare, color: "#fff" }
+      : { backgroundColor: colors.backgrounds.slightIllumination, color: colors.typography.ashGrey };
+
+  return (
+    <button
+      onClick={onClick}
+      className="px-4 py-2 text-sm font-medium rounded-md transition-all duration-150"
+      style={baseStyle}
+      onMouseEnter={(e) => {
+        Object.assign(e.currentTarget.style, onMouseEnterStyle);
+      }}
+      onMouseLeave={(e) => {
+        Object.assign(e.currentTarget.style, onMouseLeaveStyle);
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function RuleCard({ rule, onDelete }: { rule: EvalRule; onDelete: (ruleId: string) => void }) {
+  return (
+    <div
+      className="rounded-lg border transition-all duration-150"
+      style={{
+        backgroundColor: colors.backgrounds.charcoalDepth,
+        borderColor: colors.backgrounds.caveWall,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = colors.accents.softGlow;
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = colors.backgrounds.caveWall;
+      }}
+    >
+      <div className="flex items-center gap-4 px-5 py-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-lantern-pure truncate">
+              {rule.Name}
+            </span>
+            <StatusBadge enabled={rule.Enabled} />
+          </div>
+          <div className="flex items-center gap-4 mt-1 text-xs text-lantern-ash">
+            <span>Model: <span className="text-lantern-pure">{rule.JudgeModel}</span></span>
+            {rule.PromptName && (
+              <span>Prompt: <span className="text-lantern-pure">{rule.PromptName}{rule.PromptVersion > 1 ? ` v${rule.PromptVersion}` : ""}</span></span>
+            )}
+            <span>Sample: <span className="text-lantern-pure">{sampleRatePercent(rule.SampleRate)}</span></span>
+            <span className="truncate">Filter: <span className="text-lantern-pure">{truncate(filterDisplayText(rule.Filter), 40)}</span></span>
+          </div>
+        </div>
+
+        <span className="text-xs text-lantern-ash flex-shrink-0 hidden sm:block">
+          {formatTime(rule.CreatedAt)}
+        </span>
+
+        <button
+          onClick={() => onDelete(rule.RuleID)}
+          className="p-1.5 rounded-md transition-colors flex-shrink-0"
+          style={{ color: colors.accents.emberFlare }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = "rgba(255,87,34,0.1)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = "transparent";
+          }}
+          title="Delete rule"
+          aria-label={`Delete rule: ${rule.Name}`}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
   const [rules, setRules] = useState<EvalRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // New rule form state
   const [showNewRuleForm, setShowNewRuleForm] = useState(false);
-  const [newRuleName, setNewRuleName] = useState("");
-  const [newJudgeModel, setNewJudgeModel] = useState("gpt-4");
-  const [newPromptName, setNewPromptName] = useState("");
-  const [newPromptVersion, setNewPromptVersion] = useState(1);
-  const [newSampleRate, setNewSampleRate] = useState(100);
-  const [newFilterKind, setNewFilterKind] = useState("");
-  const [newFilterModel, setNewFilterModel] = useState("");
-  const [newFilterService, setNewFilterService] = useState("");
-  const [newFilterStatus, setNewFilterStatus] = useState("");
-  const [newFilterMinCost, setNewFilterMinCost] = useState("");
-  const [newFilterMaxCost, setNewFilterMaxCost] = useState("");
-  const [newFilterMinDuration, setNewFilterMinDuration] = useState("");
-  const [newFilterMaxDuration, setNewFilterMaxDuration] = useState("");
-
+  const [createForm, setCreateForm] = useState<NewRuleFormState>(defaultFormState);
   const [createError, setCreateError] = useState<string | null>(null);
 
   const fetchRules = async () => {
@@ -97,7 +312,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
     try {
       const res = await fetch(`/api/v1/eval-rules?project_id=${activeProject}`);
       if (!res.ok) throw new Error("Failed to fetch eval rules");
-      const data: ApiResponse = await res.json();
+      const data = await res.json();
       setRules(data.rules || []);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
@@ -110,36 +325,31 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
     fetchRules();
   }, [activeProject]);
 
-  // Handle create new rule
+  const resetCreateForm = () => {
+    setCreateForm(defaultFormState);
+    setCreateError(null);
+    setShowNewRuleForm(false);
+  };
+
   const handleCreate = async () => {
     setCreateError(null);
-    if (!newRuleName.trim()) {
+    if (!createForm.ruleName.trim()) {
       setCreateError("Rule name is required");
       return;
     }
-    if (!newJudgeModel.trim()) {
+    if (!createForm.judgeModel.trim()) {
       setCreateError("Judge model is required");
       return;
     }
 
-    const filter: EvalFilter = {};
-    if (newFilterKind) filter.kind = newFilterKind;
-    if (newFilterModel) filter.model = newFilterModel;
-    if (newFilterService) filter.service_name = newFilterService;
-    if (newFilterStatus) filter.status_code = newFilterStatus;
-    if (newFilterMinCost) filter.min_cost_usd = parseFloat(newFilterMinCost);
-    if (newFilterMaxCost) filter.max_cost_usd = parseFloat(newFilterMaxCost);
-    if (newFilterMinDuration) filter.min_duration_ms = parseInt(newFilterMinDuration);
-    if (newFilterMaxDuration) filter.max_duration_ms = parseInt(newFilterMaxDuration);
-
     const body: CreateEvalRuleRequest = {
-      name: newRuleName.trim(),
-      judge_model: newJudgeModel.trim(),
-      prompt_name: newPromptName.trim(),
-      prompt_version: newPromptVersion,
-      sample_rate: newSampleRate / 100,
+      name: createForm.ruleName.trim(),
+      judge_model: createForm.judgeModel.trim(),
+      prompt_name: createForm.promptName.trim(),
+      prompt_version: createForm.promptVersion,
+      sample_rate: createForm.sampleRate / 100,
       enabled: true,
-      filter,
+      filter: buildFilter(createForm),
     };
 
     try {
@@ -153,27 +363,13 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
         setCreateError(bodyText || "Failed to create rule");
         return;
       }
-      setNewRuleName("");
-      setNewJudgeModel("gpt-4");
-      setNewPromptName("");
-      setNewPromptVersion(1);
-      setNewSampleRate(100);
-      setNewFilterKind("");
-      setNewFilterModel("");
-      setNewFilterService("");
-      setNewFilterStatus("");
-      setNewFilterMinCost("");
-      setNewFilterMaxCost("");
-      setNewFilterMinDuration("");
-      setNewFilterMaxDuration("");
-      setShowNewRuleForm(false);
+      resetCreateForm();
       await fetchRules();
     } catch (e: unknown) {
       setCreateError(e instanceof Error ? e.message : "Unknown error");
     }
   };
 
-  // Handle delete rule
   const handleDelete = async (ruleId: string) => {
     if (!window.confirm("Are you sure you want to delete this eval rule?")) {
       return;
@@ -193,30 +389,6 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
     }
   };
 
-  // Format sample rate for display
-  const formatSampleRate = (rate: number): string => {
-    return `${(rate * 100).toFixed(0)}%`;
-  };
-
-  // Build filter display text
-  const filterDisplayText = (filter: EvalFilter): string => {
-    const parts: string[] = [];
-    if (filter.kind) parts.push(`kind=${filter.kind}`);
-    if (filter.model) parts.push(`model=${filter.model}`);
-    if (filter.service_name) parts.push(`service=${filter.service_name}`);
-    if (filter.status_code) parts.push(`status=${filter.status_code}`);
-    if (filter.min_cost_usd !== undefined) parts.push(`min_cost=$${filter.min_cost_usd}`);
-    if (filter.max_cost_usd !== undefined) parts.push(`max_cost=$${filter.max_cost_usd}`);
-    if (filter.min_duration_ms !== undefined) parts.push(`min_dur=${filter.min_duration_ms}ms`);
-    if (filter.max_duration_ms !== undefined) parts.push(`max_dur=${filter.max_duration_ms}ms`);
-    if (filter.attributes_match && filter.attributes_match.length > 0) {
-      parts.push(`attrs=${filter.attributes_match.length}`);
-    }
-    return parts.join(", ") || "no filter";
-  };
-
-  // ── Render ───────────────────────────────────────────────────────
-
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh]">
@@ -226,7 +398,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
     );
   }
 
-  if (error && !loading) {
+  if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh]">
         <div className="text-lantern-ember text-xl mb-2">⚠</div>
@@ -273,90 +445,53 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
             </div>
           )}
 
-          {/* Basic fields */}
           <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="block text-xs text-lantern-ash mb-1">Rule Name</label>
-              <input
+            <FormField label="Rule Name">
+              <StyledInput
                 type="text"
-                value={newRuleName}
-                onChange={(e) => setNewRuleName(e.target.value)}
+                value={createForm.ruleName}
+                onChange={(e) => setCreateForm({ ...createForm, ruleName: e.target.value })}
                 placeholder="e.g. Production LLM Eval"
-                className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
-                style={{
-                  backgroundColor: colors.backgrounds.abyssBlack,
-                  borderColor: colors.backgrounds.caveWall,
-                  color: colors.typography.pureLight,
-                }}
               />
-            </div>
-            <div>
-              <label className="block text-xs text-lantern-ash mb-1">Judge Model</label>
-              <input
+            </FormField>
+            <FormField label="Judge Model">
+              <StyledInput
                 type="text"
-                value={newJudgeModel}
-                onChange={(e) => setNewJudgeModel(e.target.value)}
+                value={createForm.judgeModel}
+                onChange={(e) => setCreateForm({ ...createForm, judgeModel: e.target.value })}
                 placeholder="e.g. gpt-4"
-                className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
-                style={{
-                  backgroundColor: colors.backgrounds.abyssBlack,
-                  borderColor: colors.backgrounds.caveWall,
-                  color: colors.typography.pureLight,
-                }}
               />
-            </div>
+            </FormField>
           </div>
 
           <div className="grid grid-cols-3 gap-4 mb-4">
-            <div>
-              <label className="block text-xs text-lantern-ash mb-1">Judge Prompt Name</label>
-              <input
+            <FormField label="Judge Prompt Name">
+              <StyledInput
                 type="text"
-                value={newPromptName}
-                onChange={(e) => setNewPromptName(e.target.value)}
+                value={createForm.promptName}
+                onChange={(e) => setCreateForm({ ...createForm, promptName: e.target.value })}
                 placeholder="e.g. judge-v1"
-                className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
-                style={{
-                  backgroundColor: colors.backgrounds.abyssBlack,
-                  borderColor: colors.backgrounds.caveWall,
-                  color: colors.typography.pureLight,
-                }}
               />
-            </div>
-            <div>
-              <label className="block text-xs text-lantern-ash mb-1">Prompt Version</label>
-              <input
+            </FormField>
+            <FormField label="Prompt Version">
+              <StyledInput
                 type="number"
-                value={newPromptVersion}
+                value={createForm.promptVersion}
                 min={1}
-                onChange={(e) => setNewPromptVersion(parseInt(e.target.value) || 1)}
-                className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
-                style={{
-                  backgroundColor: colors.backgrounds.abyssBlack,
-                  borderColor: colors.backgrounds.caveWall,
-                  color: colors.typography.pureLight,
-                }}
+                onChange={(e) => setCreateForm({ ...createForm, promptVersion: parseInt(e.target.value) || 1 })}
               />
-            </div>
-            <div>
-              <label className="block text-xs text-lantern-ash mb-1">Sample Rate (%)</label>
-              <input
+            </FormField>
+            <FormField label="Sample Rate (%)">
+              <StyledInput
                 type="number"
-                value={newSampleRate}
+                value={createForm.sampleRate}
                 min={0}
                 max={100}
-                onChange={(e) => setNewSampleRate(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
-                className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
-                style={{
-                  backgroundColor: colors.backgrounds.abyssBlack,
-                  borderColor: colors.backgrounds.caveWall,
-                  color: colors.typography.pureLight,
-                }}
+                onChange={(e) => setCreateForm({ ...createForm, sampleRate: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) })}
               />
-            </div>
+            </FormField>
           </div>
 
-          {/* Filter conditions */}
           <div
             className="p-3 rounded-md border mb-4"
             style={{ backgroundColor: colors.backgrounds.abyssBlack, borderColor: colors.backgrounds.caveWall }}
@@ -364,164 +499,101 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
             <h4 className="text-xs font-medium text-lantern-ash mb-3 uppercase tracking-wider">Filter Conditions (AND logic)</h4>
 
             <div className="grid grid-cols-3 gap-3 mb-3">
-              <div>
-                <label className="block text-xs text-lantern-ash mb-1">Span Kind</label>
-                <select
-                  value={newFilterKind}
-                  onChange={(e) => setNewFilterKind(e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
-                  style={{
-                    backgroundColor: colors.backgrounds.abyssBlack,
-                    borderColor: colors.backgrounds.caveWall,
-                    color: colors.typography.pureLight,
-                  }}
+              <FormField label="Span Kind">
+                <StyledSelect
+                  value={createForm.filterKind}
+                  onChange={(e) => setCreateForm({ ...createForm, filterKind: e.target.value })}
                 >
                   <option value="">Any</option>
                   {SPAN_KINDS.map((k) => (
                     <option key={k.value} value={k.value}>{k.label}</option>
                   ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-lantern-ash mb-1">Model</label>
-                <input
+                </StyledSelect>
+              </FormField>
+              <FormField label="Model">
+                <StyledInput
                   type="text"
-                  value={newFilterModel}
-                  onChange={(e) => setNewFilterModel(e.target.value)}
+                  value={createForm.filterModel}
+                  onChange={(e) => setCreateForm({ ...createForm, filterModel: e.target.value })}
                   placeholder="e.g. gpt-4-turbo"
-                  className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
-                  style={{
-                    backgroundColor: colors.backgrounds.abyssBlack,
-                    borderColor: colors.backgrounds.caveWall,
-                    color: colors.typography.pureLight,
-                  }}
                 />
-              </div>
-              <div>
-                <label className="block text-xs text-lantern-ash mb-1">Service Name</label>
-                <input
+              </FormField>
+              <FormField label="Service Name">
+                <StyledInput
                   type="text"
-                  value={newFilterService}
-                  onChange={(e) => setNewFilterService(e.target.value)}
+                  value={createForm.filterService}
+                  onChange={(e) => setCreateForm({ ...createForm, filterService: e.target.value })}
                   placeholder="e.g. my-service"
-                  className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
-                  style={{
-                    backgroundColor: colors.backgrounds.abyssBlack,
-                    borderColor: colors.backgrounds.caveWall,
-                    color: colors.typography.pureLight,
-                  }}
                 />
-              </div>
+              </FormField>
             </div>
 
             <div className="grid grid-cols-3 gap-3 mb-3">
-              <div>
-                <label className="block text-xs text-lantern-ash mb-1">Status Code</label>
-                <select
-                  value={newFilterStatus}
-                  onChange={(e) => setNewFilterStatus(e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
-                  style={{
-                    backgroundColor: colors.backgrounds.abyssBlack,
-                    borderColor: colors.backgrounds.caveWall,
-                    color: colors.typography.pureLight,
-                  }}
+              <FormField label="Status Code">
+                <StyledSelect
+                  value={createForm.filterStatus}
+                  onChange={(e) => setCreateForm({ ...createForm, filterStatus: e.target.value })}
                 >
                   <option value="">Any</option>
                   {STATUS_CODES.map((s) => (
                     <option key={s} value={s}>{s}</option>
                   ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-lantern-ash mb-1">Min Cost ($)</label>
-                <input
+                </StyledSelect>
+              </FormField>
+              <FormField label="Min Cost ($)">
+                <StyledInput
                   type="number"
-                  value={newFilterMinCost}
+                  value={createForm.filterMinCost}
                   min={0}
                   step={0.01}
-                  onChange={(e) => setNewFilterMinCost(e.target.value)}
+                  onChange={(e) => setCreateForm({ ...createForm, filterMinCost: e.target.value })}
                   placeholder="0.00"
-                  className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
-                  style={{
-                    backgroundColor: colors.backgrounds.abyssBlack,
-                    borderColor: colors.backgrounds.caveWall,
-                    color: colors.typography.pureLight,
-                  }}
                 />
-              </div>
-              <div>
-                <label className="block text-xs text-lantern-ash mb-1">Max Cost ($)</label>
-                <input
+              </FormField>
+              <FormField label="Max Cost ($)">
+                <StyledInput
                   type="number"
-                  value={newFilterMaxCost}
+                  value={createForm.filterMaxCost}
                   min={0}
                   step={0.01}
-                  onChange={(e) => setNewFilterMaxCost(e.target.value)}
+                  onChange={(e) => setCreateForm({ ...createForm, filterMaxCost: e.target.value })}
                   placeholder="999.99"
-                  className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
-                  style={{
-                    backgroundColor: colors.backgrounds.abyssBlack,
-                    borderColor: colors.backgrounds.caveWall,
-                    color: colors.typography.pureLight,
-                  }}
                 />
-              </div>
+              </FormField>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-lantern-ash mb-1">Min Duration (ms)</label>
-                <input
+              <FormField label="Min Duration (ms)">
+                <StyledInput
                   type="number"
-                  value={newFilterMinDuration}
+                  value={createForm.filterMinDuration}
                   min={0}
-                  onChange={(e) => setNewFilterMinDuration(e.target.value)}
+                  onChange={(e) => setCreateForm({ ...createForm, filterMinDuration: e.target.value })}
                   placeholder="100"
-                  className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
-                  style={{
-                    backgroundColor: colors.backgrounds.abyssBlack,
-                    borderColor: colors.backgrounds.caveWall,
-                    color: colors.typography.pureLight,
-                  }}
                 />
-              </div>
-              <div>
-                <label className="block text-xs text-lantern-ash mb-1">Max Duration (ms)</label>
-                <input
+              </FormField>
+              <FormField label="Max Duration (ms)">
+                <StyledInput
                   type="number"
-                  value={newFilterMaxDuration}
+                  value={createForm.filterMaxDuration}
                   min={0}
-                  onChange={(e) => setNewFilterMaxDuration(e.target.value)}
+                  onChange={(e) => setCreateForm({ ...createForm, filterMaxDuration: e.target.value })}
                   placeholder="30000"
-                  className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
-                  style={{
-                    backgroundColor: colors.backgrounds.abyssBlack,
-                    borderColor: colors.backgrounds.caveWall,
-                    color: colors.typography.pureLight,
-                  }}
                 />
-              </div>
+              </FormField>
             </div>
           </div>
 
           <div className="flex gap-3">
-            <button
-              onClick={handleCreate}
-              className="px-4 py-2 text-sm font-medium rounded-md text-white transition-all duration-150"
-              style={{ backgroundColor: colors.accents.emberFlare }}
-              onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.85")}
-              onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
-            >
-              Create Rule
-            </button>
-            <button
-              onClick={() => { setShowNewRuleForm(false); setCreateError(null); }}
-              className="px-4 py-2 text-sm rounded-md transition-colors"
-              style={{ color: colors.typography.ashGrey, backgroundColor: colors.backgrounds.slightIllumination }}
+            <ActionButton onClick={handleCreate}>Create Rule</ActionButton>
+            <ActionButton
+              onClick={resetCreateForm}
+              variant="secondary"
+              onMouseEnterStyle={{ opacity: "0.85" }}
+              onMouseLeaveStyle={{ opacity: "1" }}
             >
               Cancel
-            </button>
+            </ActionButton>
           </div>
         </div>
       )}
@@ -555,78 +627,11 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
       ) : (
         <div className="space-y-2">
           {rules.map((rule) => (
-            <div
+            <RuleCard
               key={rule.RuleID}
-              className="rounded-lg border transition-all duration-150"
-              style={{
-                backgroundColor: colors.backgrounds.charcoalDepth,
-                borderColor: colors.backgrounds.caveWall,
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = colors.accents.softGlow;
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = colors.backgrounds.caveWall;
-              }}
-            >
-              <div className="flex items-center gap-4 px-5 py-4">
-                {/* Rule name */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-lantern-pure truncate">
-                      {rule.Name}
-                    </span>
-                    {rule.Enabled ? (
-                      <span
-                        className="text-xs px-2 py-0.5 rounded font-medium"
-                        style={{ backgroundColor: "rgba(34,197,94,0.1)", color: "#22c55e" }}
-                      >
-                        Enabled
-                      </span>
-                    ) : (
-                      <span
-                        className="text-xs px-2 py-0.5 rounded font-medium"
-                        style={{ backgroundColor: "rgba(161,161,170,0.1)", color: colors.typography.ashGrey }}
-                      >
-                        Disabled
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-4 mt-1 text-xs text-lantern-ash">
-                    <span>Model: <span className="text-lantern-pure">{rule.JudgeModel}</span></span>
-                    {rule.PromptName && (
-                      <span>Prompt: <span className="text-lantern-pure">{rule.PromptName}{rule.PromptVersion > 1 ? ` v${rule.PromptVersion}` : ""}</span></span>
-                    )}
-                    <span>Sample: <span className="text-lantern-pure">{formatSampleRate(rule.SampleRate)}</span></span>
-                    <span className="truncate">Filter: <span className="text-lantern-pure">{truncate(filterDisplayText(rule.Filter), 40)}</span></span>
-                  </div>
-                </div>
-
-                {/* Created date */}
-                <span className="text-xs text-lantern-ash flex-shrink-0 hidden sm:block">
-                  {formatTime(rule.CreatedAt)}
-                </span>
-
-                {/* Delete button */}
-                <button
-                  onClick={() => handleDelete(rule.RuleID)}
-                  className="p-1.5 rounded-md transition-colors flex-shrink-0"
-                  style={{ color: colors.accents.emberFlare }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = "rgba(255,87,34,0.1)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = "transparent";
-                  }}
-                  title="Delete rule"
-                  aria-label={`Delete rule: ${rule.Name}`}
-                >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                  </svg>
-                </button>
-              </div>
-            </div>
+              rule={rule}
+              onDelete={handleDelete}
+            />
           ))}
         </div>
       )}
