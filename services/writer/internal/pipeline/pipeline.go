@@ -149,6 +149,16 @@ func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
 			endTime = now
 		}
 
+		// Coerce empty strings to nil so DuckDB stores NULL instead of
+		// rejecting them as malformed JSON in JSON-typed columns.
+		var inputVal, outputVal interface{}
+		if span.Input != "" {
+			inputVal = span.Input
+		}
+		if span.Output != "" {
+			outputVal = span.Output
+		}
+
 		_, err := stmt.ExecContext(ctx,
 			span.SpanID,
 			span.TraceID,
@@ -160,8 +170,8 @@ func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
 			startTime,
 			endTime,
 			span.Model,
-			span.Input,
-			span.Output,
+			inputVal,
+			outputVal,
 			span.InputTokens,
 			span.OutputTokens,
 			cost,
