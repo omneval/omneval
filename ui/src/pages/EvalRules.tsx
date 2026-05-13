@@ -1,7 +1,22 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { colors } from "@/theme";
 import { formatTime } from "@/utils/formatters";
 import { truncate } from "@/utils/formatters";
+
+interface PreviewSpan {
+  span_id: string;
+  trace_id: string;
+  name: string;
+  kind: string;
+  model: string;
+  start_time: string;
+  cost_usd: number;
+}
+
+interface PreviewResult {
+  spans: PreviewSpan[];
+  match_count_24h: number;
+}
 
 interface EvalRule {
   RuleID: string;
@@ -305,6 +320,10 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
   const [showNewRuleForm, setShowNewRuleForm] = useState(false);
   const [createForm, setCreateForm] = useState<NewRuleFormState>(defaultFormState);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
 
   const fetchRules = async () => {
     setLoading(true);
@@ -329,7 +348,44 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
     setCreateForm(defaultFormState);
     setCreateError(null);
     setShowNewRuleForm(false);
+    setPreviewResult(null);
+    setPreviewLoading(false);
+    setPreviewError(null);
+    setShowPreview(false);
   };
+
+  const handlePreview = useCallback(async () => {
+    const filter = buildFilter(createForm);
+    const hasConditions = Object.keys(filter).length > 0;
+
+    if (!hasConditions) {
+      setPreviewError("Add at least one filter condition to preview");
+      return;
+    }
+
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setShowPreview(true);
+
+    try {
+      const res = await fetch("/api/v1/eval-rules/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filter }),
+      });
+      if (!res.ok) {
+        const bodyText = await res.text();
+        setPreviewError(bodyText || "Failed to preview");
+        return;
+      }
+      const data = await res.json();
+      setPreviewResult(data);
+    } catch (e: unknown) {
+      setPreviewError(e instanceof Error ? e.message : "Unknown error");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [createForm]);
 
   const handleCreate = async () => {
     setCreateError(null);
@@ -583,6 +639,84 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
               </FormField>
             </div>
           </div>
+
+          {/* Preview button */}
+          <div className="flex items-center gap-3 mb-4">
+            <button
+              onClick={handlePreview}
+              className="px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 text-white"
+              style={{ backgroundColor: colors.accents.emberFlare }}
+              onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.85")}
+              onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+              disabled={previewLoading}
+            >
+              {previewLoading ? "Previewing..." : "Preview Matching Spans"}
+            </button>
+            {previewResult && (
+              <span className="text-xs text-lantern-ash">
+                {previewResult.spans.length} matches in last hour · {previewResult.match_count_24h} in last 24h
+              </span>
+            )}
+          </div>
+
+          {/* Collapsible preview results */}
+          {showPreview && (
+            <div
+              className="rounded-md border mb-4 overflow-hidden"
+              style={{ backgroundColor: colors.backgrounds.abyssBlack, borderColor: colors.backgrounds.caveWall }}
+            >
+              <button
+                onClick={() => setShowPreview(!showPreview)}
+                className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-lantern-pure transition-colors"
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(255,87,34,0.05)")}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+              >
+                <span>{previewResult ? "Matching spans" : "Preview results"}</span>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                  className={`transition-transform duration-150 ${showPreview ? "rotate-180" : ""}`}
+                >
+                  <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+
+              {showPreview && (
+                <div className="px-4 pb-4">
+                  {previewError ? (
+                    <div className="text-sm text-lantern-ember">{previewError}</div>
+                  ) : previewResult && previewResult.spans.length === 0 ? (
+                    <div className="text-sm text-lantern-ash py-2">No matching spans found.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {previewResult?.spans.map((span) => (
+                        <div
+                          key={span.span_id}
+                          className="flex items-center gap-4 px-3 py-2 rounded text-xs"
+                          style={{ backgroundColor: "rgba(255,255,255,0.03)" }}
+                        >
+                          <span className="font-mono text-lantern-pure truncate max-w-[120px]" title={span.name}>
+                            {span.name}
+                          </span>
+                          <span className="text-lantern-ash">model: <span className="text-lantern-pure">{span.model}</span></span>
+                          <span className="text-lantern-ash">kind: <span className="text-lantern-pure">{span.kind}</span></span>
+                          <span className="text-lantern-ash">cost: <span className="text-lantern-pure">${span.cost_usd.toFixed(4)}</span></span>
+                          <span className="text-lantern-ash flex-1 text-right truncate" title={span.start_time}>
+                            {new Date(span.start_time).toLocaleString()}
+                          </span>
+                          <span className="font-mono text-lantern-ash flex-shrink-0">
+                            <span className="text-lantern-pure">trace: </span>{span.trace_id.substring(0, 8)}...
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="flex gap-3">
             <ActionButton onClick={handleCreate}>Create Rule</ActionButton>
