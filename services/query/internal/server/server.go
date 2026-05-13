@@ -216,6 +216,7 @@ func Run() error {
 	var evalRuleHandler *handler.EvalRuleHandler
 	if store != nil {
 		evalRuleHandler = &handler.EvalRuleHandler{
+			DB:           db,
 			Store:        store,
 			SessionStore: h,
 		}
@@ -262,6 +263,7 @@ func Run() error {
 	if evalRuleHandler != nil {
 		mux.HandleFunc("POST /api/v1/eval-rules", evalRuleHandler.HandleCreate)
 		mux.HandleFunc("GET /api/v1/eval-rules", evalRuleHandler.HandleList)
+		mux.HandleFunc("POST /api/v1/eval-rules/preview", evalRuleHandler.HandlePreview)
 		mux.HandleFunc("DELETE /api/v1/eval-rules/{id}", evalRuleHandler.HandleDelete)
 	}
 

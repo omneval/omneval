@@ -6,11 +6,14 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/zbloss/lantern/internal/domain"
+	"github.com/zbloss/lantern/internal/duckdb"
 	"github.com/zbloss/lantern/internal/fake"
 	"github.com/zbloss/lantern/internal/metadata"
 )
@@ -610,5 +613,288 @@ func TestEvalRuleHandler_CreateEvalRule_AttributesMatch_InvalidPattern(t *testin
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+// ---- Preview endpoint tests ----
+
+func TestEvalRuleHandler_PreviewPreview_AuthRequired(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &EvalRuleHandler{
+		Store: store,
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules/preview", strings.NewReader(`{
+		"filter": {"kind": "llm"}
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandlePreview(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusUnauthorized, w.Body.String())
+	}
+}
+
+func TestEvalRuleHandler_PreviewPreview_MethodNotAllowed(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &EvalRuleHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/eval-rules/preview", nil)
+	w := httptest.NewRecorder()
+	handler.HandlePreview(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestEvalRuleHandler_PreviewPreview_InvalidJSON(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &EvalRuleHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules/preview", strings.NewReader(`{invalid`))
+	w := httptest.NewRecorder()
+	handler.HandlePreview(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+func TestEvalRuleHandler_PreviewPreview_EmptyFilter(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &EvalRuleHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules/preview", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+	handler.HandlePreview(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+func TestEvalRuleHandler_PreviewPreview_MatchingSpans(t *testing.T) {
+	// Create a DuckDB with test spans.
+	db, err := duckdb.Open("test_preview_match.db")
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+	defer os.Remove("test_preview_match.db")
+
+	// Insert test spans.
+	now := time.Now().UTC()
+	past1h := now.Add(-30 * time.Minute).Format(time.RFC3339)
+	past2h := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	_, err = db.ExecContext(context.Background(), `
+		INSERT INTO spans (span_id, trace_id, project_id, name, kind, model, start_time, end_time, cost_usd)
+		VALUES
+			('span-1', 'trace-1', 'test-proj', 'gpt-4 completion', 'llm', 'gpt-4', ?, now(), 0.05),
+			('span-2', 'trace-2', 'test-proj', 'gpt-4 completion', 'llm', 'gpt-4', ?, now(), 0.10),
+			('span-3', 'trace-3', 'test-proj', 'claude completion', 'llm', 'claude-3', ?, now(), 0.15),
+			('span-4', 'trace-4', 'test-proj', 'old span', 'llm', 'gpt-4', '2024-01-01T00:00:00Z', '2024-01-01T00:01:00Z', 0.01),
+			('span-5', 'trace-5', 'other-proj', 'other span', 'llm', 'gpt-4', ?, now(), 0.05),
+			('span-6', 'trace-6', 'test-proj', 'tool call', 'tool', 'gpt-4', ?, now(), 0.00);
+	`, past1h, past1h, past2h, past1h, past1h)
+	if err != nil {
+		t.Fatalf("insert spans: %v", err)
+	}
+
+	store := fake.NewFakeMetadataStore()
+	handler := &EvalRuleHandler{
+		DB:           db,
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules/preview", strings.NewReader(`{
+		"filter": {
+			"kind": "llm",
+			"model": "gpt-4"
+		}
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandlePreview(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp PreviewEvalRulesResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Should match 2 spans in the last hour (span-1, span-2)
+	// span-5 is from other-proj, span-4 is >1h old, span-6 is tool kind
+	if len(resp.Spans) != 2 {
+		t.Errorf("span count: got %d, want 2\nspans: %+v", len(resp.Spans), resp.Spans)
+	}
+
+	// Should have match_count_24h = 2 (same 2 spans in last 24h)
+	if resp.MatchCount24h != 2 {
+		t.Errorf("match_count_24h: got %d, want 2", resp.MatchCount24h)
+	}
+
+	// Verify returned span fields
+	for _, s := range resp.Spans {
+		if s.Kind == "" || s.Model == "" || s.Name == "" {
+			t.Errorf("span missing field: %+v", s)
+		}
+	}
+}
+
+func TestEvalRuleHandler_PreviewPreview_NoMatches(t *testing.T) {
+	db, err := duckdb.Open("test_preview_no_match.db")
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+	defer os.Remove("test_preview_no_match.db")
+
+	// Insert a non-matching span.
+	_, err = db.ExecContext(context.Background(), `
+		INSERT INTO spans (span_id, trace_id, project_id, name, kind, model, start_time, end_time, cost_usd)
+		VALUES ('span-1', 'trace-1', 'test-proj', 'tool call', 'tool', 'gpt-4', now(), now(), 0.00);
+	`)
+	if err != nil {
+		t.Fatalf("insert span: %v", err)
+	}
+
+	store := fake.NewFakeMetadataStore()
+	handler := &EvalRuleHandler{
+		DB:           db,
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules/preview", strings.NewReader(`{
+		"filter": {
+			"kind": "llm",
+			"model": "claude-3"
+		}
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandlePreview(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp PreviewEvalRulesResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if len(resp.Spans) != 0 {
+		t.Errorf("span count: got %d, want 0", len(resp.Spans))
+	}
+	if resp.MatchCount24h != 0 {
+		t.Errorf("match_count_24h: got %d, want 0", resp.MatchCount24h)
+	}
+}
+
+func TestEvalRuleHandler_PreviewPreview_MatchCount24h(t *testing.T) {
+	db, err := duckdb.Open("test_preview_count.db")
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+	defer os.Remove("test_preview_count.db")
+
+	now := time.Now().UTC()
+	past1h := now.Add(-30 * time.Minute)
+	past2h := now.Add(-2 * time.Hour)
+	past23h := now.Add(-23 * time.Hour)
+	past30h := now.Add(-30 * time.Hour) // outside 24h window
+	_, err = db.ExecContext(context.Background(), `
+		INSERT INTO spans (span_id, trace_id, project_id, name, kind, model, start_time, cost_usd)
+		VALUES
+			('span-1', 'trace-1', 'test-proj', 'gpt-4', 'llm', 'gpt-4', ?, 0.05),
+			('span-2', 'trace-2', 'test-proj', 'gpt-4', 'llm', 'gpt-4', ?, 0.10),
+			('span-3', 'trace-3', 'test-proj', 'gpt-4', 'llm', 'gpt-4', ?, 0.15),
+			('span-4', 'trace-4', 'test-proj', 'gpt-4', 'llm', 'gpt-4', ?, 0.01);
+	`, past1h, past2h, past23h, past30h)
+	if err != nil {
+		t.Fatalf("insert spans: %v", err)
+	}
+
+	store := fake.NewFakeMetadataStore()
+	handler := &EvalRuleHandler{
+		DB:           db,
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules/preview", strings.NewReader(`{
+		"filter": {
+			"kind": "llm",
+			"model": "gpt-4"
+		}
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandlePreview(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp PreviewEvalRulesResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Last hour: spans at 30m, 2h, 23h old -> 1 match (span-1)
+	if len(resp.Spans) != 1 {
+		t.Errorf("span count (last hour): got %d, want 1", len(resp.Spans))
+	}
+
+	// Last 24h: spans at 30m, 2h, 23h old -> 3 matches (span-1, span-2, span-3)
+	if resp.MatchCount24h != 3 {
+		t.Errorf("match_count_24h: got %d, want 3", resp.MatchCount24h)
+	}
+}
+
+func TestEvalRuleHandler_PreviewPreview_DBNil(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &EvalRuleHandler{
+		DB:           nil, // No DB connection
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules/preview", strings.NewReader(`{
+		"filter": {
+			"kind": "llm"
+		}
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandlePreview(w, req)
+
+	// Should return empty results gracefully (not error)
+	if w.Code != http.StatusOK {
+		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp PreviewEvalRulesResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if len(resp.Spans) != 0 {
+		t.Errorf("span count: got %d, want 0 (no DB)", len(resp.Spans))
+	}
+	if resp.MatchCount24h != 0 {
+		t.Errorf("match_count_24h: got %d, want 0 (no DB)", resp.MatchCount24h)
 	}
 }
