@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { colors } from "@/theme";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { Skeleton } from "@/components/Skeleton";
 import {
   formatNumber,
   formatTime,
@@ -127,6 +128,9 @@ const chartTooltipStyle: React.CSSProperties = {
 
 const gridColor = colors.backgrounds.caveWall;
 
+/** Series color index for multi-chart consistency. */
+const SERIES_EMBER = 0;
+
 // ── Chart: Traces by Name (Horizontal Bar) ─────────────────────────
 
 interface TracesByNameData {
@@ -136,7 +140,13 @@ interface TracesByNameData {
 
 function TracesByNameChart({ data, loading }: { data: TracesByNameData[]; loading: boolean }) {
   if (loading && data.length === 0) {
-    return <div className="text-center py-8 text-lantern-ash text-sm">Loading...</div>;
+    return (
+      <div className="space-y-3 py-4">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-5 rounded" />
+        ))}
+      </div>
+    );
   }
 
   if (data.length === 0) {
@@ -148,8 +158,6 @@ function TracesByNameChart({ data, loading }: { data: TracesByNameData[]; loadin
       />
     );
   }
-
-  // maxCount computed for scaling
 
   return (
     <ResponsiveContainer width="100%" height={280}>
@@ -173,8 +181,8 @@ function TracesByNameChart({ data, loading }: { data: TracesByNameData[]; loadin
           {data.map((_entry, index) => (
             <Cell
               key={`cell-${index}`}
-              fill={colors.accents.emberFlare}
-              fillOpacity={0.5 + (0.5 * index) / Math.max(data.length, 1)}
+              fill={colors.chartColors.series[index % colors.chartColors.series.length]}
+              fillOpacity={colors.chartColors.barOpacity(index, data.length)}
             />
           ))}
         </Bar>
@@ -192,7 +200,11 @@ interface TimeSeriesData {
 
 function TracesByTimeChart({ data, loading }: { data: TimeSeriesData[]; loading: boolean }) {
   if (loading && data.length === 0) {
-    return <div className="text-center py-8 text-lantern-ash text-sm">Loading...</div>;
+    return (
+      <div className="space-y-3 py-4">
+        <Skeleton className="h-32 rounded" />
+      </div>
+    );
   }
 
   if (data.length === 0) {
@@ -229,10 +241,10 @@ function TracesByTimeChart({ data, loading }: { data: TimeSeriesData[]; loading:
         <Line
           type="monotone"
           dataKey="count"
-          stroke={colors.accents.emberFlare}
+          stroke={colors.chartColors.series[SERIES_EMBER]}
           strokeWidth={2.5}
-          dot={{ fill: colors.accents.emberFlare, r: 3 }}
-          activeDot={{ r: 5, fill: colors.accents.emberFlare }}
+          dot={{ fill: colors.chartColors.series[SERIES_EMBER], r: 3 }}
+          activeDot={{ r: 5, fill: colors.chartColors.series[SERIES_EMBER] }}
         />
       </LineChart>
     </ResponsiveContainer>
@@ -255,7 +267,13 @@ function ModelCostsTable({ data, loading }: { data: CostData[]; loading: boolean
   );
 
   if (loading && data.length === 0) {
-    return <div className="text-center py-8 text-lantern-ash text-sm">Loading...</div>;
+    return (
+      <div className="space-y-2 py-4">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-6 rounded" />
+        ))}
+      </div>
+    );
   }
 
   if (data.length === 0) {
@@ -330,7 +348,12 @@ function ModelCostsTable({ data, loading }: { data: CostData[]; loading: boolean
 
 function ScoresWidget({ loading }: { loading: boolean }) {
   if (loading) {
-    return <div className="text-center py-8 text-lantern-ash text-sm">Loading...</div>;
+    return (
+      <div className="space-y-3 py-4">
+        <Skeleton className="h-6 rounded" />
+        <Skeleton className="h-4 rounded" />
+      </div>
+    );
   }
 
   return (
@@ -350,7 +373,12 @@ function ModelUsageWidget({ loading }: { loading: boolean }) {
   const [activeTab, setActiveTab] = useState(0);
 
   if (loading) {
-    return <div className="text-center py-8 text-lantern-ash text-sm">Loading...</div>;
+    return (
+      <div className="space-y-3 py-4">
+        <Skeleton className="h-5 rounded" />
+        <Skeleton className="h-24 rounded" />
+      </div>
+    );
   }
 
   return (
@@ -369,7 +397,7 @@ function ModelUsageWidget({ loading }: { loading: boolean }) {
             style={
               i === activeTab
                 ? {
-                    borderBottom: `2px solid ${colors.accents.emberFlare}`,
+                    borderBottom: `2px solid ${colors.chartColors.series[SERIES_EMBER]}`,
                     paddingBottom: "0.375rem",
                   }
                 : { borderBottom: "2px solid transparent" }
@@ -396,7 +424,13 @@ interface UserConsumptionData {
 
 function UserConsumptionChart({ data, loading }: { data: UserConsumptionData[]; loading: boolean }) {
   if (loading && data.length === 0) {
-    return <div className="text-center py-8 text-lantern-ash text-sm">Loading...</div>;
+    return (
+      <div className="space-y-3 py-4">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-5 rounded" />
+        ))}
+      </div>
+    );
   }
 
   if (data.length === 0) {
@@ -406,8 +440,6 @@ function UserConsumptionChart({ data, loading }: { data: UserConsumptionData[]; 
       </div>
     );
   }
-
-  // maxCount computed for scaling
 
   return (
     <ResponsiveContainer width="100%" height={280}>
@@ -431,8 +463,8 @@ function UserConsumptionChart({ data, loading }: { data: UserConsumptionData[]; 
           {data.map((_entry, index) => (
             <Cell
               key={`cell-${index}`}
-              fill={colors.accents.softGlow}
-              fillOpacity={0.7}
+              fill={colors.chartColors.series[index % colors.chartColors.series.length]}
+              fillOpacity={colors.chartColors.barOpacity(index, data.length)}
             />
           ))}
         </Bar>
@@ -664,6 +696,8 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
         <ErrorBanner
           message={error}
           onDismiss={() => setError(null)}
+          onRetry={fetchData}
+          retryLabel="Retry"
         />
       )}
 

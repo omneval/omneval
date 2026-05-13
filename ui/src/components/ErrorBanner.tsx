@@ -1,6 +1,8 @@
 interface ErrorBannerProps {
   message: string;
   onDismiss?: () => void;
+  onRetry?: () => void;
+  retryLabel?: string;
 }
 
 interface InfoBannerProps {
@@ -38,7 +40,22 @@ function InfoIcon() {
  * ErrorBanner — Shows an error with red icon + text on a dark background.
  * Uses the lantern accent color system for consistent error styling.
  */
-export function ErrorBanner({ message, onDismiss }: ErrorBannerProps) {
+function RetryIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="flex-shrink-0">
+      <path
+        d="M2 8a6 6 0 0111.13-2.83M14 8a6 6 0 01-11.13 2.83"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <path d="M13 2v4h-4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 14v-4h4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function ErrorBanner({ message, onDismiss, onRetry, retryLabel = "Retry" }: ErrorBannerProps) {
   return (
     <div
       className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium"
@@ -66,6 +83,20 @@ export function ErrorBanner({ message, onDismiss }: ErrorBannerProps) {
               strokeLinecap="round"
             />
           </svg>
+        </button>
+      )}
+      {onRetry && (
+        <button
+          onClick={onRetry}
+          className="flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-all duration-150 hover:brightness-110"
+          style={{
+            background: "rgba(255, 87, 34, 0.15)",
+            border: "1px solid rgba(255, 87, 34, 0.3)",
+            color: "#FF8A65",
+          }}
+        >
+          <RetryIcon />
+          {retryLabel}
         </button>
       )}
     </div>

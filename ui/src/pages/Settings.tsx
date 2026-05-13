@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useToast } from "@/components/Toast";
+import { CopyButton } from "@/components/CopyButton";
 import { colors } from "@/theme";
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -51,6 +52,13 @@ function KeyCard({
           <span className="text-sm font-mono text-lantern-pure truncate">
             {apiKey.key_id}
           </span>
+          {!isRevoked && (
+            <CopyButton
+              text={apiKey.key_id}
+              copyLabel="Copy"
+              ariaLabel={`Copy API key ${apiKey.kind}`}
+            />
+          )}
           <span
             className={`text-xs px-1.5 py-0.5 rounded font-medium ${
               apiKey.kind === "service"

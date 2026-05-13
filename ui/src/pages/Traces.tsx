@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { colors } from "@/theme";
+import { OnboardingEmptyState } from "@/components/OnboardingEmptyState";
+import { Skeleton } from "@/components/Skeleton";
 import {
   formatTime,
   formatDuration,
@@ -650,21 +652,16 @@ export default function TracesPage({
         {/* Table */}
         <div className="flex-1 overflow-auto">
           {spans.length === 0 && !loading ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <svg
-                width="48"
-                height="48"
-                viewBox="0 0 48 48"
-                fill="none"
-                className="mb-3 text-lantern-bg-cave"
-              >
-                <rect x="8" y="8" width="32" height="32" rx="4" stroke="currentColor" strokeWidth="2" />
-                <path d="M18 24h12M24 18v12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-              <p className="text-sm text-lantern-ash">No traces found</p>
-              <p className="text-xs text-lantern-ash opacity-70 mt-1">
-                Try adjusting your filters or time range
-              </p>
+            <OnboardingEmptyState />
+          ) : loading && spans.length === 0 ? (
+            <div className="flex flex-col gap-2 p-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <Skeleton
+                  key={i}
+                  className="h-6 rounded"
+                  style={{ width: `${70 + Math.random() * 30}%` }}
+                />
+              ))}
             </div>
           ) : (
             <table className="w-full text-sm">
@@ -693,7 +690,7 @@ export default function TracesPage({
                   return (
                     <tr
                       key={span.span_id}
-                      className="transition-colors duration-150"
+                      className="cursor-pointer transition-colors duration-150"
                       style={{
                         borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
                       }}

@@ -65,8 +65,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         <h1 className="text-xl font-semibold text-center text-white mb-1">
           Sign in to Lantern
         </h1>
-        <p className="text-xs text-center text-gray-500 mb-6">
-          LLM/Agent tracing and evaluation platform
+        <p className="text-sm text-center text-lantern-ash mb-6 leading-relaxed">
+          LLM/Agent tracing, evaluation &amp; cost observability
+          <br />
+          <span className="text-xs text-lantern-ash opacity-60">
+            Self-hostable · Open source · Privacy-first
+          </span>
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">

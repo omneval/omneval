@@ -107,6 +107,22 @@ const baseColors = {
     "--lantern-text-pure": "#FFFFFF",
     "--lantern-text-ash": "#A1A1AA",
   },
+  /** Chart colors for multi-series visualizations. */
+  chartColors: {
+    /** Series fill colors — at least 4 distinct, theme-aligned colors. */
+    series: [
+      "#FF5722", // emberFlare (orange)
+      "#FF8A65", // softGlow (light orange)
+      "#4A90D9", // ocean blue
+      "#7ED321", // lantern green
+      "#BD10E0", // electric purple
+      "#F5A623", // warm gold
+    ] as const,
+    /** Returns a fill-opacity for bar charts based on series index. */
+    barOpacity: (index: number, total: number): number => {
+      return 0.55 + (0.45 * index) / Math.max(total, 1);
+    },
+  },
 } as const;
 
 type BaseColors = typeof baseColors;
