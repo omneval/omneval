@@ -220,7 +220,7 @@ func (p *Pipeline) evalSpans(ctx context.Context, span *domain.Span, rules []dom
 		if rule.SampleRate <= 0.0 {
 			continue
 		}
-		if !isSampled(rule.SampleRate) {
+		if isSampled(rule.SampleRate) {
 			job := &domain.EvalJob{
 				JobID:         idgen.Generate(),
 				RuleID:        rule.RuleID,
