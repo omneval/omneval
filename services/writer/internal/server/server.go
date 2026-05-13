@@ -166,7 +166,7 @@ func Run() error {
 	}
 
 	// Create syncer (S3 snapshot sync).
-	syncer := syncpkg.New(s3store, dbPath, cfg, metricsHelper)
+	syncer := syncpkg.New(s3store, db, dbPath, cfg, metricsHelper)
 
 	// Create flusher (aged partition flush to Parquet on S3).
 	flusher := flush.NewWithDB(s3store, db, cfg)

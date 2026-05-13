@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"os"
 	"time"
@@ -16,6 +17,7 @@ import (
 // replicas always have a fresh snapshot.
 type Syncer struct {
 	store        storage.ObjectStore
+	db           *sql.DB
 	dbPath       string
 	cfg          *config.Config
 	syncInterval time.Duration
@@ -26,6 +28,7 @@ type Syncer struct {
 // New creates a new Syncer.
 func New(
 	store storage.ObjectStore,
+	db *sql.DB,
 	dbPath string,
 	cfg *config.Config,
 	m *metrics.WriterMetrics,
@@ -39,6 +42,7 @@ func New(
 
 	return &Syncer{
 		store:        store,
+		db:           db,
 		dbPath:       dbPath,
 		cfg:          cfg,
 		syncInterval: syncInterval,
@@ -70,10 +74,23 @@ func (s *Syncer) Run(ctx context.Context) error {
 	}
 }
 
-// doSync performs a single sync cycle. It logs errors at Warn level and
-// does not panic — the next tick will retry.
+// doSync performs a single sync cycle. It checkpoints the DuckDB WAL into
+// the main file before uploading, ensuring no committed writes are left
+// behind in the WAL when the snapshot is taken.
 func (s *Syncer) doSync(ctx context.Context) {
 	start := time.Now()
+
+	// Checkpoint WAL into the main file before reading it for upload.
+	// PRAGMA force_checkpoint (DuckDB 1.3+) forces all pending writes into the
+	// main database file, ensuring the snapshot is fully consistent.
+	if s.db != nil {
+		if _, err := s.db.ExecContext(ctx, "PRAGMA force_checkpoint"); err != nil {
+			slog.WarnContext(ctx, "writer: syncer: checkpoint failed (uploading without checkpoint)",
+				"db_path", s.dbPath,
+				"err", err,
+			)
+		}
+	}
 
 	info, err := os.Stat(s.dbPath)
 	if err != nil {

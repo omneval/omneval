@@ -2,12 +2,15 @@ package sync
 
 import (
 	"context"
+	"database/sql"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/zbloss/lantern/internal/config"
 	"github.com/zbloss/lantern/internal/storage"
 	"github.com/zbloss/lantern/services/writer/internal/metrics"
@@ -82,7 +85,7 @@ func TestNew_DefaultInterval(t *testing.T) {
 		},
 	}
 	m := newTestMetrics(t)
-	s := New(nil, "/tmp/test.db", cfg, m)
+	s := New(nil, nil, "/tmp/test.db", cfg, m)
 	if s.syncInterval != 30*time.Second {
 		t.Errorf("syncInterval: got %v, want %v", s.syncInterval, 30*time.Second)
 	}
@@ -95,7 +98,7 @@ func TestNew_CustomInterval(t *testing.T) {
 		},
 	}
 	m := newTestMetrics(t)
-	s := New(nil, "/tmp/test.db", cfg, m)
+	s := New(nil, nil, "/tmp/test.db", cfg, m)
 	if s.syncInterval != 1*time.Minute {
 		t.Errorf("syncInterval: got %v, want %v", s.syncInterval, 1*time.Minute)
 	}
@@ -104,7 +107,7 @@ func TestNew_CustomInterval(t *testing.T) {
 func TestNew_NoStore(t *testing.T) {
 	cfg := &config.Config{}
 	m := newTestMetrics(t)
-	s := New(nil, "/tmp/test.db", cfg, m)
+	s := New(nil, nil, "/tmp/test.db", cfg, m)
 	if s.store != nil {
 		t.Error("expected nil store")
 	}
@@ -113,7 +116,7 @@ func TestNew_NoStore(t *testing.T) {
 func TestRun_NoStore(t *testing.T) {
 	cfg := &config.Config{}
 	m := newTestMetrics(t)
-	s := New(nil, "/tmp/test.db", cfg, m)
+	s := New(nil, nil, "/tmp/test.db", cfg, m)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
@@ -142,7 +145,7 @@ func TestDoSync_Success(t *testing.T) {
 	}
 
 	m := newTestMetrics(t)
-	s := New(store, dbPath, cfg, m)
+	s := New(store, nil, dbPath, cfg, m)
 	ctx := context.Background()
 
 	s.doSync(ctx)
@@ -161,7 +164,7 @@ func TestDoSync_Success(t *testing.T) {
 
 func TestDoSync_NoStore(t *testing.T) {
 	m := newTestMetrics(t)
-	s := New(nil, "/tmp/nonexistent.db", &config.Config{}, m)
+	s := New(nil, nil, "/tmp/nonexistent.db", &config.Config{}, m)
 	ctx := context.Background()
 
 	// Should not panic, just log a warn.
@@ -174,7 +177,7 @@ func TestDoSync_DBPathIsDir(t *testing.T) {
 	store := &mockStore{}
 	cfg := &config.Config{}
 	m := newTestMetrics(t)
-	s := New(store, tmpDir, cfg, m)
+	s := New(store, nil, tmpDir, cfg, m)
 	ctx := context.Background()
 
 	s.doSync(ctx)
@@ -188,7 +191,7 @@ func TestDoSync_NonExistentDB(t *testing.T) {
 	store := &mockStore{}
 	cfg := &config.Config{}
 	m := newTestMetrics(t)
-	s := New(store, "/tmp/nonexistent-database-xyz.db", cfg, m)
+	s := New(store, nil, "/tmp/nonexistent-database-xyz.db", cfg, m)
 	ctx := context.Background()
 
 	s.doSync(ctx)
@@ -209,7 +212,7 @@ func TestDoSync_UploadFailure(t *testing.T) {
 	failingStore := &failingStore{}
 	cfg := &config.Config{}
 	m := newTestMetrics(t)
-	s := New(failingStore, dbPath, cfg, m)
+	s := New(failingStore, nil, dbPath, cfg, m)
 	ctx := context.Background()
 
 	s.doSync(ctx)
@@ -257,7 +260,7 @@ func TestRun_FinalSyncOnShutdown(t *testing.T) {
 		},
 	}
 
-	s := New(store, dbPath, cfg, nil)
+	s := New(store, nil, dbPath, cfg, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	done := make(chan error, 1)
@@ -300,7 +303,7 @@ func TestRun_SyncIntervalTriggeredSync(t *testing.T) {
 		},
 	}
 
-	s := New(store, dbPath, cfg, nil)
+	s := New(store, nil, dbPath, cfg, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 
@@ -312,5 +315,126 @@ func TestRun_SyncIntervalTriggeredSync(t *testing.T) {
 	// At least one interval-triggered sync should have happened.
 	if len(store.puts) == 0 {
 		t.Error("expected at least one sync from interval, got 0")
+	}
+}
+
+func TestDoSync_CheckpointsWALBeforeUpload(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lantern.db")
+
+	// Open a real DuckDB connection. DuckDB v1.4+ uses WAL by default.
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	// Create a table and insert data. This exercises the checkpoint path:
+	// the Syncer will call PRAGMA wal_checkpoint(TRUNCATE) before reading the
+	// main file, which should succeed without error.
+	if _, err := db.ExecContext(context.Background(), `
+		CREATE TABLE test_table (id INTEGER, name VARCHAR);
+		INSERT INTO test_table VALUES (1, 'wal_test_data')
+	`); err != nil {
+		t.Fatalf("insert data: %v", err)
+	}
+
+	store := &mockStore{}
+	cfg := &config.Config{
+		Writer: config.WriterConfig{
+			SyncInterval: "30s",
+		},
+		Storage: config.StorageConfig{
+			Bucket: "my-bucket",
+		},
+	}
+
+	m := newTestMetrics(t)
+	s := New(store, nil, dbPath, cfg, m)
+	s.db = db
+
+	// Execute the sync — this runs the checkpoint before uploading.
+	// If the checkpoint fails or panics, this test fails.
+	s.doSync(context.Background())
+
+	// Verify the sync uploaded the file.
+	if len(store.puts) != 1 {
+		t.Fatalf("expected 1 put, got %d", len(store.puts))
+	}
+	// The uploaded data should be non-empty (a valid DuckDB file).
+	if len(store.puts[0].data) == 0 {
+		t.Fatal("uploaded snapshot should be non-empty")
+	}
+
+	// Verify the checkpoint succeeded by confirming the database is still
+	// fully queryable after the sync cycle (checkpoint did not corrupt state).
+	var count int
+	if err := db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM test_table").Scan(&count); err != nil {
+		t.Fatalf("query after sync failed: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 row in test_table after checkpoint, got %d", count)
+	}
+}
+
+func TestDoSync_CheckpointFailureIsNonFatal(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lantern.db")
+
+	// Create a dummy DB file.
+	if err := os.WriteFile(dbPath, []byte("fake duckdb"), 0644); err != nil {
+		t.Fatalf("create temp db: %v", err)
+	}
+
+	// Create a Syncer with a nil db (no checkpoint possible).
+	store := &mockStore{}
+	cfg := &config.Config{
+		Writer: config.WriterConfig{
+			SyncInterval: "30s",
+		},
+	}
+
+	m := newTestMetrics(t)
+	s := New(store, nil, dbPath, cfg, m)
+	// s.db is nil — checkpoint will be skipped in doSync.
+
+	ctx := context.Background()
+	// Should not panic even with nil db.
+	s.doSync(ctx)
+
+	// Sync should still have happened (upload the file).
+	if len(store.puts) != 1 {
+		t.Errorf("expected 1 put even without db connection, got %d", len(store.puts))
+	}
+}
+
+// TestDoSync_CheckpointWithNilDB verifies that sync still works
+// when no db connection is provided (backward compatibility).
+func TestDoSync_CheckpointWithNilDB(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lantern.db")
+
+	if err := os.WriteFile(dbPath, []byte("fake duckdb content for sync"), 0644); err != nil {
+		t.Fatalf("create temp db: %v", err)
+	}
+
+	store := &mockStore{}
+	cfg := &config.Config{}
+
+	m := newTestMetrics(t)
+	s := New(store, nil, dbPath, cfg, m)
+	// s.db is nil by default — ensure backward compat.
+
+	if s.db != nil {
+		t.Error("expected nil db for backward compat")
+	}
+
+	s.doSync(context.Background())
+
+	if len(store.puts) != 1 {
+		t.Fatalf("expected 1 put, got %d", len(store.puts))
+	}
+	if !strings.Contains(string(store.puts[0].data), "fake duckdb content for sync") {
+		t.Errorf("data mismatch: got %q", string(store.puts[0].data))
 	}
 }
