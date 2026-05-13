@@ -163,6 +163,30 @@ function FilterSection({
     onApply(vals);
   };
 
+  const applyButton = (
+    <button
+      type="button"
+      onClick={handleApply}
+      className="text-xs px-2 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
+      style={{
+        background: colors.accents.emberFlare,
+        boxShadow: "0 1px 4px rgba(255, 87, 34, 0.2)",
+      }}
+    >
+      Apply
+    </button>
+  );
+
+  const filterInput = (
+    <input
+      type="text"
+      value={input}
+      onChange={(e) => setInput(e.target.value)}
+      className="w-full text-sm px-2 py-1.5 rounded border bg-lantern-bg-illumination text-lantern-pure placeholder-lantern-ash"
+      style={{ borderColor: colors.backgrounds.caveWall }}
+    />
+  );
+
   return (
     <div
       className="border-b"
@@ -214,46 +238,14 @@ function FilterSection({
           )}
           {name === "latency" && (
             <div className="space-y-2">
-              <input
-                type="text"
-                placeholder="e.g., &gt;1000 or 100-500"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                className="w-full text-sm px-2 py-1.5 rounded border bg-lantern-bg-illumination text-lantern-pure placeholder-lantern-ash"
-                style={{ borderColor: colors.backgrounds.caveWall }}
-              />
-              <button
-                onClick={handleApply}
-                className="text-xs px-2 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
-                style={{
-                  background: colors.accents.emberFlare,
-                  boxShadow: "0 1px 4px rgba(255, 87, 34, 0.2)",
-                }}
-              >
-                Apply
-              </button>
+              {filterInput}
+              {applyButton}
             </div>
           )}
           {name !== "trace_name" && name !== "latency" && (
             <div className="space-y-2">
-              <input
-                type="text"
-                placeholder={`Filter by ${label}...`}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                className="w-full text-sm px-2 py-1.5 rounded border bg-lantern-bg-illumination text-lantern-pure placeholder-lantern-ash"
-                style={{ borderColor: colors.backgrounds.caveWall }}
-              />
-              <button
-                onClick={handleApply}
-                className="text-xs px-2 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
-                style={{
-                  background: colors.accents.emberFlare,
-                  boxShadow: "0 1px 4px rgba(255, 87, 34, 0.2)",
-                }}
-              >
-                Apply
-              </button>
+              {filterInput}
+              {applyButton}
             </div>
           )}
         </div>

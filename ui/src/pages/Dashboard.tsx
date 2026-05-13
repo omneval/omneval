@@ -92,18 +92,8 @@ function EmptyState({ title, description, action, actionLabel }: {
 
 function Card({ title, children, subtitle }: { title: string; children: React.ReactNode; subtitle?: string }) {
   return (
-    <div
-      className="card"
-      style={{
-        background: colors.backgrounds.charcoalDepth,
-        border: `1px solid ${colors.backgrounds.caveWall}`,
-        borderRadius: "0.5rem",
-      }}
-    >
-      <div
-        className="card-header"
-        style={{ borderBottom: `1px solid ${colors.backgrounds.caveWall}` }}
-      >
+    <div className="card">
+      <div className="card-header">
         <div className="flex items-center justify-between">
           <span>{title}</span>
           {subtitle && (
@@ -476,8 +466,9 @@ function UserConsumptionChart({ data, loading }: { data: UserConsumptionData[]; 
 // ── Main Dashboard ─────────────────────────────────────────────────
 
 export default function DashboardPage({ activeProject }: DashboardPageProps) {
-  const [from, setFrom] = useState(getDefaultFromTo().from);
-  const [to, setTo] = useState(getDefaultFromTo().to);
+  const defaultFromTo = getDefaultFromTo();
+  const [from, setFrom] = useState(defaultFromTo.from);
+  const [to, setTo] = useState(defaultFromTo.to);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
