@@ -7,6 +7,7 @@ import PromptsPage from "./pages/Prompts";
 import DatasetDetailPage from "./pages/DatasetDetail";
 import DatasetsPage from "./pages/Datasets";
 import SettingsPage, { NewProjectModal } from "./pages/Settings";
+import EvalRulesPage from "./pages/EvalRules";
 import Header from "./components/Header";
 import Layout from "./components/Layout";
 import { ToastProvider } from "./components/Toast";
@@ -20,7 +21,8 @@ type Page =
   | "prompts"
   | "datasets"
   | "dataset-detail"
-  | "settings";
+  | "settings"
+  | "eval-rules";
 
 const NAV_MAP: Record<string, Page> = {
   dashboard: "dashboard",
@@ -29,6 +31,7 @@ const NAV_MAP: Record<string, Page> = {
   datasets: "datasets",
   "dataset-detail": "dataset-detail",
   settings: "settings",
+  "eval-rules": "eval-rules",
 };
 
 interface Project {
@@ -176,6 +179,11 @@ export default function App() {
             )}
             {page === "settings" && (
               <SettingsPage
+                activeProject={activeProject}
+              />
+            )}
+            {page === "eval-rules" && (
+              <EvalRulesPage
                 activeProject={activeProject}
               />
             )}

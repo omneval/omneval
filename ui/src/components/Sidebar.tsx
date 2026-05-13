@@ -132,6 +132,7 @@ const NAV_SECTIONS: {
     label: "Evaluation",
     items: [
       { id: "datasets", label: "Datasets", section: "eval", icon: <EvalIcon /> },
+      { id: "eval-rules", label: "Eval Rules", section: "eval", icon: <EvalIcon /> },
     ],
   },
 ];
