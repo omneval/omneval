@@ -330,7 +330,7 @@ func TestDoSync_CheckpointsWALBeforeUpload(t *testing.T) {
 	defer db.Close()
 
 	// Create a table and insert data. This exercises the checkpoint path:
-	// the Syncer will call PRAGMA wal_checkpoint(TRUNCATE) before reading the
+	// the Syncer will call PRAGMA force_checkpoint before reading the
 	// main file, which should succeed without error.
 	if _, err := db.ExecContext(context.Background(), `
 		CREATE TABLE test_table (id INTEGER, name VARCHAR);
@@ -377,16 +377,17 @@ func TestDoSync_CheckpointsWALBeforeUpload(t *testing.T) {
 	}
 }
 
-func TestDoSync_CheckpointFailureIsNonFatal(t *testing.T) {
+// TestDoSync_NilDBSkipsCheckpoint verifies that sync still works
+// when no DB connection is provided — the checkpoint is skipped and the
+// snapshot is uploaded as-is. This is the backward-compatibility path.
+func TestDoSync_NilDBSkipsCheckpoint(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "lantern.db")
 
-	// Create a dummy DB file.
-	if err := os.WriteFile(dbPath, []byte("fake duckdb"), 0644); err != nil {
+	if err := os.WriteFile(dbPath, []byte("fake duckdb content for sync"), 0644); err != nil {
 		t.Fatalf("create temp db: %v", err)
 	}
 
-	// Create a Syncer with a nil db (no checkpoint possible).
 	store := &mockStore{}
 	cfg := &config.Config{
 		Writer: config.WriterConfig{
@@ -396,38 +397,7 @@ func TestDoSync_CheckpointFailureIsNonFatal(t *testing.T) {
 
 	m := newTestMetrics(t)
 	s := New(store, nil, dbPath, cfg, m)
-	// s.db is nil — checkpoint will be skipped in doSync.
-
-	ctx := context.Background()
-	// Should not panic even with nil db.
-	s.doSync(ctx)
-
-	// Sync should still have happened (upload the file).
-	if len(store.puts) != 1 {
-		t.Errorf("expected 1 put even without db connection, got %d", len(store.puts))
-	}
-}
-
-// TestDoSync_CheckpointWithNilDB verifies that sync still works
-// when no db connection is provided (backward compatibility).
-func TestDoSync_CheckpointWithNilDB(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
-
-	if err := os.WriteFile(dbPath, []byte("fake duckdb content for sync"), 0644); err != nil {
-		t.Fatalf("create temp db: %v", err)
-	}
-
-	store := &mockStore{}
-	cfg := &config.Config{}
-
-	m := newTestMetrics(t)
-	s := New(store, nil, dbPath, cfg, m)
-	// s.db is nil by default — ensure backward compat.
-
-	if s.db != nil {
-		t.Error("expected nil db for backward compat")
-	}
+	// s.db is nil by default — checkpoint is skipped in doSync.
 
 	s.doSync(context.Background())
 
