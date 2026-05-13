@@ -1,10 +1,10 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -261,52 +261,20 @@ func (h *EvalRuleHandler) HandlePreview(w http.ResponseWriter, r *http.Request) 
 
 	// If no DB connection is available, return empty results.
 	if h.DB == nil {
-		resp := PreviewEvalRulesResponse{
-			Spans:         nil,
-			MatchCount24h: 0,
-		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(PreviewEvalRulesResponse{})
 		return
 	}
 
 	now := time.Now().UTC()
-	hourAgo := now.Add(-1 * time.Hour)
-	dayAgo := now.Add(-24 * time.Hour)
 
-	// Query spans from the last hour for the project.
-	query := fmt.Sprintf(`
-		SELECT span_id, trace_id, name, kind, model, start_time, cost_usd
-		FROM spans
-		WHERE project_id = ?
-		  AND start_time >= ?
-		ORDER BY start_time DESC, span_id ASC
-		LIMIT 50
-	`)
-
-	rows, err := h.DB.QueryContext(r.Context(), query, projectID, hourAgo)
+	// Query spans from the last hour, then evaluate each against the filter.
+	matchingSpans, err := h.querySpans(r.Context(), projectID, now.Add(-1*time.Hour), 50)
 	if err != nil {
 		http.Error(w, "query execution error", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
 
-	// Scan into span structs.
-	var matchingSpans []*PreviewSpan
-	for rows.Next() {
-		var s PreviewSpan
-		if err := rows.Scan(&s.SpanID, &s.TraceID, &s.Name, &s.Kind, &s.Model, &s.StartTime, &s.CostUSD); err != nil {
-			http.Error(w, "scan error", http.StatusInternalServerError)
-			return
-		}
-		matchingSpans = append(matchingSpans, &s)
-	}
-	if err := rows.Err(); err != nil {
-		http.Error(w, "row iteration error", http.StatusInternalServerError)
-		return
-	}
-
-	// Evaluate each span against the filter in-memory.
 	var matched []*PreviewSpan
 	for _, s := range matchingSpans {
 		if req.Filter.Matches(spanFromPreview(s)) {
@@ -315,36 +283,71 @@ func (h *EvalRuleHandler) HandlePreview(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Count total matches in the last 24 hours.
-	var matchCount24h int64
-	countQuery := fmt.Sprintf(`
-		SELECT span_id, trace_id, name, kind, model, start_time, cost_usd
-		FROM spans
-		WHERE project_id = ?
-		  AND start_time >= ?
-	`)
-
-	countRows, err := h.DB.QueryContext(r.Context(), countQuery, projectID, dayAgo)
-	if err == nil {
-		defer countRows.Close()
-		for countRows.Next() {
-			var s PreviewSpan
-			if err := countRows.Scan(&s.SpanID, &s.TraceID, &s.Name, &s.Kind, &s.Model, &s.StartTime, &s.CostUSD); err != nil {
-				break
-			}
-			if req.Filter.Matches(spanFromPreview(&s)) {
-				matchCount24h++
-			}
-		}
-		countRows.Err() // ignore error from iteration
-	}
-
-	resp := PreviewEvalRulesResponse{
-		Spans:         matched,
-		MatchCount24h: matchCount24h,
-	}
+	matchCount24h := h.countSpansInPeriod(r.Context(), projectID, now.Add(-24*time.Hour), req.Filter)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(PreviewEvalRulesResponse{
+		Spans:         matched,
+		MatchCount24h: matchCount24h,
+	})
+}
+
+// querySpans returns up to maxSpans matching spans for the project within
+// the time window, ordered by start time descending.
+func (h *EvalRuleHandler) querySpans(ctx context.Context, projectID string, since time.Time, maxSpans int) ([]*PreviewSpan, error) {
+	var spans []*PreviewSpan
+	rows, err := h.DB.QueryContext(ctx,
+		`SELECT span_id, trace_id, name, kind, model, start_time, cost_usd
+		 FROM spans
+		 WHERE project_id = ? AND start_time >= ?
+		 ORDER BY start_time DESC, span_id ASC
+		 LIMIT ?`,
+		projectID, since, maxSpans,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var s PreviewSpan
+		if err := rows.Scan(&s.SpanID, &s.TraceID, &s.Name, &s.Kind, &s.Model, &s.StartTime, &s.CostUSD); err != nil {
+			return nil, err
+		}
+		spans = append(spans, &s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return spans, nil
+}
+
+// countSpansInPeriod counts spans matching the filter within the given
+// time window.
+func (h *EvalRuleHandler) countSpansInPeriod(ctx context.Context, projectID string, since time.Time, filter domain.EvalFilter) int64 {
+	rows, err := h.DB.QueryContext(ctx,
+		`SELECT span_id, trace_id, name, kind, model, start_time, cost_usd
+		 FROM spans
+		 WHERE project_id = ? AND start_time >= ?`,
+		projectID, since,
+	)
+	if err != nil {
+		return 0
+	}
+	defer rows.Close()
+
+	var count int64
+	for rows.Next() {
+		var s PreviewSpan
+		if err := rows.Scan(&s.SpanID, &s.TraceID, &s.Name, &s.Kind, &s.Model, &s.StartTime, &s.CostUSD); err != nil {
+			break
+		}
+		if filter.Matches(spanFromPreview(&s)) {
+			count++
+		}
+	}
+	_ = rows.Err() // ignore iteration error — best-effort count
+	return count
 }
 
 // spanFromPreview converts a PreviewSpan back to a domain.Span for filter matching.
@@ -361,10 +364,9 @@ func spanFromPreview(p *PreviewSpan) *domain.Span {
 }
 
 // hasFilterConditions checks if the filter has at least one leaf condition.
-// Recursively checks AND/OR sub-filters.
+// Recursively checks AND/OR/NOT sub-filters.
 func hasFilterConditions(f domain.EvalFilter) bool {
-	// Check leaf conditions.
-	hasLeaf := f.Kind != nil ||
+	leafCondition := f.Kind != nil ||
 		f.Model != nil ||
 		f.ServiceName != nil ||
 		f.PromptName != nil ||
@@ -375,11 +377,10 @@ func hasFilterConditions(f domain.EvalFilter) bool {
 		f.MaxDurationMS != nil ||
 		len(f.AttributesMatch) > 0
 
-	if hasLeaf {
+	if leafCondition {
 		return true
 	}
 
-	// Check sub-filters.
 	for _, sub := range f.And {
 		if hasFilterConditions(*sub) {
 			return true
@@ -390,9 +391,8 @@ func hasFilterConditions(f domain.EvalFilter) bool {
 			return true
 		}
 	}
-	if f.Not != nil {
-		return hasFilterConditions(*f.Not)
+	if f.Not != nil && hasFilterConditions(*f.Not) {
+		return true
 	}
-
 	return false
 }

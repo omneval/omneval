@@ -618,7 +618,7 @@ func TestEvalRuleHandler_CreateEvalRule_AttributesMatch_InvalidPattern(t *testin
 
 // ---- Preview endpoint tests ----
 
-func TestEvalRuleHandler_PreviewPreview_AuthRequired(t *testing.T) {
+func TestEvalRuleHandler_HandlePreview_AuthRequired(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
 		Store: store,
@@ -635,7 +635,7 @@ func TestEvalRuleHandler_PreviewPreview_AuthRequired(t *testing.T) {
 	}
 }
 
-func TestEvalRuleHandler_PreviewPreview_MethodNotAllowed(t *testing.T) {
+func TestEvalRuleHandler_HandlePreview_MethodNotAllowed(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
 		Store:        store,
@@ -651,7 +651,7 @@ func TestEvalRuleHandler_PreviewPreview_MethodNotAllowed(t *testing.T) {
 	}
 }
 
-func TestEvalRuleHandler_PreviewPreview_InvalidJSON(t *testing.T) {
+func TestEvalRuleHandler_HandlePreview_InvalidJSON(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
 		Store:        store,
@@ -667,7 +667,7 @@ func TestEvalRuleHandler_PreviewPreview_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestEvalRuleHandler_PreviewPreview_EmptyFilter(t *testing.T) {
+func TestEvalRuleHandler_HandlePreview_EmptyFilter(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
 		Store:        store,
@@ -683,7 +683,7 @@ func TestEvalRuleHandler_PreviewPreview_EmptyFilter(t *testing.T) {
 	}
 }
 
-func TestEvalRuleHandler_PreviewPreview_MatchingSpans(t *testing.T) {
+func TestEvalRuleHandler_HandlePreview_MatchingSpans(t *testing.T) {
 	// Create a DuckDB with test spans.
 	db, err := duckdb.Open("test_preview_match.db")
 	if err != nil {
@@ -754,7 +754,7 @@ func TestEvalRuleHandler_PreviewPreview_MatchingSpans(t *testing.T) {
 	}
 }
 
-func TestEvalRuleHandler_PreviewPreview_NoMatches(t *testing.T) {
+func TestEvalRuleHandler_HandlePreview_NoMatches(t *testing.T) {
 	db, err := duckdb.Open("test_preview_no_match.db")
 	if err != nil {
 		t.Fatalf("open duckdb: %v", err)
@@ -804,7 +804,7 @@ func TestEvalRuleHandler_PreviewPreview_NoMatches(t *testing.T) {
 	}
 }
 
-func TestEvalRuleHandler_PreviewPreview_MatchCount24h(t *testing.T) {
+func TestEvalRuleHandler_HandlePreview_MatchCount24h(t *testing.T) {
 	db, err := duckdb.Open("test_preview_count.db")
 	if err != nil {
 		t.Fatalf("open duckdb: %v", err)
@@ -865,7 +865,7 @@ func TestEvalRuleHandler_PreviewPreview_MatchCount24h(t *testing.T) {
 	}
 }
 
-func TestEvalRuleHandler_PreviewPreview_DBNil(t *testing.T) {
+func TestEvalRuleHandler_HandlePreview_DBNil(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
 		DB:           nil, // No DB connection
