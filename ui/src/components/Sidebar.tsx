@@ -3,7 +3,7 @@ import { colors } from "@/theme";
 
 // ── Types ──────────────────────────────────────────────────────────
 
-export type NavSection = "home" | "dashboards" | "prompts" | "eval" | "settings";
+export type NavSection = "home" | "traces" | "dashboards" | "prompts" | "eval" | "settings";
 
 export interface NavItem {
   id: string;
@@ -52,6 +52,22 @@ function HomeIcon() {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+function TracesIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <path
+        d="M4 4h10M4 9h10M4 14h10"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <circle cx="2" cy="4" r="1" fill="currentColor" />
+      <circle cx="2" cy="9" r="1" fill="currentColor" />
+      <circle cx="2" cy="14" r="1" fill="currentColor" />
     </svg>
   );
 }
@@ -118,6 +134,7 @@ const NAV_SECTIONS: {
   {
     label: "",
     items: [
+      { id: "traces", label: "Traces", section: "traces", icon: <TracesIcon /> },
       { id: "dashboard", label: "Dashboard", section: "home", icon: <HomeIcon /> },
     ],
   },
