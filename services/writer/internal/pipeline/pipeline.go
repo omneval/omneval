@@ -136,7 +136,6 @@ func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
 
 	now := time.Now()
 	for _, span := range spans {
-
 		cost := p.pricing.Cost(span.Model, span.InputTokens, span.OutputTokens)
 		span.CostUSD = cost
 
@@ -270,10 +269,14 @@ func attributesJSON(attrs map[string]any) string {
 }
 
 // isSampled returns true when a span is selected for sampling
-// based on the given sample rate (0.0–1.0). For rate >= 1.0, always returns true.
+// based on the given sample rate (0.0–1.0). Rates >= 1.0 always return true;
+// rates <= 0.0 always return false.
 func isSampled(rate float64) bool {
 	if rate >= 1.0 {
 		return true
+	}
+	if rate <= 0.0 {
+		return false
 	}
 	// Use crypto/rand for unbiased sampling.
 	n, err := rand.Int(rand.Reader, big.NewInt(1000))

@@ -60,32 +60,58 @@ func (f *fakeIngestQueue) Dequeue(ctx context.Context) ([]*domain.Span, error) {
 type fakeEvalQueue struct{}
 
 func (f *fakeEvalQueue) Enqueue(ctx context.Context, job *domain.EvalJob) error { return nil }
-func (f *fakeEvalQueue) Dequeue(ctx context.Context) (*domain.EvalJob, error)  { return nil, nil }
+func (f *fakeEvalQueue) Dequeue(ctx context.Context) (*domain.EvalJob, error)   { return nil, nil }
 
 // ---- fake metadata store ----
 
-type fakeMetaStore struct{}
+type fakeMetaStore struct {
+	evalRules []domain.EvalRule
+}
 
-func (f *fakeMetaStore) CreateOrganization(ctx context.Context, o *domain.Organization) error            { return nil }
-func (f *fakeMetaStore) GetOrganization(ctx context.Context, orgID string) (*domain.Organization, error) { return nil, nil }
-func (f *fakeMetaStore) CreateProject(ctx context.Context, p *domain.Project) error                      { return nil }
-func (f *fakeMetaStore) GetProject(ctx context.Context, projectID string) (*domain.Project, error)       { return nil, nil }
-func (f *fakeMetaStore) ListProjects(ctx context.Context, orgID string) ([]*domain.Project, error)       { return nil, nil }
-func (f *fakeMetaStore) CreateUser(ctx context.Context, u *domain.User) error                            { return nil }
-func (f *fakeMetaStore) GetUserByEmail(ctx context.Context, email string) (*domain.User, error)          { return nil, nil }
-func (f *fakeMetaStore) GetUserByID(ctx context.Context, userID string) (*domain.User, error)            { return nil, nil }
-func (f *fakeMetaStore) ListUsers(ctx context.Context, orgID string) ([]*domain.User, error)             { return nil, nil }
-func (f *fakeMetaStore) CountUsers(ctx context.Context) (int, error)                                     { return 0, nil }
-func (f *fakeMetaStore) UpdateUserPassword(ctx context.Context, userID, passwordHash string) error       { return nil }
-func (f *fakeMetaStore) CreateSession(ctx context.Context, s *domain.Session) error                      { return nil }
-func (f *fakeMetaStore) GetSession(ctx context.Context, sessionID string) (*domain.Session, error)       { return nil, nil }
-func (f *fakeMetaStore) DeleteSession(ctx context.Context, sessionID string) error                       { return nil }
-func (f *fakeMetaStore) CheckPassword(hashed, plaintext string) error                                    { return nil }
-func (f *fakeMetaStore) CreateAPIKey(ctx context.Context, key *domain.APIKey) error                      { return nil }
-func (f *fakeMetaStore) GetAPIKeyByHash(ctx context.Context, hashedKey string) (*domain.APIKey, error)   { return nil, nil }
-func (f *fakeMetaStore) RevokeAPIKey(ctx context.Context, keyID string) error                            { return nil }
-func (f *fakeMetaStore) ListAPIKeys(ctx context.Context, projectID string) ([]*domain.APIKey, error)     { return nil, nil }
-func (f *fakeMetaStore) CreatePromptVersion(ctx context.Context, pv *domain.PromptVersion) error         { return nil }
+func (f *fakeMetaStore) CreateOrganization(ctx context.Context, o *domain.Organization) error {
+	return nil
+}
+func (f *fakeMetaStore) GetOrganization(ctx context.Context, orgID string) (*domain.Organization, error) {
+	return nil, nil
+}
+func (f *fakeMetaStore) CreateProject(ctx context.Context, p *domain.Project) error { return nil }
+func (f *fakeMetaStore) GetProject(ctx context.Context, projectID string) (*domain.Project, error) {
+	return nil, nil
+}
+func (f *fakeMetaStore) ListProjects(ctx context.Context, orgID string) ([]*domain.Project, error) {
+	return nil, nil
+}
+func (f *fakeMetaStore) CreateUser(ctx context.Context, u *domain.User) error { return nil }
+func (f *fakeMetaStore) GetUserByEmail(ctx context.Context, email string) (*domain.User, error) {
+	return nil, nil
+}
+func (f *fakeMetaStore) GetUserByID(ctx context.Context, userID string) (*domain.User, error) {
+	return nil, nil
+}
+func (f *fakeMetaStore) ListUsers(ctx context.Context, orgID string) ([]*domain.User, error) {
+	return nil, nil
+}
+func (f *fakeMetaStore) CountUsers(ctx context.Context) (int, error) { return 0, nil }
+func (f *fakeMetaStore) UpdateUserPassword(ctx context.Context, userID, passwordHash string) error {
+	return nil
+}
+func (f *fakeMetaStore) CreateSession(ctx context.Context, s *domain.Session) error { return nil }
+func (f *fakeMetaStore) GetSession(ctx context.Context, sessionID string) (*domain.Session, error) {
+	return nil, nil
+}
+func (f *fakeMetaStore) DeleteSession(ctx context.Context, sessionID string) error  { return nil }
+func (f *fakeMetaStore) CheckPassword(hashed, plaintext string) error               { return nil }
+func (f *fakeMetaStore) CreateAPIKey(ctx context.Context, key *domain.APIKey) error { return nil }
+func (f *fakeMetaStore) GetAPIKeyByHash(ctx context.Context, hashedKey string) (*domain.APIKey, error) {
+	return nil, nil
+}
+func (f *fakeMetaStore) RevokeAPIKey(ctx context.Context, keyID string) error { return nil }
+func (f *fakeMetaStore) ListAPIKeys(ctx context.Context, projectID string) ([]*domain.APIKey, error) {
+	return nil, nil
+}
+func (f *fakeMetaStore) CreatePromptVersion(ctx context.Context, pv *domain.PromptVersion) error {
+	return nil
+}
 func (f *fakeMetaStore) GetPromptVersion(ctx context.Context, projectID string, name string, version int64) (*domain.PromptVersion, error) {
 	return nil, nil
 }
@@ -104,7 +130,11 @@ func (f *fakeMetaStore) GetEvalRule(ctx context.Context, ruleID string) (*domain
 	return nil, nil
 }
 func (f *fakeMetaStore) ListEvalRules(ctx context.Context, projectID string) ([]*domain.EvalRule, error) {
-	return nil, nil
+	result := make([]*domain.EvalRule, len(f.evalRules))
+	for i, r := range f.evalRules {
+		result[i] = &r
+	}
+	return result, nil
 }
 func (f *fakeMetaStore) UpdateEvalRule(ctx context.Context, r *domain.EvalRule) error { return nil }
 func (f *fakeMetaStore) DeleteEvalRule(ctx context.Context, ruleID string) error      { return nil }
@@ -125,11 +155,15 @@ func (f *fakeMetaStore) ListDatasetItems(ctx context.Context, datasetID string) 
 func (f *fakeMetaStore) ListDatasetItemsPaginated(ctx context.Context, datasetID, cursor string, limit int) ([]*domain.DatasetItem, string, error) {
 	return nil, "", nil
 }
-func (f *fakeMetaStore) CreateDatasetRun(ctx context.Context, run *domain.DatasetRun) error { return nil }
+func (f *fakeMetaStore) CreateDatasetRun(ctx context.Context, run *domain.DatasetRun) error {
+	return nil
+}
 func (f *fakeMetaStore) GetDatasetRun(ctx context.Context, runID string) (*domain.DatasetRun, error) {
 	return nil, nil
 }
-func (f *fakeMetaStore) UpdateDatasetRun(ctx context.Context, run *domain.DatasetRun) error { return nil }
+func (f *fakeMetaStore) UpdateDatasetRun(ctx context.Context, run *domain.DatasetRun) error {
+	return nil
+}
 func (f *fakeMetaStore) ListDatasetRuns(ctx context.Context, datasetID string) ([]*domain.DatasetRun, error) {
 	return nil, nil
 }
