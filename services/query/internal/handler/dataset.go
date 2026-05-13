@@ -186,24 +186,9 @@ func (h *DatasetHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 		// Fallback for tests that don't use ServeMux pattern matching.
 		datasetID = extractDatasetID(r.URL.Path)
 	}
-	if datasetID == "" {
-		http.Error(w, "dataset ID is required", http.StatusBadRequest)
-		return
-	}
 
-	ds, err := h.Store.GetDataset(r.Context(), datasetID)
-	if err != nil {
-		if errors.Is(err, metadata.ErrNotFound) {
-			http.Error(w, "dataset not found", http.StatusNotFound)
-			return
-		}
-		http.Error(w, "store error", http.StatusInternalServerError)
-		return
-	}
-
-	// Verify ownership.
-	if ds.ProjectID != projectID {
-		http.Error(w, "forbidden", http.StatusForbidden)
+	ds := h.requireDataset(w, r, datasetID, projectID)
+	if ds == nil {
 		return
 	}
 
@@ -236,23 +221,9 @@ func (h *DatasetHandler) HandleAddItems(w http.ResponseWriter, r *http.Request) 
 	if datasetID == "" {
 		datasetID = extractDatasetID(r.URL.Path)
 	}
-	if datasetID == "" {
-		http.Error(w, "dataset ID is required", http.StatusBadRequest)
-		return
-	}
 
-	// Verify dataset exists and belongs to the project.
-	ds, err := h.Store.GetDataset(r.Context(), datasetID)
-	if err != nil {
-		if errors.Is(err, metadata.ErrNotFound) {
-			http.Error(w, "dataset not found", http.StatusNotFound)
-			return
-		}
-		http.Error(w, "store error", http.StatusInternalServerError)
-		return
-	}
-	if ds.ProjectID != projectID {
-		http.Error(w, "forbidden", http.StatusForbidden)
+	ds := h.requireDataset(w, r, datasetID, projectID)
+	if ds == nil {
 		return
 	}
 
@@ -303,23 +274,9 @@ func (h *DatasetHandler) HandleAddItemsBatch(w http.ResponseWriter, r *http.Requ
 	if datasetID == "" {
 		datasetID = extractDatasetID(r.URL.Path)
 	}
-	if datasetID == "" {
-		http.Error(w, "dataset ID is required", http.StatusBadRequest)
-		return
-	}
 
-	// Verify dataset exists and belongs to the project.
-	ds, err := h.Store.GetDataset(r.Context(), datasetID)
-	if err != nil {
-		if errors.Is(err, metadata.ErrNotFound) {
-			http.Error(w, "dataset not found", http.StatusNotFound)
-			return
-		}
-		http.Error(w, "store error", http.StatusInternalServerError)
-		return
-	}
-	if ds.ProjectID != projectID {
-		http.Error(w, "forbidden", http.StatusForbidden)
+	ds := h.requireDataset(w, r, datasetID, projectID)
+	if ds == nil {
 		return
 	}
 
@@ -376,23 +333,9 @@ func (h *DatasetHandler) HandleListItems(w http.ResponseWriter, r *http.Request)
 	if datasetID == "" {
 		datasetID = extractDatasetID(r.URL.Path)
 	}
-	if datasetID == "" {
-		http.Error(w, "dataset ID is required", http.StatusBadRequest)
-		return
-	}
 
-	// Verify dataset exists and belongs to the project.
-	ds, err := h.Store.GetDataset(r.Context(), datasetID)
-	if err != nil {
-		if errors.Is(err, metadata.ErrNotFound) {
-			http.Error(w, "dataset not found", http.StatusNotFound)
-			return
-		}
-		http.Error(w, "store error", http.StatusInternalServerError)
-		return
-	}
-	if ds.ProjectID != projectID {
-		http.Error(w, "forbidden", http.StatusForbidden)
+	ds := h.requireDataset(w, r, datasetID, projectID)
+	if ds == nil {
 		return
 	}
 
@@ -450,23 +393,9 @@ func (h *DatasetHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 	if datasetID == "" {
 		datasetID = extractDatasetID(r.URL.Path)
 	}
-	if datasetID == "" {
-		http.Error(w, "dataset ID is required", http.StatusBadRequest)
-		return
-	}
 
-	// Verify the dataset exists and belongs to the project.
-	existing, err := h.Store.GetDataset(r.Context(), datasetID)
-	if err != nil {
-		if errors.Is(err, metadata.ErrNotFound) {
-			http.Error(w, "dataset not found", http.StatusNotFound)
-			return
-		}
-		http.Error(w, "store error", http.StatusInternalServerError)
-		return
-	}
-	if existing.ProjectID != projectID {
-		http.Error(w, "forbidden", http.StatusForbidden)
+	existing := h.requireDataset(w, r, datasetID, projectID)
+	if existing == nil {
 		return
 	}
 
@@ -480,6 +409,30 @@ func (h *DatasetHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// requireDataset verifies the dataset exists and belongs to the project.
+// It writes an HTTP error response and returns nil on failure, or the dataset on success.
+func (h *DatasetHandler) requireDataset(w http.ResponseWriter, r *http.Request, datasetID string, projectID string) *domain.Dataset {
+	if datasetID == "" {
+		http.Error(w, "dataset ID is required", http.StatusBadRequest)
+		return nil
+	}
+
+	ds, err := h.Store.GetDataset(r.Context(), datasetID)
+	if err != nil {
+		if errors.Is(err, metadata.ErrNotFound) {
+			http.Error(w, "dataset not found", http.StatusNotFound)
+			return nil
+		}
+		http.Error(w, "store error", http.StatusInternalServerError)
+		return nil
+	}
+	if ds.ProjectID != projectID {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return nil
+	}
+	return ds
 }
 
 // ---- Helpers ----

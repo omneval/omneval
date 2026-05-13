@@ -97,6 +97,10 @@ function parseJSON(text: string): ParsedItem[] {
     }));
 }
 
+// ── Constants ──────────────────────────────────────────────────────
+
+const BATCH_SIZE = 50;
+
 // ── Component ──────────────────────────────────────────────────────
 
 export default function DatasetsPage({ activeProject, onNavigateToDetail }: DatasetsPageProps) {
@@ -202,8 +206,6 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
       setCreating(false);
     }
   };
-
-  const BATCH_SIZE = 50;
 
   const importItems = async (datasetId: string, items: ParsedItem[]) => {
     setImporting(true);
@@ -380,16 +382,6 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
               style={{
                 color: colors.typography.ashGrey,
               }}
-            />
-            <input
-              type="file"
-              accept=".csv,.json"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleFileChange(file);
-                e.target.value = "";
-              }}
-              className="hidden"
             />
           </div>
 
