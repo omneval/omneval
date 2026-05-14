@@ -123,33 +123,35 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 	}()
 
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	traceID := r.PathValue("traceId")
 	if traceID == "" {
-		http.Error(w, "missing trace ID", http.StatusBadRequest)
+		writeJSONError(w, "missing trace ID", http.StatusBadRequest)
 		return
 	}
 
 	// Extract project_id from the authenticated session.
 	projectID, ok := h.SessionStore.ProjectID(r)
 	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	// Query all spans for this trace in this project.
 	spans, err := h.querySpansForTrace(projectID, traceID)
 	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		writeJSONError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	// Return 404 if no spans found.
 	if len(spans) == 0 {
-		http.Error(w, "not found", http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "trace not found"})
 		return
 	}
 
@@ -484,6 +486,14 @@ func withScores(db *sql.DB, spans []*domain.Span, traceID, projectID string) []*
 	}
 
 	return spans
+}
+
+// writeJSONError writes a JSON error response with the given status code.
+// It sets Content-Type to application/json and writes {"error": message}.
+func writeJSONError(w http.ResponseWriter, message string, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
 // ScoreHandler handles POST /api/v1/scores — the public-facing endpoint

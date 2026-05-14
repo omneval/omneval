@@ -255,6 +255,53 @@ func TestHandleTraceDetail_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+// callHandlerDirect invokes the handler directly (bypassing ServeMux)
+// so we can test the handler's own error paths (method, missing ID, etc.).
+func callHandlerDirect(h *SpanHandler, method, url string, body io.Reader) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(method, url, body)
+	h.HandleTraceDetail(w, req)
+	return w
+}
+
+func TestHandleTraceDetail_HandlerReturnsJSON(t *testing.T) {
+	// Test that the handler itself (not ServeMux) returns JSON for error cases.
+	h := &SpanHandler{
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	tests := []struct {
+		method    string
+		wantCode  int
+		wantError string
+	}{
+		{method: http.MethodPost, wantCode: http.StatusMethodNotAllowed, wantError: "method not allowed"},
+	}
+
+	for _, tc := range tests {
+		w := callHandlerDirect(h, tc.method, "/api/v1/traces/abc123", strings.NewReader(`{}`))
+
+		if w.Code != tc.wantCode {
+			t.Errorf("%s /api/v1/traces/abc123: status got %d, want %d", tc.method, w.Code, tc.wantCode)
+			continue
+		}
+
+		contentType := w.Header().Get("Content-Type")
+		if contentType != "application/json" {
+			t.Errorf("%s: Content-Type got %q, want %q", tc.method, contentType, "application/json")
+			continue
+		}
+
+		var resp map[string]string
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("%s: decode response: %v (raw: %q)", tc.method, err, w.Body.String())
+		}
+		if resp["error"] != tc.wantError {
+			t.Errorf("%s: error got %q, want %q", tc.method, resp["error"], tc.wantError)
+		}
+	}
+}
+
 func TestHandleTraceDetail_NotFound(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "lantern-trace-test")
 	if err != nil {
@@ -283,6 +330,21 @@ func TestHandleTraceDetail_NotFound(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status: got %d, want %d", w.Code, http.StatusNotFound)
+	}
+
+	// Verify JSON content type.
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("Content-Type: got %q, want %q", contentType, "application/json")
+	}
+
+	// Verify JSON body shape: {"error": "trace not found"}.
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response body: %v (raw: %q)", err, w.Body.String())
+	}
+	if resp["error"] != "trace not found" {
+		t.Errorf("error body: got %q, want %q", resp["error"], "trace not found")
 	}
 }
 
