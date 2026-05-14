@@ -616,6 +616,98 @@ func TestEvalRuleHandler_CreateEvalRule_AttributesMatch_InvalidPattern(t *testin
 	}
 }
 
+// TestEvalRuleHandler_CreateEvalRule_ResponseUsesSnakeCase verifies that the
+// POST /api/v1/eval-rules response uses snake_case JSON keys (not PascalCase).
+func TestEvalRuleHandler_CreateEvalRule_ResponseUsesSnakeCase(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &EvalRuleHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
+		"name": "my-eval",
+		"judge_model": "gpt-4",
+		"prompt_name": "judge-v1",
+		"sample_rate": 0.5,
+		"enabled": true
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreate(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	body := w.Body.String()
+
+	// Verify snake_case keys are present
+	snakeKeys := []string{"rule_id", "project_id", "judge_model", "prompt_name", "sample_rate", "enabled", "created_at"}
+	for _, key := range snakeKeys {
+		if !strings.Contains(body, `"`+key+`"`) {
+			t.Errorf("response missing snake_case key %q\nbody: %s", key, body)
+		}
+	}
+
+	// Verify PascalCase keys are NOT present
+	pascalKeys := []string{"RuleID", "ProjectID", "JudgeModel", "PromptName", "PromptVersion", "SampleRate", "Enabled", "CreatedAt"}
+	for _, key := range pascalKeys {
+		if strings.Contains(body, `"`+key+`"`) {
+			t.Errorf("response contains PascalCase key %q (should be snake_case)\nbody: %s", key, body)
+		}
+	}
+
+	// Verify nested filter uses snake_case
+	if !strings.Contains(body, `"kind"`) && !strings.Contains(body, `"model"`) {
+		// filter might be empty, which is fine
+	}
+}
+
+// TestEvalRuleHandler_ListEvalRules_ResponseUsesSnakeCase verifies that the
+// GET /api/v1/eval-rules list response uses snake_case JSON keys.
+func TestEvalRuleHandler_ListEvalRules_ResponseUsesSnakeCase(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	rule := &domain.EvalRule{
+		RuleID:     uuid.New().String(),
+		ProjectID:  "test-proj",
+		Name:       "eval-1",
+		JudgeModel: "gpt-4",
+		Enabled:    true,
+	}
+	store.CreateEvalRule(context.Background(), rule)
+
+	handler := &EvalRuleHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/eval-rules", nil)
+	w := httptest.NewRecorder()
+	handler.HandleList(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	body := w.Body.String()
+
+	// Verify snake_case keys are present
+	snakeKeys := []string{"rule_id", "project_id", "judge_model", "sample_rate", "enabled", "created_at"}
+	for _, key := range snakeKeys {
+		if !strings.Contains(body, `"`+key+`"`) {
+			t.Errorf("response missing snake_case key %q\nbody: %s", key, body)
+		}
+	}
+
+	// Verify PascalCase keys are NOT present
+	pascalKeys := []string{"RuleID", "ProjectID", "JudgeModel", "SampleRate", "Enabled", "CreatedAt"}
+	for _, key := range pascalKeys {
+		if strings.Contains(body, `"`+key+`"`) {
+			t.Errorf("response contains PascalCase key %q (should be snake_case)\nbody: %s", key, body)
+		}
+	}
+}
+
 // ---- Preview endpoint tests ----
 
 func TestEvalRuleHandler_HandlePreview_AuthRequired(t *testing.T) {

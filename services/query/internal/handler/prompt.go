@@ -88,6 +88,7 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 			Temperature: req.Temperature,
 			MaxTokens:   req.MaxTokens,
 		},
+		CreatedAt: time.Now().UTC(),
 	}
 
 	if err := h.Store.CreatePromptVersion(r.Context(), pv); err != nil {

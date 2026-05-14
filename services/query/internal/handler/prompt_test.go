@@ -576,6 +576,213 @@ func TestPromptHandler_CreatePrompt_AuthRequired(t *testing.T) {
 	}
 }
 
+// TestPromptHandler_CreatePrompt_ResponseUsesSnakeCase verifies that the
+// POST /api/v1/prompts response uses snake_case JSON keys (not PascalCase),
+// including nested model_config.
+func TestPromptHandler_CreatePrompt_ResponseUsesSnakeCase(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(`{
+		"name": "greeting",
+		"version": 1,
+		"template": "Hello {{name}}!",
+		"model": "gpt-4",
+		"temperature": 0.7,
+		"max_tokens": 256
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreatePrompt(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	body := w.Body.String()
+
+	// Verify snake_case keys are present
+	snakeKeys := []string{"version_id", "project_id", "name", "version", "template", "created_at"}
+	for _, key := range snakeKeys {
+		if !strings.Contains(body, `"`+key+`"`) {
+			t.Errorf("response missing snake_case key %q\nbody: %s", key, body)
+		}
+	}
+
+	// Verify PascalCase keys are NOT present
+	pascalKeys := []string{"VersionID", "ProjectID", "Name", "Template", "CreatedAt"}
+	for _, key := range pascalKeys {
+		if strings.Contains(body, `"`+key+`"`) {
+			t.Errorf("response contains PascalCase key %q (should be snake_case)\nbody: %s", key, body)
+		}
+	}
+
+	// Verify model_config uses snake_case
+	if !strings.Contains(body, `"model_config"`) {
+		t.Errorf("response missing snake_case key 'model_config'\nbody: %s", body)
+	}
+
+	// Verify model_config inner fields use snake_case
+	innerSnakeKeys := []string{"model", "temperature", "max_tokens"}
+	for _, key := range innerSnakeKeys {
+		if !strings.Contains(body, `"`+key+`"`) {
+			t.Errorf("model_config missing snake_case key %q\nbody: %s", key, body)
+		}
+	}
+
+	// Verify model_config inner PascalCase keys are NOT present
+	innerPascalKeys := []string{"Model", "Temperature", "MaxTokens"}
+	for _, key := range innerPascalKeys {
+		if strings.Contains(body, `"`+key+`"`) {
+			t.Errorf("model_config contains PascalCase key %q (should be snake_case)\nbody: %s", key, body)
+		}
+	}
+}
+
+// TestPromptHandler_CreatePrompt_ModelConfigDeserialization verifies that
+// the model_config input is correctly deserialized from flat fields.
+func TestPromptHandler_CreatePrompt_ModelConfigDeserialization(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(`{
+		"name": "greeting",
+		"version": 1,
+		"template": "Hello {{name}}!",
+		"model": "gpt-4o",
+		"temperature": 0.7,
+		"max_tokens": 1024
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreatePrompt(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	// Parse response as raw JSON to verify model_config values
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	modelConfig, ok := resp["model_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("model_config is not an object\nbody: %s", w.Body.String())
+	}
+
+	if modelConfig["model"] != "gpt-4o" {
+		t.Errorf("model_config.model: got %v, want 'gpt-4o'", modelConfig["model"])
+	}
+	if modelConfig["temperature"] != 0.7 {
+		t.Errorf("model_config.temperature: got %v, want 0.7", modelConfig["temperature"])
+	}
+	if modelConfig["max_tokens"] != float64(1024) {
+		t.Errorf("model_config.max_tokens: got %v, want 1024", modelConfig["max_tokens"])
+	}
+}
+
+// TestPromptHandler_CreatePrompt_CreatedAtPopulated verifies that the
+// created_at field is populated with the actual creation timestamp
+// (not the zero value 0001-01-01T00:00:00Z).
+func TestPromptHandler_CreatePrompt_CreatedAtPopulated(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(`{
+		"name": "greeting",
+		"version": 1,
+		"template": "Hello {{name}}!",
+		"model": "gpt-4"
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreatePrompt(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	createdAt, ok := resp["created_at"].(string)
+	if !ok {
+		t.Fatalf("created_at is not a string\nbody: %s", w.Body.String())
+	}
+
+	// Must not be zero value
+	if createdAt == "0001-01-01T00:00:00Z" || createdAt == "0001-01-01T00:00:00.000000000Z" {
+		t.Errorf("created_at is zero value: %q", createdAt)
+	}
+
+	// Parse and verify it's a reasonable timestamp
+	parsed, err := time.Parse(time.RFC3339, createdAt)
+	if err == nil && parsed.IsZero() {
+		t.Errorf("created_at is zero after parsing: %q", createdAt)
+	}
+}
+
+// TestPromptHandler_GetPrompt_VersionResponseUsesSnakeCase verifies that
+// GET /api/v1/prompts/:name also uses snake_case JSON keys.
+func TestPromptHandler_GetPrompt_VersionResponseUsesSnakeCase(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store: store,
+		Cache: cache,
+	}
+
+	// Pre-seed a version with a real timestamp.
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v1", ProjectID: "test-proj", Name: "greeting", Version: 1,
+		Template:    "Hello {{name}}!",
+		ModelConfig: domain.PromptModelConfig{Model: "gpt-4", Temperature: 0.7, MaxTokens: 256},
+		CreatedAt:   time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting?version=1&project_id=test-proj", nil)
+	w := httptest.NewRecorder()
+	handler.HandleGetPrompt(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	body := w.Body.String()
+
+	// Verify snake_case keys
+	snakeKeys := []string{"version_id", "project_id", "name", "version", "template", "model_config", "created_at"}
+	for _, key := range snakeKeys {
+		if !strings.Contains(body, `"`+key+`"`) {
+			t.Errorf("response missing snake_case key %q\nbody: %s", key, body)
+		}
+	}
+
+	// Verify PascalCase keys are NOT present
+	pascalKeys := []string{"VersionID", "ProjectID", "Name", "ModelConfig", "CreatedAt"}
+	for _, key := range pascalKeys {
+		if strings.Contains(body, `"`+key+`"`) {
+			t.Errorf("response contains PascalCase key %q (should be snake_case)\nbody: %s", key, body)
+		}
+	}
+}
+
 // TestPromptHandler_CreatePrompt_MethodNotAllowed
 func TestPromptHandler_CreatePrompt_MethodNotAllowed(t *testing.T) {
 	store := newFakePromptStore()
