@@ -56,6 +56,7 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 		Model       string  `json:"model"`
 		Temperature float64 `json:"temperature"`
 		MaxTokens   int     `json:"max_tokens"`
+		Label       string  `json:"label"` // optional: assign a label at creation time
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -95,6 +96,8 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 		// Duplicate key is also a conflict (409), not a generic error.
 		errStr := err.Error()
 		if strings.Contains(errStr, "UNIQUE") || strings.Contains(errStr, "duplicate") {
+			// Even if the label param was provided, the version conflict takes
+			// precedence — return 409 without creating a stale label.
 			http.Error(w, "version already exists", http.StatusConflict)
 			return
 		}
@@ -103,13 +106,32 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Optionally assign a label at creation time.
+	if req.Label != "" {
+		pl := &domain.PromptLabel{
+			ProjectID: projectID,
+			Name:      req.Name,
+			Label:     req.Label,
+			Version:   pv.Version,
+			UpdatedAt: time.Now().UTC(),
+		}
+		if labelErr := h.Store.SetPromptLabel(r.Context(), pl); labelErr != nil {
+			slog.Warn("query: set initial prompt label", "name", pv.Name, "label", req.Label, "err", labelErr)
+			// Don't fail the creation if the label assignment fails — the version
+			// is already created and the label is optional.
+		}
+		// Invalidate the label cache so the next lookup reflects the new assignment.
+		h.Cache.InvalidateLabel(projectID, req.Name, req.Label)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(pv)
 }
 
 // HandleGetPrompt handles GET /api/v1/prompts/:name.
-// Resolves by ?version=N (unbounded cache) or ?label=<label> (30s TTL cache).
+// Resolves by ?version=N (unbounded cache), ?label=<label> (30s TTL cache),
+// or defaults to the latest (highest) version when no params are provided.
 func (h *PromptHandler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -128,11 +150,6 @@ func (h *PromptHandler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) 
 	versionQuery := r.URL.Query().Get("version")
 	labelQuery := r.URL.Query().Get("label")
 
-	if versionQuery == "" && labelQuery == "" {
-		http.Error(w, "provide ?version=N or ?label=<label>", http.StatusBadRequest)
-		return
-	}
-
 	var pv *domain.PromptVersion
 	var getErr error
 
@@ -146,6 +163,13 @@ func (h *PromptHandler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) 
 		pv, getErr = h.Cache.GetVersion(r.Context(), r.URL.Query().Get("project_id"), name, v)
 	} else if labelQuery != "" {
 		pv, getErr = h.Cache.GetLabel(r.Context(), r.URL.Query().Get("project_id"), name, labelQuery)
+	} else {
+		// No params — default to the latest (highest version number).
+		var projectID string
+		if h.SessionStore != nil {
+			projectID, _ = h.SessionStore.ProjectID(r)
+		}
+		pv, getErr = h.getLatestVersion(r.Context(), name, projectID)
 	}
 
 	if getErr != nil {
@@ -160,6 +184,30 @@ func (h *PromptHandler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(pv)
+}
+
+// getLatestVersion returns the prompt version with the highest version number
+// for the given prompt name and project.
+func (h *PromptHandler) getLatestVersion(ctx context.Context, name, projectID string) (*domain.PromptVersion, error) {
+	if projectID == "" {
+		return nil, metadata.ErrNotFound
+	}
+
+	versions, err := h.Store.ListPromptVersions(ctx, projectID, name)
+	if err != nil {
+		return nil, err
+	}
+	if len(versions) == 0 {
+		return nil, metadata.ErrNotFound
+	}
+
+	var latest *domain.PromptVersion
+	for _, v := range versions {
+		if latest == nil || v.Version > latest.Version {
+			latest = v
+		}
+	}
+	return latest, nil
 }
 
 // promptListItem represents a prompt name with its latest version and active labels.
@@ -432,6 +480,7 @@ func (c *PromptCache) InvalidateLabel(projectID, name, label string) {
 
 // HandleListPromptVersions handles GET /api/v1/prompts/:name/versions
 // and returns all versions for a prompt name (uses metadata store).
+// Infers project_id from session context; falls back to query param.
 func (h *PromptHandler) HandleListPromptVersions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -447,7 +496,14 @@ func (h *PromptHandler) HandleListPromptVersions(w http.ResponseWriter, r *http.
 		return
 	}
 
-	projectID := r.URL.Query().Get("project_id")
+	// Infer project_id from session, then fall back to query param.
+	var projectID string
+	if h.SessionStore != nil {
+		projectID, _ = h.SessionStore.ProjectID(r)
+	}
+	if projectID == "" {
+		projectID = r.URL.Query().Get("project_id")
+	}
 	if projectID == "" {
 		http.Error(w, "project_id is required", http.StatusBadRequest)
 		return

@@ -819,21 +819,41 @@ func TestPromptHandler_GetPrompt_MissingName(t *testing.T) {
 	}
 }
 
-// TestPromptHandler_GetPrompt_VersionOrLabelRequired
-func TestPromptHandler_GetPrompt_VersionOrLabelRequired(t *testing.T) {
+// TestPromptHandler_GetPrompt_NoParamsDefaultToLatest replaces the old
+// "version or label required" test — now defaults to latest version.
+func TestPromptHandler_GetPrompt_NoParamsDefaultToLatest(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store: store,
-		Cache: cache,
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
+
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v1", ProjectID: "test-proj", Name: "greeting", Version: 1,
+		Template: "Hello!",
+	})
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v2", ProjectID: "test-proj", Name: "greeting", Version: 2,
+		Template: "Hi!",
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting", nil)
 	w := httptest.NewRecorder()
 	handler.HandleGetPrompt(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Version int64 `json:"version"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	if resp.Version != 2 {
+		t.Errorf("version: got %d, want 2 (latest)", resp.Version)
 	}
 }
 
@@ -1033,5 +1053,303 @@ func TestPromptHandler_ListPrompts_MissingProjectID(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+// ---- Issue #75: Default prompt resolution tests ----
+
+// TestPromptHandler_GetPrompt_DefaultToLatestVersion verifies that calling
+// GET /api/v1/prompts/{name} without ?version= or ?label= returns the
+// latest (highest version number) automatically.
+func TestPromptHandler_GetPrompt_DefaultToLatestVersion(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	// Pre-seed multiple versions.
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v1", ProjectID: "test-proj", Name: "greeting", Version: 1,
+		Template: "Hello {{name}}!",
+	})
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v2", ProjectID: "test-proj", Name: "greeting", Version: 2,
+		Template: "Hi {{name}}!",
+	})
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v3", ProjectID: "test-proj", Name: "greeting", Version: 3,
+		Template: "Hey {{name}}!",
+	})
+
+	// GET /api/v1/prompts/greeting — no params.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting", nil)
+	w := httptest.NewRecorder()
+	handler.HandleGetPrompt(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Name    string `json:"name"`
+		Version int64  `json:"version"`
+		Template string `json:"template"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.Version != 3 {
+		t.Errorf("version: got %d, want 3 (latest)", resp.Version)
+	}
+	if resp.Template != "Hey {{name}}!" {
+		t.Errorf("template: got %q, want %q", resp.Template, "Hey {{name}}!")
+	}
+}
+
+// TestPromptHandler_GetPrompt_SingleVersionNoParams returns the only version
+// when there is exactly one version and no params are provided.
+func TestPromptHandler_GetPrompt_SingleVersionNoParams(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v1", ProjectID: "test-proj", Name: "greeting", Version: 1,
+		Template: "Hello!",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting", nil)
+	w := httptest.NewRecorder()
+	handler.HandleGetPrompt(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Version int64 `json:"version"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	if resp.Version != 1 {
+		t.Errorf("version: got %d, want 1", resp.Version)
+	}
+}
+
+// TestPromptHandler_GetPrompt_NotFoundNoParams returns 404 when the prompt
+// name does not exist and no params are provided.
+func TestPromptHandler_GetPrompt_NotFoundNoParams(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/nonexistent", nil)
+	w := httptest.NewRecorder()
+	handler.HandleGetPrompt(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+// TestPromptHandler_GetPrompt_LabelNotFound returns 404 when the specified
+// label does not exist.
+func TestPromptHandler_GetPrompt_LabelNotFound(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v1", ProjectID: "test-proj", Name: "greeting", Version: 1,
+		Template: "Hello!",
+	})
+	// No labels assigned.
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting?label=production", nil)
+	w := httptest.NewRecorder()
+	handler.HandleGetPrompt(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+// TestPromptHandler_ListPromptVersions_InferProjectID verifies that
+// GET /api/v1/prompts/{name}/versions infers project_id from the session
+// instead of requiring it as a query parameter.
+func TestPromptHandler_ListPromptVersions_InferProjectID(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v1", ProjectID: "test-proj", Name: "greeting", Version: 1,
+		Template: "Hello!",
+	})
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v2", ProjectID: "test-proj", Name: "greeting", Version: 2,
+		Template: "Hi!",
+	})
+
+	// No project_id query param — should infer from session.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting/versions", nil)
+	w := httptest.NewRecorder()
+	handler.HandleListPromptVersions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Count int `json:"count"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	if resp.Count != 2 {
+		t.Errorf("count: got %d, want 2", resp.Count)
+	}
+}
+
+// TestPromptHandler_CreatePrompt_WithLabel verifies that POST
+// /api/v1/prompts accepts an optional "label" field and assigns it.
+func TestPromptHandler_CreatePrompt_WithLabel(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(`{
+		"name": "greeting",
+		"version": 1,
+		"template": "Hello {{name}}!",
+		"label": "production"
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreatePrompt(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	// Verify label was assigned.
+	pv, err := store.GetPromptByLabel(context.Background(), "test-proj", "greeting", "production")
+	if err != nil {
+		t.Fatalf("get by label: %v", err)
+	}
+	if pv.Version != 1 {
+		t.Errorf("label version: got %d, want 1", pv.Version)
+	}
+}
+
+// TestPromptHandler_ListPromptVersions_NoSessionNoProjectID verifies that
+// without a session store and without project_id query param, it returns 400.
+func TestPromptHandler_ListPromptVersions_NoSessionNoProjectID(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store: store,
+		Cache: cache,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting/versions", nil)
+	w := httptest.NewRecorder()
+	handler.HandleListPromptVersions(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+// TestPromptHandler_ListPromptVersions_NoSessionWithProjectID verifies that
+// without a session store, project_id from query param still works.
+func TestPromptHandler_ListPromptVersions_NoSessionWithProjectID(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store: store,
+		Cache: cache,
+	}
+
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v1", ProjectID: "test-proj", Name: "greeting", Version: 1,
+		Template: "Hello!",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting/versions?project_id=test-proj", nil)
+	w := httptest.NewRecorder()
+	handler.HandleListPromptVersions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+// TestPromptHandler_CreatePrompt_LabelOverwrite verifies that re-creating
+// the same prompt name+version with a different label overwrites the previous label.
+func TestPromptHandler_CreatePrompt_LabelOverwrite(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	// Create with production label.
+	req1 := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(`{
+		"name": "greeting",
+		"version": 1,
+		"template": "Hello!",
+		"label": "production"
+	}`))
+	w1 := httptest.NewRecorder()
+	handler.HandleCreatePrompt(w1, req1)
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("first create: status %d", w1.Code)
+	}
+
+	// Re-create the same version with staging label.
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(`{
+		"name": "greeting",
+		"version": 1,
+		"template": "Hello!",
+		"label": "staging"
+	}`))
+	w2 := httptest.NewRecorder()
+	handler.HandleCreatePrompt(w2, req2)
+	if w2.Code != http.StatusConflict {
+		t.Fatalf("second create (conflict): status %d, want 409", w2.Code)
+	}
+
+	// Production label should still point to version 1.
+	pv, err := store.GetPromptByLabel(context.Background(), "test-proj", "greeting", "production")
+	if err != nil {
+		t.Fatalf("get by label: %v", err)
+	}
+	if pv.Version != 1 {
+		t.Errorf("production version: got %d, want 1", pv.Version)
 	}
 }
