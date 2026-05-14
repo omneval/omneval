@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -99,14 +101,23 @@ func (h *OTLPHandler) handleOTLPTraces(w http.ResponseWriter, r *http.Request) {
 	}
 	domainSpans, err := otlp.Translate(vk.ProjectID, rss, opts)
 	if err != nil {
+		slog.Error("ingest: translate failed", "error", err.Error())
 		http.Error(w, fmt.Sprintf("translate: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	if err := h.queue.Enqueue(r.Context(), domainSpans); err != nil {
+		slog.Error("ingest: enqueue failed", "error", err.Error())
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 		return
 	}
+
+	// Extract clean IP from remote_addr (strip port)
+	remoteAddr := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		remoteAddr = host
+	}
+	slog.Info("ingest: accepted spans", "project_id", vk.ProjectID, "span_count", len(domainSpans), "remote_addr", remoteAddr)
 
 	w.Header().Set("Content-Type", contentType)
 	w.WriteHeader(http.StatusAccepted)

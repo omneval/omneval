@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -136,6 +138,7 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 	domainSpans := make([]*domain.Span, 0, len(req.Spans))
 	for _, ns := range req.Spans {
 		if err := h.validateAndTransform(ns, vk); err != nil {
+			slog.Warn("ingest: validation error", "span_id", ns.SpanID, "error", err.Error())
 			http.Error(w, fmt.Sprintf("invalid span: %v", err), http.StatusBadRequest)
 			return
 		}
@@ -148,6 +151,7 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 		if h.metrics != nil {
 			h.metrics.RecordEnqueueError()
 		}
+		slog.Error("ingest: enqueue failed", "error", err.Error())
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -155,6 +159,13 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 	if h.metrics != nil {
 		h.metrics.RecordSpan(vk.ProjectID, len(domainSpans))
 	}
+
+	// Extract clean IP from remote_addr (strip port)
+	remoteAddr := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		remoteAddr = host
+	}
+	slog.Info("ingest: accepted spans", "project_id", vk.ProjectID, "span_count", len(domainSpans), "remote_addr", remoteAddr)
 
 	w.WriteHeader(http.StatusAccepted)
 }

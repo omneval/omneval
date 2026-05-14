@@ -13,16 +13,17 @@ import (
 // Config is the top-level configuration structure populated by Viper from
 // lantern.yaml and environment variable overrides.
 type Config struct {
-	Database  DatabaseConfig  `mapstructure:"database"`
-	Redis     RedisConfig     `mapstructure:"redis"`
-	Storage   StorageConfig   `mapstructure:"storage"`
-	Auth      AuthConfig      `mapstructure:"auth"`
-	Ingest    IngestConfig    `mapstructure:"ingest"`
-	Writer    WriterConfig    `mapstructure:"writer"`
-	Query     QueryConfig     `mapstructure:"query"`
-	Eval      EvalConfig      `mapstructure:"eval"`
-	Pricing   PricingConfig   `mapstructure:"pricing"`
-	Metrics   MetricsConfig   `mapstructure:"metrics"`
+	LogLevel  string           `mapstructure:"log_level"`
+	Database  DatabaseConfig   `mapstructure:"database"`
+	Redis     RedisConfig      `mapstructure:"redis"`
+	Storage   StorageConfig    `mapstructure:"storage"`
+	Auth      AuthConfig       `mapstructure:"auth"`
+	Ingest    IngestConfig     `mapstructure:"ingest"`
+	Writer    WriterConfig     `mapstructure:"writer"`
+	Query     QueryConfig      `mapstructure:"query"`
+	Eval      EvalConfig       `mapstructure:"eval"`
+	Pricing   PricingConfig    `mapstructure:"pricing"`
+	Metrics   MetricsConfig    `mapstructure:"metrics"`
 }
 
 type DatabaseConfig struct {
@@ -164,6 +165,8 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("auth.secure_cookie", false)
 	v.SetDefault("auth.admin_email", "")
 	v.SetDefault("auth.admin_password", "")
+	// log level (global)
+	v.SetDefault("log_level", "info")
 	// ingest
 	v.SetDefault("ingest.addr", ":8000")
 	v.SetDefault("ingest.log_system_prompt", true)
@@ -210,6 +213,7 @@ func Load(path string) (*Config, error) {
 	// Apply LANTERN_* environment variable overrides directly.
 	// Viper's AutomaticEnv does not reliably propagate env vars into nested
 	// struct fields via Unmarshal — os.Getenv is the only guaranteed path.
+	envString(&cfg.LogLevel,         "LANTERN_LOG_LEVEL")
 	envString(&cfg.Database.Driver,  "LANTERN_DATABASE_DRIVER")
 	envString(&cfg.Database.DSN,     "LANTERN_DATABASE_DSN")
 	envString(&cfg.Redis.Addr,       "LANTERN_REDIS_ADDR")

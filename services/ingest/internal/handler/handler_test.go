@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/zbloss/lantern/internal/domain"
@@ -704,5 +706,123 @@ func TestNativeHandler_CORS_WithoutOriginHeader(t *testing.T) {
 	}
 	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
 		t.Errorf("Access-Control-Allow-Origin: got %q, want empty (no Origin header)", got)
+	}
+}
+
+// --- Logging Tests ---
+
+func TestNativeHandler_LogsAcceptedBatch(t *testing.T) {
+	buf := &strings.Builder{}
+	logger := slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	orig := slog.Default()
+	slog.SetDefault(logger)
+	defer slog.SetDefault(orig)
+
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handler.NewNativeHandler(q, v, nil, nil)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	spans := []*handler.NativeSpan{
+		{TraceID: "0123456789abcdef0123456789abcdef", SpanID: "0123456789abcdef", Name: "test-span"},
+	}
+	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
+	req.Header.Set("X-API-Key", "valid_project_key")
+	req.RemoteAddr = "172.20.0.1:12345"
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+
+	if !strings.Contains(buf.String(), "accepted spans") {
+		t.Errorf("expected log with 'accepted spans', got:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "project_id=") {
+		t.Errorf("expected log with 'project_id=', got:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "span_count=") {
+		t.Errorf("expected log with 'span_count=', got:\n%s", buf.String())
+	}
+}
+
+func TestNativeHandler_LogsValidationFailure(t *testing.T) {
+	buf := &strings.Builder{}
+	logger := slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	orig := slog.Default()
+	slog.SetDefault(logger)
+	defer slog.SetDefault(orig)
+
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handler.NewNativeHandler(q, v, nil, nil)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	spans := []*handler.NativeSpan{
+		{TraceID: "0123456789abcdef0123456789abcdef", SpanID: "short", Name: "test-span"},
+	}
+	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
+	req.Header.Set("X-API-Key", "valid_project_key")
+	req.RemoteAddr = "172.20.0.1:12345"
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+
+	if !strings.Contains(buf.String(), "validation error") {
+		t.Errorf("expected log with 'validation error', got:\n%s", buf.String())
+	}
+}
+
+func TestNativeHandler_LogsEnqueueFailure(t *testing.T) {
+	buf := &strings.Builder{}
+	logger := slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelError}))
+	orig := slog.Default()
+	slog.SetDefault(logger)
+	defer slog.SetDefault(orig)
+
+	q := &failingQueue{}
+	v := &fakeValidator{}
+	h := handler.NewNativeHandler(q, v, nil, nil)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	spans := []*handler.NativeSpan{
+		{TraceID: "0123456789abcdef0123456789abcdef", SpanID: "0123456789abcdef", Name: "test-span"},
+	}
+	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
+	req.Header.Set("X-API-Key", "valid_project_key")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+
+	if !strings.Contains(buf.String(), "enqueue failed") {
+		t.Errorf("expected log with 'enqueue failed', got:\n%s", buf.String())
 	}
 }

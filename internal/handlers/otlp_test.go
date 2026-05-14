@@ -1,0 +1,207 @@
+package handlers_test
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	coltracev1 "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
+
+	"github.com/zbloss/lantern/internal/auth"
+	"github.com/zbloss/lantern/internal/domain"
+	"github.com/zbloss/lantern/internal/handlers"
+	"google.golang.org/protobuf/proto"
+)
+
+// fakeIngestQueue stores enqueued spans in-memory for testing.
+type fakeIngestQueue struct {
+	batches [][]*domain.Span
+}
+
+func (f *fakeIngestQueue) Enqueue(_ context.Context, spans []*domain.Span) error {
+	f.batches = append(f.batches, spans)
+	return nil
+}
+
+// fakeValidator is a minimal Validator for testing.
+type fakeValidator struct{}
+
+func (f *fakeValidator) Validate(_ context.Context, rawKey string) (*auth.ValidatedKey, error) {
+	if rawKey == "valid_project_key" {
+		return &auth.ValidatedKey{
+			ProjectID: "proj-1",
+		}, nil
+	}
+	return nil, fmt.Errorf("invalid API key")
+}
+
+// --- Tests ---
+
+func TestOTLPHandler_LogsAcceptedBatch(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	// Build a minimal OTLP request with 2 spans
+	req := &coltracev1.ExportTraceServiceRequest{
+		ResourceSpans: []*tracev1.ResourceSpans{
+			{
+				ScopeSpans: []*tracev1.ScopeSpans{
+					{
+						Spans: []*tracev1.Span{
+							{
+								TraceId: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+								SpanId:  []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+								Name:    "test-otel-span",
+							},
+							{
+								TraceId: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+								SpanId:  []byte{0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20},
+								Name:    "test-otel-span-2",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	body, err := proto.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal OTLP request: %v", err)
+	}
+
+	req2, _ := http.NewRequest("POST", ts.URL+"/v1/traces", bytes.NewReader(body))
+	req2.Header.Set("X-API-Key", "valid_project_key")
+	req2.Header.Set("Content-Type", "application/x-protobuf")
+
+	resp, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+	if len(q.batches) != 1 || len(q.batches[0]) != 2 {
+		t.Errorf("expected 1 batch with 2 spans, got %d batches", len(q.batches))
+	}
+}
+
+func TestOTLPHandler_401OnMissingKey(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	req := &coltracev1.ExportTraceServiceRequest{}
+	body, _ := proto.Marshal(req)
+
+	req2, _ := http.NewRequest("POST", ts.URL+"/v1/traces", bytes.NewReader(body))
+	req2.Header.Set("Content-Type", "application/x-protobuf")
+
+	resp, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+	}
+}
+
+func TestOTLPHandler_405OnWrongMethod(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("GET", ts.URL+"/v1/traces", nil)
+	req.Header.Set("X-API-Key", "valid_project_key")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestOTLPHandler_400OnUnsupportedContentType(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/traces", strings.NewReader("not protobuf"))
+	req.Header.Set("X-API-Key", "valid_project_key")
+	req.Header.Set("Content-Type", "text/plain")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestOTLPHandler_400OnInvalidProtobuf(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/traces", strings.NewReader("garbage"))
+	req.Header.Set("X-API-Key", "valid_project_key")
+	req.Header.Set("Content-Type", "application/x-protobuf")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestOTLPHandler_400OnInvalidJSON(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/traces", strings.NewReader("{invalid"))
+	req.Header.Set("X-API-Key", "valid_project_key")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}

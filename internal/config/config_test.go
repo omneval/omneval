@@ -185,3 +185,46 @@ func TestLoad_CORS_EnvOverride(t *testing.T) {
 		t.Errorf("CORSAllowedOrigins[0]: got %q, want %q", cfg.Ingest.CORSAllowedOrigins[0], "http://override.com")
 	}
 }
+
+func TestLoad_LoggingDefaults(t *testing.T) {
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.LogLevel != "info" {
+		t.Errorf("log_level: got %q, want %q", cfg.LogLevel, "info")
+	}
+}
+
+func TestLoad_Logging_EnvOverride(t *testing.T) {
+	t.Setenv("LANTERN_LOG_LEVEL", "debug")
+
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.LogLevel != "debug" {
+		t.Errorf("LANTERN_LOG_LEVEL: got %q, want %q", cfg.LogLevel, "debug")
+	}
+}
+
+func TestLoad_Logging_FromFile(t *testing.T) {
+	yaml := `
+log_level: debug
+`
+	f := filepath.Join(t.TempDir(), "lantern.yaml")
+	if err := os.WriteFile(f, []byte(yaml), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(f)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.LogLevel != "debug" {
+		t.Errorf("log_level: got %q, want %q", cfg.LogLevel, "debug")
+	}
+}

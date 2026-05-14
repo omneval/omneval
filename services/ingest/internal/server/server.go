@@ -24,6 +24,20 @@ import (
 	"github.com/zbloss/lantern/services/ingest/internal/metrics"
 )
 
+// levelFromString maps a string to an slog.Level, defaulting to info.
+func levelFromString(s string) slog.Level {
+	switch s {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
 // Run starts the Ingest API HTTP server with graceful shutdown.
 //
 // Graceful shutdown behavior:
@@ -34,6 +48,10 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
+
+	// Configure slog with the configured log level.
+	logLevel := levelFromString(cfg.LogLevel)
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
 
 	// Register Prometheus metrics.
 	if err := metrics.Register(cfg.Metrics.DisableProjectLabels); err != nil {

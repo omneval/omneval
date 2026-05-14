@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"net/http"
 	"testing"
@@ -63,5 +64,27 @@ func TestGracefulShutdown(t *testing.T) {
 	// The request should have completed quickly (not during shutdown).
 	if elapsed > 500*time.Millisecond {
 		t.Errorf("request took too long after shutdown: %v", elapsed)
+	}
+}
+
+func TestLevelFromString(t *testing.T) {
+	cases := []struct {
+		input string
+		want  slog.Level
+	}{
+		{"debug", slog.LevelDebug},
+		{"info", slog.LevelInfo},
+		{"warn", slog.LevelWarn},
+		{"error", slog.LevelError},
+		{"", slog.LevelInfo},
+		{"invalid", slog.LevelInfo},
+		{"INFO", slog.LevelInfo},
+		{"Debug", slog.LevelInfo}, // case-sensitive
+	}
+	for _, c := range cases {
+		got := levelFromString(c.input)
+		if got != c.want {
+			t.Errorf("levelFromString(%q): got %v, want %v", c.input, got, c.want)
+		}
 	}
 }
