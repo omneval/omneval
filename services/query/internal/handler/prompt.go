@@ -106,7 +106,6 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Optionally assign a label at creation time.
 	if req.Label != "" {
 		pl := &domain.PromptLabel{
 			ProjectID: projectID,
@@ -117,10 +116,7 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 		}
 		if labelErr := h.Store.SetPromptLabel(r.Context(), pl); labelErr != nil {
 			slog.Warn("query: set initial prompt label", "name", pv.Name, "label", req.Label, "err", labelErr)
-			// Don't fail the creation if the label assignment fails — the version
-			// is already created and the label is optional.
 		}
-		// Invalidate the label cache so the next lookup reflects the new assignment.
 		h.Cache.InvalidateLabel(projectID, req.Name, req.Label)
 	}
 
@@ -164,11 +160,7 @@ func (h *PromptHandler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) 
 	} else if labelQuery != "" {
 		pv, getErr = h.Cache.GetLabel(r.Context(), r.URL.Query().Get("project_id"), name, labelQuery)
 	} else {
-		// No params — default to the latest (highest version number).
-		var projectID string
-		if h.SessionStore != nil {
-			projectID, _ = h.SessionStore.ProjectID(r)
-		}
+		projectID, _ := extractProjectID(h.SessionStore, r)
 		pv, getErr = h.getLatestVersion(r.Context(), name, projectID)
 	}
 
@@ -496,11 +488,7 @@ func (h *PromptHandler) HandleListPromptVersions(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Infer project_id from session, then fall back to query param.
-	var projectID string
-	if h.SessionStore != nil {
-		projectID, _ = h.SessionStore.ProjectID(r)
-	}
+	projectID, _ := extractProjectID(h.SessionStore, r)
 	if projectID == "" {
 		projectID = r.URL.Query().Get("project_id")
 	}
