@@ -14,6 +14,7 @@ import {
 import { colors } from "@/theme";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Skeleton } from "@/components/Skeleton";
+import { EmptyState, LoadingState } from "@/components/EmptyState";
 import {
   formatNumber,
   formatTime,
@@ -48,44 +49,6 @@ function getDefaultFromTo(): { from: string; to: string } {
     from: from.toISOString(),
     to: now.toISOString(),
   };
-}
-
-// ── Empty State ────────────────────────────────────────────────────
-
-function EmptyState({ title, description, action, actionLabel }: {
-  title: string;
-  description: string;
-  action?: () => void;
-  actionLabel?: string;
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center py-12 px-4">
-      <svg
-        width="48"
-        height="48"
-        viewBox="0 0 48 48"
-        fill="none"
-        className="mb-3 text-lantern-bg-cave"
-      >
-        <rect x="8" y="8" width="32" height="32" rx="4" stroke="currentColor" strokeWidth="2" />
-        <path d="M18 24h12M24 18v12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      </svg>
-      <p className="text-sm font-medium text-lantern-pure">{title}</p>
-      <p className="text-xs text-lantern-ash mt-1 opacity-70">{description}</p>
-      {action && actionLabel && (
-        <button
-          onClick={action}
-          className="mt-3 px-3 py-1.5 text-xs rounded-md font-medium transition-colors"
-          style={{
-            background: colors.accents.emberFlare,
-            color: colors.typography.pureLight,
-          }}
-        >
-          {actionLabel}
-        </button>
-      )}
-    </div>
-  );
 }
 
 // ── Card Wrapper ───────────────────────────────────────────────────
@@ -130,18 +93,13 @@ interface TracesByNameData {
 
 function TracesByNameChart({ data, loading }: { data: TracesByNameData[]; loading: boolean }) {
   if (loading && data.length === 0) {
-    return (
-      <div className="space-y-3 py-4">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton key={i} className="h-5 rounded" />
-        ))}
-      </div>
-    );
+    return <LoadingState rows={5} rowHeight="1.25rem" />;
   }
 
   if (data.length === 0) {
     return (
       <EmptyState
+        variant="onboarding"
         title="No traces yet"
         description="Send your first trace to see model breakdown here"
         actionLabel="View Traces"
@@ -190,11 +148,7 @@ interface TimeSeriesData {
 
 function TracesByTimeChart({ data, loading }: { data: TimeSeriesData[]; loading: boolean }) {
   if (loading && data.length === 0) {
-    return (
-      <div className="space-y-3 py-4">
-        <Skeleton className="h-32 rounded" />
-      </div>
-    );
+    return <LoadingState rows={1} rowHeight="8rem" />;
   }
 
   if (data.length === 0) {
@@ -257,17 +211,17 @@ function ModelCostsTable({ data, loading }: { data: CostData[]; loading: boolean
   );
 
   if (loading && data.length === 0) {
-    return (
-      <div className="space-y-2 py-4">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton key={i} className="h-6 rounded" />
-        ))}
-      </div>
-    );
+    return <LoadingState rows={5} rowHeight="1.5rem" />;
   }
 
   if (data.length === 0) {
-    return <EmptyState title="No cost data yet" description="Cost breakdown will appear once traces are ingested" />;
+    return (
+      <EmptyState
+        variant="default"
+        title="No cost data yet"
+        description="Cost breakdown will appear once traces are ingested"
+      />
+    );
   }
 
   return (
@@ -348,6 +302,7 @@ function ScoresWidget({ loading }: { loading: boolean }) {
 
   return (
     <EmptyState
+      variant="default"
       title="No scores yet"
       description="Configure evaluation rules to start scoring traces"
       actionLabel="Go to Settings"
@@ -363,17 +318,11 @@ function ModelUsageWidget({ loading }: { loading: boolean }) {
   const [activeTab, setActiveTab] = useState(0);
 
   if (loading) {
-    return (
-      <div className="space-y-3 py-4">
-        <Skeleton className="h-5 rounded" />
-        <Skeleton className="h-24 rounded" />
-      </div>
-    );
+    return <LoadingState rows={3} rowHeight="2.5rem" />;
   }
 
   return (
     <div>
-      {/* Tabs */}
       <div className="flex gap-1 mb-4 border-b" style={{ borderColor: colors.backgrounds.caveWall }}>
         {USAGE_TABS.map((tab, i) => (
           <button
@@ -398,6 +347,7 @@ function ModelUsageWidget({ loading }: { loading: boolean }) {
         ))}
       </div>
       <EmptyState
+        variant="default"
         title="No usage data yet"
         description="Token counts will appear once traces are ingested"
       />
@@ -414,13 +364,7 @@ interface UserConsumptionData {
 
 function UserConsumptionChart({ data, loading }: { data: UserConsumptionData[]; loading: boolean }) {
   if (loading && data.length === 0) {
-    return (
-      <div className="space-y-3 py-4">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton key={i} className="h-5 rounded" />
-        ))}
-      </div>
-    );
+    return <LoadingState rows={5} rowHeight="1.25rem" />;
   }
 
   if (data.length === 0) {

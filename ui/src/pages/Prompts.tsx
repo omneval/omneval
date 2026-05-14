@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { colors } from "@/theme";
+import { EmptyState } from "@/components/EmptyState";
 import { formatTime } from "@/utils/formatters";
 import { diffText, diffModelConfig, type DiffLine, type ModelConfigDiff } from "@/utils/diff";
 
@@ -73,6 +74,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
   const [newMaxTokens, setNewMaxTokens] = useState(256);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   // Label reassignment state: { promptName, label } -> new version
   const [labelAssignments, setLabelAssignments] = useState<Map<string, number>>(new Map());
@@ -151,11 +153,47 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
   };
 
   // Create new prompt
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
+
+    if (!newName.trim()) {
+      errors.name = "Prompt name is required";
+    } else if (newName.length > 128) {
+      errors.name = "Name must be 128 characters or fewer";
+    } else if (!/^[a-zA-Z0-9_\-]+$/.test(newName)) {
+      errors.name = "Name can only contain letters, numbers, underscores, and hyphens";
+    }
+
+    if (!newTemplate.trim()) {
+      errors.template = "Template is required";
+    } else if (newTemplate.length > 32000) {
+      errors.template = "Template must be 32000 characters or fewer";
+    }
+
+    if (newModel.trim()) {
+      if (newModel.length > 64) {
+        errors.model = "Model name must be 64 characters or fewer";
+      } else if (!/^[a-zA-Z0-9_\-\./]+$/.test(newModel)) {
+        errors.model = "Model name can only contain letters, numbers, underscores, hyphens, dots, and slashes";
+      }
+    }
+
+    if (newTemperature < 0 || newTemperature > 2) {
+      errors.temperature = "Temperature must be between 0 and 2";
+    }
+
+    if (newMaxTokens < 1) {
+      errors.maxTokens = "Max tokens must be at least 1";
+    }
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const handleCreate = async () => {
     setCreateError(null);
     setCreateSuccess(null);
-    if (!newName.trim() || !newTemplate.trim()) {
-      setCreateError("Name and template are required");
+    if (!validateForm()) {
       return;
     }
     try {
@@ -291,30 +329,36 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
               <input
                 type="text"
                 value={newName}
-                onChange={(e) => setNewName(e.target.value)}
+                onChange={(e) => { setNewName(e.target.value); setFormErrors((prev) => ({ ...prev, name: "" })); }}
                 placeholder="e.g. greeting"
-                className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors ${formErrors.name ? "border-lantern-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
-                  borderColor: colors.backgrounds.caveWall,
+                  borderColor: formErrors.name ? colors.accents.dangerRed : colors.backgrounds.caveWall,
                   color: colors.typography.pureLight,
                 }}
               />
+              {formErrors.name && (
+                <p className="text-xs mt-1" style={{ color: colors.accents.dangerRed }}>{formErrors.name}</p>
+              )}
             </div>
             <div>
               <label className="block text-xs text-lantern-ash mb-1">Model</label>
               <input
                 type="text"
                 value={newModel}
-                onChange={(e) => setNewModel(e.target.value)}
+                onChange={(e) => { setNewModel(e.target.value); setFormErrors((prev) => ({ ...prev, model: "" })); }}
                 placeholder="e.g. gpt-4"
-                className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors ${formErrors.model ? "border-lantern-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
-                  borderColor: colors.backgrounds.caveWall,
+                  borderColor: formErrors.model ? colors.accents.dangerRed : colors.backgrounds.caveWall,
                   color: colors.typography.pureLight,
                 }}
               />
+              {formErrors.model && (
+                <p className="text-xs mt-1" style={{ color: colors.accents.dangerRed }}>{formErrors.model}</p>
+              )}
             </div>
           </div>
 
@@ -327,14 +371,17 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 min={0}
                 max={1}
                 step={0.1}
-                onChange={(e) => setNewTemperature(parseFloat(e.target.value) || 0)}
-                className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
+                onChange={(e) => { setNewTemperature(parseFloat(e.target.value) || 0); setFormErrors((prev) => ({ ...prev, temperature: "" })); }}
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors ${formErrors.temperature ? "border-lantern-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
-                  borderColor: colors.backgrounds.caveWall,
+                  borderColor: formErrors.temperature ? colors.accents.dangerRed : colors.backgrounds.caveWall,
                   color: colors.typography.pureLight,
                 }}
               />
+              {formErrors.temperature && (
+                <p className="text-xs mt-1" style={{ color: colors.accents.dangerRed }}>{formErrors.temperature}</p>
+              )}
             </div>
             <div>
               <label className="block text-xs text-lantern-ash mb-1">Max Tokens</label>
@@ -342,14 +389,17 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 type="number"
                 value={newMaxTokens}
                 min={1}
-                onChange={(e) => setNewMaxTokens(parseInt(e.target.value) || 0)}
-                className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors"
+                onChange={(e) => { setNewMaxTokens(parseInt(e.target.value) || 0); setFormErrors((prev) => ({ ...prev, maxTokens: "" })); }}
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors ${formErrors.maxTokens ? "border-lantern-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
-                  borderColor: colors.backgrounds.caveWall,
+                  borderColor: formErrors.maxTokens ? colors.accents.dangerRed : colors.backgrounds.caveWall,
                   color: colors.typography.pureLight,
                 }}
               />
+              {formErrors.maxTokens && (
+                <p className="text-xs mt-1" style={{ color: colors.accents.dangerRed }}>{formErrors.maxTokens}</p>
+              )}
             </div>
           </div>
 
@@ -362,16 +412,20 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
             </label>
             <textarea
               value={newTemplate}
-              onChange={(e) => setNewTemplate(e.target.value)}
+              onChange={(e) => { setNewTemplate(e.target.value); setFormErrors((prev) => ({ ...prev, template: "" })); }}
               placeholder="Hello {{name}}, welcome to {{place}}!"
               rows={4}
-              className="w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors font-mono resize-none"
+              className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors font-mono resize-none ${formErrors.template ? "border-lantern-danger" : ""}`}
               style={{
                 backgroundColor: colors.backgrounds.abyssBlack,
-                borderColor: colors.backgrounds.caveWall,
+                borderColor: formErrors.template ? colors.accents.dangerRed : colors.backgrounds.caveWall,
                 color: colors.typography.pureLight,
               }}
             />
+            {formErrors.template && (
+              <p className="text-xs mt-1" style={{ color: colors.accents.dangerRed }}>{formErrors.template}</p>
+            )}
+            <p className="text-xs text-lantern-ash mt-1 opacity-60">{newTemplate.length.toLocaleString()} / 32,000 chars</p>
           </div>
 
           <div className="flex gap-3">
@@ -397,22 +451,13 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
 
       {/* Prompt List */}
       {prompts.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20">
-          <svg
-            width="48"
-            height="48"
-            viewBox="0 0 18 18"
-            fill="none"
-            className="mb-4 text-lantern-ash"
-          >
-            <rect x="3" y="3" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.5" />
-            <path d="M7 7h4M7 10h2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-          <h2 className="text-lg font-medium text-lantern-pure">No prompts yet</h2>
-          <p className="text-sm text-lantern-ash mt-1">
-            Create your first prompt to get started
-          </p>
-        </div>
+        <EmptyState
+          variant="default"
+          title="No prompts yet"
+          description="Create your first prompt to get started"
+          actionLabel="+ New Prompt"
+          onAction={() => setShowNewPromptForm(true)}
+        />
       ) : (
         <div className="space-y-2">
           {prompts.map((prompt) => {

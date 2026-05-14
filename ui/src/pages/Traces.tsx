@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { colors } from "@/theme";
 import { OnboardingEmptyState } from "@/components/OnboardingEmptyState";
 import { Skeleton } from "@/components/Skeleton";
+import { EmptyState } from "@/components/EmptyState";
 import {
   formatTime,
   formatDuration,
@@ -644,7 +645,17 @@ export default function TracesPage({
         {/* Table */}
         <div className="flex-1 overflow-auto">
           {spans.length === 0 && !loading ? (
-            <OnboardingEmptyState />
+            searchQuery ? (
+              <EmptyState
+                variant="search"
+                title="No results found"
+                description={`No traces match "${searchQuery}"`}
+                actionLabel="Clear Search"
+                onAction={() => setSearchQuery("")}
+              />
+            ) : (
+              <OnboardingEmptyState />
+            )
           ) : loading && spans.length === 0 ? (
             <div className="flex flex-col gap-2 p-4">
               {Array.from({ length: 8 }).map((_, i) => (

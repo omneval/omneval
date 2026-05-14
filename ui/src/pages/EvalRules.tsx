@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { colors } from "@/theme";
+import { EmptyState } from "@/components/EmptyState";
 import { formatTime } from "@/utils/formatters";
 import { truncate } from "@/utils/formatters";
 
@@ -320,6 +321,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
   const [showNewRuleForm, setShowNewRuleForm] = useState(false);
   const [createForm, setCreateForm] = useState<NewRuleFormState>(defaultFormState);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null);
@@ -387,14 +389,38 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
     }
   }, [createForm]);
 
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
+
+    if (!createForm.ruleName.trim()) {
+      errors.ruleName = "Rule name is required";
+    } else if (createForm.ruleName.length > 128) {
+      errors.ruleName = "Name must be 128 characters or fewer";
+    }
+
+    if (!createForm.judgeModel.trim()) {
+      errors.judgeModel = "Judge model is required";
+    } else if (createForm.judgeModel.length > 64) {
+      errors.judgeModel = "Model name must be 64 characters or fewer";
+    }
+
+    if (createForm.sampleRate < 0 || createForm.sampleRate > 100) {
+      errors.sampleRate = "Sample rate must be between 0 and 100";
+    }
+
+    if (createForm.promptName.trim()) {
+      if (createForm.promptName.length > 128) {
+        errors.promptName = "Prompt name must be 128 characters or fewer";
+      }
+    }
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const handleCreate = async () => {
     setCreateError(null);
-    if (!createForm.ruleName.trim()) {
-      setCreateError("Rule name is required");
-      return;
-    }
-    if (!createForm.judgeModel.trim()) {
-      setCreateError("Judge model is required");
+    if (!validateForm()) {
       return;
     }
 
@@ -506,17 +532,39 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
               <StyledInput
                 type="text"
                 value={createForm.ruleName}
-                onChange={(e) => setCreateForm({ ...createForm, ruleName: e.target.value })}
+                onChange={(e) => { setCreateForm({ ...createForm, ruleName: e.target.value }); setFormErrors((prev) => ({ ...prev, ruleName: "" })); }}
                 placeholder="e.g. Production LLM Eval"
+                style={{
+                  ...{
+                    backgroundColor: colors.backgrounds.abyssBlack,
+                    borderColor: colors.backgrounds.caveWall,
+                    color: colors.typography.pureLight,
+                  },
+                  ...(formErrors.ruleName ? { borderColor: colors.accents.dangerRed } : {}),
+                }}
               />
+              {formErrors.ruleName && (
+                <p className="text-xs mt-1" style={{ color: colors.accents.dangerRed }}>{formErrors.ruleName}</p>
+              )}
             </FormField>
             <FormField label="Judge Model">
               <StyledInput
                 type="text"
                 value={createForm.judgeModel}
-                onChange={(e) => setCreateForm({ ...createForm, judgeModel: e.target.value })}
+                onChange={(e) => { setCreateForm({ ...createForm, judgeModel: e.target.value }); setFormErrors((prev) => ({ ...prev, judgeModel: "" })); }}
                 placeholder="e.g. gpt-4"
+                style={{
+                  ...{
+                    backgroundColor: colors.backgrounds.abyssBlack,
+                    borderColor: colors.backgrounds.caveWall,
+                    color: colors.typography.pureLight,
+                  },
+                  ...(formErrors.judgeModel ? { borderColor: colors.accents.dangerRed } : {}),
+                }}
               />
+              {formErrors.judgeModel && (
+                <p className="text-xs mt-1" style={{ color: colors.accents.dangerRed }}>{formErrors.judgeModel}</p>
+              )}
             </FormField>
           </div>
 
@@ -525,9 +573,20 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
               <StyledInput
                 type="text"
                 value={createForm.promptName}
-                onChange={(e) => setCreateForm({ ...createForm, promptName: e.target.value })}
+                onChange={(e) => { setCreateForm({ ...createForm, promptName: e.target.value }); setFormErrors((prev) => ({ ...prev, promptName: "" })); }}
                 placeholder="e.g. judge-v1"
+                style={{
+                  ...{
+                    backgroundColor: colors.backgrounds.abyssBlack,
+                    borderColor: colors.backgrounds.caveWall,
+                    color: colors.typography.pureLight,
+                  },
+                  ...(formErrors.promptName ? { borderColor: colors.accents.dangerRed } : {}),
+                }}
               />
+              {formErrors.promptName && (
+                <p className="text-xs mt-1" style={{ color: colors.accents.dangerRed }}>{formErrors.promptName}</p>
+              )}
             </FormField>
             <FormField label="Prompt Version">
               <StyledInput
@@ -543,8 +602,19 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
                 value={createForm.sampleRate}
                 min={0}
                 max={100}
-                onChange={(e) => setCreateForm({ ...createForm, sampleRate: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) })}
+                onChange={(e) => { setCreateForm({ ...createForm, sampleRate: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); setFormErrors((prev) => ({ ...prev, sampleRate: "" })); }}
+                style={{
+                  ...{
+                    backgroundColor: colors.backgrounds.abyssBlack,
+                    borderColor: colors.backgrounds.caveWall,
+                    color: colors.typography.pureLight,
+                  },
+                  ...(formErrors.sampleRate ? { borderColor: colors.accents.dangerRed } : {}),
+                }}
               />
+              {formErrors.sampleRate && (
+                <p className="text-xs mt-1" style={{ color: colors.accents.dangerRed }}>{formErrors.sampleRate}</p>
+              )}
             </FormField>
           </div>
 
@@ -734,30 +804,13 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
 
       {/* Rule List */}
       {rules.length === 0 ? (
-        <div
-          className="flex flex-col items-center justify-center py-20 rounded-lg border"
-          style={{ borderColor: colors.backgrounds.caveWall }}
-        >
-          <svg
-            width="48"
-            height="48"
-            viewBox="0 0 18 18"
-            fill="none"
-            className="mb-4 text-lantern-ash"
-          >
-            <path
-              d="M9 2l6 4v6l-6 4-6-4V6l6-4z"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinejoin="round"
-            />
-            <path d="M9 6v6M6 8l3 2 3-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <h2 className="text-lg font-medium text-lantern-pure">No eval rules yet</h2>
-          <p className="text-sm text-lantern-ash mt-1">
-            Create your first eval rule to get started
-          </p>
-        </div>
+        <EmptyState
+          variant="default"
+          title="No eval rules yet"
+          description="Create your first eval rule to start evaluating traces"
+          actionLabel="+ New Rule"
+          onAction={() => setShowNewRuleForm(true)}
+        />
       ) : (
         <div className="space-y-2">
           {rules.map((rule) => (
