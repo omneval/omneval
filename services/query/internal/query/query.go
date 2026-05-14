@@ -330,9 +330,15 @@ func (q *SpanQuery) buildWhereClause() ([]any, string) {
 	clauses = append(clauses, "project_id = ?")
 	args = append(args, q.projectID)
 
-	// Time range filter.
-	clauses = append(clauses, "start_time >= ? AND start_time <= ?")
-	args = append(args, q.from, q.to)
+	// Time range filter — only applied when the corresponding bound is set.
+	if !q.from.IsZero() {
+		clauses = append(clauses, "start_time >= ?")
+		args = append(args, q.from)
+	}
+	if !q.to.IsZero() {
+		clauses = append(clauses, "start_time <= ?")
+		args = append(args, q.to)
+	}
 
 	// Special filters (e.g., bookmarked) require custom SQL beyond simple
 	// column comparisons.

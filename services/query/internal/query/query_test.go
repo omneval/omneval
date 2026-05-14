@@ -570,6 +570,110 @@ func TestNextCursor_PageBoundary(t *testing.T) {
 	}
 }
 
+func TestSQL_NoTimeRange_ReturnsAllTime(t *testing.T) {
+	// When from/to are omitted (zero time.Time), the query should
+	// NOT append a time range filter — it should return all spans.
+	req := SpanQueryRequest{
+		Limit: 50,
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, args, err := q.SQL()
+	if err != nil {
+		t.Fatalf("SQL error: %v", err)
+	}
+
+	// Should NOT contain time range filters.
+	if strings.Contains(sql, "start_time >= ?") {
+		t.Error("expected no start_time >= filter when from is zero")
+	}
+	if strings.Contains(sql, "start_time <= ?") {
+		t.Error("expected no start_time <= filter when to is zero")
+	}
+
+	// Should still have project_id and limit args.
+	if len(args) < 2 {
+		t.Errorf("expected at least 2 args (project_id + limit), got %d", len(args))
+	}
+	if args[0] != "proj-abc" {
+		t.Errorf("first arg should be project ID, got %v", args[0])
+	}
+}
+
+func TestSQL_FromZeroToSet(t *testing.T) {
+	// When only 'to' is set, apply only an upper bound.
+	to := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	req := SpanQueryRequest{
+		To:   to,
+		Limit: 50,
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, args, err := q.SQL()
+	if err != nil {
+		t.Fatalf("SQL error: %v", err)
+	}
+
+	// Should contain upper bound only.
+	if !strings.Contains(sql, "start_time <= ?") {
+		t.Error("expected start_time <= filter")
+	}
+	if strings.Contains(sql, "start_time >= ?") {
+		t.Error("expected no start_time >= filter when from is zero")
+	}
+
+	// Should have exactly 3 args: project_id + upper bound + limit.
+	if len(args) != 3 {
+		t.Errorf("expected 3 args (project_id + to + limit), got %d: %v", len(args), args)
+	}
+	if len(args) >= 2 && !args[1].(time.Time).Equal(to) {
+		t.Errorf("second arg should be 'to' time, got %v", args[1])
+	}
+}
+
+func TestSQL_FromSetToZero(t *testing.T) {
+	// When only 'from' is set, apply only a lower bound.
+	from := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	req := SpanQueryRequest{
+		From:  from,
+		Limit: 50,
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, args, err := q.SQL()
+	if err != nil {
+		t.Fatalf("SQL error: %v", err)
+	}
+
+	// Should contain lower bound only.
+	if !strings.Contains(sql, "start_time >= ?") {
+		t.Error("expected start_time >= filter")
+	}
+	if strings.Contains(sql, "start_time <= ?") {
+		t.Error("expected no start_time <= filter when to is zero")
+	}
+
+	// Should have exactly 3 args: project_id + lower bound + limit.
+	if len(args) != 3 {
+		t.Errorf("expected 3 args (project_id + from + limit), got %d: %v", len(args), args)
+	}
+	if len(args) >= 2 && !args[1].(time.Time).Equal(from) {
+		t.Errorf("second arg should be 'from' time, got %v", args[1])
+	}
+}
+
 func TestNextCursor_SameStartTimeDifferentSpanID(t *testing.T) {
 	// When multiple spans share the same start_time, the cursor should
 	// encode span_id as tiebreaker.
