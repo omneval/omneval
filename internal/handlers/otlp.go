@@ -112,15 +112,20 @@ func (h *OTLPHandler) handleOTLPTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract clean IP from remote_addr (strip port)
-	remoteAddr := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
-		remoteAddr = host
-	}
+	remoteAddr := RemoteHost(r.RemoteAddr)
 	slog.Info("ingest: accepted spans", "project_id", vk.ProjectID, "span_count", len(domainSpans), "remote_addr", remoteAddr)
 
 	w.Header().Set("Content-Type", contentType)
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// RemoteHost extracts the host part from a remote address string,
+// stripping the port if present.
+func RemoteHost(remoteAddr string) string {
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return host
+	}
+	return remoteAddr
 }
 
 func convertToResourceSpans(req *coltracev1.ExportTraceServiceRequest) []otlp.ResourceSpans {

@@ -165,7 +165,6 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("auth.secure_cookie", false)
 	v.SetDefault("auth.admin_email", "")
 	v.SetDefault("auth.admin_password", "")
-	// log level (global)
 	v.SetDefault("log_level", "info")
 	// ingest
 	v.SetDefault("ingest.addr", ":8000")

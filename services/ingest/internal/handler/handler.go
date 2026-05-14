@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"time"
 
 	"github.com/zbloss/lantern/internal/auth"
+	handlers "github.com/zbloss/lantern/internal/handlers"
 	"github.com/zbloss/lantern/internal/domain"
 	"github.com/zbloss/lantern/services/ingest/internal/metrics"
 )
@@ -160,11 +160,7 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 		h.metrics.RecordSpan(vk.ProjectID, len(domainSpans))
 	}
 
-	// Extract clean IP from remote_addr (strip port)
-	remoteAddr := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
-		remoteAddr = host
-	}
+	remoteAddr := handlers.RemoteHost(r.RemoteAddr)
 	slog.Info("ingest: accepted spans", "project_id", vk.ProjectID, "span_count", len(domainSpans), "remote_addr", remoteAddr)
 
 	w.WriteHeader(http.StatusAccepted)

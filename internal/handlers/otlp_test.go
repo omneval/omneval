@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,7 +43,7 @@ func (f *fakeValidator) Validate(_ context.Context, rawKey string) (*auth.Valida
 
 // --- Tests ---
 
-func TestOTLPHandler_LogsAcceptedBatch(t *testing.T) {
+func TestOTLPHandler_AcceptsBatch(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
 	h := handlers.NewOTLPHandler(q, v)
@@ -203,5 +204,118 @@ func TestOTLPHandler_400OnInvalidJSON(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+// --- Logging Tests ---
+
+func TestOTLPHandler_LogsAcceptedBatch(t *testing.T) {
+	buf := &strings.Builder{}
+	logger := slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	orig := slog.Default()
+	slog.SetDefault(logger)
+	defer slog.SetDefault(orig)
+
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	req := buildMinimalOTLPRequest()
+	body, err := proto.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal OTLP request: %v", err)
+	}
+
+	rq, _ := http.NewRequest("POST", ts.URL+"/v1/traces", bytes.NewReader(body))
+	rq.Header.Set("X-API-Key", "valid_project_key")
+	rq.Header.Set("Content-Type", "application/x-protobuf")
+
+	resp, err := http.DefaultClient.Do(rq)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+
+	if !strings.Contains(buf.String(), "accepted spans") {
+		t.Errorf("expected log with 'accepted spans', got:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "project_id=") {
+		t.Errorf("expected log with 'project_id=', got:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "span_count=") {
+		t.Errorf("expected log with 'span_count=', got:\n%s", buf.String())
+	}
+}
+
+func TestOTLPHandler_LogsEnqueueFailure(t *testing.T) {
+	buf := &strings.Builder{}
+	logger := slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelError}))
+	orig := slog.Default()
+	slog.SetDefault(logger)
+	defer slog.SetDefault(orig)
+
+	q := &failingQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	req := buildMinimalOTLPRequest()
+	body, err := proto.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal OTLP request: %v", err)
+	}
+
+	rq, _ := http.NewRequest("POST", ts.URL+"/v1/traces", bytes.NewReader(body))
+	rq.Header.Set("X-API-Key", "valid_project_key")
+	rq.Header.Set("Content-Type", "application/x-protobuf")
+
+	resp, err := http.DefaultClient.Do(rq)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+
+	if !strings.Contains(buf.String(), "enqueue failed") {
+		t.Errorf("expected log with 'enqueue failed', got:\n%s", buf.String())
+	}
+}
+
+// failingQueue always returns an error for enqueue operations.
+type failingQueue struct{}
+
+func (f *failingQueue) Enqueue(_ context.Context, _ []*domain.Span) error {
+	return fmt.Errorf("queue full")
+}
+
+// buildMinimalOTLPRequest creates an OTLP request with a gen_ai model attribute
+// so the translate function produces domain spans.
+func buildMinimalOTLPRequest() *coltracev1.ExportTraceServiceRequest {
+	return &coltracev1.ExportTraceServiceRequest{
+		ResourceSpans: []*tracev1.ResourceSpans{
+			{
+				ScopeSpans: []*tracev1.ScopeSpans{
+					{
+						Spans: []*tracev1.Span{
+							{
+								TraceId: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+								SpanId:  []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+								Name:    "test-otel-span",
+							},
+						},
+					},
+				},
+			},
+		},
 	}
 }
