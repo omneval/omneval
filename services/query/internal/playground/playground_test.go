@@ -780,8 +780,23 @@ func TestHandleRun_LLMNotConfigured(t *testing.T) {
 
 	handler.HandleRun(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	// Should return 503 Service Unavailable, not 400 Bad Request.
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+
+	// Response must be JSON, never HTML.
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("content-type: got %q, want %q", contentType, "application/json")
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v\nbody: %s", err, w.Body.String())
+	}
+	if resp["error"] != "playground LLM not configured" {
+		t.Errorf("error: got %q, want %q", resp["error"], "playground LLM not configured")
 	}
 }
 

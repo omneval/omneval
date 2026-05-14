@@ -52,6 +52,16 @@ func (h *PlaygroundHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check LLM client is configured early, before resolving the prompt.
+	// This ensures we always return 503 JSON (never HTML) when the LLM
+	// is not configured, regardless of whether the prompt exists.
+	if h.LLMClient == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "playground LLM not configured"})
+		return
+	}
+
 	// Resolve the prompt version.
 	pv, err := h.resolvePrompt(projectID, req.PromptName, req.Version, req.Label)
 	if err != nil {
@@ -80,12 +90,6 @@ func (h *PlaygroundHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 	interpolated, missing := judge.Interpolate(pv.Template, req.Variables)
 	if len(missing) > 0 {
 		http.Error(w, "missing required variables: "+strings.Join(missing, ", "), http.StatusBadRequest)
-		return
-	}
-
-	// Check LLM client is configured.
-	if h.LLMClient == nil {
-		http.Error(w, "playground LLM not configured", http.StatusBadRequest)
 		return
 	}
 

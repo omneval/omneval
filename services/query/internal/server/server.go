@@ -222,12 +222,18 @@ func Run() error {
 		}
 	}
 
-	// Playground handler (requires metadata store + LLM config).
+	// Playground handler (requires metadata store).
+	// Always create the handler so the route is registered even when the LLM
+	// is not configured — the handler itself returns 503 in that case.
 	var playgroundHandler *playground.PlaygroundHandler
-	if store != nil && (cfg.Query.PlaygroundLLMBaseURL != "" && cfg.Query.PlaygroundLLMAPIKey != "") {
+	if store != nil {
+		var llmClient playground.LLMClient
+		if cfg.Query.PlaygroundLLMBaseURL != "" && cfg.Query.PlaygroundLLMAPIKey != "" {
+			llmClient = playground.NewHTTPClient(cfg.Query.PlaygroundLLMBaseURL, cfg.Query.PlaygroundLLMAPIKey)
+		}
 		playgroundHandler = &playground.PlaygroundHandler{
 			Cache:        promptCache,
-			LLMClient:    playground.NewHTTPClient(cfg.Query.PlaygroundLLMBaseURL, cfg.Query.PlaygroundLLMAPIKey),
+			LLMClient:    llmClient,
 			SessionStore: h,
 		}
 	}

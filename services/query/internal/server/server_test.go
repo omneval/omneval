@@ -13,6 +13,7 @@ import (
 	"github.com/zbloss/lantern/internal/domain"
 	"github.com/zbloss/lantern/internal/fake"
 	"github.com/zbloss/lantern/services/query/internal/auth"
+	"github.com/zbloss/lantern/services/query/internal/playground"
 )
 
 // setupTestMuxWithMiddleware builds a mux that mirrors server.go's router:
@@ -46,6 +47,13 @@ func setupTestMuxWithMiddleware(t *testing.T) *httptest.Server {
 	mux.HandleFunc("POST /api/v1/scores", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
+	// Playground route: registered without LLM client so it returns 503.
+	playgroundH := &playground.PlaygroundHandler{
+		Cache:        nil,
+		LLMClient:    nil,
+		SessionStore: h,
+	}
+	mux.HandleFunc("POST /api/v1/playground/run", playgroundH.HandleRun)
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
@@ -332,6 +340,44 @@ func TestLogout_StillWorksWithoutAuth(t *testing.T) {
 
 // TestSessionMiddleware_IsApplied verifies that RequireAuth is called in server.go
 // and wraps the mux with session validation. This is the key acceptance criterion.
+func TestPlaygroundRunRoute_NoLLMConfig(t *testing.T) {
+	// When LLM is not configured, the playground route should still be
+	// registered (route always present) but return 503 with JSON, never HTML.
+	ts := setupTestMuxWithMiddleware(t)
+
+	// Login first — playground route is under /api/v1/ so it needs auth.
+	sessionID := loginAndGetCookie(t, ts, "admin@example.com", "admin-password")
+
+	// Build request with session cookie and project_id query param.
+	// (The fake store has no projects, so ProjectID() falls back to query param.)
+	body := strings.NewReader(`{"prompt_name":"test","version":1,"variables":{}}`)
+	req, err := http.NewRequest("POST", ts.URL+"/api/v1/playground/run?project_id=test-proj", body)
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("playground request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+
+	// Response must be JSON, never HTML.
+	var respBody map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+		t.Fatalf("body is not JSON: %v\nraw: %s", err, resp.Body)
+	}
+	if respBody["error"] == "" {
+		t.Error("expected 'error' field in JSON response")
+	}
+}
+
 func TestSessionMiddleware_IsApplied(t *testing.T) {
 	// Create a minimal mux to test that RequireAuth wraps handlers.
 	store := fake.NewFakeMetadataStore()
