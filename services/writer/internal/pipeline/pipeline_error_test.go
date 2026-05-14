@@ -181,6 +181,10 @@ func (f *fakeMetaStore) ListDatasetRunItems(ctx context.Context, runID string) (
 }
 func (f *fakeMetaStore) Migrate(ctx context.Context) error { return nil }
 func (f *fakeMetaStore) Close() error                      { return nil }
+func (f *fakeMetaStore) UpdateUserResetToken(ctx context.Context, userID, token string, expiry time.Time) error { return nil }
+func (f *fakeMetaStore) GetUserByResetToken(ctx context.Context, token string) (*domain.User, error) {
+	return nil, nil
+}
 
 // TestPipeline_Run_continuesAfterDequeueError verifies that when Dequeue
 // returns an error (e.g. Redis unreachable), the pipeline logs the error

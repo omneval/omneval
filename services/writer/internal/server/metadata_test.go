@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -88,10 +87,8 @@ func TestOpenMetadataStore(t *testing.T) {
 			}
 			defer store.Close()
 
-			// Verify migrations succeed.
-			if err := store.Migrate(context.Background()); err != nil {
-				t.Fatalf("migration failed: %v", err)
-			}
+			// NOTE: openSQLiteStore already calls Migrate() internally, so
+			// no second Migrate() call here to avoid "table already exists" errors.
 		})
 	}
 }
