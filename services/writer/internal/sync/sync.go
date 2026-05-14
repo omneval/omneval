@@ -84,7 +84,7 @@ func (s *Syncer) doSync(ctx context.Context) {
 	// Without this step, the snapshot may be missing recent committed writes
 	// that are still pending in the write-ahead log.
 	if s.db != nil {
-		if _, err := s.db.ExecContext(ctx, "PRAGMA force_checkpoint"); err != nil {
+		if _, err := s.db.ExecContext(ctx, "CHECKPOINT"); err != nil {
 			slog.WarnContext(ctx, "writer: syncer: checkpoint failed, uploading without checkpoint",
 				"db_path", s.dbPath,
 				"err", err,

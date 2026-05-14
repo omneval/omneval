@@ -330,7 +330,7 @@ func TestDoSync_CheckpointsWALBeforeUpload(t *testing.T) {
 	defer db.Close()
 
 	// Create a table and insert data. This exercises the checkpoint path:
-	// the Syncer will call PRAGMA force_checkpoint before reading the
+	// the Syncer will call CHECKPOINT (DuckDB's WAL flush) before reading the
 	// main file, which should succeed without error.
 	if _, err := db.ExecContext(context.Background(), `
 		CREATE TABLE test_table (id INTEGER, name VARCHAR);
@@ -374,6 +374,98 @@ func TestDoSync_CheckpointsWALBeforeUpload(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("expected 1 row in test_table after checkpoint, got %d", count)
+	}
+}
+
+// TestDoSync_SnapshotContainsWrittenData verifies that a fresh DuckDB
+// connection opened on the snapshot file can read data written by the
+// original connection. This tests the full WAL checkpoint + upload cycle.
+//
+// This is the regression test for issue #71: PRAGMA force_checkpoint
+// (SQLite syntax) silently succeeds in DuckDB but does nothing, leaving
+// recent writes trapped in the WAL. A fresh snapshot connection would
+// see empty tables.
+func TestDoSync_SnapshotContainsWrittenData(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lantern.db")
+
+	// Open a real DuckDB connection — this is the "Writer".
+	writerDB, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+
+	// Create schema and insert data.
+	if _, err := writerDB.ExecContext(context.Background(), `
+		CREATE TABLE spans (
+			trace_id VARCHAR,
+			span_id VARCHAR,
+			name VARCHAR,
+			model VARCHAR
+		);
+		INSERT INTO spans VALUES
+			('trace-001', 'span-001', 'test_span', 'gpt-4'),
+			('trace-002', 'span-002', 'another_span', 'claude-sonnet')
+	`); err != nil {
+		t.Fatalf("insert data: %v", err)
+	}
+
+	// Verify data is visible in the writer connection.
+	var count int
+	if err := writerDB.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM spans").Scan(&count); err != nil {
+		t.Fatalf("pre-sync query failed: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 rows before sync, got %d", count)
+	}
+
+	// Run the syncer to checkpoint and upload the snapshot.
+	store := &mockStore{}
+	cfg := &config.Config{
+		Writer: config.WriterConfig{
+			SyncInterval: "30s",
+		},
+		Storage: config.StorageConfig{
+			Bucket: "my-bucket",
+		},
+	}
+	m := newTestMetrics(t)
+	s := New(store, nil, dbPath, cfg, m)
+	s.db = writerDB
+
+	s.doSync(context.Background())
+
+	if len(store.puts) != 1 {
+		t.Fatalf("expected 1 put, got %d", len(store.puts))
+	}
+
+	// Simulate the Query API: close the writer connection and open
+	// a brand new one (this is what happens when Query API downloads
+	// the S3 snapshot and opens it as a file).
+	writerDB.Close()
+
+	// Open a fresh connection to the main file — this is the "Query API".
+	queryDB, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		t.Fatalf("open fresh duckdb: %v", err)
+	}
+	defer queryDB.Close()
+
+	// Verify the fresh connection can read the data.
+	if err := queryDB.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM spans").Scan(&count); err != nil {
+		t.Fatalf("fresh connection query failed: %v (checkpoint likely did not persist writes)", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 rows in fresh snapshot, got %d (writes lost because WAL was not checkpointed)", count)
+	}
+
+	// Verify the actual data content.
+	var model string
+	if err := queryDB.QueryRowContext(context.Background(), "SELECT model FROM spans ORDER BY trace_id LIMIT 1").Scan(&model); err != nil {
+		t.Fatalf("data query failed: %v", err)
+	}
+	if model != "gpt-4" {
+		t.Errorf("expected model 'gpt-4', got '%s'", model)
 	}
 }
 
