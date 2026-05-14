@@ -402,6 +402,77 @@ func TestValidateFilter_RejectsNilValue(t *testing.T) {
 	}
 }
 
+func TestValidateFilter_UnknownFieldListsAcceptedFields(t *testing.T) {
+	f := SpanQueryFilter{Field: "unknown_field", Op: "eq", Value: "x"}
+	err := validateFilter(f)
+	if err == nil {
+		t.Fatal("expected error for unknown field")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "accepted fields") {
+		t.Errorf("error should list accepted fields, got: %q", errMsg)
+	}
+	for _, valid := range []string{"model", "name", "trace_id"} {
+		if !strings.Contains(errMsg, valid) {
+			t.Errorf("error should mention field %q, got: %q", valid, errMsg)
+		}
+	}
+}
+
+func TestValidateFilter_UnknownOpListsAcceptedOperators(t *testing.T) {
+	f := SpanQueryFilter{Field: "model", Op: "regex", Value: ".*"}
+	err := validateFilter(f)
+	if err == nil {
+		t.Fatal("expected error for unknown operator")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "accepted operators") {
+		t.Errorf("error should list accepted operators, got: %q", errMsg)
+	}
+	for _, valid := range []string{"eq", "neq", "in"} {
+		if !strings.Contains(errMsg, valid) {
+			t.Errorf("error should mention operator %q, got: %q", valid, errMsg)
+		}
+	}
+}
+
+func TestValidSpanQueryFilters_ReturnsFields(t *testing.T) {
+	fields := ValidSpanQueryFilters()
+	if len(fields) == 0 {
+		t.Fatal("expected non-empty list of fields")
+	}
+	expectedFields := []string{"model", "name", "trace_id", "service_name"}
+	fieldSet := make(map[string]bool)
+	for _, f := range fields {
+		fieldSet[f] = true
+	}
+	for _, exp := range expectedFields {
+		if !fieldSet[exp] {
+			t.Errorf("expected field %q in list", exp)
+		}
+	}
+}
+
+func TestValidFilterOperators_ReturnsOps(t *testing.T) {
+	ops := ValidFilterOperators()
+	if len(ops) == 0 {
+		t.Fatal("expected non-empty list of operators")
+	}
+	expectedOps := []string{"eq", "neq", "in", "lt", "lte"}
+	for _, exp := range expectedOps {
+		found := false
+		for _, op := range ops {
+			if op == exp {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected operator %q in list", exp)
+		}
+	}
+}
+
 func TestCompileFilter_InWithEmptySlice(t *testing.T) {
 	f := SpanQueryFilter{Field: "model", Op: "in", Value: []any{}}
 	sql, args, err := compileFilter(f)

@@ -48,10 +48,53 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req query.SpanQueryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+	// Decode into a raw map first to validate filters is an array.
+	var rawBody map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&rawBody); err != nil {
+		writeJSONError(w, "invalid JSON body", http.StatusBadRequest)
 		return
+	}
+
+	// Validate that filters (if present) is a JSON array.
+	if rawFilters, ok := rawBody["filters"]; ok {
+		var filtersKind []json.RawMessage
+		if err := json.Unmarshal(rawFilters, &filtersKind); err != nil {
+			writeJSONError(w, "filters must be an array of {field, op, value} objects", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Now decode into the typed struct.
+	var req query.SpanQueryRequest
+	if rawFrom, ok := rawBody["from"]; ok {
+		if err := json.Unmarshal(rawFrom, &req.From); err != nil {
+			writeJSONError(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+	}
+	if rawTo, ok := rawBody["to"]; ok {
+		if err := json.Unmarshal(rawTo, &req.To); err != nil {
+			writeJSONError(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+	}
+	if rawFilters, ok := rawBody["filters"]; ok {
+		if err := json.Unmarshal(rawFilters, &req.Filters); err != nil {
+			writeJSONError(w, "filters must be an array of {field, op, value} objects", http.StatusBadRequest)
+			return
+		}
+	}
+	if rawCursor, ok := rawBody["cursor"]; ok {
+		if err := json.Unmarshal(rawCursor, &req.Cursor); err != nil {
+			writeJSONError(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+	}
+	if rawLimit, ok := rawBody["limit"]; ok {
+		if err := json.Unmarshal(rawLimit, &req.Limit); err != nil {
+			writeJSONError(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
 	}
 
 	// Extract project_id from the authenticated session.
@@ -64,7 +107,7 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 	// Build the query — projectID is injected from the session, never from client input.
 	q, err := query.NewSpanQuery(projectID, req, nil, "")
 	if err != nil {
-		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+		writeJSONError(w, "bad request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 

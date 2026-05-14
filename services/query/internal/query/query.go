@@ -3,6 +3,7 @@ package query
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,6 +24,40 @@ const (
 	OpLte FilterOp = "lte"
 	OpIn  FilterOp = "in"
 )
+
+// ValidSpanQueryFilters returns the list of accepted filter fields for
+// use in error messages and API documentation.
+func ValidSpanQueryFilters() []string {
+	fields := make([]string, 0, len(allSpanFields))
+	for f := range allSpanFields {
+		fields = append(fields, string(f))
+	}
+	sort.Strings(fields)
+	return fields
+}
+
+// ValidFilterOperators returns the list of accepted filter operators for
+// use in error messages and API documentation.
+func ValidFilterOperators() []string {
+	ops := make([]string, 0, len(validOps))
+	for op := range validOps {
+		ops = append(ops, string(op))
+	}
+	sort.Strings(ops)
+	return ops
+}
+
+// acceptedFieldsMessage returns a human-readable string of all accepted
+// filter fields, suitable for inclusion in error messages.
+func acceptedFieldsMessage() string {
+	return strings.Join(ValidSpanQueryFilters(), ", ")
+}
+
+// acceptedOperatorsMessage returns a human-readable string of all accepted
+// operators, suitable for inclusion in error messages.
+func acceptedOperatorsMessage() string {
+	return strings.Join(ValidFilterOperators(), ", ")
+}
 
 // spanField is an allowlisted column name for span queries.
 type spanField string
@@ -63,7 +98,53 @@ var validOps = map[FilterOp]struct{}{
 	OpEq: {}, OpNeq: {}, OpGt: {}, OpGte: {}, OpLt: {}, OpLte: {}, OpIn: {},
 }
 
-// SpanQueryRequest is the body accepted by POST /api/v1/spans/query.
+// SpanQueryRequest is the JSON body accepted by POST /api/v1/spans/query.
+//
+// # API Schema
+//
+// The request body must be a JSON object with the following fields:
+//
+//	{
+//	  "from": "2025-01-01T00:00:00Z",     // RFC 3339 start time (optional)
+//	  "to": "2025-01-02T00:00:00Z",       // RFC 3339 end time (optional)
+//	  "filters": [                         // array of filter predicates (optional)
+//	    {
+//	      "field": "model",                // one of: project_id, trace_id, span_id,
+//	                                       //   service_name, name, kind, model,
+//	                                       //   start_time, end_time, input_tokens,
+//	                                       //   output_tokens, cost_usd, prompt_name,
+//	                                       //   status_code, bookmarked
+//	      "op": "eq",                      // one of: eq, neq, gt, gte, lt, lte, in
+//	      "value": "gpt-4o"                // value to compare against (any JSON type)
+//	    }
+//	  ],
+//	  "cursor": "...",                     // base64-encoded keyset cursor for pagination (optional)
+//	  "limit": 50                          // page size, 1-500 (optional, defaults to 50)
+//	}
+//
+// # Filter Format
+//
+// Filters MUST be an array of objects with "field", "op", and "value" keys.
+// Passing a non-array value (e.g., an object or string) will return a 400 error
+// with a message describing the correct format.
+//
+// # Accepted Fields
+//
+// The following fields are supported:
+//
+//	project_id, trace_id, span_id, service_name, name, kind, model,
+//	start_time, end_time, input_tokens, output_tokens, cost_usd,
+//	prompt_name, status_code, bookmarked
+//
+// # Accepted Operators
+//
+// The following operators are supported:
+//
+//	eq, neq, gt, gte, lt, lte, in
+//
+// For "in" operator, value must be a JSON array of values.
+// For "bookmarked" field, value must be a boolean (true/false).
+// All other fields accept the operator's natural value type (string, number, etc.).
 type SpanQueryRequest struct {
 	From    time.Time         `json:"from"`
 	To      time.Time         `json:"to"`
@@ -72,7 +153,8 @@ type SpanQueryRequest struct {
 	Limit   int               `json:"limit,omitempty"`
 }
 
-// SpanQueryFilter is a single predicate on a span field.
+// SpanQueryFilter is a single predicate on a span field, used within
+// SpanQueryRequest.Filters as an object with three keys: "field", "op", "value".
 type SpanQueryFilter struct {
 	Field string `json:"field"`
 	Op    string `json:"op"`
@@ -371,14 +453,15 @@ func (q *SpanQuery) compileSpecialFilter(f SpanQueryFilter) (string, []any) {
 
 // validateFilter checks that a SpanQueryFilter has a valid field and operator.
 // Special fields (like "bookmarked") bypass the spanFields allowlist.
+// Error messages include lists of accepted fields/operators for discoverability.
 func validateFilter(f SpanQueryFilter) error {
 	if _, ok := allSpanFields[spanField(f.Field)]; !ok {
 		if _, ok := specialFilterFields[f.Field]; !ok {
-			return fmt.Errorf("unknown field %q", f.Field)
+			return fmt.Errorf("unknown field %q; accepted fields: %s", f.Field, acceptedFieldsMessage())
 		}
 	}
 	if _, ok := validOps[FilterOp(f.Op)]; !ok {
-		return fmt.Errorf("unknown operator %q", f.Op)
+		return fmt.Errorf("unknown operator %q; accepted operators: %s", f.Op, acceptedOperatorsMessage())
 	}
 	if f.Value == nil {
 		return fmt.Errorf("value must not be nil")

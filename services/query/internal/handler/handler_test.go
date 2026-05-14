@@ -876,6 +876,170 @@ type spanScore struct {
 	Reasoning string  `json:"reasoning"`
 }
 
+func TestHandleSpansQuery_FiltersAsObject(t *testing.T) {
+	body := strings.NewReader(`{"filters": {"model": "gpt-4o"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
+	w := httptest.NewRecorder()
+
+	h := &SpanHandler{
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	h.HandleSpansQuery(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("Content-Type: got %q, want %q", contentType, "application/json")
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v (raw: %q)", err, w.Body.String())
+	}
+
+	errorMsg := resp["error"]
+	if errorMsg == "" {
+		t.Fatal("expected error message in response body")
+	}
+	if !strings.Contains(errorMsg, "filters must be an array") {
+		t.Errorf("error should mention filters must be an array, got: %q", errorMsg)
+	}
+}
+
+func TestHandleSpansQuery_UnknownField(t *testing.T) {
+	body := strings.NewReader(`{
+		"from": "2025-01-01T00:00:00Z",
+		"to": "2025-01-02T00:00:00Z",
+		"filters": [{"field": "nonexistent_field", "op": "eq", "value": "x"}]
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
+	w := httptest.NewRecorder()
+
+	h := &SpanHandler{
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	h.HandleSpansQuery(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("Content-Type: got %q, want %q", contentType, "application/json")
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v (raw: %q)", err, w.Body.String())
+	}
+
+	errorMsg := resp["error"]
+	if errorMsg == "" {
+		t.Fatal("expected error message in response body")
+	}
+	if !strings.Contains(errorMsg, "accepted fields") {
+		t.Errorf("error should mention accepted fields, got: %q", errorMsg)
+	}
+	if !strings.Contains(errorMsg, "nonexistent_field") {
+		t.Errorf("error should mention the unknown field name, got: %q", errorMsg)
+	}
+}
+
+func TestHandleSpansQuery_UnknownOp(t *testing.T) {
+	body := strings.NewReader(`{
+		"from": "2025-01-01T00:00:00Z",
+		"to": "2025-01-02T00:00:00Z",
+		"filters": [{"field": "model", "op": "regex", "value": "gpt.*"}]
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
+	w := httptest.NewRecorder()
+
+	h := &SpanHandler{
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	h.HandleSpansQuery(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("Content-Type: got %q, want %q", contentType, "application/json")
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v (raw: %q)", err, w.Body.String())
+	}
+
+	errorMsg := resp["error"]
+	if errorMsg == "" {
+		t.Fatal("expected error message in response body")
+	}
+	if !strings.Contains(errorMsg, "accepted operators") {
+		t.Errorf("error should mention accepted operators, got: %q", errorMsg)
+	}
+	if !strings.Contains(errorMsg, "regex") {
+		t.Errorf("error should mention the unknown operator, got: %q", errorMsg)
+	}
+}
+
+func TestHandleSpansQuery_FiltersAsNumber(t *testing.T) {
+	body := strings.NewReader(`{"filters": 42}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
+	w := httptest.NewRecorder()
+
+	h := &SpanHandler{
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	h.HandleSpansQuery(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v (raw: %q)", err, w.Body.String())
+	}
+	if !strings.Contains(resp["error"], "filters must be an array") {
+		t.Errorf("error should mention filters must be an array, got: %q", resp["error"])
+	}
+}
+
+func TestHandleSpansQuery_FiltersAsString(t *testing.T) {
+	body := strings.NewReader(`{"filters": "model eq gpt-4"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
+	w := httptest.NewRecorder()
+
+	h := &SpanHandler{
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	h.HandleSpansQuery(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v (raw: %q)", err, w.Body.String())
+	}
+	if !strings.Contains(resp["error"], "filters must be an array") {
+		t.Errorf("error should mention filters must be an array, got: %q", resp["error"])
+	}
+}
+
 // FakeSessionStore is a test fake implementing SessionStore.
 type FakeSessionStore struct {
 	projectID string
