@@ -248,8 +248,8 @@ func TestHandler_Invite_Success(t *testing.T) {
 	if body.Email != "newuser@example.com" {
 		t.Errorf("email: got %q, want %q", body.Email, "newuser@example.com")
 	}
-	if body.Password == "" {
-		t.Error("expected temporary password in invite response")
+	if body.PasswordResetToken == "" {
+		t.Error("expected password_reset_token in invite response")
 	}
 
 	// Verify user was created
@@ -516,7 +516,7 @@ func TestHandler_Logout_ReturnsJSON(t *testing.T) {
 	}
 }
 
-func TestHandler_Invite_GeneratesTempPassword(t *testing.T) {
+func TestHandler_Invite_GeneratesResetToken(t *testing.T) {
 	store, ts := setupAuthServerWithMiddleware(t, "admin@example.com")
 	_ = store.CreateUser(nil, &domain.User{
 		UserID:       "admin-1",
@@ -548,20 +548,57 @@ func TestHandler_Invite_GeneratesTempPassword(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	// Verify the temp password can be used for login
+	if body.PasswordResetToken == "" {
+		t.Fatal("expected password_reset_token in response")
+	}
+
+	// Verify the reset token can be used to set a password and then login
+	resetPayload, _ := json.Marshal(map[string]string{
+		"token":        body.PasswordResetToken,
+		"new_password": "new-password",
+	})
+	resetReq, _ := http.NewRequest("POST", ts.URL+"/api/v1/users/reset-password", bytes.NewReader(resetPayload))
+	resetReq.Header.Set("Content-Type", "application/json")
+	resetResp, err := http.DefaultClient.Do(resetReq)
+	if err != nil {
+		t.Fatalf("reset password request failed: %v", err)
+	}
+	defer resetResp.Body.Close()
+
+	if resetResp.StatusCode != http.StatusOK {
+		t.Errorf("reset password should succeed, got status %d", resetResp.StatusCode)
+	}
+
+	// Debug: check what the user's password hash looks like in the store
+	user, err := store.GetUserByEmail(nil, "newuser@example.com")
+	if err != nil {
+		t.Fatalf("get user by email after reset: %v", err)
+	}
+	if user.PasswordHash == "" {
+		t.Fatal("user password_hash is empty after reset (this means update failed)")
+	}
+	if len(user.PasswordHash) < 10 {
+		t.Fatalf("user password_hash looks wrong: %q", user.PasswordHash)
+	}
+
+	// Now login with the new password
 	loginPayload, _ := json.Marshal(map[string]string{
 		"email":    "newuser@example.com",
-		"password": body.Password,
+		"password": "new-password",
 	})
 	loginReq, _ := http.NewRequest("POST", ts.URL+"/login", bytes.NewReader(loginPayload))
 	loginResp, err := http.DefaultClient.Do(loginReq)
 	if err != nil {
-		t.Fatalf("login with temp password failed: %v", err)
+		t.Fatalf("login request failed: %v", err)
 	}
 	loginResp.Body.Close()
 
 	if loginResp.StatusCode != http.StatusOK {
-		t.Errorf("login with temp password should succeed, got status %d", loginResp.StatusCode)
+		// Debug: read the response body
+		var buf bytes.Buffer
+		buf.ReadFrom(loginResp.Body)
+		t.Logf("login response body: %q, status: %d", buf.String(), loginResp.StatusCode)
+		t.Errorf("login with new password should succeed, got status %d", loginResp.StatusCode)
 	}
 }
 
@@ -1079,6 +1116,190 @@ func TestHandler_GenerateAPIKey_ReturnsRawKeyOnce(t *testing.T) {
 	}
 	if body.RawKey[:9] != "ltn_proj_" {
 		t.Errorf("raw_key prefix: got %q, want %q", body.RawKey[:9], "ltn_proj_")
+	}
+}
+
+func TestHandler_Invite_NoPasswordInResponse(t *testing.T) {
+	store, ts := setupAuthServerWithMiddleware(t, "admin@example.com")
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "admin-1",
+		OrgID:        "org-1",
+		Email:        "admin@example.com",
+		PasswordHash: "admin-password",
+	})
+
+	sessionID := loginAndGetCookie(t, ts, "admin@example.com", "admin-password")
+
+	invitePayload, _ := json.Marshal(map[string]string{
+		"email":  "newuser@example.com",
+		"org_id": "org-1",
+	})
+	inviteReq, _ := http.NewRequest("POST", ts.URL+"/api/v1/users/invite", bytes.NewReader(invitePayload))
+	inviteReq.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	inviteResp, err := http.DefaultClient.Do(inviteReq)
+	if err != nil {
+		t.Fatalf("invite request failed: %v", err)
+	}
+	defer inviteResp.Body.Close()
+
+	if inviteResp.StatusCode != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d", inviteResp.StatusCode, http.StatusCreated)
+	}
+
+	// Read the raw body
+	var rawBody map[string]any
+	if err := json.NewDecoder(inviteResp.Body).Decode(&rawBody); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// Password must NEVER appear in the invite response
+	if _, hasPassword := rawBody["password"]; hasPassword {
+		t.Error("invite response must not include a 'password' field (security risk)")
+	}
+
+	// Response should include user_id and email
+	if _, hasUserID := rawBody["user_id"]; !hasUserID {
+		t.Error("expected 'user_id' in invite response")
+	}
+	if _, hasEmail := rawBody["email"]; !hasEmail {
+		t.Error("expected 'email' in invite response")
+	}
+
+	// Response should include a password_reset_token
+	if _, hasToken := rawBody["password_reset_token"]; !hasToken {
+		t.Error("expected 'password_reset_token' in invite response")
+	}
+}
+
+func TestHandler_Invite_UsesResetToken(t *testing.T) {
+	store, ts := setupAuthServerWithMiddleware(t, "admin@example.com")
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "admin-1",
+		OrgID:        "org-1",
+		Email:        "admin@example.com",
+		PasswordHash: "admin-password",
+	})
+
+	sessionID := loginAndGetCookie(t, ts, "admin@example.com", "admin-password")
+
+	invitePayload, _ := json.Marshal(map[string]string{
+		"email":  "newuser@example.com",
+		"org_id": "org-1",
+	})
+	inviteReq, _ := http.NewRequest("POST", ts.URL+"/api/v1/users/invite", bytes.NewReader(invitePayload))
+	inviteReq.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	inviteResp, err := http.DefaultClient.Do(inviteReq)
+	if err != nil {
+		t.Fatalf("invite request failed: %v", err)
+	}
+	defer inviteResp.Body.Close()
+
+	if inviteResp.StatusCode != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d", inviteResp.StatusCode, http.StatusCreated)
+	}
+
+	var body auth.InviteResponse
+	if err := json.NewDecoder(inviteResp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if body.UserID == "" {
+		t.Error("expected user_id in invite response")
+	}
+	if body.Email != "newuser@example.com" {
+		t.Errorf("email: got %q, want %q", body.Email, "newuser@example.com")
+	}
+	if body.PasswordResetToken == "" {
+		t.Error("expected password_reset_token in invite response")
+	}
+
+	// Verify the user was created in the store
+	users, _ := store.ListUsers(nil, "org-1")
+	if len(users) != 2 {
+		t.Errorf("expected 2 users, got %d", len(users))
+	}
+}
+
+func TestHandler_ResetPassword_ValidToken(t *testing.T) {
+	store, ts := setupAuthServerWithMiddleware(t, "admin@example.com")
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "admin-1",
+		OrgID:        "org-1",
+		Email:        "admin@example.com",
+		PasswordHash: "admin-password",
+	})
+
+	sessionID := loginAndGetCookie(t, ts, "admin@example.com", "admin-password")
+
+	// Step 1: Invite the new user to get a reset token
+	invitePayload, _ := json.Marshal(map[string]string{
+		"email":  "newuser@example.com",
+		"org_id": "org-1",
+	})
+	inviteReq, _ := http.NewRequest("POST", ts.URL+"/api/v1/users/invite", bytes.NewReader(invitePayload))
+	inviteReq.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	inviteResp, err := http.DefaultClient.Do(inviteReq)
+	if err != nil {
+		t.Fatalf("invite request failed: %v", err)
+	}
+	var inviteBody auth.InviteResponse
+	if err := json.NewDecoder(inviteResp.Body).Decode(&inviteBody); err != nil {
+		t.Fatalf("decode invite: %v", err)
+	}
+	inviteResp.Body.Close()
+
+	if inviteBody.PasswordResetToken == "" {
+		t.Fatal("invite response must include a password_reset_token")
+	}
+
+	// Step 2: Use the reset token to set a new password
+	resetPayload, _ := json.Marshal(map[string]string{
+		"token":   inviteBody.PasswordResetToken,
+		"new_password": "new-password",
+	})
+	resetReq, _ := http.NewRequest("POST", ts.URL+"/api/v1/users/reset-password", bytes.NewReader(resetPayload))
+	resetReq.Header.Set("Content-Type", "application/json")
+	resetResp, err := http.DefaultClient.Do(resetReq)
+	if err != nil {
+		t.Fatalf("reset password request failed: %v", err)
+	}
+	defer resetResp.Body.Close()
+
+	if resetResp.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want %d", resetResp.StatusCode, http.StatusOK)
+	}
+
+	// Step 3: Verify the user can log in with the new password
+	loginPayload, _ := json.Marshal(map[string]string{
+		"email":    "newuser@example.com",
+		"password": "new-password",
+	})
+	loginReq, _ := http.NewRequest("POST", ts.URL+"/login", bytes.NewReader(loginPayload))
+	loginResp, err := http.DefaultClient.Do(loginReq)
+	if err != nil {
+		t.Fatalf("login request failed: %v", err)
+	}
+	loginResp.Body.Close()
+
+	if loginResp.StatusCode != http.StatusOK {
+		t.Errorf("login with new password should succeed, got status %d", loginResp.StatusCode)
+	}
+
+	// Step 4: Verify the token is now consumed (single use)
+	resetPayload2, _ := json.Marshal(map[string]string{
+		"token":   inviteBody.PasswordResetToken,
+		"new_password": "another-password",
+	})
+	resetReq2, _ := http.NewRequest("POST", ts.URL+"/api/v1/users/reset-password", bytes.NewReader(resetPayload2))
+	resetReq2.Header.Set("Content-Type", "application/json")
+	resetResp2, err := http.DefaultClient.Do(resetReq2)
+	if err != nil {
+		t.Fatalf("reset password request failed: %v", err)
+	}
+	defer resetResp2.Body.Close()
+
+	if resetResp2.StatusCode != http.StatusBadRequest {
+		t.Errorf("second use of reset token should be rejected, got status %d", resetResp2.StatusCode)
 	}
 }
 

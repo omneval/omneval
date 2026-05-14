@@ -18,6 +18,9 @@ import (
 //go:embed migrations/0001_init.up.sql
 var migrationSQL string
 
+//go:embed migrations/0002_add_reset_token.up.sql
+var migrationSQL2 string
+
 // Store is the Postgres-backed implementation of metadata.Store.
 type Store struct {
 	db       *sql.DB
@@ -42,7 +45,7 @@ func New(dsn string) (*Store, error) {
 }
 
 // Migrate applies pending SQL migrations.
-// For the single-file migration, this applies it once and records the version.
+// Applies migration 1 (init) and migration 2 (add reset token) if not already applied.
 func (s *Store) Migrate(ctx context.Context) error {
 	if s.migrated {
 		return nil
@@ -64,33 +67,48 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("postgres: check migration status: %w", err)
 	}
-	if count > 0 {
-		s.migrated = true
-		return nil
+	if count == 0 {
+		// Run migration 1
+		if err := s.applyMigration(ctx, 1, migrationSQL); err != nil {
+			return err
+		}
 	}
 
-	// Wrap the entire migration in a transaction
-	tx, err := s.db.BeginTx(ctx, nil)
+	// Check if migration 2 is already applied
+	err = s.db.QueryRowContext(ctx, "SELECT count(*) FROM _schema_migrations WHERE version = 2").Scan(&count)
 	if err != nil {
-		return fmt.Errorf("postgres: begin migration tx: %w", err)
+		return fmt.Errorf("postgres: check migration 2 status: %w", err)
 	}
-	defer tx.Rollback()
-
-	// Execute migration SQL — pgx supports multi-statement
-	if _, err := tx.ExecContext(ctx, migrationSQL); err != nil {
-		return fmt.Errorf("postgres: apply migration: %w", err)
-	}
-
-	// Record migration
-	if _, err := tx.ExecContext(ctx, "INSERT INTO _schema_migrations (version) VALUES ($1)", 1); err != nil {
-		return fmt.Errorf("postgres: record migration version: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("postgres: commit migration: %w", err)
+	if count == 0 {
+		// Run migration 2
+		if err := s.applyMigration(ctx, 2, migrationSQL2); err != nil {
+			return err
+		}
 	}
 
 	s.migrated = true
+	return nil
+}
+
+// applyMigration wraps a single migration SQL in a transaction.
+func (s *Store) applyMigration(ctx context.Context, version int64, sql string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("postgres: begin migration %d tx: %w", version, err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, sql); err != nil {
+		return fmt.Errorf("postgres: apply migration %d: %w", version, err)
+	}
+
+	if _, err := tx.ExecContext(ctx, "INSERT INTO _schema_migrations (version) VALUES ($1)", version); err != nil {
+		return fmt.Errorf("postgres: record migration %d version: %w", version, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("postgres: commit migration %d: %w", version, err)
+	}
 	return nil
 }
 
@@ -186,15 +204,22 @@ func (s *Store) ListProjects(ctx context.Context, orgID string) ([]*domain.Proje
 // ---- Users ----
 
 func (s *Store) CreateUser(ctx context.Context, user *domain.User) error {
-	hashed, err := bcrypt.GenerateFromPassword([]byte(user.PasswordHash), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("postgres: bcrypt hash: %w", err)
+	// Hash the password only if it's provided (non-empty).
+	// Invite flow creates users without an initial password; the user
+	// sets their own via the reset token endpoint.
+	if user.PasswordHash != "" {
+		hashed, err := bcrypt.GenerateFromPassword([]byte(user.PasswordHash), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("postgres: bcrypt hash: %w", err)
+		}
+		user.PasswordHash = string(hashed)
 	}
-	user.PasswordHash = string(hashed)
 
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO users (user_id, org_id, email, password_hash, created_at) VALUES ($1, $2, $3, $4, $5)`,
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO users (user_id, org_id, email, password_hash, created_at, password_reset_token, reset_token_expiry)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		user.UserID, user.OrgID, user.Email, user.PasswordHash, user.CreatedAt,
+		user.PasswordResetToken, user.ResetTokenExpiry,
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: create user: %w", err)
@@ -397,6 +422,36 @@ func (s *Store) UpdateUserPassword(ctx context.Context, userID, passwordHash str
 		return fmt.Errorf("postgres: update user password: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) UpdateUserResetToken(ctx context.Context, userID, token string, expiry time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET password_reset_token = $1, reset_token_expiry = $2 WHERE user_id = $3`,
+		token, expiry, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("postgres: update user reset token: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) GetUserByResetToken(ctx context.Context, token string) (*domain.User, error) {
+	var u domain.User
+	var createdAt, expiryAt time.Time
+	err := s.db.QueryRowContext(ctx,
+		`SELECT user_id, org_id, email, password_hash, created_at, password_reset_token, reset_token_expiry
+		 FROM users WHERE password_reset_token = $1 AND reset_token_expiry > now()`,
+		token,
+	).Scan(&u.UserID, &u.OrgID, &u.Email, &u.PasswordHash, &createdAt, &u.PasswordResetToken, &expiryAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, metadata.ErrNotFound
+		}
+		return nil, fmt.Errorf("postgres: get user by reset token: %w", err)
+	}
+	u.CreatedAt = createdAt
+	u.ResetTokenExpiry = expiryAt
+	return &u, nil
 }
 
 // ---- Prompt Registry ----

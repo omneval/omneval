@@ -88,6 +88,8 @@ func (f *FakeMetadataStore) ListUsers(_ context.Context, _ string) ([]*domain.Us
 }
 func (f *FakeMetadataStore) CountUsers(_ context.Context) (int, error) { return 0, nil }
 func (f *FakeMetadataStore) UpdateUserPassword(_ context.Context, _, _ string) error { return nil }
+func (f *FakeMetadataStore) UpdateUserResetToken(_ context.Context, _, _ string, _ time.Time) error { return nil }
+func (f *FakeMetadataStore) GetUserByResetToken(_ context.Context, _ string) (*domain.User, error) { return nil, nil }
 func (f *FakeMetadataStore) CreateSession(_ context.Context, _ *domain.Session) error { return nil }
 func (f *FakeMetadataStore) GetSession(_ context.Context, _ string) (*domain.Session, error) {
 	return nil, metadata.ErrNotFound

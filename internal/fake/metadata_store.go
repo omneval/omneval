@@ -20,6 +20,7 @@ type FakeMetadataStore struct {
 	projects       map[string]*domain.Project
 	users          map[string]*domain.User
 	emailsToIDs    map[string]string // email -> user_id
+	tokensToIDs    map[string]string // reset token -> user_id
 	sessions       map[string]*domain.Session
 	apiKeys        map[string]*domain.APIKey
 	hashedKeys     map[string]*domain.APIKey
@@ -45,6 +46,7 @@ func NewFakeMetadataStore() *FakeMetadataStore {
 		projects:       make(map[string]*domain.Project),
 		users:          make(map[string]*domain.User),
 		emailsToIDs:    make(map[string]string),
+		tokensToIDs:    make(map[string]string),
 		sessions:       make(map[string]*domain.Session),
 		apiKeys:        make(map[string]*domain.APIKey),
 		hashedKeys:     make(map[string]*domain.APIKey),
@@ -116,12 +118,16 @@ func (f *FakeMetadataStore) CreateUser(ctx context.Context, u *domain.User) erro
 		return fmt.Errorf("duplicate email: %s", u.Email)
 	}
 
-	// Hash password if it looks like plaintext (not a bcrypt hash)
-	hash, err := bcrypt.GenerateFromPassword([]byte(u.PasswordHash), bcrypt.DefaultCost)
-	if err != nil {
-		return err
+	// Hash password only if it's provided (non-empty).
+	// Invite flow creates users without an initial password; the user
+	// sets their own via the reset token endpoint.
+	if u.PasswordHash != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(u.PasswordHash), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+		u.PasswordHash = string(hash)
 	}
-	u.PasswordHash = string(hash)
 
 	f.users[u.UserID] = u
 	f.emailsToIDs[u.Email] = u.UserID
@@ -185,6 +191,45 @@ func (f *FakeMetadataStore) UpdateUserPassword(ctx context.Context, userID, pass
 	}
 	u.PasswordHash = string(hash)
 	return nil
+}
+
+// UpdateUserResetToken sets (or clears) the password reset token for a user.
+// Passing an empty token and zero time clears the token.
+func (f *FakeMetadataStore) UpdateUserResetToken(ctx context.Context, userID, token string, expiry time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u, ok := f.users[userID]
+	if !ok {
+		return metadata.ErrNotFound
+	}
+	// Remove old token mapping if present
+	if u.PasswordResetToken != "" {
+		delete(f.tokensToIDs, u.PasswordResetToken)
+	}
+	u.PasswordResetToken = token
+	u.ResetTokenExpiry = expiry
+	if token != "" {
+		f.tokensToIDs[token] = userID
+	}
+	return nil
+}
+
+// GetUserByResetToken returns the user associated with a reset token.
+// Returns ErrNotFound if the token doesn't exist or has expired.
+func (f *FakeMetadataStore) GetUserByResetToken(ctx context.Context, token string) (*domain.User, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	userID, ok := f.tokensToIDs[token]
+	if !ok {
+		return nil, metadata.ErrNotFound
+	}
+	u, ok := f.users[userID]
+	if !ok {
+		return nil, metadata.ErrNotFound
+	}
+	// Return a copy so callers can't mutate the store
+	copy := *u
+	return &copy, nil
 }
 
 func (f *FakeMetadataStore) CreateSession(ctx context.Context, s *domain.Session) error {

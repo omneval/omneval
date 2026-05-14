@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/zbloss/lantern/internal/domain"
 )
@@ -29,6 +30,9 @@ type Store interface {
 	ListUsers(ctx context.Context, orgID string) ([]*domain.User, error)
 	CountUsers(ctx context.Context) (int, error)
 	UpdateUserPassword(ctx context.Context, userID, passwordHash string) error
+	// Password reset token management
+	UpdateUserResetToken(ctx context.Context, userID, token string, expiry time.Time) error
+	GetUserByResetToken(ctx context.Context, token string) (*domain.User, error)
 
 	// Sessions
 	CreateSession(ctx context.Context, session *domain.Session) error

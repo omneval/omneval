@@ -16,11 +16,13 @@ type Project struct {
 }
 
 type User struct {
-	UserID       string
-	OrgID        string
-	Email        string
-	PasswordHash string
-	CreatedAt    time.Time
+	UserID               string
+	OrgID                string
+	Email                string
+	PasswordHash         string
+	CreatedAt            time.Time
+	PasswordResetToken   string
+	ResetTokenExpiry     time.Time
 }
 
 type Session struct {

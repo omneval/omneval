@@ -139,6 +139,12 @@ func (m *FakePromptStore) CountUsers(ctx context.Context) (int, error) { return 
 func (m *FakePromptStore) UpdateUserPassword(ctx context.Context, userID, passwordHash string) error {
 	return nil
 }
+func (m *FakePromptStore) UpdateUserResetToken(ctx context.Context, userID, token string, expiry time.Time) error {
+	return nil
+}
+func (m *FakePromptStore) GetUserByResetToken(ctx context.Context, token string) (*domain.User, error) {
+	return nil, metadata.ErrNotFound
+}
 func (m *FakePromptStore) CheckPassword(hashed, plaintext string) error { return nil }
 func (m *FakePromptStore) ListUsers(ctx context.Context, orgID string) ([]*domain.User, error) {
 	return nil, nil

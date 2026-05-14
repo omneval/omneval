@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zbloss/lantern/internal/domain"
 	"github.com/zbloss/lantern/internal/judge"
@@ -344,6 +345,8 @@ func (m *fakePromptStore) GetUserByEmail(ctx context.Context, email string) (*do
 func (m *fakePromptStore) GetUserByID(ctx context.Context, userID string) (*domain.User, error)         { return nil, metadata.ErrNotFound }
 func (m *fakePromptStore) CountUsers(ctx context.Context) (int, error)                                  { return 0, nil }
 func (m *fakePromptStore) UpdateUserPassword(ctx context.Context, userID, passwordHash string) error    { return nil }
+func (m *fakePromptStore) UpdateUserResetToken(ctx context.Context, userID, token string, expiry time.Time) error { return nil }
+func (m *fakePromptStore) GetUserByResetToken(ctx context.Context, token string) (*domain.User, error)    { return nil, metadata.ErrNotFound }
 func (m *fakePromptStore) CheckPassword(hashed, plaintext string) error                                 { return nil }
 func (m *fakePromptStore) ListUsers(ctx context.Context, orgID string) ([]*domain.User, error)          { return nil, nil }
 func (m *fakePromptStore) CreateSession(ctx context.Context, s *domain.Session) error                   { return nil }

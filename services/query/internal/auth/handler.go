@@ -35,15 +35,21 @@ type InviteRequest struct {
 
 // InviteResponse is returned by POST /api/v1/users/invite.
 type InviteResponse struct {
-	UserID   string `json:"user_id"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	UserID               string `json:"user_id"`
+	Email                string `json:"email"`
+	PasswordResetToken   string `json:"password_reset_token"`
 }
 
 // PasswordChangeRequest is the body accepted by PUT /api/v1/users/me/password.
 type PasswordChangeRequest struct {
 	CurrentPassword string `json:"current_password"`
 	NewPassword     string `json:"new_password"`
+}
+
+// PasswordResetRequest is the body accepted by POST /api/v1/users/reset-password.
+type PasswordResetRequest struct {
+	Token       string `json:"token"`
+	NewPassword string `json:"new_password"`
 }
 
 // CreateProjectRequest is the body accepted by POST /api/v1/projects.
@@ -107,6 +113,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /login", h.Login)
 	mux.HandleFunc("POST /logout", h.Logout)
 	mux.HandleFunc("POST /api/v1/users/invite", h.Invite)
+	mux.HandleFunc("POST /api/v1/users/reset-password", h.ResetPassword)
 	mux.HandleFunc("PUT /api/v1/users/me/password", h.ChangePassword)
 	mux.HandleFunc("GET /api/v1/projects", h.HandleProjects)
 	mux.HandleFunc("POST /api/v1/projects", h.HandleCreateProject)
@@ -475,7 +482,9 @@ func (h *Handler) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 }
 
 // Invite handles POST /api/v1/users/invite (admin only). Creates a new user
-// with a randomly-generated temporary password, returned once in the response.
+// and generates a one-time password reset token. The token is returned in the
+// response and can be used with POST /api/v1/users/reset-password to set a
+// new password. The token expires after 24 hours.
 func (h *Handler) Invite(w http.ResponseWriter, r *http.Request) {
 	// Check admin
 	if !IsAdmin(r, h.adminEmail) {
@@ -498,14 +507,17 @@ func (h *Handler) Invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate temporary password
-	tempPassword := generateTempPassword()
+	// Generate password reset token (43 characters of base58-safe random data)
+	resetToken := generateResetToken()
+	resetExpiry := time.Now().Add(24 * time.Hour)
 
 	user := &domain.User{
-		UserID:       xid.New().String(),
-		OrgID:        req.OrgID,
-		Email:        req.Email,
-		PasswordHash: tempPassword,
+		UserID:               xid.New().String(),
+		OrgID:                req.OrgID,
+		Email:                req.Email,
+		PasswordHash:         "", // no initial password; user sets it via reset token
+		PasswordResetToken:   resetToken,
+		ResetTokenExpiry:     resetExpiry,
 	}
 
 	if err := h.store.CreateUser(r.Context(), user); err != nil {
@@ -513,10 +525,16 @@ func (h *Handler) Invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Update the user record with the reset token
+	if err := h.store.UpdateUserResetToken(r.Context(), user.UserID, resetToken, resetExpiry); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store reset token"})
+		return
+	}
+
 	writeJSON(w, http.StatusCreated, InviteResponse{
-		UserID:   user.UserID,
-		Email:    user.Email,
-		Password: tempPassword,
+		UserID:               user.UserID,
+		Email:                user.Email,
+		PasswordResetToken:   resetToken,
 	})
 }
 
@@ -561,20 +579,66 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "password_updated"})
 }
 
-// generateTempPassword creates a 16-character random alphanumeric password
-// from crypto/rand. Failure to read from crypto/rand is extremely unlikely
-// (kernel entropy exhaustion) and results in a panic.
-func generateTempPassword() string {
+// generateResetToken creates a 43-character base58-safe random token suitable
+// for URL-safe password reset links. Failure to read from crypto/rand is
+// extremely unlikely and results in a panic.
+func generateResetToken() string {
 	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	bytes := make([]byte, 16)
+	bytes := make([]byte, 43)
 	if _, err := rand.Read(bytes); err != nil {
 		panic(fmt.Sprintf("auth: cannot read from crypto/rand: %v", err))
 	}
-	result := make([]byte, 16)
+	result := make([]byte, 43)
 	for i := range result {
 		result[i] = chars[int(bytes[i])%len(chars)]
 	}
 	return string(result)
+}
+
+// ResetPassword handles POST /api/v1/users/reset-password. Accepts a
+// password reset token and a new password. Validates the token (exists, not
+// expired, unused), hashes the new password, stores it, and invalidates the
+// token. Single-use: the same token cannot be used twice.
+func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var req PasswordResetRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	if req.Token == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "token is required"})
+		return
+	}
+	if req.NewPassword == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "new_password is required"})
+		return
+	}
+
+	// Look up user by reset token
+	user, err := h.store.GetUserByResetToken(r.Context(), req.Token)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid or expired reset token"})
+		return
+	}
+
+	// Verify token hasn't expired
+	if time.Now().After(user.ResetTokenExpiry) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "reset token has expired"})
+		return
+	}
+
+	// Update password (store handles bcrypt hashing) and clear the reset token (single-use)
+	if err := h.store.UpdateUserPassword(r.Context(), user.UserID, req.NewPassword); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update password"})
+		return
+	}
+	if err := h.store.UpdateUserResetToken(r.Context(), user.UserID, "", time.Time{}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to invalidate reset token"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "password_reset"})
 }
 
 // ListProjects returns all projects for the authenticated user's organization.

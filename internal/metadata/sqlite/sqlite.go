@@ -201,6 +201,16 @@ func fileVersion(name string) int {
 	if s == "" {
 		return 0
 	}
+	// Extract leading digits (e.g. "1_init" → "1")
+	idx := strings.IndexFunc(s, func(r rune) bool {
+		return r < '0' || r > '9'
+	})
+	if idx == 0 {
+		return 0
+	}
+	if idx > 0 {
+		s = s[:idx]
+	}
 	v, _ := strconv.Atoi(s)
 	return v
 }
@@ -300,16 +310,30 @@ func (s *Store) ListProjects(ctx context.Context, orgID string) ([]*domain.Proje
 // ---- Users ----
 
 func (s *Store) CreateUser(ctx context.Context, user *domain.User) error {
-	hashed, err := bcrypt.GenerateFromPassword([]byte(user.PasswordHash), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("sqlite: bcrypt hash: %w", err)
-	}
-	user.PasswordHash = string(hashed)
-
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO users (user_id, org_id, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)`,
-		user.UserID, user.OrgID, user.Email, user.PasswordHash, now,
+	resetToken := user.PasswordResetToken
+	var resetExpiry string
+	if !user.ResetTokenExpiry.IsZero() {
+		resetExpiry = user.ResetTokenExpiry.Format(time.RFC3339)
+	}
+
+	// Hash the password only if it's provided (non-empty).
+	// Invite flow creates users without an initial password; the user
+	// sets their own via the reset token endpoint.
+	if user.PasswordHash != "" {
+		hashed, err := bcrypt.GenerateFromPassword([]byte(user.PasswordHash), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("sqlite: bcrypt hash: %w", err)
+		}
+		user.PasswordHash = string(hashed)
+	} else {
+		user.PasswordHash = ""
+	}
+
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO users (user_id, org_id, email, password_hash, created_at, password_reset_token, reset_token_expiry)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		user.UserID, user.OrgID, user.Email, user.PasswordHash, now, resetToken, resetExpiry,
 	)
 	if err != nil {
 		return fmt.Errorf("sqlite: create user: %w", err)
@@ -384,6 +408,48 @@ func (s *Store) UpdateUserPassword(ctx context.Context, userID, passwordHash str
 		return metadata.ErrNotFound
 	}
 	return nil
+}
+
+func (s *Store) UpdateUserResetToken(ctx context.Context, userID, token string, expiry time.Time) error {
+	expiryStr := ""
+	if !expiry.IsZero() {
+		expiryStr = expiry.Format(time.RFC3339)
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET password_reset_token = ?, reset_token_expiry = ? WHERE user_id = ?`,
+		token, expiryStr, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("sqlite: update user reset token: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) GetUserByResetToken(ctx context.Context, token string) (*domain.User, error) {
+	var u domain.User
+	var userID, email, passwordHash, createdAt, resetToken string
+	var resetExpiry string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT user_id, org_id, email, password_hash, created_at, password_reset_token, reset_token_expiry
+		 FROM users WHERE password_reset_token = ? AND reset_token_expiry > datetime('now')`,
+		token,
+	).Scan(&userID, &u.OrgID, &email, &passwordHash, &createdAt, &resetToken, &resetExpiry)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, metadata.ErrNotFound
+		}
+		return nil, fmt.Errorf("sqlite: get user by reset token: %w", err)
+	}
+	u.UserID = userID
+	u.Email = email
+	u.PasswordHash = passwordHash
+	u.PasswordResetToken = resetToken
+	if resetExpiry != "" {
+		u.ResetTokenExpiry, _ = time.Parse(time.RFC3339, resetExpiry)
+	}
+	t, _ := time.Parse(time.RFC3339, createdAt)
+	u.CreatedAt = t
+	return &u, nil
 }
 
 func (s *Store) GetUserByID(ctx context.Context, userID string) (*domain.User, error) {
