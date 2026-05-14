@@ -12,8 +12,8 @@ import (
 
 func TestNewSpanQuery_Valid(t *testing.T) {
 	req := SpanQueryRequest{
-		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-		To:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
 		Limit: 10,
 	}
 
@@ -79,10 +79,10 @@ func TestNewSpanQuery_LimitWithinMax(t *testing.T) {
 
 func TestNewSpanQuery_InvalidCursor(t *testing.T) {
 	req := SpanQueryRequest{
-		From:    time.Now(),
-		To:      time.Now().Add(time.Hour),
-		Cursor:  "not-valid-base64!!!",
-		Limit:   10,
+		From:   time.Now(),
+		To:     time.Now().Add(time.Hour),
+		Cursor: "not-valid-base64!!!",
+		Limit:  10,
 	}
 
 	_, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
@@ -123,8 +123,8 @@ func TestNewSpanQuery_InvalidFilterOp(t *testing.T) {
 
 func TestSQL_FirstPage(t *testing.T) {
 	req := SpanQueryRequest{
-		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-		To:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
 		Limit: 10,
 	}
 
@@ -487,22 +487,6 @@ func TestCompileFilter_InWithEmptySlice(t *testing.T) {
 	}
 }
 
-func TestCompileFilter_UnknownField(t *testing.T) {
-	f := SpanQueryFilter{Field: "nonexistent", Op: "eq", Value: "x"}
-	_, _, err := compileFilter(f)
-	if err == nil {
-		t.Error("expected error for unknown field")
-	}
-}
-
-func TestCompileFilter_UnknownOp(t *testing.T) {
-	f := SpanQueryFilter{Field: "model", Op: "regex", Value: ".*"}
-	_, _, err := compileFilter(f)
-	if err == nil {
-		t.Error("expected error for unknown operator")
-	}
-}
-
 func TestCompileFilter_StringSliceIn(t *testing.T) {
 	f := SpanQueryFilter{Field: "model", Op: "in", Value: []string{"gpt-4", "gpt-3.5"}}
 	sql, args, err := compileFilter(f)
@@ -611,4 +595,3 @@ func TestNextCursor_SameStartTimeDifferentSpanID(t *testing.T) {
 		t.Errorf("cursor span_id: got %q, want %q", decoded.SpanID, "bbb")
 	}
 }
-

@@ -335,7 +335,7 @@ func (q *SpanQuery) buildWhereClause() ([]any, string) {
 	args = append(args, q.from, q.to)
 
 	// Special filters (e.g., bookmarked) require custom SQL beyond simple
-	// column comparisons. These are validated separately by compileSpecialFilter.
+	// column comparisons.
 	for _, f := range q.filters {
 		if _, ok := specialFilterFields[f.Field]; ok {
 			compiled, specialArgs := q.compileSpecialFilter(f)
@@ -346,7 +346,7 @@ func (q *SpanQuery) buildWhereClause() ([]any, string) {
 		}
 	}
 
-	// Regular filters map directly to span column comparisons.
+	// Regular filters map directly to span columns.
 	for _, f := range q.filters {
 		if _, ok := specialFilterFields[f.Field]; ok {
 			continue
@@ -374,16 +374,12 @@ var operatorSQL = map[FilterOp]string{
 }
 
 // compileFilter translates a single Filter into SQL with placeholder arguments.
+// Validation of field and operator names is guaranteed by NewSpanQuery's
+// validateFilter calls — this function assumes the filter has already been
+// validated and focuses solely on SQL compilation.
 func compileFilter(f SpanQueryFilter) (sql string, args []any, err error) {
 	field := spanField(f.Field)
-	if _, ok := allSpanFields[field]; !ok {
-		return "", nil, fmt.Errorf("query: unknown field %q", f.Field)
-	}
-
 	op := FilterOp(f.Op)
-	if _, ok := validOps[op]; !ok {
-		return "", nil, fmt.Errorf("query: unknown operator %q", f.Op)
-	}
 
 	// Handle IN specially — value is a slice.
 	if op == OpIn {

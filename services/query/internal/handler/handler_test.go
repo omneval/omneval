@@ -124,6 +124,69 @@ func TestHandleSpansQuery_InvalidCursor(t *testing.T) {
 	}
 }
 
+func TestHandleSpansQuery_FieldDecodingErrors(t *testing.T) {
+	tests := []struct {
+		name          string
+		body          string
+		wantErrorCode string
+	}{
+		{
+			name:          "invalid from timestamp",
+			body:          `{"from": "not-a-timestamp"}`,
+			wantErrorCode: "invalid 'from' field: expected RFC 3339 timestamp",
+		},
+		{
+			name:          "invalid to timestamp",
+			body:          `{"to": 12345}`,
+			wantErrorCode: "invalid 'to' field: expected RFC 3339 timestamp",
+		},
+		{
+			name:          "cursor as number",
+			body:          `{"cursor": 42}`,
+			wantErrorCode: "invalid 'cursor' field: expected string",
+		},
+		{
+			name:          "limit as string",
+			body:          `{"limit": "fast"}`,
+			wantErrorCode: "invalid 'limit' field: expected number",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body := strings.NewReader(tc.body)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
+			w := httptest.NewRecorder()
+
+			h := &SpanHandler{
+				SessionStore: &FakeSessionStore{projectID: "test-proj"},
+			}
+
+			h.HandleSpansQuery(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+				return
+			}
+
+			contentType := w.Header().Get("Content-Type")
+			if contentType != "application/json" {
+				t.Errorf("Content-Type: got %q, want %q", contentType, "application/json")
+				return
+			}
+
+			var resp map[string]string
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode response: %v (raw: %q)", err, w.Body.String())
+			}
+
+			if resp["error"] != tc.wantErrorCode {
+				t.Errorf("error: got %q, want %q", resp["error"], tc.wantErrorCode)
+			}
+		})
+	}
+}
+
 func TestHandleSpansQuery_WithDatabase(t *testing.T) {
 	// Create a temp DuckDB file.
 	tmpDir, err := os.MkdirTemp("", "lantern-handler-test")
@@ -201,9 +264,9 @@ func TestHandleSpansQuery_WithDatabase(t *testing.T) {
 
 	// Parse response.
 	var resp struct {
-		Spans  []map[string]any `json:"spans"`
-		Next   string           `json:"next,omitempty"`
-		Limit  int              `json:"limit"`
+		Spans []map[string]any `json:"spans"`
+		Next  string           `json:"next,omitempty"`
+		Limit int              `json:"limit"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -386,9 +449,9 @@ func TestHandleTraceDetail_SingleSpan(t *testing.T) {
 	}
 
 	var trace struct {
-		TraceID   string          `json:"trace_id"`
-		ProjectID string          `json:"project_id"`
-		RootSpan  json.RawMessage `json:"root_span"`
+		TraceID   string            `json:"trace_id"`
+		ProjectID string            `json:"project_id"`
+		RootSpan  json.RawMessage   `json:"root_span"`
 		Spans     []json.RawMessage `json:"spans"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&trace); err != nil {
@@ -458,9 +521,9 @@ func TestHandleTraceDetail_MultiLevelTree(t *testing.T) {
 	}
 
 	var trace struct {
-		TraceID   string   `json:"trace_id"`
-		RootSpan  *treeSpan `json:"root_span"`
-		Spans     []*treeSpan `json:"spans"`
+		TraceID  string      `json:"trace_id"`
+		RootSpan *treeSpan   `json:"root_span"`
+		Spans    []*treeSpan `json:"spans"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&trace); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -740,7 +803,7 @@ func TestHandleTraceDetail_ProjectIsolation(t *testing.T) {
 	}
 
 	var trace struct {
-		ProjectID string  `json:"project_id"`
+		ProjectID string     `json:"project_id"`
 		Spans     []treeSpan `json:"spans"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&trace); err != nil {

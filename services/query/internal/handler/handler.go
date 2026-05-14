@@ -68,13 +68,13 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 	var req query.SpanQueryRequest
 	if rawFrom, ok := rawBody["from"]; ok {
 		if err := json.Unmarshal(rawFrom, &req.From); err != nil {
-			writeJSONError(w, "invalid JSON body", http.StatusBadRequest)
+			writeJSONError(w, "invalid 'from' field: expected RFC 3339 timestamp", http.StatusBadRequest)
 			return
 		}
 	}
 	if rawTo, ok := rawBody["to"]; ok {
 		if err := json.Unmarshal(rawTo, &req.To); err != nil {
-			writeJSONError(w, "invalid JSON body", http.StatusBadRequest)
+			writeJSONError(w, "invalid 'to' field: expected RFC 3339 timestamp", http.StatusBadRequest)
 			return
 		}
 	}
@@ -86,13 +86,13 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	if rawCursor, ok := rawBody["cursor"]; ok {
 		if err := json.Unmarshal(rawCursor, &req.Cursor); err != nil {
-			writeJSONError(w, "invalid JSON body", http.StatusBadRequest)
+			writeJSONError(w, "invalid 'cursor' field: expected string", http.StatusBadRequest)
 			return
 		}
 	}
 	if rawLimit, ok := rawBody["limit"]; ok {
 		if err := json.Unmarshal(rawLimit, &req.Limit); err != nil {
-			writeJSONError(w, "invalid JSON body", http.StatusBadRequest)
+			writeJSONError(w, "invalid 'limit' field: expected number", http.StatusBadRequest)
 			return
 		}
 	}
@@ -218,8 +218,8 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 // querySpansForTrace fetches all spans for a given trace_id and project_id.
 func (h *SpanHandler) querySpansForTrace(projectID, traceID string) ([]*domain.Span, error) {
 	req := query.SpanQueryRequest{
-		From:  time.Time{},
-		To:    time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC),
+		From: time.Time{},
+		To:   time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC),
 		Filters: []query.SpanQueryFilter{
 			{Field: "trace_id", Op: "eq", Value: traceID},
 		},
