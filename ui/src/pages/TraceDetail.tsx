@@ -18,6 +18,16 @@ import { formatTime, formatDuration } from "@/utils/formatters";
 import { useToast } from "@/components/Toast";
 import SaveToDatasetModal from "@/components/SaveToDatasetModal";
 
+// ── Constants ──────────────────────────────────────────────────────
+
+const KIND_COLOR_MAP: Record<string, string> = {
+  llm: colors.accents.emberFlare,
+  tool: colors.accents.softGlow,
+  agent: colors.accents.flicker,
+  chain: "#60a5fa",
+  internal: colors.typography.ashGrey,
+};
+
 // ── Types ──────────────────────────────────────────────────────────
 
 interface TraceDetailPageProps {
@@ -53,7 +63,7 @@ interface TraceResponse {
   spans?: Span[];
 }
 
-interface WaterfallEntry {
+export interface WaterfallEntry {
   name: string;
   spanId: string;
   start: number;
@@ -82,10 +92,10 @@ export default function TraceDetailPage({
 
   // Fetch trace detail
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetch(`/api/v1/traces/${traceId}`)
+    fetch(`/api/v1/traces/${traceId}`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) {
           if (res.status === 404) {
@@ -96,19 +106,17 @@ export default function TraceDetailPage({
         return res.json();
       })
       .then((data: TraceResponse) => {
-        if (!cancelled) {
-          setTrace(data.root_span);
-          setLoading(false);
-        }
+        setTrace(data.root_span);
+        setLoading(false);
       })
       .catch((err) => {
-        if (!cancelled) {
+        if (err.name !== "AbortError") {
           setError(err.message);
           setLoading(false);
         }
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [traceId, activeProject]);
 
@@ -145,15 +153,6 @@ export default function TraceDetailPage({
     );
   }
 
-  // Determine span color based on kind
-  const kindColor: Record<string, string> = {
-    llm: colors.accents.emberFlare,
-    tool: colors.accents.softGlow,
-    agent: colors.accents.flicker,
-    chain: "#60a5fa",
-    internal: colors.typography.ashGrey,
-  };
-
   // Flatten the span tree for the waterfall chart
   const allSpans = useMemo(() => {
     const result: Span[] = [trace];
@@ -174,7 +173,7 @@ export default function TraceDetailPage({
       const start = new Date(span.start_time).getTime() - baseTime;
       const end = new Date(span.end_time).getTime() - baseTime;
       const duration = end - start;
-      const color = kindColor[span.kind] || colors.backgrounds.caveWall;
+      const color = KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall;
       return {
         name: span.name,
         spanId: span.span_id,
@@ -185,7 +184,7 @@ export default function TraceDetailPage({
         model: span.model,
       } satisfies WaterfallEntry;
     });
-  }, [allSpans, trace.start_time, kindColor]);
+  }, [allSpans, trace.start_time]);
 
   const [viewMode, setViewMode] = useState<"waterfall" | "tree">("waterfall");
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
@@ -197,15 +196,7 @@ export default function TraceDetailPage({
     setSelectedSpanId(selectedSpanId === spanId ? null : spanId);
   };
 
-  const handleSaveFromPanel = (span: Span) => {
-    setSaveSpan({
-      span,
-      input: span.input ?? "",
-      output: span.output,
-    });
-  };
-
-  const handleShowSaveFromRow = (span: Span) => {
+  const handleSaveSpan = (span: Span) => {
     setSaveSpan({
       span,
       input: span.input ?? "",
@@ -283,8 +274,8 @@ export default function TraceDetailPage({
             className="mx-4 mt-4 mb-4 px-4 py-3 rounded-lg border"
             style={{
               background: colors.backgrounds.charcoalDepth,
-              borderColor: kindColor[trace.kind] ? `${kindColor[trace.kind]}44` : colors.backgrounds.caveWall,
-              borderLeft: `3px solid ${kindColor[trace.kind] || colors.backgrounds.caveWall}`,
+              borderColor: KIND_COLOR_MAP[trace.kind] ? `${KIND_COLOR_MAP[trace.kind]}44` : colors.backgrounds.caveWall,
+              borderLeft: `3px solid ${KIND_COLOR_MAP[trace.kind] || colors.backgrounds.caveWall}`,
             }}
           >
             <div className="flex items-center gap-3 mb-1">
@@ -293,8 +284,8 @@ export default function TraceDetailPage({
                 <span
                   className="text-xs px-2 py-0.5 rounded-full font-medium"
                   style={{
-                    background: `${kindColor[trace.kind] || colors.backgrounds.caveWall}22`,
-                    color: kindColor[trace.kind] || colors.typography.ashGrey,
+                    background: `${KIND_COLOR_MAP[trace.kind] || colors.backgrounds.caveWall}22`,
+                    color: KIND_COLOR_MAP[trace.kind] || colors.typography.ashGrey,
                   }}
                 >
                   {trace.kind}
@@ -324,15 +315,13 @@ export default function TraceDetailPage({
                   data={waterfallData}
                   selectedSpanId={selectedSpanId}
                   onSelect={handleSpanSelect}
-                  kindColor={kindColor}
                 />
               ) : (
                 <TraceTree
                   trace={trace}
-                  kindColor={kindColor}
                   expandedSpanId={expandedSpanId}
                   onToggleExpand={(id) => setExpandedSpanId(expandedSpanId === id ? null : id)}
-                  onShowSaveModal={handleShowSaveFromRow}
+                  onShowSaveModal={handleSaveSpan}
                 />
               )}
             </div>
@@ -343,9 +332,8 @@ export default function TraceDetailPage({
         {selectedSpan && (
           <SlideInDetailPanel
             span={selectedSpan}
-            kindColor={kindColor}
             onClose={() => setSelectedSpanId(null)}
-            onSave={() => handleSaveFromPanel(selectedSpan)}
+            onSave={() => handleSaveSpan(selectedSpan)}
           />
         )}
       </div>
@@ -371,18 +359,14 @@ function GanttWaterfall({
   data,
   selectedSpanId,
   onSelect,
-  kindColor,
 }: {
   data: WaterfallEntry[];
   selectedSpanId: string | null;
   onSelect: (spanId: string) => void;
-  kindColor: Record<string, string>;
 }) {
   if (data.length === 0) {
     return <EmptyState variant="default" title="No spans" description="This trace has no child spans" />;
   }
-
-  const maxEnd = Math.max(...data.map((d) => d.start + d.duration));
 
   const formatMs = (ms: number): string => {
     if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
@@ -509,12 +493,10 @@ function GanttWaterfall({
 
 function SlideInDetailPanel({
   span,
-  kindColor,
   onClose,
   onSave,
 }: {
   span: Span;
-  kindColor: Record<string, string>;
   onClose: () => void;
   onSave: () => void;
 }) {
@@ -547,8 +529,8 @@ function SlideInDetailPanel({
                 <span
                   className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0"
                   style={{
-                    background: `${kindColor[span.kind] || colors.backgrounds.caveWall}22`,
-                    color: kindColor[span.kind] || colors.typography.ashGrey,
+                    background: `${KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall}22`,
+                    color: KIND_COLOR_MAP[span.kind] || colors.typography.ashGrey,
                   }}
                 >
                   {span.kind}
@@ -672,13 +654,11 @@ function SlideInDetailPanel({
 
 function TraceTree({
   trace,
-  kindColor,
   expandedSpanId,
   onToggleExpand,
   onShowSaveModal,
 }: {
   trace: Span;
-  kindColor: Record<string, string>;
   expandedSpanId: string | null;
   onToggleExpand: (id: string) => void;
   onShowSaveModal: (span: Span) => void;
@@ -698,7 +678,6 @@ function TraceTree({
           key={child.span_id}
           span={child}
           depth={1}
-          kindColor={kindColor}
           onShowSaveModal={onShowSaveModal}
           isExpanded={expandedSpanId === child.span_id}
           onToggleExpand={() => onToggleExpand(child.span_id)}
@@ -713,14 +692,12 @@ function TraceTree({
 function SpanRow({
   span,
   depth,
-  kindColor,
   onShowSaveModal,
   isExpanded,
   onToggleExpand,
 }: {
   span: Span;
   depth: number;
-  kindColor: Record<string, string>;
   onShowSaveModal: (span: Span) => void;
   isExpanded: boolean;
   onToggleExpand: () => void;
@@ -804,7 +781,7 @@ function SpanRow({
         {/* Kind indicator */}
         <div
           className="w-2 h-2 rounded-full flex-shrink-0"
-          style={{ background: kindColor[span.kind] || colors.backgrounds.caveWall }}
+          style={{ background: KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall }}
         />
 
         {/* Span name */}
@@ -918,7 +895,6 @@ function SpanRow({
               key={child.span_id}
               span={child}
               depth={depth + 1}
-              kindColor={kindColor}
               onShowSaveModal={onShowSaveModal}
               isExpanded={isExpanded && child.span_id === span.span_id}
               onToggleExpand={() => onToggleExpand()}
@@ -930,6 +906,6 @@ function SpanRow({
   );
 }
 
-function totalTokens(span: Span): number {
+export function totalTokens(span: Span): number {
   return span.input_tokens + span.output_tokens;
 }

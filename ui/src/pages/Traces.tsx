@@ -134,6 +134,18 @@ const FILTER_SECTIONS = [
   "cost",
 ];
 
+const FILTER_LABELS: Record<string, string> = {
+  environment: "Environment",
+  trace_name: "Trace Name",
+  trace_id: "Trace ID",
+  user_id: "User ID",
+  session_id: "Session ID",
+  tags: "Tags",
+  latency: "Latency",
+  tokens: "Tokens",
+  cost: "Cost",
+};
+
 function FilterSection({
   name,
   label,
@@ -506,30 +518,17 @@ export default function TracesPage({
           <h3 className="text-sm font-medium text-lantern-pure">Filters</h3>
         </div>
         <div className="flex-1 py-1">
-          {FILTER_SECTIONS.map((section) => {
-            const labelMap: Record<string, string> = {
-              environment: "Environment",
-              trace_name: "Trace Name",
-              trace_id: "Trace ID",
-              user_id: "User ID",
-              session_id: "Session ID",
-              tags: "Tags",
-              latency: "Latency",
-              tokens: "Tokens",
-              cost: "Cost",
-            };
-            return (
-              <FilterSection
-                key={section}
-                name={section}
-                label={labelMap[section] ?? section}
-                expanded={!!expandedFilters[section]}
-                onToggle={() => toggleFilter(section)}
-                onApply={(vals) => applyFilter(section, vals)}
-                value={filterState[section] ?? []}
-              />
-            );
-          })}
+          {FILTER_SECTIONS.map((section) => (
+            <FilterSection
+              key={section}
+              name={section}
+              label={FILTER_LABELS[section] ?? section}
+              expanded={!!expandedFilters[section]}
+              onToggle={() => toggleFilter(section)}
+              onApply={(vals) => applyFilter(section, vals)}
+              value={filterState[section] ?? []}
+            />
+          ))}
         </div>
         <div className="px-3 py-2 border-t" style={{ borderColor: colors.backgrounds.caveWall }}>
           <button

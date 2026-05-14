@@ -91,7 +91,7 @@ export function EmptyState({
   className = "",
   style,
 }: EmptyStateProps) {
-  const defaultConfig = {
+  const defaultConfig: Record<Exclude<EmptyStateVariant, "loading">, { title: string; description: string }> = {
     onboarding: {
       title: "No traces yet",
       description: "Get started by sending your first trace to Lantern",
@@ -110,7 +110,7 @@ export function EmptyState({
     },
   };
 
-  const config = defaultConfig[variant];
+  const config = variant === "loading" ? { title: "", description: "" } : defaultConfig[variant];
   const resolvedTitle = title ?? config.title;
   const resolvedDescription = description ?? config.description;
 
