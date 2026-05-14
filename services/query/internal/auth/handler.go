@@ -525,12 +525,6 @@ func (h *Handler) Invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update the user record with the reset token
-	if err := h.store.UpdateUserResetToken(r.Context(), user.UserID, resetToken, resetExpiry); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store reset token"})
-		return
-	}
-
 	writeJSON(w, http.StatusCreated, InviteResponse{
 		UserID:               user.UserID,
 		Email:                user.Email,
@@ -615,16 +609,10 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up user by reset token
+	// Look up user by reset token (also validates expiry)
 	user, err := h.store.GetUserByResetToken(r.Context(), req.Token)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid or expired reset token"})
-		return
-	}
-
-	// Verify token hasn't expired
-	if time.Now().After(user.ResetTokenExpiry) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "reset token has expired"})
 		return
 	}
 

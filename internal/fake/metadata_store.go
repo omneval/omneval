@@ -131,6 +131,12 @@ func (f *FakeMetadataStore) CreateUser(ctx context.Context, u *domain.User) erro
 
 	f.users[u.UserID] = u
 	f.emailsToIDs[u.Email] = u.UserID
+
+	// Register reset token mapping if provided (mirrors DB INSERT).
+	if u.PasswordResetToken != "" {
+		f.tokensToIDs[u.PasswordResetToken] = u.UserID
+	}
+
 	return nil
 }
 
@@ -227,9 +233,13 @@ func (f *FakeMetadataStore) GetUserByResetToken(ctx context.Context, token strin
 	if !ok {
 		return nil, metadata.ErrNotFound
 	}
+	// Check expiry to mirror production DB behavior (WHERE reset_token_expiry > now())
+	if !u.ResetTokenExpiry.IsZero() && time.Now().After(u.ResetTokenExpiry) {
+		return nil, metadata.ErrNotFound
+	}
 	// Return a copy so callers can't mutate the store
-	copy := *u
-	return &copy, nil
+	userCopy := *u
+	return &userCopy, nil
 }
 
 func (f *FakeMetadataStore) CreateSession(ctx context.Context, s *domain.Session) error {

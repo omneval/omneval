@@ -326,8 +326,6 @@ func (s *Store) CreateUser(ctx context.Context, user *domain.User) error {
 			return fmt.Errorf("sqlite: bcrypt hash: %w", err)
 		}
 		user.PasswordHash = string(hashed)
-	} else {
-		user.PasswordHash = ""
 	}
 
 	_, err := s.db.ExecContext(ctx,
