@@ -23,6 +23,9 @@ type Syncer struct {
 	syncInterval time.Duration
 	snapshotKey  string
 	metrics      *metrics.WriterMetrics
+	// lastSyncMod tracks the file modification time of the last uploaded
+	// snapshot. Used to skip uploads when the file hasn't changed (issue #82).
+	lastSyncMod time.Time
 }
 
 // New creates a new Syncer.
@@ -107,6 +110,16 @@ func (s *Syncer) doSync(ctx context.Context) {
 		return
 	}
 
+	// Check whether the file has changed since the last sync.
+	if !info.ModTime().After(s.lastSyncMod) {
+		slog.InfoContext(ctx, "writer: syncer: snapshot unchanged, skipping upload",
+			"db_path", s.dbPath,
+			"size_bytes", info.Size(),
+		)
+		s.recordDuration(start, "skipped")
+		return
+	}
+
 	f, err := os.Open(s.dbPath)
 	if err != nil {
 		slog.WarnContext(ctx, "writer: syncer: cannot open DuckDB file",
@@ -127,9 +140,12 @@ func (s *Syncer) doSync(ctx context.Context) {
 		return
 	}
 
+	s.lastSyncMod = info.ModTime()
+
 	slog.InfoContext(ctx, "writer: syncer: snapshot synced",
 		"key", s.snapshotKey,
 		"size_bytes", info.Size(),
+		"mod_time", s.lastSyncMod,
 	)
 	s.recordDuration(start, "success")
 }

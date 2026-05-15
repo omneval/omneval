@@ -469,6 +469,98 @@ func TestDoSync_SnapshotContainsWrittenData(t *testing.T) {
 	}
 }
 
+// TestDoSync_SkipsUploadWhenUnchanged verifies that doSync skips the S3
+// upload when the DuckDB file has not changed since the last sync.
+// This is the fix for issue #82: Writer uploads DuckDB snapshot to S3
+// every 30s regardless of changes.
+func TestDoSync_SkipsUploadWhenUnchanged(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lantern.db")
+
+	if err := os.WriteFile(dbPath, []byte("fake duckdb content for sync"), 0644); err != nil {
+		t.Fatalf("create temp db: %v", err)
+	}
+
+	store := &mockStore{}
+	cfg := &config.Config{
+		Writer: config.WriterConfig{
+			SyncInterval: "30s",
+		},
+	}
+
+	m := newTestMetrics(t)
+	s := New(store, nil, dbPath, cfg, m)
+
+	ctx := context.Background()
+
+	// First sync should upload the file.
+	s.doSync(ctx)
+	if len(store.puts) != 1 {
+		t.Fatalf("first sync: expected 1 put, got %d", len(store.puts))
+	}
+
+	// Second sync immediately after should be skipped (no changes).
+	store.puts = nil
+	s.doSync(ctx)
+	if len(store.puts) != 0 {
+		t.Errorf("second sync (no changes): expected 0 puts, got %d", len(store.puts))
+	}
+
+	// Touch the file to simulate a change (new write to DuckDB).
+	// Set the mtime to *now* (after lastSyncMod) so the syncer detects a change.
+	if err := os.Chtimes(dbPath, time.Now(), time.Now()); err != nil {
+		t.Fatalf("touch db file: %v", err)
+	}
+
+	// Third sync after touch should upload again.
+	s.doSync(ctx)
+	if len(store.puts) != 1 {
+		t.Errorf("third sync (after touch): expected 1 put, got %d", len(store.puts))
+	}
+}
+
+// TestDoSync_DBWriteThenSkip exercises the real DuckDB path: after writing
+// data, the sync uploads; without writing, the next sync is skipped.
+func TestDoSync_DBWriteThenSkip(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lantern.db")
+
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), `CREATE TABLE test (id INTEGER)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	store := &mockStore{}
+	cfg := &config.Config{
+		Writer: config.WriterConfig{
+			SyncInterval: "30s",
+		},
+	}
+
+	m := newTestMetrics(t)
+	s := New(store, db, dbPath, cfg, m)
+
+	ctx := context.Background()
+
+	// First sync after DB creation should upload.
+	s.doSync(ctx)
+	if len(store.puts) != 1 {
+		t.Fatalf("first sync: expected 1 put, got %d", len(store.puts))
+	}
+
+	// Second sync without any writes should be skipped.
+	store.puts = nil
+	s.doSync(ctx)
+	if len(store.puts) != 0 {
+		t.Errorf("second sync (no writes): expected 0 puts, got %d", len(store.puts))
+	}
+}
+
 // TestDoSync_NilDBSkipsCheckpoint verifies that sync still works
 // when no DB connection is provided — the checkpoint is skipped and the
 // snapshot is uploaded as-is. This is the backward-compatibility path.

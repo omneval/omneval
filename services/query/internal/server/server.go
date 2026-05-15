@@ -467,6 +467,10 @@ func downloadSnapshot(ctx context.Context, store storage.ObjectStore, dbPath str
 }
 
 // pollAndDownload checks if the S3 snapshot has changed and re-downloads if needed.
+// It compares the S3 object's LastModified against the previously stored value
+// (lastModified). This avoids the stale-mod-time problem where the local file's
+// filesystem timestamp reflects the download time rather than the S3 object's
+// LastModified.
 func pollAndDownload(ctx context.Context, store storage.ObjectStore, dbPath string, lastModified *time.Time) error {
 	snapshotKey := s3.SnapshotKey()
 
@@ -476,17 +480,21 @@ func pollAndDownload(ctx context.Context, store storage.ObjectStore, dbPath stri
 		return fmt.Errorf("snapshot: stat %s: %w", snapshotKey, err)
 	}
 
-	// Check if local file exists and has the same ETag/LastModified.
-	localInfo, statErr := os.Stat(dbPath)
-	if statErr == nil && info != nil {
-		if localInfo.ModTime().Equal(info.LastModified) || localInfo.ModTime().After(info.LastModified) {
-			slog.Debug("query: snapshot unchanged, skipping download")
+	// Skip download if the S3 object hasn't changed since our last known version.
+	// lastModified is updated after each successful download to the S3
+	// object's LastModified timestamp. If they match, nothing changed.
+	if lastModified != nil && !lastModified.IsZero() {
+		if info.LastModified.Equal(*lastModified) {
+			slog.Debug("query: snapshot unchanged, skipping download",
+				"last_modified", info.LastModified)
 			return nil
 		}
 	}
 
 	// Download new snapshot.
-	slog.Info("query: downloading updated snapshot from S3", "etag", info.ETag)
+	slog.Info("query: downloading updated snapshot from S3",
+		"etag", info.ETag,
+		"last_modified", info.LastModified)
 	if err := downloadSnapshot(ctx, store, dbPath); err != nil {
 		return err
 	}
