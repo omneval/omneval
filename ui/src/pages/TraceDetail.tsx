@@ -14,7 +14,7 @@ import Breadcrumb from "@/components/Breadcrumb";
 import JsonCodeBlock from "@/components/JsonCodeBlock";
 import { Skeleton } from "@/components/Skeleton";
 import { EmptyState, LoadingState } from "@/components/EmptyState";
-import { formatTime, formatDuration } from "@/utils/formatters";
+import { formatTime, formatDuration, formatMs } from "@/utils/formatters";
 import { useToast } from "@/components/Toast";
 import SaveToDatasetModal from "@/components/SaveToDatasetModal";
 
@@ -56,11 +56,15 @@ interface Span {
   scores?: { eval_name: string; value: number }[];
 }
 
+interface Score {
+  eval_name: string;
+  value: number;
+}
+
 interface TraceResponse {
   trace_id: string;
   project_id: string;
   root_span: Span;
-  spans?: Span[];
 }
 
 export interface WaterfallEntry {
@@ -195,18 +199,6 @@ export default function TraceDetailPage({
 
   const selectedSpan = allSpans.find((s) => s.span_id === selectedSpanId);
 
-  const handleSpanSelect = (spanId: string) => {
-    setSelectedSpanId(selectedSpanId === spanId ? null : spanId);
-  };
-
-  const handleSaveSpan = (span: Span) => {
-    setSaveSpan({
-      span,
-      input: span.input ?? "",
-      output: span.output,
-    });
-  };
-
   return (
     <div className="flex flex-col h-full" style={{ background: colors.backgrounds.abyssBlack }}>
       {/* Header with breadcrumb */}
@@ -317,14 +309,14 @@ export default function TraceDetailPage({
                 <GanttWaterfall
                   data={waterfallData}
                   selectedSpanId={selectedSpanId}
-                  onSelect={handleSpanSelect}
+                  onSelect={(spanId) => setSelectedSpanId(selectedSpanId === spanId ? null : spanId)}
                 />
               ) : (
                 <TraceTree
                   trace={trace}
                   expandedSpanId={expandedSpanId}
                   onToggleExpand={(id) => setExpandedSpanId(expandedSpanId === id ? null : id)}
-                  onShowSaveModal={handleSaveSpan}
+                  onShowSaveModal={(span) => setSaveSpan({ span, input: span.input ?? "", output: span.output })}
                 />
               )}
             </div>
@@ -336,7 +328,7 @@ export default function TraceDetailPage({
           <SlideInDetailPanel
             span={selectedSpan}
             onClose={() => setSelectedSpanId(null)}
-            onSave={() => handleSaveSpan(selectedSpan)}
+            onSave={() => setSaveSpan({ span: selectedSpan, input: selectedSpan.input ?? "", output: selectedSpan.output })}
           />
         )}
       </div>
@@ -356,6 +348,35 @@ export default function TraceDetailPage({
   );
 }
 
+// ── Score Badges ───────────────────────────────────────────────────
+
+function ScoreBadges({ scores }: { scores: Score[] }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {scores.map((score) => (
+        <span
+          key={score.eval_name}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+          style={{
+            background: score.value >= 0.8
+              ? "rgba(76, 175, 80, 0.15)"
+              : score.value >= 0.5
+                ? "rgba(255, 193, 7, 0.15)"
+                : "rgba(244, 67, 54, 0.15)",
+            color: score.value >= 0.8
+              ? "#4CAF50"
+              : score.value >= 0.5
+                ? "#FFC107"
+                : "#F44336",
+          }}
+        >
+          {score.eval_name}: {score.value.toFixed(2)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // ── Gantt-Style Waterfall Chart ────────────────────────────────────
 
 function GanttWaterfall({
@@ -370,11 +391,6 @@ function GanttWaterfall({
   if (data.length === 0) {
     return <EmptyState variant="default" title="No spans" description="This trace has no child spans" />;
   }
-
-  const formatMs = (ms: number): string => {
-    if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
-    return `${ms}ms`;
-  };
 
   return (
     <div className="space-y-4">
@@ -596,28 +612,7 @@ function SlideInDetailPanel({
           {span.scores && span.scores.length > 0 && (
             <div>
               <div className="text-xs font-medium text-lantern-ash mb-2">Scores</div>
-              <div className="flex flex-wrap gap-2">
-                {span.scores.map((score) => (
-                  <span
-                    key={score.eval_name}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                    style={{
-                      background: score.value >= 0.8
-                        ? "rgba(76, 175, 80, 0.15)"
-                        : score.value >= 0.5
-                          ? "rgba(255, 193, 7, 0.15)"
-                          : "rgba(244, 67, 54, 0.15)",
-                      color: score.value >= 0.8
-                        ? "#4CAF50"
-                        : score.value >= 0.5
-                          ? "#FFC107"
-                          : "#F44336",
-                    }}
-                  >
-                    {score.eval_name}: {score.value.toFixed(2)}
-                  </span>
-                ))}
-              </div>
+              <ScoreBadges scores={span.scores} />
             </div>
           )}
 
@@ -860,28 +855,7 @@ function SpanRow({
           {span.scores && span.scores.length > 0 && (
             <div className="mt-3">
               <div className="text-xs font-medium mb-1" style={{ color: colors.typography.ashGrey }}>Scores</div>
-              <div className="flex flex-wrap gap-2">
-                {span.scores.map((score) => (
-                  <span
-                    key={score.eval_name}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                    style={{
-                      background: score.value >= 0.8
-                        ? "rgba(76, 175, 80, 0.15)"
-                        : score.value >= 0.5
-                          ? "rgba(255, 193, 7, 0.15)"
-                          : "rgba(244, 67, 54, 0.15)",
-                      color: score.value >= 0.8
-                        ? "#4CAF50"
-                        : score.value >= 0.5
-                          ? "#FFC107"
-                          : "#F44336",
-                    }}
-                  >
-                    {score.eval_name}: {score.value.toFixed(2)}
-                  </span>
-                ))}
-              </div>
+              <ScoreBadges scores={span.scores} />
             </div>
           )}
         </div>

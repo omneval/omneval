@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import TraceDetailPage from "./TraceDetail";
 import { ToastProvider } from "@/components/Toast";
+import { totalTokens } from "./TraceDetail";
+import { formatMs } from "@/utils/formatters";
 
 function renderWithProvider(ui: React.ReactElement) {
   return render(<ToastProvider>{ui}</ToastProvider>);
@@ -35,7 +37,6 @@ describe("hook ordering", () => {
   });
 
   it("does not throw React hook order violation when trace is not found (error state)", async () => {
-    // Mock fetch to return 404
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: false,
       status: 404,
@@ -70,27 +71,35 @@ describe("hook ordering", () => {
 });
 
 describe("totalTokens", () => {
-  const sumTokens = (inputTokens: number, outputTokens: number): number =>
-    inputTokens + outputTokens;
+  const testCases: Array<{ inputTokens: number; outputTokens: number; expected: number }> = [
+    { inputTokens: 100, outputTokens: 200, expected: 300 },
+    { inputTokens: 0, outputTokens: 0, expected: 0 },
+    { inputTokens: 1000, outputTokens: 500, expected: 1500 },
+    { inputTokens: 1_000_000, outputTokens: 500_000, expected: 1_500_000 },
+  ];
 
-  it("returns the sum of input and output tokens", () => {
-    expect(sumTokens(100, 200)).toBe(300);
-    expect(sumTokens(0, 0)).toBe(0);
-    expect(sumTokens(1000, 500)).toBe(1500);
-  });
-
-  it("handles large token counts", () => {
-    expect(sumTokens(1_000_000, 500_000)).toBe(1_500_000);
-  });
+  it.each(testCases)(
+    "returns $expected for inputTokens=$inputTokens, outputTokens=$outputTokens",
+    ({ inputTokens, outputTokens, expected }) => {
+      expect(totalTokens({
+        span_id: "x",
+        trace_id: "x",
+        parent_id: "",
+        project_id: "",
+        name: "",
+        kind: "",
+        start_time: "",
+        end_time: "",
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        cost_usd: 0,
+      })).toBe(expected);
+    },
+  );
 });
 
 describe("formatMs (milliseconds display)", () => {
-  const formatMs = (ms: number): string => {
-    if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
-    return `${ms}ms`;
-  };
-
-  const tests: Array<[number, string]> = [
+  const testCases: Array<[number, string]> = [
     [0, "0ms"],
     [100, "100ms"],
     [999, "999ms"],
@@ -101,7 +110,7 @@ describe("formatMs (milliseconds display)", () => {
     [60000, "60.0s"],
   ];
 
-  it.each(tests)("formats %d ms as '%s'", (ms, expected) => {
+  it.each(testCases)("formats %d ms as '%s'", (ms, expected) => {
     expect(formatMs(ms)).toBe(expected);
   });
 });

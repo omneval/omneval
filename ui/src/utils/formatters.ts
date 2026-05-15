@@ -63,6 +63,14 @@ export function safeExtractInputOutput(json: string): string {
 }
 
 /**
+ * Format milliseconds to a human-readable string ("Xms" or "X.Xs").
+ */
+export function formatMs(ms: number): string {
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${ms}ms`;
+}
+
+/**
  * Derive a human-readable time-range label from a start timestamp.
  */
 export function timeRangeLabel(from: string): string {
