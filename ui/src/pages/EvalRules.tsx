@@ -178,25 +178,18 @@ function FormField({
 function StyledInput({
   value,
   onChange,
-  error,
   ...rest
 }: Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange"> & {
   onChange: React.ChangeEventHandler<HTMLInputElement>;
-  error?: string;
 }) {
   return (
     <input
       value={value}
       onChange={onChange}
-      className={`input-focus w-full px-3 py-2 text-sm rounded-md border ${
-        error ? "border-lantern-danger" : "border-lantern-bg-cave"
-      } transition-colors`}
+      className="input-focus w-full px-3 py-2 text-sm rounded-md border border-lantern-bg-cave transition-colors"
       style={{
         backgroundColor: colors.backgrounds.abyssBlack,
         color: colors.typography.pureLight,
-        ...(error ? {
-          boxShadow: `0 0 0 2px ${colors.focusRing.danger}`,
-        } : {}),
       }}
       {...rest}
     />
