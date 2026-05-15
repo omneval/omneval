@@ -1,6 +1,7 @@
 package dsl
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -59,6 +60,12 @@ var validAggFuncs = map[AggFunc]struct{}{
 	AggP50: {}, AggP95: {}, AggP99: {},
 }
 
+// aggFuncList returns a human-readable comma-separated list of valid
+// aggregation function names, used in error messages.
+func aggFuncList() []string {
+	return []string{"sum", "count", "avg", "min", "max", "p50", "p95", "p99"}
+}
+
 // spanColumns is the allowlist of valid span table columns for aggregations,
 // filters, group-by, and order-by clauses.
 var spanColumns = map[string]struct{}{
@@ -102,7 +109,11 @@ func durationMsExpr() string {
 // aggregations that wrap approx_quantile.
 func aggExprForField(fn AggFunc, field string) (string, error) {
 	if _, ok := validAggFuncs[fn]; !ok {
-		return "", fmt.Errorf("dsl: unknown aggregation function %q", fn)
+		return "", fmt.Errorf(
+			"dsl: unknown aggregation function %q. aggregations[i].function must be one of: %s",
+			fn,
+			strings.Join(aggFuncList(), ", "),
+		)
 	}
 
 	if field == "*" {
@@ -415,6 +426,31 @@ type Aggregation struct {
 	Function AggFunc `json:"function"`
 	Field    string  `json:"field"`
 	Alias    string  `json:"alias"`
+}
+
+// UnmarshalJSON implements custom JSON unmarshalling so that both "function"
+// and the ergonomic alias "fn" are accepted. When both keys are present,
+// "function" takes precedence.
+func (a *Aggregation) UnmarshalJSON(data []byte) error {
+	type rawAlias struct {
+		Function string `json:"function"`
+		Fn       string `json:"fn"`
+		Field    string `json:"field"`
+		Alias    string `json:"alias"`
+	}
+	var raw rawAlias
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	// Prefer "function" over "fn" if both are present.
+	if raw.Function != "" {
+		a.Function = AggFunc(raw.Function)
+	} else if raw.Fn != "" {
+		a.Function = AggFunc(raw.Fn)
+	}
+	a.Field = raw.Field
+	a.Alias = raw.Alias
+	return nil
 }
 
 // OrderClause specifies sort direction for an output column.

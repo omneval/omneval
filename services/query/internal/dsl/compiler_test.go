@@ -1,6 +1,7 @@
 package dsl
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -233,6 +234,75 @@ func TestCompile_AggUnknownFuncRejected(t *testing.T) {
 	_, _, err := Compile("proj", q)
 	if err == nil {
 		t.Error("expected error for unknown aggregation function")
+	}
+}
+
+// TestCompile_AggUnknownFuncErrorMessage verifies that the error message
+// for an unknown aggregation function includes the list of accepted functions
+// and hints about the "fn" vs "function" field name.
+func TestCompile_AggUnknownFuncErrorMessage(t *testing.T) {
+	q := makeQuery(withAgg(AggFunc("median"), "cost_usd", "m"))
+	_, _, err := Compile("proj", q)
+	if err == nil {
+		t.Fatal("expected error for unknown aggregation function")
+	}
+	errMsg := err.Error()
+	// Should list accepted functions
+	accepted := []string{"sum", "count", "avg", "min", "max", "p50", "p95", "p99"}
+	for _, fn := range accepted {
+		if !strings.Contains(errMsg, fn) {
+			t.Errorf("error message should mention accepted function %q, got: %s", fn, errMsg)
+		}
+	}
+	// Should hint about the correct field name
+	if !strings.Contains(errMsg, "function") {
+		t.Errorf("error message should hint about 'function' field name, got: %s", errMsg)
+	}
+}
+
+// TestCompile_AggFnAliasDeserialization verifies that the "fn" key is
+// accepted as an alias for "function" in the JSON request body.
+func TestCompile_AggFnAliasDeserialization(t *testing.T) {
+	jsonStr := `{"aggregations":[{"fn":"count","field":"*","alias":"total"}]}`
+	var req Query
+	if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+	if len(req.Aggregations) != 1 {
+		t.Fatalf("expected 1 aggregation, got %d", len(req.Aggregations))
+	}
+	if req.Aggregations[0].Function != AggCount {
+		t.Errorf("expected function count, got %q", req.Aggregations[0].Function)
+	}
+}
+
+// TestCompile_AggFnAliasEndToEnd verifies that sending "fn" in the request
+// produces valid SQL (end-to-end through Compile).
+func TestCompile_AggFnAliasEndToEnd(t *testing.T) {
+	jsonStr := `{"aggregations":[{"fn":"count","field":"*","alias":"total"}]}`
+	var req Query
+	if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+	sql, _, err := Compile("proj", req)
+	if err != nil {
+		t.Fatalf("unexpected compile error: %v", err)
+	}
+	if !strings.Contains(sql, "COUNT(*)") {
+		t.Errorf("expected COUNT(*) in SQL, got:\n%s", sql)
+	}
+}
+
+// TestCompile_AggFunctionPreferredOverFn verifies that if both "function"
+// and "fn" are provided, "function" takes precedence.
+func TestCompile_AggFunctionPreferredOverFn(t *testing.T) {
+	jsonStr := `{"aggregations":[{"fn":"sum","function":"count","field":"*","alias":"total"}]}`
+	var req Query
+	if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+	if req.Aggregations[0].Function != AggCount {
+		t.Errorf("expected function count (" + "function" + " wins over fn), got %q", req.Aggregations[0].Function)
 	}
 }
 
