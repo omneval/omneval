@@ -15,17 +15,15 @@ export type EmptyStateVariant =
 const variantIcons: Record<EmptyStateVariant, React.ReactNode> = {
   default: (
     <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
-      <rect
-        x="8"
-        y="8"
-        width="40"
-        height="40"
-        rx="6"
+      {/* Neutral empty-folder illustration — not a "+" action button */}
+      <path
+        d="M10 16h14l4 4h18a2 2 0 012 2v20a2 2 0 01-2 2H10a2 2 0 01-2-2V18a2 2 0 012-2z"
         stroke="currentColor"
         strokeWidth="2"
+        strokeLinejoin="round"
       />
       <path
-        d="M18 28h20M28 18v20"
+        d="M8 20h40"
         stroke="currentColor"
         strokeWidth="2"
         strokeLinecap="round"

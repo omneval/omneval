@@ -1,3 +1,79 @@
+import { Component, ErrorInfo, ReactNode } from "react";
+import { colors } from "@/theme";
+
+// ── Error Boundary ─────────────────────────────────────────────────
+
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  fallback?: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+/**
+ * ErrorBoundary catches React errors in its child tree and renders
+ * a user-friendly fallback UI instead of a blank white screen.
+ */
+export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo): void {
+    console.error("[ErrorBoundary] Uncaught error:", error, info);
+  }
+
+  handleReload = (): void => {
+    this.setState({ hasError: false, error: null });
+    window.location.reload();
+  };
+
+  render(): ReactNode {
+    if (this.state.hasError) {
+      if (this.props.fallback) return this.props.fallback;
+      return (
+        <div
+          className="flex flex-col items-center justify-center py-16 px-4 text-center"
+          style={{ background: colors.backgrounds.abyssBlack }}
+        >
+          <svg
+            width="48" height="48" viewBox="0 0 56 56" fill="none"
+            className="mb-4 text-lantern-danger"
+          >
+            <circle cx="28" cy="28" r="18" stroke="currentColor" strokeWidth="2" />
+            <path d="M28 18v12M28 34v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+          <p className="text-lg font-semibold text-lantern-pure mb-2">
+            Something went wrong
+          </p>
+          <p className="text-sm text-lantern-ash mb-4 max-w-md">
+            {this.state.error?.message || "An unexpected error occurred"}
+          </p>
+          <button
+            onClick={this.handleReload}
+            className="px-4 py-2 text-sm font-medium rounded-md text-white transition-all duration-150 hover:brightness-110"
+            style={{
+              background: colors.accents.emberFlare,
+              boxShadow: "0 2px 8px rgba(255, 87, 34, 0.25)",
+            }}
+          >
+            Reload Page
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 interface ErrorBannerProps {
   message: string;
   onDismiss?: () => void;

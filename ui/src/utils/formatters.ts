@@ -3,7 +3,8 @@
  */
 
 /**
- * Format an ISO timestamp to a human-readable locale string.
+ * Format an ISO timestamp to a human-readable locale string (compact, no year).
+ * For dates from the current calendar year, omits the year.
  */
 export function formatTime(iso: string): string {
   if (!iso) return "N/A";
@@ -11,6 +12,24 @@ export function formatTime(iso: string): string {
   return d.toLocaleString(undefined, {
     month: "short",
     day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/**
+ * Format an ISO timestamp, including the year for dates from previous
+ * calendar years so that cross-year dates are disambiguated.
+ */
+export function formatTimeWithYear(iso: string): string {
+  if (!iso) return "N/A";
+  const d = new Date(iso);
+  const now = new Date();
+  const sameYear = d.getFullYear() === now.getFullYear();
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: sameYear ? undefined : "numeric",
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -59,6 +78,32 @@ export function safeExtractInputOutput(json: string): string {
       : json);
   } catch {
     return json;
+  }
+}
+
+/**
+ * Produce a clean, truncated JSON preview suitable for display in table cells.
+ * If the input is valid JSON it will be compacted; otherwise the raw string
+ * is cleaned up (Go-map-like syntax becomes plain text) and truncated.
+ */
+export function formatJsonPreview(json: string, maxLen = 60): string {
+  if (!json) return "\u2014";
+
+  try {
+    const obj = JSON.parse(json);
+    const compact = JSON.stringify(obj);
+    if (compact.length <= maxLen) return compact;
+    return compact.slice(0, maxLen) + "\u2026";
+  } catch {
+    // Not valid JSON — sanitise and truncate
+    // Remove Go-map artefacts like "map[content:x role:y]"
+    let cleaned = json
+      .replace(/\[map\[/g, "[")
+      .replace(/map\[/g, "[")
+      .replace(/\]\]/g, "]")
+      .trim();
+    if (cleaned.length <= maxLen) return cleaned;
+    return cleaned.slice(0, maxLen) + "\u2026";
   }
 }
 

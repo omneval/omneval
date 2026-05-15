@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useToast } from "@/components/Toast";
 import { CopyButton } from "@/components/CopyButton";
+import { Skeleton } from "@/components/Skeleton";
 import { colors } from "@/theme";
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -106,6 +107,7 @@ function GenerateKeyDialog({
   onClose: () => void;
   onGenerated: (rawKey: string) => void;
 }) {
+  const { addToast } = useToast();
   const [serviceName, setServiceName] = useState("");
   const [loading, setLoading] = useState(false);
   const [rawKey, setRawKey] = useState<string | null>(null);
@@ -128,14 +130,18 @@ function GenerateKeyDialog({
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        if (err.error) alert(err.error);
+        if (err.error) {
+          addToast("error", err.error);
+        } else {
+          addToast("error", "Failed to generate API key");
+        }
         return;
       }
 
       const data = await res.json();
       setRawKey(data.raw_key);
     } catch {
-      alert("Failed to generate key");
+      addToast("error", "Failed to generate API key");
     } finally {
       setLoading(false);
     }
@@ -178,6 +184,7 @@ function GenerateKeyDialog({
               onClick={() => {
                 handleCopy();
                 onGenerated(rawKey);
+                addToast("success", `${kind === "service" ? "Service" : "Project"} API key generated`);
                 handleClose();
               }}
               className={`flex-1 px-3 py-2 rounded-md text-sm font-medium text-white transition-all duration-150 hover:brightness-110 ${
@@ -259,6 +266,7 @@ export function NewProjectModal({
   onClose: () => void;
   onCreated: (project: Project) => void;
 }) {
+  const { addToast } = useToast();
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -276,15 +284,20 @@ export function NewProjectModal({
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        if (err.error) alert(err.error);
+        if (err.error) {
+          addToast("error", err.error);
+        } else {
+          addToast("error", "Failed to create project");
+        }
         return;
       }
 
       const data = await res.json();
+      addToast("success", `Project "${data.name || name.trim()}" created`);
       onCreated(data);
       onClose();
     } catch {
-      alert("Failed to create project");
+      addToast("error", "Failed to create project");
     } finally {
       setLoading(false);
     }
@@ -452,8 +465,10 @@ export default function SettingsPage({
 
         {/* Key list */}
         {loading ? (
-          <div className="text-sm text-lantern-ash py-8 text-center">
-            Loading...
+          <div className="space-y-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-16 rounded-md" />
+            ))}
           </div>
         ) : apiKeys.length === 0 ? (
           <div className="text-sm text-lantern-ash py-8 text-center bg-lantern-bg-charcoal/30 rounded-md border border-lantern-bg-cave">

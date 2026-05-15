@@ -3,6 +3,7 @@ import { colors } from "@/theme";
 import { EmptyState } from "@/components/EmptyState";
 import { formatTime } from "@/utils/formatters";
 import { truncate } from "@/utils/formatters";
+import { useToast } from "@/components/Toast";
 
 interface PreviewSpan {
   span_id: string;
@@ -316,6 +317,7 @@ function RuleCard({ rule, onDelete }: { rule: EvalRule; onDelete: (ruleId: strin
 
 export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
   const [rules, setRules] = useState<EvalRule[]>([]);
+  const { addToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showNewRuleForm, setShowNewRuleForm] = useState(false);
@@ -445,6 +447,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
         setCreateError(bodyText || "Failed to create rule");
         return;
       }
+      addToast("success", `Rule "${createForm.ruleName.trim()}" created`);
       resetCreateForm();
       await fetchRules();
     } catch (e: unknown) {
@@ -465,6 +468,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
         setError(bodyText || "Failed to delete rule");
         return;
       }
+      addToast("success", "Rule deleted");
       setRules((prev) => prev.filter((r) => r.RuleID !== ruleId));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");

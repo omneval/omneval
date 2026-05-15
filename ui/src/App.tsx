@@ -12,6 +12,7 @@ import Header from "./components/Header";
 import Layout from "./components/Layout";
 import { ToastProvider } from "./components/Toast";
 import { colors } from "./theme";
+import { ErrorBoundary } from "./components/ErrorBanner";
 
 type Page =
   | "login"
@@ -120,7 +121,8 @@ export default function App() {
 
   // ── Authenticated Layout ──
   return (
-    <div className="flex flex-col h-screen" style={{ background: colors.backgrounds.abyssBlack }}>
+    <ErrorBoundary>
+      <div className="flex flex-col h-screen" style={{ background: colors.backgrounds.abyssBlack }}>
       {/* Header */}
       <Header
         activeProject={activeProject}
@@ -191,5 +193,6 @@ export default function App() {
         </ToastProvider>
       </Layout>
     </div>
+    </ErrorBoundary>
   );
 }

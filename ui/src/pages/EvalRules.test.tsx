@@ -1,6 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import EvalRulesPage from "./EvalRules";
+import { ToastProvider } from "@/components/Toast";
+
+function renderWithToast(ui: React.ReactElement) {
+  return render(<ToastProvider>{ui}</ToastProvider>);
+}
 
 describe("EvalRulesPage", () => {
   const mockRules = [
@@ -42,7 +47,7 @@ describe("EvalRulesPage", () => {
   it("renders the page with header and project id", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules(mockRules));
 
-    render(<EvalRulesPage activeProject="proj-1" />);
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
 
     await waitFor(() => {
       expect(screen.getByText("Eval Rules")).toBeInTheDocument();
@@ -55,7 +60,7 @@ describe("EvalRulesPage", () => {
   it("shows loading state on initial render", async () => {
     vi.spyOn(globalThis, "fetch").mockReturnValue(new Promise<Response>(() => {}));
 
-    render(<EvalRulesPage activeProject="proj-1" />);
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
 
     expect(screen.getByText(/Loading eval rules.../)).toBeInTheDocument();
   });
@@ -63,7 +68,7 @@ describe("EvalRulesPage", () => {
   it("renders a list of eval rules with key fields", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules(mockRules));
 
-    render(<EvalRulesPage activeProject="proj-1" />);
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
 
     await waitFor(() => {
       expect(screen.getByText("Production LLM Eval")).toBeInTheDocument();
@@ -79,7 +84,7 @@ describe("EvalRulesPage", () => {
   it("shows delete button on each rule row", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules(mockRules));
 
-    render(<EvalRulesPage activeProject="proj-1" />);
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
 
     await waitFor(() => {
       expect(screen.getAllByRole("button", { name: /delete/i })).toHaveLength(2);
@@ -89,7 +94,7 @@ describe("EvalRulesPage", () => {
   it("shows empty state when no rules exist", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules([]));
 
-    render(<EvalRulesPage activeProject="proj-1" />);
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
 
     await waitFor(() => {
       expect(screen.getByText("No eval rules yet")).toBeInTheDocument();
@@ -112,7 +117,7 @@ describe("EvalRulesPage", () => {
     );
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
-    render(<EvalRulesPage activeProject="proj-1" />);
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
 
     await waitFor(() => {
       expect(screen.getAllByRole("button", { name: /delete/i })).toHaveLength(2);
@@ -133,7 +138,7 @@ describe("EvalRulesPage", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules(mockRules));
     vi.spyOn(window, "confirm").mockReturnValue(false);
 
-    render(<EvalRulesPage activeProject="proj-1" />);
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
 
     await waitFor(() => {
       expect(screen.getAllByRole("button", { name: /delete/i })).toHaveLength(2);
@@ -151,7 +156,7 @@ describe("EvalRulesPage", () => {
   it("fetches rules on mount and on project change", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules([]));
 
-    const { rerender } = render(<EvalRulesPage activeProject="proj-1" />);
+    const { rerender } = renderWithToast(<EvalRulesPage activeProject="proj-1" />);
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
@@ -160,7 +165,7 @@ describe("EvalRulesPage", () => {
     });
 
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules([mockRules[0]]));
-    rerender(<EvalRulesPage activeProject="proj-2" />);
+    rerender(<ToastProvider><EvalRulesPage activeProject="proj-2" /></ToastProvider>);
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
@@ -172,7 +177,7 @@ describe("EvalRulesPage", () => {
   it("shows disabled badge for disabled rules", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules(mockRules));
 
-    render(<EvalRulesPage activeProject="proj-1" />);
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
 
     await waitFor(() => {
       expect(screen.getByText("Disabled")).toBeInTheDocument();
@@ -182,7 +187,7 @@ describe("EvalRulesPage", () => {
   it("shows enabled badge for enabled rules", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules(mockRules));
 
-    render(<EvalRulesPage activeProject="proj-1" />);
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
 
     await waitFor(() => {
       expect(screen.getByText("Enabled")).toBeInTheDocument();

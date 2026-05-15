@@ -4,10 +4,9 @@ import { OnboardingEmptyState } from "@/components/OnboardingEmptyState";
 import { Skeleton } from "@/components/Skeleton";
 import { EmptyState } from "@/components/EmptyState";
 import {
-  formatTime,
+  formatTimeWithYear,
   formatDuration,
-  truncate,
-  safeExtractInputOutput,
+  formatJsonPreview,
 } from "@/utils/formatters";
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -376,6 +375,18 @@ export default function TracesPage({
     { key: "environment", label: "Env", visible: columnVisibility.environment },
   ];
 
+  const columnTooltips: Record<string, string> = {
+    timestamp: "Timestamp of the span",
+    name: "Span or trace name",
+    input: "Input content (JSON preview)",
+    output: "Output content (JSON preview)",
+    observationLevels: "Observation count and type (e.g. LLM 3, chain 2)",
+    latency: "Duration of the span",
+    tokens: "Total token count (input + output)",
+    cost: "Estimated cost in USD",
+    environment: "Deployment environment",
+  };
+
   const fetchSpans = useCallback(
     async (cursor: string, append = false) => {
       setLoading(true);
@@ -393,6 +404,13 @@ export default function TracesPage({
           body.filters = [
             { field: "name", op: "ilike", value: `%${searchQuery}%` },
           ];
+        }
+
+        // Observations tab: show only observation-level spans (LLM, tool, agent, chain)
+        const observationKinds = ["llm", "tool", "agent", "chain"];
+        if (activeTab === "observations") {
+          body.filters = body.filters ?? [];
+          body.filters.push({ field: "kind", op: "in", value: observationKinds });
         }
 
         // Apply filter state
@@ -633,6 +651,7 @@ export default function TracesPage({
                       : "border-lantern-bg-cave text-lantern-ash/60 hover:text-lantern-pure hover:border-lantern-bg-illumination"
                   }`}
                   title={`Toggle ${col.label}`}
+                  aria-label={`Toggle ${col.label} column`}
                 >
                   {col.label.slice(0, 2).toUpperCase()}
                 </button>
@@ -679,6 +698,7 @@ export default function TracesPage({
                     <th
                       key={col.key}
                       className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider whitespace-nowrap"
+                      title={columnTooltips[col.key] ?? col.label}
                     >
                       {col.label}
                     </th>
@@ -714,7 +734,7 @@ export default function TracesPage({
                           )}
                           {col.key === "timestamp" && (
                             <span className="text-lantern-ash text-xs">
-                              {formatTime(span.start_time)}
+                              {formatTimeWithYear(span.start_time)}
                             </span>
                           )}
                           {col.key === "name" && (
@@ -733,13 +753,13 @@ export default function TracesPage({
                             </button>
                           )}
                           {col.key === "input" && (
-                            <div className="max-w-[200px] truncate text-lantern-ash text-xs font-mono">
-                              {span.input ? truncate(safeExtractInputOutput(span.input), 40) : "—"}
+                            <div className="max-w-[200px] text-lantern-ash text-xs font-mono">
+                              {span.input ? formatJsonPreview(span.input, 40) : "—"}
                             </div>
                           )}
                           {col.key === "output" && (
-                            <div className="max-w-[200px] truncate text-lantern-ash text-xs font-mono">
-                              {span.output ? truncate(safeExtractInputOutput(span.output), 40) : "—"}
+                            <div className="max-w-[200px] text-lantern-ash text-xs font-mono">
+                              {span.output ? formatJsonPreview(span.output, 40) : "—"}
                             </div>
                           )}
                           {col.key === "observationLevels" && (

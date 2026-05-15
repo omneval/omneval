@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { colors } from "@/theme";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { formatTime } from "@/utils/formatters";
+import { useToast } from "@/components/Toast";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -104,6 +105,7 @@ const BATCH_SIZE = 50;
 // ── Component ──────────────────────────────────────────────────────
 
 export default function DatasetsPage({ activeProject, onNavigateToDetail }: DatasetsPageProps) {
+  const { addToast } = useToast();
   const [datasets, setDatasets] = useState<DatasetListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -195,6 +197,7 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
       if (parsedItems.length > 0) {
         await importItems(datasetId, parsedItems);
       } else {
+        addToast("success", `Dataset "${newName.trim()}" created`);
         setShowNewForm(false);
         setParsedItems([]);
         setUploadedFile(null);
@@ -254,10 +257,13 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
         method: "DELETE",
       });
       if (res.ok) {
+        addToast("success", "Dataset deleted");
         await fetchDatasets();
+      } else {
+        addToast("error", "Failed to delete dataset");
       }
     } catch {
-      // silently fail
+      addToast("error", "Failed to delete dataset");
     } finally {
       setDeleting(null);
     }

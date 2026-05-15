@@ -3,6 +3,7 @@ import { colors } from "@/theme";
 import { EmptyState } from "@/components/EmptyState";
 import { formatTime } from "@/utils/formatters";
 import { diffText, diffModelConfig, type DiffLine, type ModelConfigDiff } from "@/utils/diff";
+import { useToast } from "@/components/Toast";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -72,6 +73,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
   const [newModel, setNewModel] = useState("gpt-4");
   const [newTemperature, setNewTemperature] = useState(0.7);
   const [newMaxTokens, setNewMaxTokens] = useState(256);
+  const { addToast } = useToast();
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -145,9 +147,10 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
       if (!res.ok) throw new Error("Failed to reassign label");
       // Update the assignment cache and refresh the prompt list
       setLabelAssignments((prev) => new Map(prev).set(`${promptName}:${label}`, version));
+      addToast("success", `Label "${label}" assigned to v${version}`);
       await fetchPrompts();
     } catch (e: unknown) {
-      // show error briefly
+      addToast("error", "Label reassignment failed");
       console.error("Label reassignment failed:", e);
     }
   };
@@ -218,6 +221,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
         }
         return;
       }
+      addToast("success", `Created prompt "${newName.trim()}" version 1`);
       setCreateSuccess(`Created prompt "${newName.trim()}" version 1`);
       setNewName("");
       setNewTemplate("");

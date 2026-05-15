@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import DatasetsPage from "./Datasets";
+import { ToastProvider } from "@/components/Toast";
+
+function renderWithToast(ui: React.ReactElement) {
+  return render(<ToastProvider>{ui}</ToastProvider>);
+}
 
 describe("DatasetsPage", () => {
   const mockDatasets = [
@@ -30,7 +35,7 @@ describe("DatasetsPage", () => {
   it("renders the page with header", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveDatasets(mockDatasets));
 
-    render(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
+    renderWithToast(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
 
     await waitFor(() => {
       expect(screen.getByText("Datasets")).toBeInTheDocument();
@@ -41,7 +46,7 @@ describe("DatasetsPage", () => {
   it("shows loading spinner on initial render", async () => {
     vi.spyOn(globalThis, "fetch").mockReturnValue(new Promise<Response>(() => {}));
 
-    render(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
+    renderWithToast(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
 
     expect(screen.getByText("Datasets")).toBeInTheDocument();
     // Spinner is present during loading (svg with animate-spin)
@@ -52,7 +57,7 @@ describe("DatasetsPage", () => {
   it("lists all datasets with name, item count, and date", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveDatasets(mockDatasets));
 
-    render(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
+    renderWithToast(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
 
     await waitFor(() => {
       expect(screen.getByText("Test Dataset")).toBeInTheDocument();
@@ -67,7 +72,7 @@ describe("DatasetsPage", () => {
   it("shows empty state when no datasets exist", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveDatasets([]));
 
-    render(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
+    renderWithToast(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
 
     await waitFor(() => {
       expect(screen.getByText(/No datasets found/)).toBeInTheDocument();
@@ -81,7 +86,7 @@ describe("DatasetsPage", () => {
       { ok: false, status: 500, text: () => Promise.resolve("Server error") } as Response
     );
 
-    render(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
+    renderWithToast(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
 
     await waitFor(() => {
       expect(screen.getByText(/Failed to fetch datasets/)).toBeInTheDocument();
@@ -93,7 +98,7 @@ describe("DatasetsPage", () => {
   it("shows create form when + New Dataset is clicked", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveDatasets([]));
 
-    render(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
+    renderWithToast(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
 
     await waitFor(() => {
       expect(screen.getByText("+ New Dataset")).toBeInTheDocument();
@@ -126,7 +131,7 @@ describe("DatasetsPage", () => {
       }
     );
 
-    render(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
+    renderWithToast(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
 
     await waitFor(() => {
       expect(screen.getByText("+ New Dataset")).toBeInTheDocument();
@@ -161,7 +166,7 @@ describe("DatasetsPage", () => {
       { ok: false, status: 400, text: () => Promise.resolve("Name is required") } as Response
     );
 
-    render(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
+    renderWithToast(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
 
     await waitFor(() => {
       expect(screen.getByText("+ New Dataset")).toBeInTheDocument();
@@ -189,7 +194,7 @@ describe("DatasetsPage", () => {
   it("cancels create form and closes it", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveDatasets([]));
 
-    render(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
+    renderWithToast(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
 
     await act(async () => {
       fireEvent.click(screen.getByText("+ New Dataset"));
@@ -219,7 +224,7 @@ describe("DatasetsPage", () => {
       }
     );
 
-    render(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
+    renderWithToast(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
 
     await waitFor(() => {
       expect(screen.getByText("Test Dataset")).toBeInTheDocument();
@@ -267,7 +272,7 @@ describe("DatasetsPage", () => {
     const navigate = vi.fn();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveDatasets(mockDatasets));
 
-    render(<DatasetsPage activeProject="proj-1" onNavigateToDetail={navigate} />);
+    renderWithToast(<DatasetsPage activeProject="proj-1" onNavigateToDetail={navigate} />);
 
     await waitFor(() => {
       expect(screen.getByText("Test Dataset")).toBeInTheDocument();
@@ -285,14 +290,14 @@ describe("DatasetsPage", () => {
   it("refetches when project changes", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveDatasets(mockDatasets));
 
-    const { rerender } = render(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
+    const { rerender } = renderWithToast(<DatasetsPage activeProject="proj-1" onNavigateToDetail={() => {}} />);
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith("/api/v1/datasets?project_id=proj-1");
     });
 
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveDatasets([]));
-    rerender(<DatasetsPage activeProject="proj-2" onNavigateToDetail={() => {}} />);
+    rerender(<ToastProvider><DatasetsPage activeProject="proj-2" onNavigateToDetail={() => {}} /></ToastProvider>);
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith("/api/v1/datasets?project_id=proj-2");
