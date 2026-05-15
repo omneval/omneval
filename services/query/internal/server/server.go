@@ -241,8 +241,11 @@ func Run() error {
 	// Build the router.
 	mux := http.NewServeMux()
 
-	// Register auth routes (login, logout, invite, change password, projects).
+	// Register auth routes (login, logout, invite, change password).
 	h.Register(mux)
+
+	// Projects list for the UI project switcher.
+	mux.HandleFunc("GET /api/v1/projects", spanHandler.HandleProjects)
 
 	// Span list with keyset pagination.
 	mux.HandleFunc("POST /api/v1/spans/query", spanHandler.HandleSpansQuery)
@@ -316,7 +319,6 @@ func Run() error {
 	mux.HandleFunc("GET /metrics", promhttp.Handler().ServeHTTP)
 
 	// Serve embedded UI for all other routes (SPA fallback to index.html).
-	// NOTE: GET /api/v1/projects is already registered by h.Register(mux) above.
 	mux.HandleFunc("/", serveUI)
 
 	sessionMw := auth.RequireAuth(store, cfg.Auth.SecureCookie, sessionTTL)

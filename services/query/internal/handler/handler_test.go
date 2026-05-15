@@ -1123,9 +1123,6 @@ func (f *FakeSessionStore) ListProjects(r *http.Request) ([]*domain.Project, err
 }
 
 func TestHandleProjects_ReturnsSnakeCaseJSON(t *testing.T) {
-	// HandleProjects should return JSON with snake_case keys
-	// (project_id, org_id, name, created_at) not PascalCase (ProjectID, OrgID, ...).
-	// This is what the UI frontend expects for the project switcher.
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
 	w := httptest.NewRecorder()
 

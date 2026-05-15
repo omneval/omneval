@@ -334,19 +334,19 @@ func scanAllRows(rows *sql.Rows) ([][]any, error) {
 // Used by the frontend project switcher dropdown.
 func (h *SpanHandler) HandleProjects(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	projects, err := h.SessionStore.ListProjects(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(projects); err != nil {
-		http.Error(w, "encode error", http.StatusInternalServerError)
+		writeJSONError(w, "encode error", http.StatusInternalServerError)
 		return
 	}
 }

@@ -115,7 +115,6 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/users/invite", h.Invite)
 	mux.HandleFunc("POST /api/v1/users/reset-password", h.ResetPassword)
 	mux.HandleFunc("PUT /api/v1/users/me/password", h.ChangePassword)
-	mux.HandleFunc("GET /api/v1/projects", h.HandleProjects)
 	mux.HandleFunc("POST /api/v1/projects", h.HandleCreateProject)
 	mux.HandleFunc("POST /api/v1/projects/{id}/api-keys", h.HandleGenerateAPIKey)
 	mux.HandleFunc("GET /api/v1/projects/{id}/api-keys", h.HandleListAPIKeys)
@@ -222,33 +221,6 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	ClearSessionCookie(w, h.secure)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
-}
-
-// HandleProjects handles GET /api/v1/projects.
-// Returns the list of projects for the authenticated user's organization.
-// Used by the frontend project switcher dropdown.
-func (h *Handler) HandleProjects(w http.ResponseWriter, r *http.Request) {
-	user := CurrentUserFromContext(r)
-	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-		return
-	}
-
-	// Look up the user to get their org ID
-	u, err := h.store.GetUserByID(r.Context(), user.UserID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to look up user"})
-		return
-	}
-
-	// List all projects for the user's org
-	projects, err := h.store.ListProjects(r.Context(), u.OrgID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list projects"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, projects)
 }
 
 // HandleCreateProject handles POST /api/v1/projects.
