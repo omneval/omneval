@@ -293,7 +293,7 @@ func TestPromptHandler_GetPromptByVersion(t *testing.T) {
 		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 
-	var resp domain.PromptVersion
+	var resp domain.PromptVersionJSON
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -304,8 +304,8 @@ func TestPromptHandler_GetPromptByVersion(t *testing.T) {
 	if resp.Version != 1 {
 		t.Errorf("version: got %d, want 1", resp.Version)
 	}
-	if resp.ModelConfig.Model != "gpt-4" {
-		t.Errorf("model: got %q, want %q", resp.ModelConfig.Model, "gpt-4")
+	if resp.Model != "gpt-4" {
+		t.Errorf("model: got %q, want %q", resp.Model, "gpt-4")
 	}
 	if resp.Template != "Hello {{name}}!" {
 		t.Errorf("template: got %q, want %q", resp.Template, "Hello {{name}}!")
@@ -621,25 +621,17 @@ func TestPromptHandler_CreatePrompt_ResponseUsesSnakeCase(t *testing.T) {
 		}
 	}
 
-	// Verify model_config uses snake_case
-	if !strings.Contains(body, `"model_config"`) {
-		t.Errorf("response missing snake_case key 'model_config'\nbody: %s", body)
-	}
-
-	// Verify model_config inner fields use snake_case
-	innerSnakeKeys := []string{"model", "temperature", "max_tokens"}
-	for _, key := range innerSnakeKeys {
+	// Verify model fields are flattened into the top-level (not nested).
+	flatKeys := []string{"model", "temperature", "max_tokens"}
+	for _, key := range flatKeys {
 		if !strings.Contains(body, `"`+key+`"`) {
-			t.Errorf("model_config missing snake_case key %q\nbody: %s", key, body)
+			t.Errorf("response missing flattened key %q\nbody: %s", key, body)
 		}
 	}
 
-	// Verify model_config inner PascalCase keys are NOT present
-	innerPascalKeys := []string{"Model", "Temperature", "MaxTokens"}
-	for _, key := range innerPascalKeys {
-		if strings.Contains(body, `"`+key+`"`) {
-			t.Errorf("model_config contains PascalCase key %q (should be snake_case)\nbody: %s", key, body)
-		}
+	// Verify model_config does NOT exist as a nested key (fields are inlined).
+	if strings.Contains(body, `"model_config"`) {
+		t.Errorf("response should not contain nested 'model_config'\nbody: %s", body)
 	}
 }
 
@@ -675,19 +667,14 @@ func TestPromptHandler_CreatePrompt_ModelConfigDeserialization(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	modelConfig, ok := resp["model_config"].(map[string]any)
-	if !ok {
-		t.Fatalf("model_config is not an object\nbody: %s", w.Body.String())
+	if resp["model"] != "gpt-4o" {
+		t.Errorf("model: got %v, want 'gpt-4o'", resp["model"])
 	}
-
-	if modelConfig["model"] != "gpt-4o" {
-		t.Errorf("model_config.model: got %v, want 'gpt-4o'", modelConfig["model"])
+	if resp["temperature"] != 0.7 {
+		t.Errorf("temperature: got %v, want 0.7", resp["temperature"])
 	}
-	if modelConfig["temperature"] != 0.7 {
-		t.Errorf("model_config.temperature: got %v, want 0.7", modelConfig["temperature"])
-	}
-	if modelConfig["max_tokens"] != float64(1024) {
-		t.Errorf("model_config.max_tokens: got %v, want 1024", modelConfig["max_tokens"])
+	if resp["max_tokens"] != float64(1024) {
+		t.Errorf("max_tokens: got %v, want 1024", resp["max_tokens"])
 	}
 }
 
@@ -766,8 +753,8 @@ func TestPromptHandler_GetPrompt_VersionResponseUsesSnakeCase(t *testing.T) {
 
 	body := w.Body.String()
 
-	// Verify snake_case keys
-	snakeKeys := []string{"version_id", "project_id", "name", "version", "template", "model_config", "created_at"}
+	// Verify snake_case keys (model fields are now flattened into parent)
+	snakeKeys := []string{"version_id", "project_id", "name", "version", "template", "model", "temperature", "max_tokens", "created_at"}
 	for _, key := range snakeKeys {
 		if !strings.Contains(body, `"`+key+`"`) {
 			t.Errorf("response missing snake_case key %q\nbody: %s", key, body)
@@ -775,11 +762,16 @@ func TestPromptHandler_GetPrompt_VersionResponseUsesSnakeCase(t *testing.T) {
 	}
 
 	// Verify PascalCase keys are NOT present
-	pascalKeys := []string{"VersionID", "ProjectID", "Name", "ModelConfig", "CreatedAt"}
+	pascalKeys := []string{"VersionID", "ProjectID", "Name", "ModelConfig", "CreatedAt", "Model", "Temperature", "MaxTokens"}
 	for _, key := range pascalKeys {
 		if strings.Contains(body, `"`+key+`"`) {
 			t.Errorf("response contains PascalCase key %q (should be snake_case)\nbody: %s", key, body)
 		}
+	}
+
+	// Verify model_config does NOT exist as a nested key (fields are inlined).
+	if strings.Contains(body, `"model_config"`) {
+		t.Errorf("response should not contain nested 'model_config'\nbody: %s", body)
 	}
 }
 
@@ -1416,6 +1408,175 @@ func TestPromptHandler_ListPromptVersions_ProjectID(t *testing.T) {
 	// CreatedAt must not be zero.
 	if resp.Versions[0].CreatedAt.IsZero() {
 		t.Errorf("version CreatedAt is zero")
+	}
+}
+
+// TestPromptHandler_CreatePrompt_ModelFieldsFlattenedIntoParent verifies that
+// the API response flattens model, temperature, and max_tokens into the
+// top-level JSON object (not nested under model_config). This is required
+// for the frontend PromptVersion interface which expects flat fields.
+// Regression test for issue #93.
+func TestPromptHandler_CreatePrompt_ModelFieldsFlattenedIntoParent(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(`{
+		"name": "greeting",
+		"version": 1,
+		"template": "Hello {{name}}!",
+		"model": "gpt-4o",
+		"temperature": 0.7,
+		"max_tokens": 1024
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreatePrompt(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Acceptance: model, temperature, max_tokens must be at the top level.
+	model, ok := resp["model"].(string)
+	if !ok {
+		t.Fatalf("top-level 'model' key missing or not a string\nbody: %s", w.Body.String())
+	}
+	if model != "gpt-4o" {
+		t.Errorf("top-level model: got %q, want %q", model, "gpt-4o")
+	}
+
+	temp, ok := resp["temperature"].(float64)
+	if !ok {
+		t.Fatalf("top-level 'temperature' key missing or not a number\nbody: %s", w.Body.String())
+	}
+	if temp != 0.7 {
+		t.Errorf("top-level temperature: got %v, want 0.7", temp)
+	}
+
+	maxTokens, ok := resp["max_tokens"].(float64)
+	if !ok {
+		t.Fatalf("top-level 'max_tokens' key missing or not a number\nbody: %s", w.Body.String())
+	}
+	if maxTokens != 1024 {
+		t.Errorf("top-level max_tokens: got %v, want 1024", maxTokens)
+	}
+
+	// model_config should NOT exist as a nested key (fields are inlined).
+	if _, hasNested := resp["model_config"]; hasNested {
+		t.Errorf("response should not contain nested 'model_config' (fields are flattened)\nbody: %s", w.Body.String())
+	}
+}
+
+// TestPromptHandler_GetPrompt_ModelFieldsFlattenedIntoParent verifies that
+// GET /api/v1/prompts/:name also returns flat model/temperature/max_tokens.
+func TestPromptHandler_GetPrompt_ModelFieldsFlattenedIntoParent(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store: store,
+		Cache: cache,
+	}
+
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID:   "v1",
+		ProjectID:   "test-proj",
+		Name:        "greeting",
+		Version:     1,
+		Template:    "Hello {{name}}!",
+		ModelConfig: domain.PromptModelConfig{Model: "claude-3", Temperature: 0.5, MaxTokens: 512},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting?version=1&project_id=test-proj", nil)
+	w := httptest.NewRecorder()
+	handler.HandleGetPrompt(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	model := resp["model"]
+	if model != "claude-3" {
+		t.Errorf("top-level model: got %v, want 'claude-3'", model)
+	}
+	temp := resp["temperature"]
+	if temp != 0.5 {
+		t.Errorf("top-level temperature: got %v, want 0.5", temp)
+	}
+	maxTokens := resp["max_tokens"]
+	if maxTokens != float64(512) {
+		t.Errorf("top-level max_tokens: got %v, want 512", maxTokens)
+	}
+
+	if _, hasNested := resp["model_config"]; hasNested {
+		t.Errorf("response should not contain nested 'model_config'")
+	}
+}
+
+// TestPromptHandler_ListPromptVersions_ModelFieldsFlattened verifies that
+// GET /api/v1/prompts/:name/versions returns flat model fields.
+func TestPromptHandler_ListPromptVersions_ModelFieldsFlattened(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID:   "v1",
+		ProjectID:   "test-proj",
+		Name:        "greeting",
+		Version:     1,
+		Template:    "Hello!",
+		ModelConfig: domain.PromptModelConfig{Model: "gpt-4", Temperature: 0.7, MaxTokens: 256},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting/versions?project_id=test-proj", nil)
+	w := httptest.NewRecorder()
+	handler.HandleListPromptVersions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Versions []map[string]any `json:"versions"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if len(resp.Versions) == 0 {
+		t.Fatal("expected at least one version")
+	}
+
+	v := resp.Versions[0]
+	model := v["model"]
+	if model != "gpt-4" {
+		t.Errorf("version[0].model: got %v, want 'gpt-4'", model)
+	}
+	temp := v["temperature"]
+	if temp != 0.7 {
+		t.Errorf("version[0].temperature: got %v, want 0.7", temp)
+	}
+	maxTokens := v["max_tokens"]
+	if maxTokens != float64(256) {
+		t.Errorf("version[0].max_tokens: got %v, want 256", maxTokens)
 	}
 }
 

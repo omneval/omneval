@@ -122,7 +122,7 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(pv)
+	json.NewEncoder(w).Encode(pv.ToJSON())
 }
 
 // HandleGetPrompt handles GET /api/v1/prompts/:name.
@@ -175,7 +175,7 @@ func (h *PromptHandler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(pv)
+	json.NewEncoder(w).Encode(pv.ToJSON())
 }
 
 // getLatestVersion returns the prompt version with the highest version number
@@ -507,9 +507,19 @@ func (h *PromptHandler) HandleListPromptVersions(w http.ResponseWriter, r *http.
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"name":     name,
-		"versions": versions,
+		"versions": versionsToJSON(versions),
 		"count":    len(versions),
 	})
+}
+
+// versionsToJSON converts []*domain.PromptVersion to []domain.PromptVersionJSON
+// so that model/temperature/max_tokens appear as flat top-level fields.
+func versionsToJSON(versions []*domain.PromptVersion) []domain.PromptVersionJSON {
+	result := make([]domain.PromptVersionJSON, len(versions))
+	for i, v := range versions {
+		result[i] = v.ToJSON()
+	}
+	return result
 }
 
 // extractPromptName extracts the prompt name from a URL path like
