@@ -138,7 +138,7 @@ export function ErrorBanner({ message, onDismiss, onRetry, retryLabel = "Retry" 
       style={{
         background: "rgba(239, 68, 68, 0.1)",
         border: "1px solid rgba(239, 68, 68, 0.25)",
-        color: "#FCA5A5",
+        color: colors.accents.dangerLight,
       }}
       role="alert"
     >
@@ -168,7 +168,7 @@ export function ErrorBanner({ message, onDismiss, onRetry, retryLabel = "Retry" 
           style={{
             background: "rgba(255, 87, 34, 0.15)",
             border: "1px solid rgba(255, 87, 34, 0.3)",
-            color: "#FF8A65",
+            color: colors.accents.softGlow,
           }}
         >
           <RetryIcon />

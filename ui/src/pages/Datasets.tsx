@@ -308,7 +308,7 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder="Dataset name"
-              className="text-xs px-3 py-1.5 rounded border outline-none flex-1 bg-black/40"
+              className="text-xs px-3 py-1.5 rounded border outline-none flex-1 bg-black/40 input-focus"
               style={{
                 borderColor: colors.backgrounds.caveWall,
                 color: colors.typography.pureLight,

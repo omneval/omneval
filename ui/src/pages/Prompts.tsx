@@ -39,19 +39,19 @@ const VERSION_OPTIONS = Array.from({ length: 50 }, (_, i) => i + 1);
 
 function labelColor(label: string): string {
   switch (label) {
-    case "production": return "#FF5722";
-    case "staging": return "#FF8A65";
-    case "dev": return "#A1A1AA";
-    default: return "#666";
+    case "production": return colors.accents.emberFlare;
+    case "staging": return colors.accents.softGlow;
+    case "dev": return colors.typography.ashGrey;
+    default: return colors.accents.deepHeat;
   }
 }
 
 function labelBg(label: string): string {
   switch (label) {
-    case "production": return "rgba(255, 87, 34, 0.15)";
-    case "staging": return "rgba(255, 138, 101, 0.15)";
-    case "dev": return "rgba(161, 161, 170, 0.15)";
-    default: return "rgba(102, 102, 102, 0.15)";
+    case "production": return colors.toRgba(colors.accents.emberFlare, 0.15);
+    case "staging": return colors.toRgba(colors.accents.softGlow, 0.15);
+    case "dev": return colors.toRgba(colors.typography.ashGrey, 0.15);
+    default: return colors.toRgba(colors.accents.deepHeat, 0.15);
   }
 }
 
@@ -322,7 +322,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
             </div>
           )}
           {createSuccess && (
-            <div className="mb-3 px-3 py-2 rounded text-sm" style={{ backgroundColor: "rgba(100,255,100,0.1)", color: "#66ff66" }}>
+            <div className="mb-3 px-3 py-2 rounded text-sm" style={{ backgroundColor: "rgba(34, 197, 94, 0.1)", color: colors.typography.pureLight }}>
               {createSuccess}
             </div>
           )}
@@ -335,7 +335,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 value={newName}
                 onChange={(e) => { setNewName(e.target.value); setFormErrors((prev) => ({ ...prev, name: "" })); }}
                 placeholder="e.g. greeting"
-                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors ${formErrors.name ? "border-lantern-danger" : ""}`}
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.name ? "border-lantern-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
                   borderColor: formErrors.name ? colors.accents.dangerRed : colors.backgrounds.caveWall,
@@ -353,7 +353,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 value={newModel}
                 onChange={(e) => { setNewModel(e.target.value); setFormErrors((prev) => ({ ...prev, model: "" })); }}
                 placeholder="e.g. gpt-4"
-                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors ${formErrors.model ? "border-lantern-danger" : ""}`}
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.model ? "border-lantern-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
                   borderColor: formErrors.model ? colors.accents.dangerRed : colors.backgrounds.caveWall,
@@ -368,15 +368,15 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
 
           <div className="grid grid-cols-3 gap-4 mb-4">
             <div>
-              <label className="block text-xs text-lantern-ash mb-1">Temperature (0–1)</label>
+              <label className="block text-xs text-lantern-ash mb-1">Temperature (0–2)</label>
               <input
                 type="number"
                 value={newTemperature}
                 min={0}
-                max={1}
+                max={2}
                 step={0.1}
                 onChange={(e) => { setNewTemperature(parseFloat(e.target.value) || 0); setFormErrors((prev) => ({ ...prev, temperature: "" })); }}
-                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors ${formErrors.temperature ? "border-lantern-danger" : ""}`}
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.temperature ? "border-lantern-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
                   borderColor: formErrors.temperature ? colors.accents.dangerRed : colors.backgrounds.caveWall,
@@ -394,7 +394,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 value={newMaxTokens}
                 min={1}
                 onChange={(e) => { setNewMaxTokens(parseInt(e.target.value) || 0); setFormErrors((prev) => ({ ...prev, maxTokens: "" })); }}
-                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors ${formErrors.maxTokens ? "border-lantern-danger" : ""}`}
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.maxTokens ? "border-lantern-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
                   borderColor: formErrors.maxTokens ? colors.accents.dangerRed : colors.backgrounds.caveWall,
@@ -419,7 +419,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
               onChange={(e) => { setNewTemplate(e.target.value); setFormErrors((prev) => ({ ...prev, template: "" })); }}
               placeholder="Hello {{name}}, welcome to {{place}}!"
               rows={4}
-              className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors font-mono resize-none ${formErrors.template ? "border-lantern-danger" : ""}`}
+              className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors font-mono resize-none input-focus ${formErrors.template ? "border-lantern-danger" : ""}`}
               style={{
                 backgroundColor: colors.backgrounds.abyssBlack,
                 borderColor: formErrors.template ? colors.accents.dangerRed : colors.backgrounds.caveWall,
@@ -704,7 +704,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                   const v = parseInt(e.target.value);
                   computeDiff(versionData.get(diffPromptName) || [], v, diffNewVersion);
                 }}
-                className="text-xs px-2 py-1 rounded border outline-none"
+                className="text-xs px-2 py-1 rounded border outline-none input-focus"
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
                   borderColor: colors.backgrounds.caveWall,
@@ -724,7 +724,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                   const v = parseInt(e.target.value);
                   computeDiff(versionData.get(diffPromptName) || [], diffOldVersion, v);
                 }}
-                className="text-xs px-2 py-1 rounded border outline-none"
+                className="text-xs px-2 py-1 rounded border outline-none input-focus"
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
                   borderColor: colors.backgrounds.caveWall,
@@ -774,9 +774,9 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                         : "transparent";
                     const text =
                       line.type === "added"
-                        ? "#22c55e"
+                        ? colors.typography.pureLight
                         : line.type === "removed"
-                        ? "#ef4444"
+                        ? colors.accents.dangerLight
                         : colors.typography.pureLight;
                     const leftBorder =
                       line.type === "added"
@@ -834,10 +834,10 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                             <td className="px-4 py-2 font-medium" style={{ color: colors.typography.pureLight }}>
                               {d.field}
                             </td>
-                            <td className="px-4 py-2" style={{ color: "#ef4444", textDecoration: d.newValue !== d.oldValue ? "line-through" : undefined }}>
+                            <td className="px-4 py-2" style={{ color: colors.accents.dangerRed, textDecoration: d.newValue !== d.oldValue ? "line-through" : undefined }}>
                               {String(d.oldValue)}
                             </td>
-                            <td className="px-4 py-2 font-medium" style={{ color: "#22c55e" }}>
+                            <td className="px-4 py-2 font-medium" style={{ color: colors.typography.pureLight }}>
                               {String(d.newValue)}
                             </td>
                           </tr>

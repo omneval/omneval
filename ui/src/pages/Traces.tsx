@@ -84,9 +84,9 @@ function ObservationPills({ childSpans }: ObservationPillsProps) {
           key={kind}
           className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
           style={{
-            background: `${colors.accents.emberFlare}22`,
+            background: colors.toRgba(colors.accents.emberFlare, 0.13),
             color: colors.accents.softGlow,
-            border: `1px solid ${colors.accents.emberFlare}44`,
+            border: `1px solid ${colors.toRgba(colors.accents.emberFlare, 0.27)}`,
           }}
         >
           {kind.slice(0, 3).toUpperCase()} {count}

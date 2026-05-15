@@ -110,7 +110,7 @@ function StatusBadge({ enabled }: { enabled: boolean }) {
     return (
       <span
         className="text-xs px-2 py-0.5 rounded font-medium"
-        style={{ backgroundColor: "rgba(34,197,94,0.1)", color: "#22c55e" }}
+        style={{ backgroundColor: colors.toRgba(colors.accents.emberFlare, 0.1), color: colors.accents.emberFlare }}
       >
         Enabled
       </span>
