@@ -23,8 +23,8 @@ type Syncer struct {
 	syncInterval time.Duration
 	snapshotKey  string
 	metrics      *metrics.WriterMetrics
-	// lastSyncMod tracks the file modification time of the last uploaded
-	// snapshot. Used to skip uploads when the file hasn't changed (issue #82).
+	// lastSyncMod is the mtime of the last successfully uploaded snapshot.
+	// A subsequent sync with the same mtime is skipped.
 	lastSyncMod time.Time
 }
 
