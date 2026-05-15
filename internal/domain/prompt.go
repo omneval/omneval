@@ -35,8 +35,9 @@ type PromptVersionJSON struct {
 	CreatedAt   string  `json:"created_at"`
 }
 
-// ToJSON flattens PromptVersion into the API response format.
-// Model/temperature/max_tokens are top-level keys, not nested.
+// ToJSON converts a domain PromptVersion into the flattened API response
+// representation (PromptVersionJSON) with model/temperature/max_tokens at
+// the top level, matching the frontend PromptVersion interface.
 func (pv *PromptVersion) ToJSON() PromptVersionJSON {
 	return PromptVersionJSON{
 		VersionID:   pv.VersionID,
