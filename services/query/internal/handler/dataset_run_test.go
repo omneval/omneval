@@ -494,6 +494,40 @@ func TestHandleListRuns_EmptyList(t *testing.T) {
 	}
 }
 
+// TestHandleListRuns_WithoutJudgeClient verifies that the list runs endpoint
+// works without a JudgeClient. This is important because the server.go route
+// registration should not gate read endpoints behind judge LLM config.
+func TestHandleListRuns_WithoutJudgeClient(t *testing.T) {
+	t.Parallel()
+
+	store := fake.NewFakeMetadataStore()
+	handler := &DatasetRunHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+		// JudgeClient is nil — simulating no LLM configured.
+	}
+
+	ds := &domain.Dataset{DatasetID: uuid.New().String(), ProjectID: "test-proj", Name: "empty"}
+	store.CreateDataset(context.Background(), ds)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/datasets/"+ds.DatasetID+"/runs", nil)
+	w := httptest.NewRecorder()
+	handler.HandleListRuns(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp ListDatasetRunsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v\nbody: %s", err, w.Body.String())
+	}
+
+	if len(resp.Runs) != 0 {
+		t.Errorf("runs count: got %d, want 0", len(resp.Runs))
+	}
+}
+
 // ---- Tests for HandleGetRun ----
 
 func TestHandleGetRun_ReturnsRunWithItems(t *testing.T) {

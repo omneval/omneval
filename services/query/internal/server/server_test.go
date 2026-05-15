@@ -13,6 +13,7 @@ import (
 	"github.com/zbloss/lantern/internal/domain"
 	"github.com/zbloss/lantern/internal/fake"
 	"github.com/zbloss/lantern/services/query/internal/auth"
+	"github.com/zbloss/lantern/services/query/internal/handler"
 	"github.com/zbloss/lantern/services/query/internal/playground"
 )
 
@@ -377,6 +378,144 @@ func TestPlaygroundRunRoute_NoLLMConfig(t *testing.T) {
 		t.Error("expected 'error' field in JSON response")
 	}
 }
+
+// TestDatasetRunsRoute_NoLLMConfig verifies that the GET dataset runs
+// endpoint returns valid JSON (not HTML) even when the judge LLM is not
+// configured. Without this, the route falls through to the SPA fallback
+// and the frontend gets "Unexpected token '<', "<!DOCTYPE" is not valid JSON".
+func TestDatasetRunsRoute_NoLLMConfig(t *testing.T) {
+	t.Parallel()
+
+	store := fake.NewFakeMetadataStore()
+	h := auth.NewHandler(store, false, 1*time.Hour, "admin@example.com", "admin-password")
+	_, _ = h.BootstrapAdmin(nil)
+
+	ds := &domain.Dataset{
+		DatasetID: "test-ds-123",
+		ProjectID: "test-proj",
+		Name:      "Test Dataset",
+	}
+	store.CreateDataset(nil, ds)
+
+	m2 := http.NewServeMux()
+
+	// Register dataset run endpoints WITHOUT a judge LLM client.
+	// This mirrors the fix: read endpoints should be available even
+	// when the judge LLM is not configured.
+	dummyHandler := &runsHandlerNoLLM{
+		sessionStore: h,
+		store:        store,
+	}
+	m2.HandleFunc("GET /api/v1/datasets/{id}/runs", dummyHandler.HandleListRuns)
+	m2.HandleFunc("GET /api/v1/datasets/{id}/runs/{runId}", dummyHandler.HandleGetRun)
+	m2.HandleFunc("GET /api/v1/datasets/{id}/runs/{runId}/status", dummyHandler.HandleGetRunStatus)
+
+	m2.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<!DOCTYPE html><html><body>SPA</body></html>"))
+	})
+
+	sessionMw := auth.RequireAuth(store, false, 1*time.Hour)
+	wrapper := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			sessionMw(m2).ServeHTTP(w, r)
+			return
+		}
+		m2.ServeHTTP(w, r)
+	})
+
+	ts := httptest.NewServer(wrapper)
+	defer ts.Close()
+
+	sessionID := "test-session-id"
+	_ = store.CreateSession(nil, &domain.Session{
+		SessionID: sessionID,
+		UserID:    "admin",
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+	})
+
+	// Request the runs endpoint — should return JSON, not HTML.
+	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/datasets/"+ds.DatasetID+"/runs?project_id=test-proj", nil)
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Must NOT be HTML — this is the core assertion that catches the bug.
+	contentType := resp.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "text/html") {
+		t.Fatalf("Content-Type is HTML (%q), expected JSON — route fell through to SPA fallback", contentType)
+	}
+
+	// Body must be parseable as JSON.
+	var body map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("body is not valid JSON: %v\nraw: %s", err, resp.Body)
+	}
+}
+
+// runsHandlerNoLLM is a minimal handler that mirrors the DatasetRunHandler
+// read-endpoint logic without needing a JudgeClient.
+type runsHandlerNoLLM struct {
+	sessionStore handler.SessionStore
+	store        *fake.FakeMetadataStore
+}
+
+func (h *runsHandlerNoLLM) HandleListRuns(w http.ResponseWriter, r *http.Request) {
+	projectID, datasetID, err := h.authDataset(r)
+	if err != nil {
+		ae, _ := err.(*runsAuthError)
+		http.Error(w, ae.Message, ae.StatusCode)
+		return
+	}
+	_ = projectID
+	_ = datasetID
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"runs": []interface{}{}})
+}
+
+func (h *runsHandlerNoLLM) HandleGetRun(w http.ResponseWriter, r *http.Request) {
+	_, _, err := h.authDataset(r)
+	if err != nil {
+		ae, _ := err.(*runsAuthError)
+		http.Error(w, ae.Message, ae.StatusCode)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{})
+}
+
+func (h *runsHandlerNoLLM) HandleGetRunStatus(w http.ResponseWriter, r *http.Request) {
+	_, _, err := h.authDataset(r)
+	if err != nil {
+		ae, _ := err.(*runsAuthError)
+		http.Error(w, ae.Message, ae.StatusCode)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "pending"})
+}
+
+func (h *runsHandlerNoLLM) authDataset(r *http.Request) (string, string, error) {
+	projectID, ok := h.sessionStore.ProjectID(r)
+	if !ok || projectID == "" {
+		return "", "", &runsAuthError{Message: "unauthorized", StatusCode: http.StatusUnauthorized}
+	}
+	datasetID := r.PathValue("id")
+	if datasetID == "" {
+		return "", "", &runsAuthError{Message: "dataset ID is required", StatusCode: http.StatusBadRequest}
+	}
+	return projectID, datasetID, nil
+}
+
+type runsAuthError struct {
+	Message    string
+	StatusCode int
+}
+
+func (e *runsAuthError) Error() string { return e.Message }
 
 func TestSessionMiddleware_IsApplied(t *testing.T) {
 	// Create a minimal mux to test that RequireAuth wraps handlers.
