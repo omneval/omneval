@@ -193,4 +193,55 @@ describe("EvalRulesPage", () => {
       expect(screen.getByText("Enabled")).toBeInTheDocument();
     });
   });
+
+  it("handles rules with null/undefined filter without crashing", async () => {
+    const rulesWithNullFilter = [
+      {
+        RuleID: "rule-1",
+        ProjectID: "proj-1",
+        Name: "Rule With Null Filter",
+        JudgeModel: "gpt-4",
+        PromptName: "judge-v1",
+        PromptVersion: 1,
+        SampleRate: 1.0,
+        Enabled: true,
+        CreatedAt: "2026-05-13T10:00:00Z",
+        Filter: null,
+      },
+    ];
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules(rulesWithNullFilter));
+
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Rule With Null Filter")).toBeInTheDocument();
+      expect(screen.getByText("gpt-4")).toBeInTheDocument();
+    });
+  });
+
+  it("handles rules with missing filter field without crashing", async () => {
+    const rulesWithMissingFilter = [
+      {
+        RuleID: "rule-1",
+        ProjectID: "proj-1",
+        Name: "Rule Without Filter",
+        JudgeModel: "gpt-4",
+        PromptName: "judge-v1",
+        PromptVersion: 1,
+        SampleRate: 1.0,
+        Enabled: true,
+        CreatedAt: "2026-05-13T10:00:00Z",
+      },
+    ];
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules(rulesWithMissingFilter));
+
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Rule Without Filter")).toBeInTheDocument();
+      expect(screen.getByText("gpt-4")).toBeInTheDocument();
+    });
+  });
 });

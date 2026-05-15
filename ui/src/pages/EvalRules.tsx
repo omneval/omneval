@@ -30,7 +30,7 @@ interface EvalRule {
   SampleRate: number;
   Enabled: boolean;
   CreatedAt: string;
-  Filter: EvalFilter;
+  Filter: EvalFilter | null | undefined;
 }
 
 interface EvalFilter {
@@ -143,7 +143,8 @@ function sampleRatePercent(rate: number): string {
   return `${(rate * 100).toFixed(0)}%`;
 }
 
-function filterDisplayText(filter: EvalFilter): string {
+function filterDisplayText(filter: EvalFilter | null | undefined): string {
+  if (!filter) return "no filter";
   const parts: string[] = [];
   if (filter.kind) parts.push(`kind=${filter.kind}`);
   if (filter.model) parts.push(`model=${filter.model}`);
