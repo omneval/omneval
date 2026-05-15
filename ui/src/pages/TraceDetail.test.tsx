@@ -9,17 +9,24 @@ function renderWithProvider(ui: React.ReactElement) {
   return render(<ToastProvider>{ui}</ToastProvider>);
 }
 
+// Helper to detect React hook order violations in console.error output.
+// React prints hook order warnings with "hook" or a line number (e.g. "310").
+function captureConsoleErrors() {
+  const saved = console.error;
+  let found: string | null = null;
+  console.error = (...args: unknown[]) => {
+    const msg = args.join(" ");
+    if (msg.includes("hook") || msg.includes("310")) {
+      found = msg;
+    }
+    saved(...args);
+  };
+  return { found, restore: () => { console.error = saved; } };
+}
+
 describe("hook ordering", () => {
   it("does not throw React hook order violation when traceId is empty (loading state)", () => {
-    const consoleError = console.error;
-    let hookOrderError: string | null = null;
-    console.error = (...args: unknown[]) => {
-      const msg = args.join(" ");
-      if (msg.includes("hook") || msg.includes("310")) {
-        hookOrderError = msg;
-      }
-      consoleError(...args);
-    };
+    const { found, restore } = captureConsoleErrors();
 
     expect(() => {
       renderWithProvider(
@@ -31,9 +38,8 @@ describe("hook ordering", () => {
       );
     }).not.toThrow();
 
-    expect(hookOrderError).toBeNull();
-
-    console.error = consoleError;
+    expect(found).toBeNull();
+    restore();
   });
 
   it("does not throw React hook order violation when trace is not found (error state)", async () => {
@@ -42,17 +48,9 @@ describe("hook ordering", () => {
       status: 404,
     } as Response);
 
-    const consoleError = console.error;
-    let hookOrderError: string | null = null;
-    console.error = (...args: unknown[]) => {
-      const msg = args.join(" ");
-      if (msg.includes("hook") || msg.includes("310")) {
-        hookOrderError = msg;
-      }
-      consoleError(...args);
-    };
+    const { found, restore } = captureConsoleErrors();
 
-    // Note: This will still show loading first, then error. The hook order
+    // This test still shows loading first, then error. The hook order
     // must be stable across both states.
     renderWithProvider(
       <TraceDetailPage
@@ -64,9 +62,8 @@ describe("hook ordering", () => {
 
     await screen.findByText("Trace not found");
 
-    expect(hookOrderError).toBeNull();
-
-    console.error = consoleError;
+    expect(found).toBeNull();
+    restore();
   });
 });
 
@@ -252,16 +249,15 @@ describe("tree view renders with loaded trace data", () => {
 
     await waitForTraceLoaded();
 
-    // Should be in waterfall mode by default
+    // Waterfall is the default view
     expect(screen.getByText("Waterfall Timeline")).toBeInTheDocument();
 
-    // Switch to tree view
     const treeTab = screen.getByText("Tree");
     await act(async () => {
       fireEvent.click(treeTab);
     });
 
-    // Should now show tree view with children
+    // Tree view renders the same child spans
     expect(screen.getByText("llm-call")).toBeInTheDocument();
     expect(screen.getByText("tool-use")).toBeInTheDocument();
   });
@@ -299,13 +295,11 @@ describe("tree view renders with loaded trace data", () => {
       />
     );
 
-    // Wait for trace data to load and render
     await waitFor(() => {
       const spans = screen.queryAllByText("single-span");
       expect(spans.length).toBeGreaterThan(0);
     });
 
-    // Switch to tree view
     const treeTab = screen.getByText("Tree");
     await act(async () => {
       fireEvent.click(treeTab);
@@ -354,9 +348,7 @@ describe("back navigation from trace detail", () => {
 
     await waitForTraceLoaded();
 
-    // Breadcrumb should contain "Traces" link
     expect(screen.getByText("Traces")).toBeInTheDocument();
-    // Trace ID should be shown (first 8 chars + unicode ellipsis)
     expect(screen.getByText("Trace: test-tra…")).toBeInTheDocument();
   });
 });
@@ -381,25 +373,21 @@ describe("span selection in waterfall", () => {
 
     await waitForTraceLoaded();
 
-    // Count initial "llm-call" occurrences (should be 1 - in waterfall list only)
     const initialLlmCalls = screen.getAllByText("llm-call").length;
     expect(initialLlmCalls).toBeGreaterThanOrEqual(1);
 
-    // Span list items should be clickable via role="button"
     const llmCallRow = screen.getByText("llm-call").closest('[role="button"]');
     expect(llmCallRow).toBeInTheDocument();
 
-    // Click the span to select it
     await act(async () => {
       fireEvent.click(llmCallRow!);
     });
 
-    // After selection, "llm-call" should appear in the detail panel too
-    // The waterfall list still shows it, and the panel header also shows it
+    // After selection, "llm-call" appears in both the list and the detail panel header
     const llmCallElements = screen.getAllByText("llm-call");
     expect(llmCallElements.length).toBe(initialLlmCalls + 1);
 
-    // The detail panel has a badge showing the kind
+    // The detail panel shows the span kind badge
     const llmBadges = screen.getAllByText("llm");
     expect(llmBadges.length).toBeGreaterThan(0);
   });
@@ -441,15 +429,7 @@ describe("hook ordering with loaded data", () => {
   });
 
   it("does not throw React hook order violation when trace loads successfully", async () => {
-    const consoleError = console.error;
-    let hookOrderError: string | null = null;
-    console.error = (...args: unknown[]) => {
-      const msg = args.join(" ");
-      if (msg.includes("hook") || msg.includes("310")) {
-        hookOrderError = msg;
-      }
-      consoleError(...args);
-    };
+    const { found, restore } = captureConsoleErrors();
 
     expect(() => {
       renderWithProvider(
@@ -463,8 +443,7 @@ describe("hook ordering with loaded data", () => {
 
     await waitForTraceLoaded();
 
-    expect(hookOrderError).toBeNull();
-
-    console.error = consoleError;
+    expect(found).toBeNull();
+    restore();
   });
 });
