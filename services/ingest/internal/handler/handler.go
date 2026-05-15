@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/zbloss/lantern/internal/auth"
-	handlers "github.com/zbloss/lantern/internal/handlers"
 	"github.com/zbloss/lantern/internal/domain"
+	handlers "github.com/zbloss/lantern/internal/handlers"
 	"github.com/zbloss/lantern/services/ingest/internal/metrics"
 )
 
@@ -172,6 +173,9 @@ func (h *NativeHandler) validateAndTransform(ns *NativeSpan, vk *auth.ValidatedK
 		if len(ns.SpanID) != 16 {
 			return fmt.Errorf("span_id must be a 16-character lowercase hex string (0-9, a-f), got %d characters", len(ns.SpanID))
 		}
+		if ns.SpanID != strings.ToLower(ns.SpanID) {
+			return fmt.Errorf("span_id must be a 16-character lowercase hex string (0-9, a-f)")
+		}
 		if _, err := hex.DecodeString(ns.SpanID); err != nil {
 			return fmt.Errorf("span_id must be a 16-character lowercase hex string (0-9, a-f)")
 		}
@@ -181,6 +185,9 @@ func (h *NativeHandler) validateAndTransform(ns *NativeSpan, vk *auth.ValidatedK
 	if ns.TraceID != "" {
 		if len(ns.TraceID) != 32 {
 			return fmt.Errorf("trace_id must be a 32-character lowercase hex string (0-9, a-f), got %d characters", len(ns.TraceID))
+		}
+		if ns.TraceID != strings.ToLower(ns.TraceID) {
+			return fmt.Errorf("trace_id must be a 32-character lowercase hex string (0-9, a-f)")
 		}
 		if _, err := hex.DecodeString(ns.TraceID); err != nil {
 			return fmt.Errorf("trace_id must be a 32-character lowercase hex string (0-9, a-f)")

@@ -372,6 +372,68 @@ func TestNativeHandler_ValidatesTraceIDFormat(t *testing.T) {
 	}
 }
 
+func TestNativeHandler_RejectsUppercaseSpanID(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handler.NewNativeHandler(q, v, nil, nil)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	// span_id with uppercase hex characters
+	spans := []*handler.NativeSpan{
+		{
+			TraceID: "0123456789abcdef0123456789abcdef",
+			SpanID:  "0123456789ABCDEF",
+			Name:    "test-span",
+		},
+	}
+	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
+	req.Header.Set("X-API-Key", "valid_project_key")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestNativeHandler_RejectsUppercaseTraceID(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handler.NewNativeHandler(q, v, nil, nil)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	// trace_id with uppercase hex characters
+	spans := []*handler.NativeSpan{
+		{
+			TraceID: "0123456789ABCDEF0123456789ABCDEF",
+			SpanID:  "0123456789abcdef",
+			Name:    "test-span",
+		},
+	}
+	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
+	req.Header.Set("X-API-Key", "valid_project_key")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
 func TestNativeHandler_AttachesServiceNameFromServiceKey(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
