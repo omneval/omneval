@@ -1,1 +1,44 @@
-{"issues": []}
+{
+  "issues": [
+    {
+      "id": "85",
+      "title": "bug: Analytics /api/v1/analytics/spans uses 'function' field but API docs/examples show 'fn'",
+      "branch": "sandcastle/issue-85-fix-analytics-aggregation-field-name"
+    },
+    {
+      "id": "86",
+      "title": "bug: span_id validation rejects non-hex characters with unclear error — docs should clarify format",
+      "branch": "sandcastle/issue-86-improve-span-id-validation-error"
+    },
+    {
+      "id": "88",
+      "title": "Bug: Eval Rules Page Crashes App with TypeError",
+      "branch": "sandcastle/issue-88-fix-eval-rules-page-crash"
+    },
+    {
+      "id": "89",
+      "title": "Bug: Dataset Runs Tab Shows JSON Parse Error",
+      "branch": "sandcastle/issue-89-fix-dataset-runs-endpoint"
+    },
+    {
+      "id": "90",
+      "title": "Bug: API Key Generation Does Not Work (Settings Page)",
+      "branch": "sandcastle/issue-90-fix-api-key-generation"
+    },
+    {
+      "id": "91",
+      "title": "Bug: Trace Search Bar Does Not Filter Results",
+      "branch": "sandcastle/issue-91-fix-trace-search-bar-filtering"
+    },
+    {
+      "id": "92",
+      "title": "Bug: Dashboard Cost, Token, and Time-Series Widgets Show No Data",
+      "branch": "sandcastle/issue-92-fix-dashboard-aggregation-widgets"
+    },
+    {
+      "id": "93",
+      "title": "Bug: Prompt Model, Temperature, and Max Tokens Not Persisted",
+      "branch": "sandcastle/issue-93-fix-prompt-model-temp-max-tokens-persistence"
+    }
+  ]
+}
