@@ -44,7 +44,7 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -100,7 +100,7 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 	// Extract project_id from the authenticated session.
 	projectID, ok := h.SessionStore.ProjectID(r)
 	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -113,13 +113,13 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 
 	sqlStr, args, err := q.SQL()
 	if err != nil {
-		http.Error(w, "query compilation error", http.StatusInternalServerError)
+		writeJSONError(w, "query compilation error", http.StatusInternalServerError)
 		return
 	}
 
 	rows, err := h.DB.Query(sqlStr, args...)
 	if err != nil {
-		http.Error(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
@@ -127,13 +127,13 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 	// Scan rows into domain spans.
 	spanRows, err := scanAllRows(rows)
 	if err != nil {
-		http.Error(w, "scan error: "+err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, "scan error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	spans, err := query.ScanRows(spanRows)
 	if err != nil {
-		http.Error(w, "row scan error: "+err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, "row scan error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -150,7 +150,7 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		http.Error(w, "encode error", http.StatusInternalServerError)
+		writeJSONError(w, "encode error", http.StatusInternalServerError)
 		return
 	}
 }
@@ -210,7 +210,7 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		http.Error(w, "encode error", http.StatusInternalServerError)
+		writeJSONError(w, "encode error", http.StatusInternalServerError)
 		return
 	}
 }
@@ -340,7 +340,7 @@ func (h *SpanHandler) HandleProjects(w http.ResponseWriter, r *http.Request) {
 
 	projects, err := h.SessionStore.ListProjects(r)
 	if err != nil {
-		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
+		writeJSONError(w, "error listing projects", http.StatusInternalServerError)
 		return
 	}
 
@@ -357,33 +357,33 @@ func (h *SpanHandler) HandleProjects(w http.ResponseWriter, r *http.Request) {
 // the hot+cold UNION, and returns the aggregated rows.
 func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var req dsl.Query
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		writeJSONError(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
 
 	// Extract project_id from the authenticated session — never from client input.
 	projectID, ok := h.SessionStore.ProjectID(r)
 	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	// Compile the query — all fields are validated against allowlists.
 	sqlStr, args, err := dsl.Compile(projectID, req)
 	if err != nil {
-		http.Error(w, "query compilation error: "+err.Error(), http.StatusBadRequest)
+		writeJSONError(w, "query compilation error: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	rows, err := h.DB.Query(sqlStr, args...)
 	if err != nil {
-		http.Error(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
@@ -391,7 +391,7 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 	// Scan rows into column headers + [][]any.
 	cols, err := rows.ColumnTypes()
 	if err != nil {
-		http.Error(w, "scan column types: "+err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, "scan column types: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -403,7 +403,7 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 			valuePtrs[i] = &values[i]
 		}
 		if err := rows.Scan(valuePtrs...); err != nil {
-			http.Error(w, "scan row: "+err.Error(), http.StatusInternalServerError)
+			writeJSONError(w, "scan row: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -414,7 +414,7 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 		result = append(result, row)
 	}
 	if err := rows.Err(); err != nil {
-		http.Error(w, "row iteration: "+err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, "row iteration: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -424,7 +424,7 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		http.Error(w, "encode error", http.StatusInternalServerError)
+		writeJSONError(w, "encode error", http.StatusInternalServerError)
 		return
 	}
 }
@@ -557,12 +557,12 @@ func NewScoreHandler(db *sql.DB) http.Handler {
 func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
 	var req domain.ScoreRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		writeJSONError(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
 
 	if req.SpanID == "" || req.TraceID == "" || req.ProjectID == "" {
-		http.Error(w, "span_id, trace_id, and project_id are required", http.StatusBadRequest)
+		writeJSONError(w, "span_id, trace_id, and project_id are required", http.StatusBadRequest)
 		return
 	}
 
@@ -582,7 +582,7 @@ func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.writeScore(r.Context(), score); err != nil {
-		http.Error(w, fmt.Sprintf("write score: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, "write score: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 

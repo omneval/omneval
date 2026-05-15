@@ -23,18 +23,18 @@ type PlaygroundHandler struct {
 // It resolves a prompt, renders variable interpolation, calls the LLM, and returns the result.
 func (h *PlaygroundHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var req Request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		writeJSONError(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
 
 	if req.PromptName == "" {
-		http.Error(w, "prompt_name is required", http.StatusBadRequest)
+		writeJSONError(w, "prompt_name is required", http.StatusBadRequest)
 		return
 	}
 
@@ -48,7 +48,7 @@ func (h *PlaygroundHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 		projectID = r.URL.Query().Get("project_id")
 	}
 	if projectID == "" {
-		http.Error(w, "project_id is required", http.StatusBadRequest)
+		writeJSONError(w, "project_id is required", http.StatusBadRequest)
 		return
 	}
 
@@ -66,11 +66,11 @@ func (h *PlaygroundHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 	pv, err := h.resolvePrompt(projectID, req.PromptName, req.Version, req.Label)
 	if err != nil {
 		if errors.Is(err, errProvideVersionOrLabel) {
-			http.Error(w, "provide version or label", http.StatusBadRequest)
+			writeJSONError(w, "provide version or label", http.StatusBadRequest)
 			return
 		}
 		// Prompt not found — return 400 as specified.
-		http.Error(w, "prompt not found", http.StatusBadRequest)
+		writeJSONError(w, "prompt not found", http.StatusBadRequest)
 		return
 	}
 
@@ -89,7 +89,7 @@ func (h *PlaygroundHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 	// Interpolate the template.
 	interpolated, missing := judge.Interpolate(pv.Template, req.Variables)
 	if len(missing) > 0 {
-		http.Error(w, "missing required variables: "+strings.Join(missing, ", "), http.StatusBadRequest)
+		writeJSONError(w, "missing required variables: "+strings.Join(missing, ", "), http.StatusBadRequest)
 		return
 	}
 
@@ -129,9 +129,17 @@ func (h *PlaygroundHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(playgroundResp); err != nil {
-		http.Error(w, "encode error", http.StatusInternalServerError)
+		writeJSONError(w, "encode error", http.StatusInternalServerError)
 		return
 	}
+}
+
+// writeJSONError writes a JSON error response with the given status code.
+// It sets Content-Type to application/json and writes {"error": message}.
+func writeJSONError(w http.ResponseWriter, message string, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
 var errProvideVersionOrLabel = errors.New("provide version or label")
