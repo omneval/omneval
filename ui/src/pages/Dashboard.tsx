@@ -144,6 +144,29 @@ interface TimeSeriesData {
   count: number;
 }
 
+/** Extract the timestamp from a SQL date_trunc column name or raw column. */
+function extractTime(row: Record<string, unknown>): string {
+  // The outer query projects the group-by expression as the column name.
+  // For date_trunc('hour', start_time) the column name is the full expression.
+  // Also check common aliases.
+  for (const key of [
+    "date_trunc('hour', start_time)",
+    "date_trunc('hour',start_time)",
+    "start_time",
+  ]) {
+    if (row[key] !== undefined) {
+      return formatTime(row[key] as string);
+    }
+  }
+  // Fallback: look for any key containing "time" in the value.
+  for (const [_key, value] of Object.entries(row)) {
+    if (typeof value === "string" && value.includes("-")) {
+      return formatTime(value);
+    }
+  }
+  return "";
+}
+
 function TracesByTimeChart({ data, loading }: { data: TimeSeriesData[]; loading: boolean }) {
   if (loading && data.length === 0) {
     return <LoadingState rows={1} rowHeight="8rem" />;
@@ -312,12 +335,29 @@ function ScoresWidget({ loading }: { loading: boolean }) {
 
 const USAGE_TABS = ["Cost by Model", "Cost by Type", "Usage by Model", "Usage by Type"];
 
-function ModelUsageWidget({ loading }: { loading: boolean }) {
+interface UsageByModelData {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+function ModelUsageWidget({
+  loading,
+  data,
+}: {
+  loading: boolean;
+  data: CostData[] | UsageByModelData[];
+}) {
   const [activeTab, setActiveTab] = useState(0);
 
   if (loading) {
     return <LoadingState rows={3} rowHeight="2.5rem" />;
   }
+
+  const isEmpty = Array.isArray(data) && data.length === 0;
+
+  // "Usage by Model" and "Usage by Type" tabs show tokens only (no cost).
+  const showTokensOnly = activeTab === 2 || activeTab === 3;
 
   return (
     <div>
@@ -344,11 +384,69 @@ function ModelUsageWidget({ loading }: { loading: boolean }) {
           </button>
         ))}
       </div>
-      <EmptyState
-        variant="default"
-        title="No usage data yet"
-        description="Token counts will appear once traces are ingested"
-      />
+      {isEmpty ? (
+        <EmptyState
+          variant="default"
+          title="No usage data yet"
+          description="Token counts will appear once traces are ingested"
+        />
+      ) : showTokensOnly ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr
+                className="border-b"
+                style={{
+                  borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
+                  color: colors.typography.ashGrey,
+                }}
+              >
+                <th className="text-left py-2 px-3 font-medium text-xs uppercase tracking-wider">
+                  {activeTab === 2 ? "Model" : "Type"}
+                </th>
+                <th className="text-right py-2 px-3 font-medium text-xs uppercase tracking-wider">
+                  Input Tokens
+                </th>
+                <th className="text-right py-2 px-3 font-medium text-xs uppercase tracking-wider">
+                  Output Tokens
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {data
+                .sort((a, b) => b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens))
+                .map((row: CostData | UsageByModelData, i) => (
+                  <tr
+                    key={row.model}
+                    className="transition-colors duration-150"
+                    style={{
+                      borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
+                      background: i % 2 === 0 ? "transparent" : `${colors.backgrounds.slightIllumination}33`,
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLElement).style.background =
+                        `rgba(255, 204, 188, 0.1)`;
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLElement).style.background =
+                        i % 2 === 0 ? "transparent" : `${colors.backgrounds.slightIllumination}33`;
+                    }}
+                  >
+                    <td className="py-2 px-3 font-medium text-lantern-pure">{row.model}</td>
+                    <td className="py-2 px-3 text-right text-lantern-ash">
+                      {formatNumber((row as CostData).inputTokens)}
+                    </td>
+                    <td className="py-2 px-3 text-right text-lantern-ash">
+                      {formatNumber((row as CostData).outputTokens)}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <ModelCostsTable data={data as CostData[]} loading={false} />
+      )}
     </div>
   );
 }
@@ -420,6 +518,9 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
   const [modelCosts, setModelCosts] = useState<CostData[]>([]);
   const [userConsumption, setUserConsumption] = useState<UserConsumptionData[]>([]);
 
+  // Token Usage tab data
+  const [tokenUsageData, setTokenUsageData] = useState<CostData[]>([]);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -452,6 +553,18 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
         ],
       };
 
+      // ── Token Usage: Cost by Type (grouped by kind) ──
+      const tokenUsageReq: AnalyticsRequest = {
+        ...body,
+        group_by: [{ field: "kind" }],
+        order_by: [{ field: "total_cost", desc: true }],
+        aggregations: [
+          { function: "sum", field: "input_tokens", alias: "input_tokens" },
+          { function: "sum", field: "output_tokens", alias: "output_tokens" },
+          { function: "sum", field: "cost_usd", alias: "total_cost" },
+        ],
+      };
+
       // ── Model Costs ──
       const modelCostsReq: AnalyticsRequest = {
         ...body,
@@ -464,10 +577,10 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
         ],
       };
 
-      // ── User Consumption ──
+      // ── User Consumption (by service_name) ──
       const userConsumptionReq: AnalyticsRequest = {
         ...body,
-        group_by: [{ field: "user_id" }],
+        group_by: [{ field: "service_name" }],
         order_by: [{ field: "count", desc: true }],
         aggregations: [
           { function: "count", field: "*", alias: "count" },
@@ -477,6 +590,7 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
       const [
         tracesByNameResp,
         tracesByTimeResp,
+        tokenUsageResp,
         modelCostsResp,
         userConsumptionResp,
       ] = await Promise.all([
@@ -489,6 +603,11 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(tracesByTimeReq),
+        }),
+        fetch("/api/v1/analytics/spans", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(tokenUsageReq),
         }),
         fetch("/api/v1/analytics/spans", {
           method: "POST",
@@ -515,14 +634,29 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
         }
       }
 
-      // Parse traces by time
+      // Parse traces by time (column name may be the date_trunc expression)
       if (tracesByTimeResp.ok) {
         const data = await tracesByTimeResp.json();
         if (data.rows) {
           setTracesByTime(
             data.rows.map((row: Record<string, unknown>) => ({
-              time: formatTime(row.start_time as string),
+              time: extractTime(row),
               count: Number(row.count) || 0,
+            })),
+          );
+        }
+      }
+
+      // Parse token usage data (for the tabbed widget)
+      if (tokenUsageResp.ok) {
+        const data = await tokenUsageResp.json();
+        if (data.rows) {
+          setTokenUsageData(
+            data.rows.map((row: Record<string, unknown>) => ({
+              model: (row.kind as string) || "unknown",
+              inputTokens: Number(row.input_tokens) || 0,
+              outputTokens: Number(row.output_tokens) || 0,
+              totalCost: Number(row.total_cost) || 0,
             })),
           );
         }
@@ -543,20 +677,21 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
         }
       }
 
-      // Parse user consumption
+      // Parse user consumption (uses service_name, not user_id)
       if (userConsumptionResp.ok) {
         const data = await userConsumptionResp.json();
         if (data.rows) {
           setUserConsumption(
             data.rows.map((row: Record<string, unknown>) => ({
-              user: (row.user_id as string) || "anonymous",
+              user: (row.service_name as string) || "anonymous",
               count: Number(row.count) || 0,
             })),
           );
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load dashboard data");
+      const msg = err instanceof Error ? err.message : "Failed to load dashboard data";
+      setError(msg);
       console.error("Dashboard fetch error:", err);
     } finally {
       setLoading(false);
@@ -656,13 +791,13 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
           <TracesByTimeChart data={tracesByTime} loading={loading} />
         </Card>
 
-        {/* 5. Model Usage (Tabbed Empty State) */}
+        {/* 5. Model Usage (Tabbed) */}
         <Card title="Token Usage" subtitle="input + output tokens">
-          <ModelUsageWidget loading={loading} />
+          <ModelUsageWidget loading={loading} data={tokenUsageData} />
         </Card>
 
         {/* 6. User Consumption (Horizontal Bar) */}
-        <Card title="User Consumption" subtitle="traces per user">
+        <Card title="User Consumption" subtitle="traces per service">
           <UserConsumptionChart data={userConsumption} loading={loading} />
         </Card>
       </div>

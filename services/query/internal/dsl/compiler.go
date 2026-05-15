@@ -293,13 +293,26 @@ func Compile(projectID string, q Query) (sql string, args []any, err error) {
 	}
 
 	// Build the ORDER BY clause.
+	// When an order-by field matches a group-by field's raw column name,
+	// resolve it to the group-by expression (which may include date_trunc
+	// when a truncation unit is specified). This ensures the outer query
+	// references a column that actually exists in the projected result set.
 	orderParts := make([]string, 0, len(q.OrderBy))
 	for _, ob := range q.OrderBy {
 		dir := "ASC"
 		if ob.Desc {
 			dir = "DESC"
 		}
-		orderParts = append(orderParts, fmt.Sprintf("%s %s", ob.Field, dir))
+		orderExpr := ob.Field
+		// Check if this order-by field matches a group-by field's raw column.
+		// If so, use the group-by expression (with truncation) instead.
+		for _, gb := range q.GroupBy {
+			if gb.Field == ob.Field {
+				orderExpr = groupByFieldExpr(gb.Field, gb.Truncate)
+				break
+			}
+		}
+		orderParts = append(orderParts, fmt.Sprintf("%s %s", orderExpr, dir))
 	}
 
 	limitClause := ""

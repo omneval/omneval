@@ -566,3 +566,72 @@ func withLimit(n int) func(*Query) {
 		q.Limit = n
 	}
 }
+
+// --- Dashboard-specific tests (issue #92) ---
+
+// TestCompile_GroupByTruncOrderByRawField verifies that when the group-by
+// field uses a truncation unit (e.g. "hour"), an order-by clause referencing
+// the raw field name ("start_time" instead of the truncated expression)
+// is correctly resolved to the truncated expression.
+//
+// This is the "Traces over Time" pattern: group by start_time truncated to
+// hour, ordered by start_time. The outer query projects the truncated
+// expression, so ORDER BY must also use the truncated expression.
+func TestCompile_GroupByTruncOrderByRawField(t *testing.T) {
+	q := makeQuery(
+		withAgg(AggCount, "*", "count"),
+		withGroupBy("start_time", TruncHour),
+		withOrderBy("start_time", false),
+	)
+	sql, _, err := Compile("proj", q)
+	if err != nil {
+		t.Fatalf("Compile error: %v", err)
+	}
+
+	// The outer ORDER BY must reference the truncated expression, not the
+	// raw field. The outer SELECT aliases the group-by expression directly
+	// (no explicit alias), so the column name in the outer query is the
+	// full expression.
+	if !strings.Contains(sql, "date_trunc('hour', start_time) ASC") {
+		t.Errorf("expected ORDER BY date_trunc('hour', start_time) ASC in SQL:\n%s", sql)
+	}
+}
+
+// TestCompile_GroupByOrderByAggAlias verifies that ordering by an
+// aggregation alias works correctly (the existing behavior).
+func TestCompile_GroupByOrderByAggAlias(t *testing.T) {
+	q := makeQuery(
+		withAgg(AggSum, "cost_usd", "total_cost"),
+		withGroupBy("model", ""),
+		withOrderBy("total_cost", true),
+	)
+	sql, _, err := Compile("proj", q)
+	if err != nil {
+		t.Fatalf("Compile error: %v", err)
+	}
+
+	// The ORDER BY should reference the alias "total_cost".
+	if !strings.Contains(sql, "total_cost DESC") {
+		t.Errorf("expected ORDER BY total_cost DESC in SQL:\n%s", sql)
+	}
+}
+
+// TestCompile_GroupByOrderByGroupByFieldNoTrunc verifies that when a
+// group-by field has no truncation, the order-by field matching the
+// raw group-by field is correctly resolved.
+func TestCompile_GroupByOrderByGroupByFieldNoTrunc(t *testing.T) {
+	q := makeQuery(
+		withAgg(AggCount, "*", "count"),
+		withGroupBy("model", ""),
+		withOrderBy("model", true),
+	)
+	sql, _, err := Compile("proj", q)
+	if err != nil {
+		t.Fatalf("Compile error: %v", err)
+	}
+
+	// The ORDER BY should reference the model column directly.
+	if !strings.Contains(sql, "model DESC") {
+		t.Errorf("expected ORDER BY model DESC in SQL:\n%s", sql)
+	}
+}
