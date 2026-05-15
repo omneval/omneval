@@ -182,6 +182,19 @@ func groupByFieldExpr(field string, trunc TruncUnit) string {
 	return field
 }
 
+// resolveOrderByField returns the SQL expression for an order-by field.
+// When the field name matches a group-by field (with or without truncation),
+// it returns the group-by expression so the outer query references an
+// existing projected column. Otherwise it returns the field name verbatim.
+func resolveOrderByField(field string, groupBy []GroupByField) string {
+	for _, gb := range groupBy {
+		if gb.Field == field {
+			return groupByFieldExpr(gb.Field, gb.Truncate)
+		}
+	}
+	return field
+}
+
 // Compile translates a Query into a parameterized DuckDB SQL string and its
 // positional arguments. projectID is always injected as a mandatory filter.
 // Raw SQL is never accepted from clients; all field and operator references
@@ -292,26 +305,17 @@ func Compile(projectID string, q Query) (sql string, args []any, err error) {
 		groupSQL = "\n  GROUP BY " + strings.Join(groupParts, ", ")
 	}
 
-	// Build the ORDER BY clause.
-	// When an order-by field matches a group-by field's raw column name,
-	// resolve it to the group-by expression (which may include date_trunc
-	// when a truncation unit is specified). This ensures the outer query
-	// references a column that actually exists in the projected result set.
+	// Build the ORDER BY clause, resolving any raw group-by field names
+	// to their full expressions (including date_trunc when applicable).
+	// This ensures the outer query references columns that actually exist
+	// in the projected result set.
 	orderParts := make([]string, 0, len(q.OrderBy))
 	for _, ob := range q.OrderBy {
 		dir := "ASC"
 		if ob.Desc {
 			dir = "DESC"
 		}
-		orderExpr := ob.Field
-		// Check if this order-by field matches a group-by field's raw column.
-		// If so, use the group-by expression (with truncation) instead.
-		for _, gb := range q.GroupBy {
-			if gb.Field == ob.Field {
-				orderExpr = groupByFieldExpr(gb.Field, gb.Truncate)
-				break
-			}
-		}
+		orderExpr := resolveOrderByField(ob.Field, q.GroupBy)
 		orderParts = append(orderParts, fmt.Sprintf("%s %s", orderExpr, dir))
 	}
 

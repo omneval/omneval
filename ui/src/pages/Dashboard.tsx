@@ -144,11 +144,13 @@ interface TimeSeriesData {
   count: number;
 }
 
-/** Extract the timestamp from a SQL date_trunc column name or raw column. */
+/** Extract the timestamp from a row returned by a grouped analytics query.
+ *
+ * The outer query projects the group-by expression directly as the column name.
+ * For date_trunc('hour', start_time) the column name is the full expression.
+ */
 function extractTime(row: Record<string, unknown>): string {
-  // The outer query projects the group-by expression as the column name.
-  // For date_trunc('hour', start_time) the column name is the full expression.
-  // Also check common aliases.
+  // Try known column names first.
   for (const key of [
     "date_trunc('hour', start_time)",
     "date_trunc('hour',start_time)",
@@ -158,7 +160,7 @@ function extractTime(row: Record<string, unknown>): string {
       return formatTime(row[key] as string);
     }
   }
-  // Fallback: look for any key containing "time" in the value.
+  // Fallback: scan values for an ISO-like date string.
   for (const [_key, value] of Object.entries(row)) {
     if (typeof value === "string" && value.includes("-")) {
       return formatTime(value);
@@ -335,18 +337,12 @@ function ScoresWidget({ loading }: { loading: boolean }) {
 
 const USAGE_TABS = ["Cost by Model", "Cost by Type", "Usage by Model", "Usage by Type"];
 
-interface UsageByModelData {
-  model: string;
-  inputTokens: number;
-  outputTokens: number;
-}
-
 function ModelUsageWidget({
   loading,
   data,
 }: {
   loading: boolean;
-  data: CostData[] | UsageByModelData[];
+  data: CostData[];
 }) {
   const [activeTab, setActiveTab] = useState(0);
 
@@ -354,9 +350,9 @@ function ModelUsageWidget({
     return <LoadingState rows={3} rowHeight="2.5rem" />;
   }
 
-  const isEmpty = Array.isArray(data) && data.length === 0;
+  const isEmpty = data.length === 0;
 
-  // "Usage by Model" and "Usage by Type" tabs show tokens only (no cost).
+  // Tokens-only tabs: "Usage by Model" and "Usage by Type".
   const showTokensOnly = activeTab === 2 || activeTab === 3;
 
   return (
@@ -415,7 +411,7 @@ function ModelUsageWidget({
             <tbody>
               {data
                 .sort((a, b) => b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens))
-                .map((row: CostData | UsageByModelData, i) => (
+                .map((row, i) => (
                   <tr
                     key={row.model}
                     className="transition-colors duration-150"
@@ -434,10 +430,10 @@ function ModelUsageWidget({
                   >
                     <td className="py-2 px-3 font-medium text-lantern-pure">{row.model}</td>
                     <td className="py-2 px-3 text-right text-lantern-ash">
-                      {formatNumber((row as CostData).inputTokens)}
+                      {formatNumber(row.inputTokens)}
                     </td>
                     <td className="py-2 px-3 text-right text-lantern-ash">
-                      {formatNumber((row as CostData).outputTokens)}
+                      {formatNumber(row.outputTokens)}
                     </td>
                   </tr>
                 ))}
@@ -445,7 +441,7 @@ function ModelUsageWidget({
           </table>
         </div>
       ) : (
-        <ModelCostsTable data={data as CostData[]} loading={false} />
+        <ModelCostsTable data={data} loading={false} />
       )}
     </div>
   );
@@ -621,7 +617,6 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
         }),
       ]);
 
-      // Parse traces by name
       if (tracesByNameResp.ok) {
         const data = await tracesByNameResp.json();
         if (data.rows) {
@@ -634,7 +629,6 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
         }
       }
 
-      // Parse traces by time (column name may be the date_trunc expression)
       if (tracesByTimeResp.ok) {
         const data = await tracesByTimeResp.json();
         if (data.rows) {
@@ -647,7 +641,6 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
         }
       }
 
-      // Parse token usage data (for the tabbed widget)
       if (tokenUsageResp.ok) {
         const data = await tokenUsageResp.json();
         if (data.rows) {
@@ -662,7 +655,6 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
         }
       }
 
-      // Parse model costs
       if (modelCostsResp.ok) {
         const data = await modelCostsResp.json();
         if (data.rows) {
@@ -677,7 +669,6 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
         }
       }
 
-      // Parse user consumption (uses service_name, not user_id)
       if (userConsumptionResp.ok) {
         const data = await userConsumptionResp.json();
         if (data.rows) {
