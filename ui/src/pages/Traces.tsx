@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { colors } from "@/theme";
 import { OnboardingEmptyState } from "@/components/OnboardingEmptyState";
 import { Skeleton } from "@/components/Skeleton";
@@ -20,6 +20,7 @@ interface TracesPageProps {
 interface Span {
   span_id: string;
   trace_id: string;
+  parent_id: string;
   name: string;
   kind: string;
   model?: string;
@@ -62,27 +63,35 @@ interface FilterState {
 // ── Observation Level Pills ────────────────────────────────────────
 
 interface ObservationPillsProps {
-  count: number;
-  kind?: string;
+  children: Span[];
 }
 
-function ObservationPills({ count, kind }: ObservationPillsProps) {
-  if (count <= 0) return null;
+function ObservationPills({ children }: ObservationPillsProps) {
+  if (children.length === 0) return null;
 
-  const kindLabel = kind ?? "span";
-  const shortLabel = kindLabel.slice(0, 3).toUpperCase();
+  // Aggregate child counts by kind.
+  const kindCounts: Record<string, number> = {};
+  children.forEach((s) => {
+    const kind = s.kind ?? "span";
+    kindCounts[kind] = (kindCounts[kind] ?? 0) + 1;
+  });
 
   return (
-    <span
-      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-      style={{
-        background: `${colors.accents.emberFlare}22`,
-        color: colors.accents.softGlow,
-        border: `1px solid ${colors.accents.emberFlare}44`,
-      }}
-    >
-      {shortLabel} {count}
-    </span>
+    <div className="flex items-center gap-1 flex-wrap">
+      {Object.entries(kindCounts).map(([kind, count]) => (
+        <span
+          key={kind}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+          style={{
+            background: `${colors.accents.emberFlare}22`,
+            color: colors.accents.softGlow,
+            border: `1px solid ${colors.accents.emberFlare}44`,
+          }}
+        >
+          {kind.slice(0, 3).toUpperCase()} {count}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -520,6 +529,18 @@ export default function TracesPage({
 
   const totalTokens = (span: Span) => span.input_tokens + span.output_tokens;
 
+  // Group spans by trace_id so we can compute children per span.
+  // The API returns flat spans; we reconstruct the parent-child relationship
+  // so the Levels column can show badge counts for each trace.
+  const traceGroups = useMemo(() => {
+    const groups: Record<string, Span[]> = {};
+    spans.forEach((s) => {
+      if (!groups[s.trace_id]) groups[s.trace_id] = [];
+      groups[s.trace_id].push(s);
+    });
+    return groups;
+  }, [spans]);
+
   const visibleColumns = columns.filter((c) => c.visible);
 
   return (
@@ -707,8 +728,10 @@ export default function TracesPage({
               </thead>
               <tbody>
                 {spans.map((span) => {
-                  const observationCount = span.Children?.length ?? 0;
-                  const observationKind = span.kind;
+                  // Compute children from the trace group (spans sharing the same trace_id with this span as parent).
+                  const children = (
+                    traceGroups[span.trace_id] ?? []
+                  ).filter((s) => s.parent_id === span.span_id);
                   return (
                     <tr
                       key={span.span_id}
@@ -763,7 +786,7 @@ export default function TracesPage({
                             </div>
                           )}
                           {col.key === "observationLevels" && (
-                            <ObservationPills count={observationCount} kind={observationKind} />
+                            <ObservationPills children={children} />
                           )}
                           {col.key === "latency" && (
                             <span className="text-lantern-ash">
