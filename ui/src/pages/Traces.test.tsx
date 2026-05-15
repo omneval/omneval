@@ -367,6 +367,228 @@ describe("bookmark toggling", () => {
 // ── Search tests ─────────────────────────────────────────────────
 
 describe("search", () => {
+  it("initial fetch does NOT include search filter when query is empty", async () => {
+    const fetchBodies: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (init?.body) {
+        fetchBodies.push(String(init.body));
+      }
+      return {
+        ok: true,
+        json: () =>
+          Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response;
+    });
+
+    renderTracesPage();
+
+    // Wait for the initial fetch
+    await waitFor(() => {
+      expect(fetchBodies.length).toBeGreaterThanOrEqual(1);
+    });
+
+    // The initial body must NOT contain the name/ilike filter
+    // (searchQuery is "" so no filter should be added)
+    expect(fetchBodies[0]).not.toContain("ilike");
+  });
+
+  it("sends search query in API request body when typing", async () => {
+    const fetchBodies: { callNum: number; body: string }[] = [];
+    const fetchResolve: (() => void)[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const body = init?.body ? String(init.body) : "";
+      fetchBodies.push({ callNum: fetchBodies.length + 1, body });
+      // Block all fetches until test signals them to resolve
+      await new Promise<void>((resolve) => fetchResolve.push(resolve));
+      let resultSpans = mockSpans;
+      if (body.includes("ilike") && body.includes("%llm%")) {
+        resultSpans = mockSpans.filter((s) =>
+          s.name.toLowerCase().includes("llm")
+        );
+      }
+      return {
+        ok: true,
+        json: () =>
+          Promise.resolve({ spans: resultSpans, next: "", limit: 25 }),
+      } as Response;
+    });
+
+    renderTracesPage();
+
+    // Wait for initial fetch to be registered (it's blocked)
+    await waitFor(
+      () => {
+        expect(fetchBodies.length).toBeGreaterThanOrEqual(1);
+      },
+      { timeout: 2000 }
+    );
+
+    // Resolve the initial fetch so the UI gets data
+    while (fetchResolve.length > 0) {
+      const resolver = fetchResolve.shift();
+      resolver?.();
+    }
+
+    // Wait for the UI to render with data
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // Verify initial fetch has NO search filter
+    expect(fetchBodies[0].body).not.toContain("ilike");
+
+    // Type search query
+    const searchInput = screen.getByPlaceholderText("Search by ID/Name...");
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: "llm" } });
+    });
+
+    // Wait for at least one more fetch to be initiated
+    // (from onChange handler or effect)
+    await waitFor(
+      () => {
+        expect(fetchBodies.length).toBeGreaterThanOrEqual(2);
+      },
+      { timeout: 3000 }
+    );
+
+    // The FIRST fetch after typing (call #2) MUST include "%llm%" in the body.
+    // The onChange handler calls fetchSpans() synchronously after setSearchQuery().
+    // If fetchSpans uses a stale closure, searchQuery will be "" and the body
+    // will NOT have the "%llm%" filter — this is the bug (issue #91).
+    const firstPostTypingCall = fetchBodies[1];
+    expect(firstPostTypingCall.body).toContain("%llm%");
+  });
+
+  it("shows 'No results found' when search has no matches", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, _init) => {
+      return {
+        ok: true,
+        json: () =>
+          Promise.resolve({ spans: [], next: "", limit: 25 }),
+      } as Response;
+    });
+
+    renderTracesPage();
+
+    // Initial empty state shows OnboardingEmptyState
+    // After search, should show No results found
+    const searchInput = screen.getByPlaceholderText("Search by ID/Name...");
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: "nonexistent" } });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/No results found/)).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/No traces match "nonexistent"/)).toBeInTheDocument();
+  });
+
+  it("clears search and restores results", async () => {
+    const fetchBodies: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (init?.body) {
+        fetchBodies.push(String(init.body));
+      }
+      return {
+        ok: true,
+        json: () =>
+          Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response;
+    });
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // Type a search that filters results
+    const searchInput = screen.getByPlaceholderText("Search by ID/Name...");
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: "llm" } });
+    });
+
+    // Wait for the filtered fetch
+    await waitFor(
+      () => {
+        expect(fetchBodies.some((b) => b.includes("ilike"))).toBe(true);
+      },
+      { timeout: 2000 }
+    );
+
+    // Clear the search
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: "" } });
+    });
+
+    // Wait for a fetch that no longer includes the search filter
+    await waitFor(
+      () => {
+        expect(fetchBodies.some((b) => !b.includes("ilike"))).toBe(true);
+      },
+      { timeout: 2000 }
+    );
+  });
+
+  it("filters spans by partial trace ID", async () => {
+    const fetchBodies: { callNum: number; body: string }[] = [];
+    const fetchResolve: (() => void)[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const body = init?.body ? String(init.body) : "";
+      fetchBodies.push({ callNum: fetchBodies.length + 1, body });
+      await new Promise<void>((resolve) => fetchResolve.push(resolve));
+      let resultSpans = mockSpans;
+      if (body.includes("ilike") && body.includes("trace-a")) {
+        resultSpans = mockSpans.filter((s) => s.trace_id.includes("trace-a"));
+      }
+      return {
+        ok: true,
+        json: () =>
+          Promise.resolve({ spans: resultSpans, next: "", limit: 25 }),
+      } as Response;
+    });
+
+    renderTracesPage();
+
+    // Wait for initial fetch to be registered
+    await waitFor(
+      () => {
+        expect(fetchBodies.length).toBeGreaterThanOrEqual(1);
+      },
+      { timeout: 2000 }
+    );
+
+    // Resolve the initial fetch so the UI gets data
+    while (fetchResolve.length > 0) {
+      const resolver = fetchResolve.shift();
+      resolver?.();
+    }
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // Search by partial trace ID
+    const searchInput = screen.getByPlaceholderText("Search by ID/Name...");
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: "trace-a" } });
+    });
+
+    // Wait for the search fetch
+    await waitFor(
+      () => {
+        expect(fetchBodies.some((b) => b.body.includes("ilike"))).toBe(true);
+      },
+      { timeout: 3000 }
+    );
+
+    // The search body must include the trace ID partial match
+    const searchCall = fetchBodies.find((b) => b.body.includes("ilike"));
+    expect(searchCall).toBeDefined();
+    expect(searchCall?.body).toContain("%trace-a%");
+  });
+
   it("filters spans by search query", async () => {
     // First call (initial mount) returns empty
     // Second call (after search) returns filtered results

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { colors } from "@/theme";
 import { OnboardingEmptyState } from "@/components/OnboardingEmptyState";
 import { Skeleton } from "@/components/Skeleton";
@@ -346,6 +346,11 @@ export default function TracesPage({
   const [loading, setLoading] = useState(false);
   const [pageSize, setPageSize] = useState(25);
   const [searchQuery, setSearchQuery] = useState("");
+  const searchQueryRef = useRef(searchQuery);
+  // Keep ref in sync so fetchSpans always reads the latest value.
+  useEffect(() => {
+    searchQueryRef.current = searchQuery;
+  }, [searchQuery]);
   const [activeTab, setActiveTab] = useState<"traces" | "observations">("traces");
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [columnVisibility, setColumnVisibility] = useState({
@@ -406,10 +411,13 @@ export default function TracesPage({
 
         if (cursor) body.cursor = cursor;
 
-        // Apply text search
-        if (searchQuery) {
+        // Apply text search — always read from the ref to avoid stale
+        // closures (e.g. when onChange calls fetchSpans synchronously
+        // before React has re-rendered with the new state).
+        const currentQuery = searchQueryRef.current;
+        if (currentQuery) {
           body.filters = [
-            { field: "name", op: "ilike", value: `%${searchQuery}%` },
+            { field: "name", op: "ilike", value: `%${currentQuery}%` },
           ];
         }
 
@@ -466,7 +474,7 @@ export default function TracesPage({
         setLoading(false);
       }
     },
-    [pageSize, searchQuery, filterState],
+    [pageSize, filterState, searchQueryRef],
   );
 
   useEffect(() => {
@@ -624,6 +632,7 @@ export default function TracesPage({
             value={searchQuery}
             onChange={(e) => {
               setSearchQuery(e.target.value);
+              searchQueryRef.current = e.target.value;
               fetchSpans("", false);
             }}
             className="input-focus w-48 text-sm px-2.5 py-1.5 rounded border border-lantern-bg-cave bg-lantern-bg-charcoal text-lantern-pure placeholder-lantern-ash"
