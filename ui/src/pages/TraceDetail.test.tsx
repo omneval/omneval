@@ -1,4 +1,73 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import TraceDetailPage from "./TraceDetail";
+import { ToastProvider } from "@/components/Toast";
+
+function renderWithProvider(ui: React.ReactElement) {
+  return render(<ToastProvider>{ui}</ToastProvider>);
+}
+
+describe("hook ordering", () => {
+  it("does not throw React hook order violation when traceId is empty (loading state)", () => {
+    const consoleError = console.error;
+    let hookOrderError: string | null = null;
+    console.error = (...args: unknown[]) => {
+      const msg = args.join(" ");
+      if (msg.includes("hook") || msg.includes("310")) {
+        hookOrderError = msg;
+      }
+      consoleError(...args);
+    };
+
+    expect(() => {
+      renderWithProvider(
+        <TraceDetailPage
+          traceId=""
+          activeProject="test-project"
+          onBack={() => {}}
+        />
+      );
+    }).not.toThrow();
+
+    expect(hookOrderError).toBeNull();
+
+    console.error = consoleError;
+  });
+
+  it("does not throw React hook order violation when trace is not found (error state)", async () => {
+    // Mock fetch to return 404
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 404,
+    } as Response);
+
+    const consoleError = console.error;
+    let hookOrderError: string | null = null;
+    console.error = (...args: unknown[]) => {
+      const msg = args.join(" ");
+      if (msg.includes("hook") || msg.includes("310")) {
+        hookOrderError = msg;
+      }
+      consoleError(...args);
+    };
+
+    // Note: This will still show loading first, then error. The hook order
+    // must be stable across both states.
+    renderWithProvider(
+      <TraceDetailPage
+        traceId="nonexistent-trace"
+        activeProject="test-project"
+        onBack={() => {}}
+      />
+    );
+
+    await screen.findByText("Trace not found");
+
+    expect(hookOrderError).toBeNull();
+
+    console.error = consoleError;
+  });
+});
 
 describe("totalTokens", () => {
   const sumTokens = (inputTokens: number, outputTokens: number): number =>

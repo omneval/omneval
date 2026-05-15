@@ -125,6 +125,46 @@ export default function TraceDetailPage({
     addToast("success", "Span saved to dataset");
   }, [addToast]);
 
+  // View mode and selection state — must be declared before any early returns
+  const [viewMode, setViewMode] = useState<"waterfall" | "tree">("waterfall");
+  const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
+  const [expandedSpanId, setExpandedSpanId] = useState<string | null>(null);
+
+  // Flatten the span tree for the waterfall chart
+  const allSpans = useMemo(() => {
+    if (!trace) return [];
+    const result: Span[] = [trace];
+    const collect = (spans: Span[]) => {
+      for (const span of spans) {
+        result.push(span);
+        if (span.children) collect(span.children);
+      }
+    };
+    if (trace.children) collect(trace.children);
+    return result;
+  }, [trace]);
+
+  // Waterfall chart data: bars representing each span
+  const waterfallData = useMemo(() => {
+    if (!trace) return [];
+    const baseTime = new Date(trace.start_time).getTime();
+    return allSpans.map((span) => {
+      const start = new Date(span.start_time).getTime() - baseTime;
+      const end = new Date(span.end_time).getTime() - baseTime;
+      const duration = end - start;
+      const color = KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall;
+      return {
+        name: span.name,
+        spanId: span.span_id,
+        start,
+        duration,
+        color,
+        kind: span.kind,
+        model: span.model,
+      } satisfies WaterfallEntry;
+    });
+  }, [allSpans, trace]);
+
   if (loading) {
     return (
       <div className="flex flex-col h-full" style={{ background: colors.backgrounds.abyssBlack }}>
@@ -152,43 +192,6 @@ export default function TraceDetailPage({
       </div>
     );
   }
-
-  // Flatten the span tree for the waterfall chart
-  const allSpans = useMemo(() => {
-    const result: Span[] = [trace];
-    const collect = (spans: Span[]) => {
-      for (const span of spans) {
-        result.push(span);
-        if (span.children) collect(span.children);
-      }
-    };
-    if (trace.children) collect(trace.children);
-    return result;
-  }, [trace]);
-
-  // Waterfall chart data: bars representing each span
-  const waterfallData = useMemo(() => {
-    const baseTime = new Date(trace.start_time).getTime();
-    return allSpans.map((span) => {
-      const start = new Date(span.start_time).getTime() - baseTime;
-      const end = new Date(span.end_time).getTime() - baseTime;
-      const duration = end - start;
-      const color = KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall;
-      return {
-        name: span.name,
-        spanId: span.span_id,
-        start,
-        duration,
-        color,
-        kind: span.kind,
-        model: span.model,
-      } satisfies WaterfallEntry;
-    });
-  }, [allSpans, trace.start_time]);
-
-  const [viewMode, setViewMode] = useState<"waterfall" | "tree">("waterfall");
-  const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
-  const [expandedSpanId, setExpandedSpanId] = useState<string | null>(null);
 
   const selectedSpan = allSpans.find((s) => s.span_id === selectedSpanId);
 
