@@ -231,7 +231,7 @@ function FilterSection({
 
       {expanded && (
         <div className="px-3 pb-3">
-          {name === "trace_name" && (
+          {name === "trace_name" ? (
             <div className="space-y-1">
               {["planner", "implementer", "reviewer", "merger", "coder", "architect"].map((traceName) => (
                 <label
@@ -256,14 +256,7 @@ function FilterSection({
                 </label>
               ))}
             </div>
-          )}
-          {name === "latency" && (
-            <div className="space-y-2">
-              {filterInput}
-              {applyButton}
-            </div>
-          )}
-          {name !== "trace_name" && name !== "latency" && (
+          ) : (
             <div className="space-y-2">
               {filterInput}
               {applyButton}
@@ -273,6 +266,105 @@ function FilterSection({
       )}
     </div>
   );
+}
+
+// ── Table Cell Rendering ─────────────────────────────────────────
+
+interface TableCellRendererProps {
+  col: { key: string; label: string };
+  span: Span;
+  childSpans: Span[];
+  bookmarks: Set<string>;
+  onToggleBookmark: (traceId: string) => void;
+  onNavigateToTrace: (traceId: string) => void;
+  onNavigateToTraceDetail: () => void;
+}
+
+function TableCellRenderer({
+  col,
+  span,
+  childSpans,
+  bookmarks,
+  onToggleBookmark,
+  onNavigateToTrace,
+  onNavigateToTraceDetail,
+}: TableCellRendererProps) {
+  switch (col.key) {
+    case "bookmark":
+      return (
+        <BookmarkStar
+          key={col.key}
+          starred={bookmarks.has(span.trace_id)}
+          onClick={() => onToggleBookmark(span.trace_id)}
+        />
+      );
+    case "timestamp":
+      return (
+        <span key={col.key} className="text-lantern-ash text-xs">
+          {formatTimeWithYear(span.start_time)}
+        </span>
+      );
+    case "name":
+      return (
+        <button
+          key={col.key}
+          onClick={() => {
+            onNavigateToTrace(span.trace_id);
+            onNavigateToTraceDetail();
+          }}
+          className="text-left block w-full"
+          title="View trace waterfall"
+        >
+          <div className="text-lantern-pure font-medium">{span.name}</div>
+          <div className="text-lantern-ash text-xs font-mono truncate max-w-[120px]">
+            {span.trace_id.slice(0, 12)}…
+          </div>
+        </button>
+      );
+    case "input":
+      return (
+        <div key={col.key} className="max-w-[200px] text-lantern-ash text-xs font-mono">
+          {span.input ? formatJsonPreview(span.input, 40) : "\u2014"}
+        </div>
+      );
+    case "output":
+      return (
+        <div key={col.key} className="max-w-[200px] text-lantern-ash text-xs font-mono">
+          {span.output ? formatJsonPreview(span.output, 40) : "\u2014"}
+        </div>
+      );
+    case "observationLevels":
+      return <ObservationPills key={col.key} childSpans={childSpans} />;
+    case "latency":
+      return (
+        <span key={col.key} className="text-lantern-ash">
+          {formatDuration(span.start_time, span.end_time)}
+        </span>
+      );
+    case "tokens":
+      return (
+        <span key={col.key} className="text-lantern-ash">
+          {totalTokens(span).toLocaleString()}
+          <span className="text-lantern-ash opacity-60 text-xs ml-1">
+            ({span.input_tokens}+{span.output_tokens})
+          </span>
+        </span>
+      );
+    case "cost":
+      return (
+        <span
+          key={col.key}
+          className="font-medium"
+          style={{ color: colors.accents.emberFlare }}
+        >
+          ${span.cost_usd.toFixed(4)}
+        </span>
+      );
+    case "environment":
+      return <span key={col.key} className="text-lantern-ash text-xs">default</span>;
+    default:
+      return null;
+  }
 }
 
 // ── Pagination ─────────────────────────────────────────────────────
@@ -526,8 +618,6 @@ export default function TracesPage({
     fetchSpans("", false);
   };
 
-
-
   // Reconstruct parent-child relationships from the flat span list.
   const traceGroups = useMemo<Record<string, Span[]>>(() => {
     const groups: Record<string, Span[]> = {};
@@ -556,7 +646,7 @@ export default function TracesPage({
               key={section}
               name={section}
               label={FILTER_LABELS[section] ?? section}
-              expanded={!!expandedFilters[section]}
+              expanded={expandedFilters[section]}
               onToggle={() => toggleFilter(section)}
               onApply={(vals) => applyFilter(section, vals)}
               value={filterState[section] ?? []}
@@ -742,69 +832,15 @@ export default function TracesPage({
                     >
                       {visibleColumns.map((col) => (
                         <td key={col.key} className="px-3 py-2.5 whitespace-nowrap">
-                          {col.key === "bookmark" && (
-                            <BookmarkStar
-                              starred={bookmarks.has(span.trace_id)}
-                              onClick={() => toggleBookmark(span.trace_id)}
-                            />
-                          )}
-                          {col.key === "timestamp" && (
-                            <span className="text-lantern-ash text-xs">
-                              {formatTimeWithYear(span.start_time)}
-                            </span>
-                          )}
-                          {col.key === "name" && (
-                            <button
-                              onClick={() => {
-                                onNavigateToTrace(span.trace_id);
-                                onNavigateToTraceDetail();
-                              }}
-                              className="text-left block w-full"
-                              title="View trace waterfall"
-                            >
-                              <div className="text-lantern-pure font-medium">{span.name}</div>
-                              <div className="text-lantern-ash text-xs font-mono truncate max-w-[120px]">
-                                {span.trace_id.slice(0, 12)}…
-                              </div>
-                            </button>
-                          )}
-                          {col.key === "input" && (
-                            <div className="max-w-[200px] text-lantern-ash text-xs font-mono">
-                              {span.input ? formatJsonPreview(span.input, 40) : "—"}
-                            </div>
-                          )}
-                          {col.key === "output" && (
-                            <div className="max-w-[200px] text-lantern-ash text-xs font-mono">
-                              {span.output ? formatJsonPreview(span.output, 40) : "—"}
-                            </div>
-                          )}
-                          {col.key === "observationLevels" && (
-                            <ObservationPills childSpans={childSpans} />
-                          )}
-                          {col.key === "latency" && (
-                            <span className="text-lantern-ash">
-                              {formatDuration(span.start_time, span.end_time)}
-                            </span>
-                          )}
-                          {col.key === "tokens" && (
-                            <span className="text-lantern-ash">
-                              {totalTokens(span).toLocaleString()}
-                              <span className="text-lantern-ash opacity-60 text-xs ml-1">
-                                ({span.input_tokens}+{span.output_tokens})
-                              </span>
-                            </span>
-                          )}
-                          {col.key === "cost" && (
-                            <span
-                              className="font-medium"
-                              style={{ color: colors.accents.emberFlare }}
-                            >
-                              ${span.cost_usd.toFixed(4)}
-                            </span>
-                          )}
-                          {col.key === "environment" && (
-                            <span className="text-lantern-ash text-xs">default</span>
-                          )}
+                          <TableCellRenderer
+                            col={col}
+                            span={span}
+                            childSpans={childSpans}
+                            bookmarks={bookmarks}
+                            onToggleBookmark={toggleBookmark}
+                            onNavigateToTrace={onNavigateToTrace}
+                            onNavigateToTraceDetail={onNavigateToTraceDetail}
+                          />
                         </td>
                       ))}
                     </tr>
