@@ -70,6 +70,8 @@ docker compose run --rm eval
 |----------|--------|-------------|
 | `/v1/traces` | POST | OTLP span ingest (protobuf or JSON) |
 | `/api/v1/spans` | POST | Native REST span ingest |
+| | | **Request body:** `{"spans": [{"trace_id": "<32-char hex>", "span_id": "<16-char hex>", "name": "...", ...}]}` |
+| | | `trace_id` must be a 32-character lowercase hex string (0-9, a-f). `span_id` must be a 16-character lowercase hex string (0-9, a-f). |
 | `/api/v1/spans/query` | POST | Paginated span list with keyset cursor |
 | `/api/v1/traces/:traceId` | GET | Full span waterfall for a trace |
 | `/api/v1/scores` | POST | Manual score write |

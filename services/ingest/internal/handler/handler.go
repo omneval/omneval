@@ -170,20 +170,20 @@ func (h *NativeHandler) validateAndTransform(ns *NativeSpan, vk *auth.ValidatedK
 	// Validate span_id: exactly 8 hex bytes = 16 hex chars
 	if ns.SpanID != "" {
 		if len(ns.SpanID) != 16 {
-			return fmt.Errorf("span_id must be 16 hex characters, got %d", len(ns.SpanID))
+			return fmt.Errorf("span_id must be a 16-character lowercase hex string (0-9, a-f), got %d characters", len(ns.SpanID))
 		}
 		if _, err := hex.DecodeString(ns.SpanID); err != nil {
-			return fmt.Errorf("span_id is not valid hex: %v", err)
+			return fmt.Errorf("span_id must be a 16-character lowercase hex string (0-9, a-f)")
 		}
 	}
 
 	// Validate trace_id: exactly 16 hex bytes = 32 hex chars
 	if ns.TraceID != "" {
 		if len(ns.TraceID) != 32 {
-			return fmt.Errorf("trace_id must be 32 hex characters, got %d", len(ns.TraceID))
+			return fmt.Errorf("trace_id must be a 32-character lowercase hex string (0-9, a-f), got %d characters", len(ns.TraceID))
 		}
 		if _, err := hex.DecodeString(ns.TraceID); err != nil {
-			return fmt.Errorf("trace_id is not valid hex: %v", err)
+			return fmt.Errorf("trace_id must be a 32-character lowercase hex string (0-9, a-f)")
 		}
 	}
 

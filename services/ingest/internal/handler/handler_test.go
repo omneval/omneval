@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -253,6 +254,90 @@ func TestNativeHandler_ValidatesSpanIDFormat(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestNativeHandler_SpanIDNonHexErrorMessage(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handler.NewNativeHandler(q, v, nil, nil)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	// span_id with non-hex characters ('q' is not hex)
+	spans := []*handler.NativeSpan{
+		{
+			TraceID: "0123456789abcdef0123456789abcdef",
+			SpanID:  "qa01234567890001",
+			Name:    "test-span",
+		},
+	}
+	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
+	req.Header.Set("X-API-Key", "valid_project_key")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	msg := string(body)
+	// Must be user-friendly — no internal Go encoding/hex details
+	if strings.Contains(msg, "encoding/hex") {
+		t.Errorf("error message exposes internal Go encoding: %q", msg)
+	}
+	// Must mention the correct format
+	if !strings.Contains(msg, "16-character lowercase hex string") && !strings.Contains(msg, "0-9, a-f") {
+		t.Errorf("error message should mention 16-character lowercase hex (0-9, a-f): %q", msg)
+	}
+}
+
+func TestNativeHandler_TraceIDNonHexErrorMessage(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handler.NewNativeHandler(q, v, nil, nil)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	// trace_id with non-hex characters
+	spans := []*handler.NativeSpan{
+		{
+			TraceID: "qa0123456789000000000000000000001",
+			SpanID:  "0123456789abcdef",
+			Name:    "test-span",
+		},
+	}
+	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
+	req.Header.Set("X-API-Key", "valid_project_key")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	msg := string(body)
+	// Must be user-friendly — no internal Go encoding/hex details
+	if strings.Contains(msg, "encoding/hex") {
+		t.Errorf("error message exposes internal Go encoding: %q", msg)
+	}
+	// Must mention the correct format
+	if !strings.Contains(msg, "32-character lowercase hex string") && !strings.Contains(msg, "0-9, a-f") {
+		t.Errorf("error message should mention 32-character lowercase hex: %q", msg)
 	}
 }
 
