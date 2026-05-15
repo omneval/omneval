@@ -3,16 +3,16 @@ package domain
 import "time"
 
 type Organization struct {
-	OrgID     string
-	Name      string
-	CreatedAt time.Time
+	OrgID     string    `json:"org_id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Project struct {
-	ProjectID string
-	OrgID     string
-	Name      string
-	CreatedAt time.Time
+	ProjectID string    `json:"project_id"`
+	OrgID     string    `json:"org_id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type User struct {

@@ -1121,3 +1121,57 @@ func (f *FakeSessionStore) ListProjects(r *http.Request) ([]*domain.Project, err
 	}
 	return []*domain.Project{{ProjectID: f.projectID}}, nil
 }
+
+func TestHandleProjects_ReturnsSnakeCaseJSON(t *testing.T) {
+	// HandleProjects should return JSON with snake_case keys
+	// (project_id, org_id, name, created_at) not PascalCase (ProjectID, OrgID, ...).
+	// This is what the UI frontend expects for the project switcher.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	w := httptest.NewRecorder()
+
+	h := &SpanHandler{
+		SessionStore: &FakeSessionStore{projectID: "test-proj-123"},
+	}
+
+	h.HandleProjects(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusOK)
+		return
+	}
+
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("content-type: got %q, want %q", ct, "application/json")
+	}
+
+	// Parse the JSON response and verify snake_case keys exist.
+	var projects []map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &projects); err != nil {
+		t.Fatalf("invalid JSON response: %v", err)
+	}
+
+	if len(projects) == 0 {
+		t.Fatal("expected at least one project in response")
+	}
+
+	p := projects[0]
+
+	// Verify snake_case keys are present.
+	for _, key := range []string{"project_id", "org_id", "name", "created_at"} {
+		if _, ok := p[key]; !ok {
+			t.Errorf("response missing snake_case key %q", key)
+		}
+	}
+
+	// Verify PascalCase keys are NOT present.
+	for _, key := range []string{"ProjectID", "OrgID", "Name", "CreatedAt"} {
+		if _, ok := p[key]; ok {
+			t.Errorf("response should not contain PascalCase key %q", key)
+		}
+	}
+
+	// Verify the project_id value is correct.
+	if pid, ok := p["project_id"].(string); !ok || pid != "test-proj-123" {
+		t.Errorf("project_id: got %v, want %q", p["project_id"], "test-proj-123")
+	}
+}
