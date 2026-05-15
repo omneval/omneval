@@ -302,7 +302,7 @@ func TestCompile_AggFunctionPreferredOverFn(t *testing.T) {
 		t.Fatalf("unexpected unmarshal error: %v", err)
 	}
 	if req.Aggregations[0].Function != AggCount {
-		t.Errorf("expected function count (" + "function" + " wins over fn), got %q", req.Aggregations[0].Function)
+		t.Errorf(`expected function count ("function" wins over "fn"), got %q`, req.Aggregations[0].Function)
 	}
 }
 

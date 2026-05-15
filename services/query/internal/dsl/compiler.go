@@ -147,9 +147,13 @@ func aggExprForField(fn AggFunc, field string) (string, error) {
 		return fmt.Sprintf("MIN(%s)", colExpr), nil
 	case AggMax:
 		return fmt.Sprintf("MAX(%s)", colExpr), nil
-	default:
-		return "", fmt.Errorf("dsl: unhandled aggregation function %q", fn)
 	}
+
+	// The validAggFuncs map is checked at the top of this function, so all
+	// known aggregation functions are handled by the cases above. This
+	// default arm is unreachable and exists only to satisfy the Go compiler,
+	// which does not verify exhaustive switches.
+	return "", fmt.Errorf("dsl: unhandled aggregation function %q", fn)
 }
 
 // filterOpSQL maps FilterOp names to SQL operator symbols.
