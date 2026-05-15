@@ -3,6 +3,7 @@ package sqlite_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -314,6 +315,125 @@ func TestAPIKey_ListByProject(t *testing.T) {
 }
 
 // ---- Prompt Versions ----
+
+// TestPrompt_CreateAndGet_GetAtReturnsProjectID verifies that GetPromptVersion
+// returns a PromptVersion with ProjectID set (not empty). Regression for issue #83.
+func TestPrompt_CreateAndGet_GetAtReturnsProjectID(t *testing.T) {
+	s, _ := openTestStore(t)
+	defer s.Close()
+
+	pv := &domain.PromptVersion{
+		VersionID:   "pv-1",
+		ProjectID:   "proj-1",
+		Name:        "greeting",
+		Version:     1,
+		Template:    "Hello {{name}}, welcome!",
+		ModelConfig: domain.PromptModelConfig{Model: "gpt-4", Temperature: 0.7, MaxTokens: 256},
+		CreatedAt:   time.Date(2026, 5, 10, 14, 30, 0, 0, time.UTC),
+	}
+	if err := s.CreatePromptVersion(context.Background(), pv); err != nil {
+		t.Fatalf("create prompt version: %v", err)
+	}
+
+	got, err := s.GetPromptVersion(context.Background(), "proj-1", "greeting", 1)
+	if err != nil {
+		t.Fatalf("get prompt version: %v", err)
+	}
+	if got.ProjectID != "proj-1" {
+		t.Errorf("ProjectID: got %q, want %q", got.ProjectID, "proj-1")
+	}
+	if got.CreatedAt.IsZero() {
+		t.Errorf("CreatedAt is zero (should be non-zero)")
+	}
+}
+
+// TestPrompt_CreateAndGet_ListReturnsProjectID verifies that ListPromptVersions
+// returns PromptVersion structs with ProjectID set (not empty). Regression for issue #83.
+func TestPrompt_CreateAndGet_ListReturnsProjectID(t *testing.T) {
+	s, _ := openTestStore(t)
+	defer s.Close()
+
+	for i := int64(1); i <= 2; i++ {
+		s.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+			VersionID:   fmt.Sprintf("pv-%d", i),
+			ProjectID:   "proj-1",
+			Name:        "greeting",
+			Version:     i,
+			Template:    fmt.Sprintf("v%d", i),
+			ModelConfig: domain.PromptModelConfig{Model: "gpt-4"},
+			CreatedAt:   time.Date(2026, 5, 10, 14, 30, 0, 0, time.UTC),
+		})
+	}
+
+	versions, err := s.ListPromptVersions(context.Background(), "proj-1", "greeting")
+	if err != nil {
+		t.Fatalf("list prompt versions: %v", err)
+	}
+
+	if len(versions) != 2 {
+		t.Fatalf("expected 2 versions, got %d", len(versions))
+	}
+
+	// Acceptance criterion: ProjectID must be non-empty.
+	for _, v := range versions {
+		if v.ProjectID == "" {
+			t.Errorf("version %d ProjectID is empty (should be 'proj-1')", v.Version)
+		}
+	}
+
+	// Acceptance criterion: CreatedAt must not be zero.
+	for _, v := range versions {
+		if v.CreatedAt.IsZero() {
+			t.Errorf("version %d CreatedAt is zero", v.Version)
+		}
+	}
+}
+
+// TestPrompt_ListVersionsWithDefaultCreatedAt verifies that rows inserted
+// using the table DEFAULT value for created_at (SQLite's native datetime
+// format) are parsed correctly — not returned as zero time.
+func TestPrompt_ListVersionsWithDefaultCreatedAt(t *testing.T) {
+	s, _ := openTestStore(t)
+	defer s.Close()
+
+	// Insert two versions via the API (RFC3339 created_at).
+	for i := int64(1); i <= 2; i++ {
+		s.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+			VersionID:   fmt.Sprintf("pv-%d", i),
+			ProjectID:   "proj-1",
+			Name:        "greeting",
+			Version:     i,
+			Template:    fmt.Sprintf("v%d", i),
+			ModelConfig: domain.PromptModelConfig{Model: "gpt-4"},
+		})
+	}
+
+	// Insert a third version using raw SQL to exercise the DEFAULT value
+	// (SQLite's native "YYYY-MM-DD HH:MM:SS" format).
+	s.DB().Exec(`INSERT INTO prompt_versions
+		(version_id, project_id, name, version, template, model)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		"pv-3", "proj-1", "greeting", 3, "v3 (default)", "gpt-3.5",
+	)
+
+	versions, err := s.ListPromptVersions(context.Background(), "proj-1", "greeting")
+	if err != nil {
+		t.Fatalf("list prompt versions: %v", err)
+	}
+
+	if len(versions) != 3 {
+		t.Fatalf("expected 3 versions, got %d", len(versions))
+	}
+
+	// Version 3 was inserted with DEFAULT — its created_at should NOT be zero.
+	v3 := versions[2]
+	if v3.CreatedAt.IsZero() {
+		t.Errorf("version 3 CreatedAt is zero (SQLite DEFAULT format not parsed)")
+	}
+	if v3.ProjectID == "" {
+		t.Errorf("version 3 ProjectID is empty")
+	}
+}
 
 func TestPrompt_CreateAndGet(t *testing.T) {
 	s, _ := openTestStore(t)

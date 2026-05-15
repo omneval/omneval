@@ -1307,6 +1307,118 @@ func TestPromptHandler_ListPromptVersions_NoSessionWithProjectID(t *testing.T) {
 	}
 }
 
+// TestPromptHandler_GetPrompt_DefaultProjectID verifies that
+// GET /api/v1/prompts/{name} (no params) returns a prompt with a non-empty
+// project_id and a non-zero created_at timestamp.
+// Regression test for issue #83: project_id was empty and created_at was zero.
+func TestPromptHandler_GetPrompt_DefaultProjectID(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj-123"},
+	}
+
+	// Pre-seed a prompt version with a real timestamp.
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID:   "v1",
+		ProjectID:   "test-proj-123",
+		Name:        "First prompt",
+		Version:     1,
+		Template:    "Hello {{name}}!",
+		ModelConfig: domain.PromptModelConfig{Model: "gpt-4", Temperature: 0.7, MaxTokens: 4096},
+		CreatedAt:   time.Date(2026, 5, 10, 14, 30, 0, 0, time.UTC),
+	})
+
+	// GET /api/v1/prompts/First%20prompt — no version or label params.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/First%20prompt", nil)
+	w := httptest.NewRecorder()
+	handler.HandleGetPrompt(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Acceptance criterion 1: project_id should be non-empty.
+	projectID, ok := resp["project_id"].(string)
+	if !ok {
+		t.Fatalf("project_id is not a string\nbody: %s", w.Body.String())
+	}
+	if projectID == "" {
+		t.Errorf("project_id is empty (should be 'test-proj-123')\nbody: %s", w.Body.String())
+	}
+
+	// Acceptance criterion 2: created_at should not be zero.
+	createdAt, ok := resp["created_at"].(string)
+	if !ok {
+		t.Fatalf("created_at is not a string\nbody: %s", w.Body.String())
+	}
+	if createdAt == "0001-01-01T00:00:00Z" || createdAt == "0001-01-01T00:00:00.000000000Z" {
+		t.Errorf("created_at is zero value: %q\nbody: %s", createdAt, w.Body.String())
+	}
+}
+
+// TestPromptHandler_ListPromptVersions_ProjectID verifies that
+// ListPromptVersions returns PromptVersion structs with ProjectID set.
+func TestPromptHandler_ListPromptVersions_ProjectID(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj-456"},
+	}
+
+	// Pre-seed a prompt version.
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID:   "v1",
+		ProjectID:   "test-proj-456",
+		Name:        "greeting",
+		Version:     1,
+		Template:    "Hello {{name}}!",
+		ModelConfig: domain.PromptModelConfig{Model: "gpt-4"},
+		CreatedAt:   time.Date(2026, 5, 10, 14, 30, 0, 0, time.UTC),
+	})
+
+	// GET /api/v1/prompts/greeting/versions — no query params needed.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting/versions", nil)
+	w := httptest.NewRecorder()
+	handler.HandleListPromptVersions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Name     string            `json:"name"`
+		Versions []*domain.PromptVersion `json:"versions"`
+		Count    int              `json:"count"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.Count != 1 {
+		t.Fatalf("count: got %d, want 1", resp.Count)
+	}
+
+	// ProjectID must be non-empty.
+	if resp.Versions[0].ProjectID == "" {
+		t.Errorf("version ProjectID is empty (should be 'test-proj-456')")
+	}
+
+	// CreatedAt must not be zero.
+	if resp.Versions[0].CreatedAt.IsZero() {
+		t.Errorf("version CreatedAt is zero")
+	}
+}
+
 // TestPromptHandler_CreatePrompt_LabelOverwrite verifies that re-creating
 // the same prompt name+version with a different label overwrites the previous label.
 func TestPromptHandler_CreatePrompt_LabelOverwrite(t *testing.T) {

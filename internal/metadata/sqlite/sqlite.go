@@ -630,7 +630,6 @@ func (s *Store) GetPromptVersion(ctx context.Context, projectID, name string, ve
 		}
 		return nil, fmt.Errorf("sqlite: get prompt version: %w", err)
 	}
-	t, _ := time.Parse(time.RFC3339, createdAt)
 	pv := &domain.PromptVersion{
 		VersionID: versionID,
 		ProjectID: projectID,
@@ -642,7 +641,7 @@ func (s *Store) GetPromptVersion(ctx context.Context, projectID, name string, ve
 			Temperature: derefOr(temperature, 0.7),
 			MaxTokens:   derefOr(maxTokens, 0),
 		},
-		CreatedAt: t,
+		CreatedAt: parseSQLiteTime(createdAt),
 	}
 	return pv, nil
 }
@@ -682,7 +681,8 @@ func (s *Store) ListPromptVersions(ctx context.Context, projectID, name string) 
 		if err := rows.Scan(&pv.VersionID, &pv.Name, &pv.Version, &pv.Template, &model, &temperature, &maxTokens, &createdAt); err != nil {
 			return nil, fmt.Errorf("sqlite: scan prompt version: %w", err)
 		}
-		pv.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		pv.CreatedAt = parseSQLiteTime(createdAt)
+		pv.ProjectID = projectID
 		pv.ModelConfig = domain.PromptModelConfig{
 			Model:       model,
 			Temperature: derefOr(temperature, 0.7),
@@ -1159,4 +1159,17 @@ func derefOr[T any](p *T, def T) T {
 		return *p
 	}
 	return def
+}
+
+// parseSQLiteTime parses a time string that may be in RFC3339 or SQLite's
+// native format ("2006-01-02 15:04:05"). It tries RFC3339 first, then falls
+// back to the SQLite format, returning zero time if both fail.
+func parseSQLiteTime(s string) time.Time {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t
+	}
+	if t, err := time.Parse("2006-01-02 15:04:05", s); err == nil {
+		return t
+	}
+	return time.Time{}
 }

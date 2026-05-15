@@ -532,6 +532,7 @@ func (s *Store) ListPromptVersions(ctx context.Context, projectID, name string) 
 			return nil, fmt.Errorf("postgres: scan prompt version: %w", err)
 		}
 		pv.CreatedAt = createdAt
+		pv.ProjectID = projectID
 		pv.ModelConfig = domain.PromptModelConfig{
 			Model:       model,
 			Temperature: derefOr(temperature, 0.7),
