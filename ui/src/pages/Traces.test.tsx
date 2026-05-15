@@ -185,17 +185,22 @@ describe("ObservationPills component", () => {
     expect(llmBadges.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("shows placeholder for traces with no children", async () => {
+  it("shows nothing when a trace has no children", async () => {
     renderTracesPage();
 
     await waitFor(() => {
       expect(screen.getByText("leaf-span")).toBeInTheDocument();
     });
 
-    // trace-c has no children — ObservationPills returns null when childSpans is empty
-    // So the cell should be empty (no badge rendered)
+    // leaf-span has no children, so ObservationPills renders nothing
     const leafRow = screen.getByText("leaf-span").closest("tr");
     expect(leafRow).toBeInTheDocument();
+
+    // The observation levels cell should be empty (no badge text)
+    const leafRowCells = leafRow?.querySelectorAll("td");
+    // observationLevels is the 6th column (0-indexed = 5)
+    const levelsCell = leafRowCells?.[5];
+    expect(levelsCell?.textContent).toBe("");
   });
 });
 
@@ -219,16 +224,14 @@ describe("column toggles", () => {
       expect(screen.getByText("main-trace")).toBeInTheDocument();
     });
 
-    // Click the "OL" button (observationLevels column toggle)
-    const olButton = screen.getByRole("button", { name: "Toggle Levels column" });
+    const olButton = screen.getByRole("button", {
+      name: "Toggle Levels column",
+    });
     await act(async () => {
       fireEvent.click(olButton);
     });
 
-    // The Levels header should no longer be visible
     expect(screen.queryByText("Levels")).not.toBeInTheDocument();
-
-    vi.restoreAllMocks();
   });
 
   it("shows Levels column header by default", async () => {
@@ -249,8 +252,6 @@ describe("column toggles", () => {
     });
 
     expect(screen.getByText("Levels")).toBeInTheDocument();
-
-    vi.restoreAllMocks();
   });
 });
 
@@ -360,8 +361,6 @@ describe("bookmark toggling", () => {
       name: "Remove bookmark",
     });
     expect(removeButtons.length).toBeGreaterThan(0);
-
-    vi.restoreAllMocks();
   });
 });
 
@@ -436,6 +435,38 @@ describe("pagination", () => {
     });
 
     expect(screen.getByText("Rows per page:")).toBeInTheDocument();
+  });
+});
+
+// ── Span rendering tests ─────────────────────────────────────────
+
+describe("span rendering", () => {
+  it("renders cost with four decimal places", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: [
+            {
+              ...mockSpans[0],
+              cost_usd: 0.01234,
+              input: "",
+              output: "",
+            },
+          ],
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // cost_usd.toFixed(4) produces "$0.0123"
+    expect(screen.getByText("$0.0123")).toBeInTheDocument();
   });
 });
 

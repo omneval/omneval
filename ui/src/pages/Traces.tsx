@@ -21,6 +21,7 @@ interface Span {
   span_id: string;
   trace_id: string;
   parent_id: string;
+  project_id: string;
   name: string;
   kind: string;
   model?: string;
@@ -29,7 +30,6 @@ interface Span {
   cost_usd: number;
   input_tokens: number;
   output_tokens: number;
-  Children?: Span[];
   input?: string;
   output?: string;
   status_code?: string;
@@ -470,16 +470,9 @@ export default function TracesPage({
     [pageSize, searchQuery, filterState],
   );
 
-  const resetAndFetch = useCallback(
-    (cursor = "", append = false) => {
-      fetchSpans(cursor, append);
-    },
-    [fetchSpans],
-  );
-
   useEffect(() => {
-    resetAndFetch("");
-  }, [activeProject, pageSize, resetAndFetch]);
+    fetchSpans("");
+  }, [activeProject, pageSize, fetchSpans]);
 
   // Auto-refresh effect
   useEffect(() => {
@@ -523,20 +516,15 @@ export default function TracesPage({
       ...prev,
       [field]: values,
     }));
-    resetAndFetch("", false);
+    fetchSpans("", false);
   };
 
   const totalTokens = (span: Span) => span.input_tokens + span.output_tokens;
 
-  // Group spans by trace_id so we can compute children per span.
-  // The API returns flat spans; we reconstruct the parent-child relationship
-  // so the Levels column can show badge counts for each trace.
-  const traceGroups = useMemo(() => {
+  // Reconstruct parent-child relationships from the flat span list.
+  const traceGroups = useMemo<Record<string, Span[]>>(() => {
     const groups: Record<string, Span[]> = {};
-    spans.forEach((s) => {
-      if (!groups[s.trace_id]) groups[s.trace_id] = [];
-      groups[s.trace_id].push(s);
-    });
+    spans.forEach((span) => (groups[span.trace_id] ??= []).push(span));
     return groups;
   }, [spans]);
 
@@ -573,7 +561,7 @@ export default function TracesPage({
             onClick={() => {
               setFilterState({});
               setExpandedFilters({ trace_name: true });
-              resetAndFetch("", false);
+              fetchSpans("", false);
             }}
             className="w-full text-center text-sm py-1.5 rounded transition-colors"
             style={{
@@ -637,7 +625,7 @@ export default function TracesPage({
             value={searchQuery}
             onChange={(e) => {
               setSearchQuery(e.target.value);
-              resetAndFetch("", false);
+              fetchSpans("", false);
             }}
             className="w-48 text-sm px-2.5 py-1.5 rounded border bg-lantern-bg-charcoal text-lantern-pure placeholder-lantern-ash"
             style={{ borderColor: colors.backgrounds.caveWall }}
