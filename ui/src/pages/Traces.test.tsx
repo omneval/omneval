@@ -21,8 +21,6 @@ const mockSpans = [
     input: '{"message":"hello"}',
     output: '{"reply":"hi"}',
     status_code: "OK",
-    Children: [],
-    ChildrenCount: 3,
   },
   {
     span_id: "child-llm-1",
@@ -117,32 +115,6 @@ const mockSpans = [
   },
 ];
 
-function mockFetchSuccess() {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue({
-    ok: true,
-    json: () =>
-      Promise.resolve({
-        spans: mockSpans,
-        next: "",
-        limit: 25,
-      }),
-  } as Response);
-}
-
-function mockFetchObservationsOnly() {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue({
-    ok: true,
-    json: () =>
-      Promise.resolve({
-        spans: mockSpans.filter((s) =>
-          ["llm", "tool", "agent", "chain"].includes(s.kind)
-        ),
-        next: "",
-        limit: 25,
-      }),
-  } as Response);
-}
-
 // ── Render helper ────────────────────────────────────────────────
 
 function renderTracesPage() {
@@ -170,7 +142,9 @@ describe("ObservationPills component", () => {
     } as Response);
   });
 
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it("renders a single badge when one kind of child exists", async () => {
     renderTracesPage();
@@ -218,7 +192,7 @@ describe("ObservationPills component", () => {
       expect(screen.getByText("leaf-span")).toBeInTheDocument();
     });
 
-    // trace-c has no children — ObservationPills returns null for count <= 0
+    // trace-c has no children — ObservationPills returns null when childSpans is empty
     // So the cell should be empty (no badge rendered)
     const leafRow = screen.getByText("leaf-span").closest("tr");
     expect(leafRow).toBeInTheDocument();
@@ -295,7 +269,9 @@ describe("traces tab", () => {
     } as Response);
   });
 
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it("renders traces tab with span data", async () => {
     renderTracesPage();
@@ -326,7 +302,9 @@ describe("observations tab", () => {
     } as Response);
   });
 
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it("shows only observation spans when observations tab is active", async () => {
     renderTracesPage();
@@ -446,7 +424,9 @@ describe("pagination", () => {
     } as Response);
   });
 
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it("shows pagination controls", async () => {
     renderTracesPage();

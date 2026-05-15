@@ -63,16 +63,16 @@ interface FilterState {
 // ── Observation Level Pills ────────────────────────────────────────
 
 interface ObservationPillsProps {
-  children: Span[];
+  childSpans: Span[];
 }
 
-function ObservationPills({ children }: ObservationPillsProps) {
-  if (children.length === 0) return null;
+function ObservationPills({ childSpans }: ObservationPillsProps) {
+  if (childSpans.length === 0) return null;
 
   // Aggregate child counts by kind.
   const kindCounts: Record<string, number> = {};
-  children.forEach((s) => {
-    const kind = s.kind ?? "span";
+  childSpans.forEach((span) => {
+    const kind = span.kind ?? "span";
     kindCounts[kind] = (kindCounts[kind] ?? 0) + 1;
   });
 
@@ -346,7 +346,6 @@ export default function TracesPage({
   const [nextCursor, setNextCursor] = useState("");
   const [loading, setLoading] = useState(false);
   const [pageSize, setPageSize] = useState(25);
-  const [_, setPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"traces" | "observations">("traces");
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -728,8 +727,7 @@ export default function TracesPage({
               </thead>
               <tbody>
                 {spans.map((span) => {
-                  // Compute children from the trace group (spans sharing the same trace_id with this span as parent).
-                  const children = (
+                  const childSpans = (
                     traceGroups[span.trace_id] ?? []
                   ).filter((s) => s.parent_id === span.span_id);
                   return (
@@ -786,7 +784,7 @@ export default function TracesPage({
                             </div>
                           )}
                           {col.key === "observationLevels" && (
-                            <ObservationPills children={children} />
+                            <ObservationPills childSpans={childSpans} />
                           )}
                           {col.key === "latency" && (
                             <span className="text-lantern-ash">
@@ -827,7 +825,6 @@ export default function TracesPage({
           pageSize={pageSize}
           onPageSizeChange={(size) => {
             setPageSize(size);
-            setPage(1);
           }}
           hasMore={!!nextCursor}
           loading={loading}
