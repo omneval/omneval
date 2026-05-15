@@ -139,7 +139,12 @@ function GenerateKeyDialog({
       }
 
       const data = await res.json();
-      setRawKey(data.raw_key);
+      const rawKey = data?.raw_key;
+      if (typeof rawKey !== "string" || rawKey === "") {
+        addToast("error", "Server returned an invalid key — please try again");
+        return;
+      }
+      setRawKey(rawKey);
     } catch {
       addToast("error", "Failed to generate API key");
     } finally {

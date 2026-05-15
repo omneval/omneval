@@ -1309,3 +1309,131 @@ func readBody(t *testing.T, resp *http.Response) string {
 	buf.ReadFrom(resp.Body)
 	return buf.String()
 }
+
+func TestHandler_GenerateAPIKey_EndToEnd(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+
+	// Create org, user, and project
+	_ = store.CreateOrganization(nil, &domain.Organization{OrgID: "org-1", Name: "Test Org"})
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "user-1",
+		OrgID:        "org-1",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
+	})
+	project := &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "Test Project"}
+	_ = store.CreateProject(nil, project)
+
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
+
+	// Generate a project-scoped API key via POST
+	keyPayload, _ := json.Marshal(map[string]string{"kind": "project"})
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects/proj-1/api-keys", bytes.NewReader(keyPayload))
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("generate key request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d (created)", resp.StatusCode, http.StatusCreated)
+	}
+
+	var body auth.GenerateAPIKeyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// Verify the response has the correct structure
+	if body.KeyID == "" {
+		t.Error("expected key_id in response")
+	}
+	if body.ProjectID != "proj-1" {
+		t.Errorf("project_id: got %q, want %q", body.ProjectID, "proj-1")
+	}
+	if body.Kind != domain.APIKeyKindProject {
+		t.Errorf("kind: got %q, want %q", body.Kind, domain.APIKeyKindProject)
+	}
+	if body.RawKey == "" {
+		t.Fatal("expected raw_key in response (this is what the frontend uses)")
+	}
+
+	// Verify the raw key format: prefix + 43 base58 chars
+	expectedPrefix := "ltn_proj_"
+	if len(body.RawKey) < len(expectedPrefix)+43 {
+		t.Errorf("raw_key too short: %q (expected at least %d chars)", body.RawKey, len(expectedPrefix)+43)
+	}
+	if body.RawKey[:len(expectedPrefix)] != expectedPrefix {
+		t.Errorf("raw_key prefix: got %q, want %q", body.RawKey[:len(expectedPrefix)], expectedPrefix)
+	}
+
+	// Verify the key was stored in the database (hashed only, not raw)
+	keys, err := store.ListAPIKeys(nil, "proj-1")
+	if err != nil {
+		t.Fatalf("list api keys: %v", err)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 key in store, got %d", len(keys))
+	}
+	if keys[0].KeyID != body.KeyID {
+		t.Errorf("stored key_id: got %q, want %q", keys[0].KeyID, body.KeyID)
+	}
+	if keys[0].HashedKey == "" {
+		t.Fatal("stored key should have a hashed_key")
+	}
+}
+
+func TestHandler_GenerateAPIKey_ResponseFormat(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+
+	// Create org, user, and project
+	_ = store.CreateOrganization(nil, &domain.Organization{OrgID: "org-1", Name: "Test Org"})
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "user-1",
+		OrgID:        "org-1",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
+	})
+	_ = store.CreateProject(nil, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "Test"})
+
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
+
+	// Generate a key with the exact payload the frontend sends
+	keyPayload, _ := json.Marshal(map[string]string{"kind": "project"})
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects/proj-1/api-keys", bytes.NewReader(keyPayload))
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusCreated)
+	}
+
+	// Read the raw body to check JSON format
+	var rawBody map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&rawBody); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	// The frontend reads data.raw_key
+	if _, exists := rawBody["raw_key"]; !exists {
+		t.Fatal("response must include 'raw_key' field for the frontend")
+	}
+
+	rawKey, ok := rawBody["raw_key"].(string)
+	if !ok {
+		t.Fatalf("raw_key must be a string, got %T: %v", rawBody["raw_key"], rawBody["raw_key"])
+	}
+	if rawKey == "" {
+		t.Fatal("raw_key must not be empty")
+	}
+	if len(rawKey) < 50 {
+		t.Errorf("raw_key too short: %q (expected at least 50 chars: ltn_proj_ + 43 base58)", rawKey)
+	}
+}
