@@ -127,3 +127,17 @@ export function timeRangeLabel(from: string): string {
   if (diffHours <= 168) return "Past 7 days";
   return "Custom range";
 }
+
+// ── Span helpers ───────────────────────────────────────────────────
+
+interface HasTokenCounts {
+  input_tokens: number;
+  output_tokens: number;
+}
+
+/**
+ * Compute the total token count (input + output) from a span-like object.
+ */
+export function totalTokens(span: HasTokenCounts): number {
+  return span.input_tokens + span.output_tokens;
+}

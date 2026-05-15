@@ -246,7 +246,7 @@ function NavItemButton({
   return (
     <button
       onClick={() => onNavigate(item.id)}
-      className={`group flex items-center gap-3 w-full px-2 py-2 text-sm rounded-md transition-all duration-150 ${
+      className={`group flex items-center gap-3 w-full px-2 py-2 text-sm rounded-md transition-all duration-150 relative ${
         isActive
           ? "text-lantern-ember bg-lantern-accent-ember-glow"
           : "text-lantern-ash hover:text-lantern-pure hover:bg-lantern-accent-flicker-hover"
@@ -255,7 +255,7 @@ function NavItemButton({
       {/* Orange left border for active state */}
       {isActive && (
         <span
-          className="absolute left-0 h-full bg-lantern-ember rounded-r"
+          className="absolute left-0 top-0 bottom-0 bg-lantern-ember rounded-r"
           style={{ width: "2px" }}
         />
       )}
@@ -367,23 +367,6 @@ export default function Sidebar({ collapsed, onToggle, active, onNavigate, onLog
           </button>
         </div>
       )}
-
-      {/* Collapse toggle (bottom-right) */}
-      <div className="border-t border-lantern-bg-cave py-1 px-1">
-        <button
-          onClick={onToggle}
-          className="w-full flex items-center justify-center p-1.5 rounded hover:bg-lantern-bg-illumination text-lantern-ash hover:text-lantern-pure transition-colors"
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            {collapsed ? (
-              <path d="M10 2l4 4-4 4M6 6H14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            ) : (
-              <path d="M6 2L2 6l4 4M10 6H2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            )}
-          </svg>
-        </button>
-      </div>
     </aside>
   );
 }

@@ -14,7 +14,7 @@ import Breadcrumb from "@/components/Breadcrumb";
 import JsonCodeBlock from "@/components/JsonCodeBlock";
 import { Skeleton } from "@/components/Skeleton";
 import { EmptyState, LoadingState } from "@/components/EmptyState";
-import { formatTime, formatDuration, formatMs } from "@/utils/formatters";
+import { formatTime, formatDuration, formatMs, totalTokens } from "@/utils/formatters";
 import { useToast } from "@/components/Toast";
 import SaveToDatasetModal from "@/components/SaveToDatasetModal";
 
@@ -883,6 +883,3 @@ function SpanRow({
   );
 }
 
-export function totalTokens(span: Span): number {
-  return span.input_tokens + span.output_tokens;
-}

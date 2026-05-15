@@ -7,6 +7,7 @@ import {
   formatTimeWithYear,
   formatDuration,
   formatJsonPreview,
+  totalTokens,
 } from "@/utils/formatters";
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -517,7 +518,7 @@ export default function TracesPage({
     fetchSpans("", false);
   };
 
-  const totalTokens = (span: Span) => span.input_tokens + span.output_tokens;
+
 
   // Reconstruct parent-child relationships from the flat span list.
   const traceGroups = useMemo<Record<string, Span[]>>(() => {

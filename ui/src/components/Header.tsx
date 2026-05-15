@@ -17,7 +17,6 @@ interface HeaderProps {
   onTimeRangeChange: (range: string) => void;
   environment: string;
   onEnvironmentChange: (env: string) => void;
-  onLogout?: () => void;
 }
 
 interface TimeRangeOption {

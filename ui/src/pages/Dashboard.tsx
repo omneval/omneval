@@ -27,9 +27,7 @@ interface DashboardPageProps {
   activeProject: string;
 }
 
-interface RowData {
-  [key: string]: any;
-}
+
 
 interface AnalyticsRequest {
   from: string;
@@ -509,8 +507,8 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
         const data = await tracesByNameResp.json();
         if (data.rows) {
           setTracesByName(
-            data.rows.map((row: RowData) => ({
-              name: row.name || "unknown",
+            data.rows.map((row: Record<string, unknown>) => ({
+              name: (row.name as string) || "unknown",
               count: Number(row.count) || 0,
             })),
           );
@@ -522,8 +520,8 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
         const data = await tracesByTimeResp.json();
         if (data.rows) {
           setTracesByTime(
-            data.rows.map((row: RowData) => ({
-              time: formatTime(row.start_time),
+            data.rows.map((row: Record<string, unknown>) => ({
+              time: formatTime(row.start_time as string),
               count: Number(row.count) || 0,
             })),
           );
@@ -535,8 +533,8 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
         const data = await modelCostsResp.json();
         if (data.rows) {
           setModelCosts(
-            data.rows.map((row: RowData) => ({
-              model: row.model || "unknown",
+            data.rows.map((row: Record<string, unknown>) => ({
+              model: (row.model as string) || "unknown",
               inputTokens: Number(row.input_tokens) || 0,
               outputTokens: Number(row.output_tokens) || 0,
               totalCost: Number(row.total_cost) || 0,
@@ -550,8 +548,8 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
         const data = await userConsumptionResp.json();
         if (data.rows) {
           setUserConsumption(
-            data.rows.map((row: RowData) => ({
-              user: row.user_id || "anonymous",
+            data.rows.map((row: Record<string, unknown>) => ({
+              user: (row.user_id as string) || "anonymous",
               count: Number(row.count) || 0,
             })),
           );

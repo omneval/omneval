@@ -33,7 +33,7 @@ const NAV_MAP: Record<string, Page> = {
   "dataset-detail": "dataset-detail",
   settings: "settings",
   "eval-rules": "eval-rules",
-};
+} as const;
 
 interface Project {
   project_id: string;
@@ -133,7 +133,6 @@ export default function App() {
         onTimeRangeChange={setTimeRange}
         environment={environment}
         onEnvironmentChange={setEnvironment}
-        onLogout={handleLogout}
       />
 
       {/* Main Content */}

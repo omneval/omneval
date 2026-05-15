@@ -2,8 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import TraceDetailPage from "./TraceDetail";
 import { ToastProvider } from "@/components/Toast";
-import { totalTokens } from "./TraceDetail";
-import { formatMs } from "@/utils/formatters";
+import { totalTokens, formatMs } from "@/utils/formatters";
 
 function renderWithProvider(ui: React.ReactElement) {
   return render(<ToastProvider>{ui}</ToastProvider>);
@@ -79,17 +78,8 @@ describe("totalTokens", () => {
     "returns $expected for inputTokens=$inputTokens, outputTokens=$outputTokens",
     ({ inputTokens, outputTokens, expected }) => {
       expect(totalTokens({
-        span_id: "x",
-        trace_id: "x",
-        parent_id: "",
-        project_id: "",
-        name: "",
-        kind: "",
-        start_time: "",
-        end_time: "",
         input_tokens: inputTokens,
         output_tokens: outputTokens,
-        cost_usd: 0,
       })).toBe(expected);
     },
   );
