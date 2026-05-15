@@ -15,8 +15,10 @@
     margin: 0;
     padding: 0;
     min-height: 100vh;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
       "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   /* Scrollbar styling for dark theme */
@@ -78,6 +80,22 @@
     font-size: 0.875rem;
     font-weight: 500;
     color: var(--lantern-text-pure);
+  }
+
+  /* ── Form input focus rings ─────────────────────────── */
+  .input-focus {
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .input-focus:focus {
+    border-color: var(--lantern-accent-ember);
+    box-shadow: 0 0 0 2px var(--lantern-focus-ring);
+  }
+
+  .input-focus:focus-danger {
+    border-color: var(--lantern-accent-danger);
+    box-shadow: 0 0 0 2px var(--lantern-focus-ring-danger);
   }
 
   /* ── Button hierarchy ───────────────────────────────── */

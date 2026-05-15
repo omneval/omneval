@@ -123,6 +123,13 @@ const baseColors = {
       return 0.55 + (0.45 * index) / Math.max(total, 1);
     },
   },
+  /** Focus ring colors for form inputs. */
+  focusRing: {
+    /** Normal focus — emberFlare at 25% opacity */
+    normal: "rgba(255, 87, 34, 0.25)",
+    /** Danger focus — dangerRed at 30% opacity */
+    danger: "rgba(239, 68, 68, 0.3)",
+  },
 } as const;
 
 type BaseColors = typeof baseColors;

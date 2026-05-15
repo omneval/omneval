@@ -584,7 +584,7 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
               type="datetime-local"
               value={new Date(from).toISOString().slice(0, 16)}
               onChange={(e) => setFrom(e.target.value)}
-              className="text-sm border rounded-md px-2 py-1 bg-lantern-bg-illumination border-lantern-bg-cave text-lantern-pure"
+              className="input-focus text-sm px-2 py-1 rounded-md border border-lantern-bg-cave bg-lantern-bg-illumination text-lantern-pure"
               style={{
                 colorScheme: "dark",
               }}
@@ -596,7 +596,7 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
               type="datetime-local"
               value={new Date(to).toISOString().slice(0, 16)}
               onChange={(e) => setTo(e.target.value)}
-              className="text-sm border rounded-md px-2 py-1 bg-lantern-bg-illumination border-lantern-bg-cave text-lantern-pure"
+              className="input-focus text-sm px-2 py-1 rounded-md border border-lantern-bg-cave bg-lantern-bg-illumination text-lantern-pure"
               style={{
                 colorScheme: "dark",
               }}

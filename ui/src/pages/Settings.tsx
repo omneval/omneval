@@ -223,7 +223,7 @@ function GenerateKeyDialog({
         <form onSubmit={handleSubmit}>
           {kind === "service" && (
             <div className="mb-4">
-              <label className="block text-sm text-lantern-ash mb-1">
+              <label className="block text-sm font-medium text-lantern-pure mb-1">
                 Service Name
               </label>
               <input
@@ -231,7 +231,7 @@ function GenerateKeyDialog({
                 value={serviceName}
                 onChange={(e) => setServiceName(e.target.value)}
                 placeholder="e.g. my-agent"
-                className="w-full px-3 py-2 rounded-md bg-black/40 border border-lantern-bg-cave text-lantern-pure placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-[#FF5722] focus:border-transparent transition-all"
+                className="input-focus w-full px-3 py-2 rounded-md border border-lantern-bg-cave bg-lantern-bg-abyss text-lantern-pure placeholder-lantern-ash/50 text-sm"
                 required
                 autoFocus
               />
@@ -314,7 +314,7 @@ export function NewProjectModal({
         </h3>
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
-            <label className="block text-sm text-lantern-ash mb-1">
+            <label className="block text-sm font-medium text-lantern-pure mb-1">
               Project Name
             </label>
             <input
@@ -322,7 +322,7 @@ export function NewProjectModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. my-agent"
-              className="w-full px-3 py-2 rounded-md bg-black/40 border border-lantern-bg-cave text-lantern-pure placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-[#FF5722] focus:border-transparent transition-all"
+              className="input-focus w-full px-3 py-2 rounded-md border border-lantern-bg-cave bg-lantern-bg-abyss text-lantern-pure placeholder-lantern-ash/50 text-sm"
               required
               autoFocus
             />

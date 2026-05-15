@@ -46,6 +46,12 @@
   /** Deep heat for error states — deepHeat at 15% opacity */
   --lantern-accent-heat-glow: rgba(230, 74, 25, 0.15);
 
+  /* ── Focus Ring ──────────────────────────────────────── */
+  /** Ember glow ring for focused inputs — emberFlare at 25% opacity */
+  --lantern-focus-ring: rgba(255, 87, 34, 0.25);
+  /** Danger ring for validation errors — dangerRed at 30% opacity */
+  --lantern-focus-ring-danger: rgba(239, 68, 68, 0.3);
+
   /* ── Default Dark Mode Palette ────────────────────────── */
   /** Main application background */
   --lantern-bg-root: var(--lantern-bg-abyss);

@@ -203,8 +203,7 @@ function FilterSection({
       type="text"
       value={input}
       onChange={(e) => setInput(e.target.value)}
-      className="w-full text-sm px-2 py-1.5 rounded border bg-lantern-bg-illumination text-lantern-pure placeholder-lantern-ash"
-      style={{ borderColor: colors.backgrounds.caveWall }}
+      className="input-focus w-full text-sm px-2 py-1.5 rounded border border-lantern-bg-cave bg-lantern-bg-illumination text-lantern-pure placeholder-lantern-ash"
     />
   );
 
@@ -297,8 +296,7 @@ function PaginationControls({
         <select
           value={pageSize}
           onChange={(e) => onPageSizeChange(Number(e.target.value))}
-          className="text-sm px-2 py-1 rounded border bg-lantern-bg-illumination text-lantern-pure"
-          style={{ borderColor: colors.backgrounds.caveWall }}
+          className="input-focus text-sm px-2 py-1 rounded border border-lantern-bg-cave bg-lantern-bg-illumination text-lantern-pure"
         >
           {sizes.map((s) => (
             <option key={s} value={s}>
@@ -627,8 +625,7 @@ export default function TracesPage({
               setSearchQuery(e.target.value);
               fetchSpans("", false);
             }}
-            className="w-48 text-sm px-2.5 py-1.5 rounded border bg-lantern-bg-charcoal text-lantern-pure placeholder-lantern-ash"
-            style={{ borderColor: colors.backgrounds.caveWall }}
+            className="input-focus w-48 text-sm px-2.5 py-1.5 rounded border border-lantern-bg-cave bg-lantern-bg-charcoal text-lantern-pure placeholder-lantern-ash"
           />
 
           {/* Auto-refresh toggle */}
