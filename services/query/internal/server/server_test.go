@@ -399,16 +399,15 @@ func TestDatasetRunsRoute_NoLLMConfig(t *testing.T) {
 
 	m2 := http.NewServeMux()
 
-	// Register dataset run endpoints WITHOUT a judge LLM client.
-	// This mirrors the fix: read endpoints should be available even
-	// when the judge LLM is not configured.
-	dummyHandler := &runsHandlerNoLLM{
-		sessionStore: h,
-		store:        store,
+	// Register dataset run endpoints with the real handler but without a
+	// judge LLM client — mirrors the server.go route registration.
+	readHandler := &handler.DatasetRunHandler{
+		Store:        store,
+		SessionStore: h,
 	}
-	m2.HandleFunc("GET /api/v1/datasets/{id}/runs", dummyHandler.HandleListRuns)
-	m2.HandleFunc("GET /api/v1/datasets/{id}/runs/{runId}", dummyHandler.HandleGetRun)
-	m2.HandleFunc("GET /api/v1/datasets/{id}/runs/{runId}/status", dummyHandler.HandleGetRunStatus)
+	m2.HandleFunc("GET /api/v1/datasets/{id}/runs", readHandler.HandleListRuns)
+	m2.HandleFunc("GET /api/v1/datasets/{id}/runs/{runId}", readHandler.HandleGetRun)
+	m2.HandleFunc("GET /api/v1/datasets/{id}/runs/{runId}/status", readHandler.HandleGetRunStatus)
 
 	m2.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -455,67 +454,6 @@ func TestDatasetRunsRoute_NoLLMConfig(t *testing.T) {
 		t.Fatalf("body is not valid JSON: %v\nraw: %s", err, resp.Body)
 	}
 }
-
-// runsHandlerNoLLM is a minimal handler that mirrors the DatasetRunHandler
-// read-endpoint logic without needing a JudgeClient.
-type runsHandlerNoLLM struct {
-	sessionStore handler.SessionStore
-	store        *fake.FakeMetadataStore
-}
-
-func (h *runsHandlerNoLLM) HandleListRuns(w http.ResponseWriter, r *http.Request) {
-	projectID, datasetID, err := h.authDataset(r)
-	if err != nil {
-		ae, _ := err.(*runsAuthError)
-		http.Error(w, ae.Message, ae.StatusCode)
-		return
-	}
-	_ = projectID
-	_ = datasetID
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"runs": []interface{}{}})
-}
-
-func (h *runsHandlerNoLLM) HandleGetRun(w http.ResponseWriter, r *http.Request) {
-	_, _, err := h.authDataset(r)
-	if err != nil {
-		ae, _ := err.(*runsAuthError)
-		http.Error(w, ae.Message, ae.StatusCode)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{})
-}
-
-func (h *runsHandlerNoLLM) HandleGetRunStatus(w http.ResponseWriter, r *http.Request) {
-	_, _, err := h.authDataset(r)
-	if err != nil {
-		ae, _ := err.(*runsAuthError)
-		http.Error(w, ae.Message, ae.StatusCode)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "pending"})
-}
-
-func (h *runsHandlerNoLLM) authDataset(r *http.Request) (string, string, error) {
-	projectID, ok := h.sessionStore.ProjectID(r)
-	if !ok || projectID == "" {
-		return "", "", &runsAuthError{Message: "unauthorized", StatusCode: http.StatusUnauthorized}
-	}
-	datasetID := r.PathValue("id")
-	if datasetID == "" {
-		return "", "", &runsAuthError{Message: "dataset ID is required", StatusCode: http.StatusBadRequest}
-	}
-	return projectID, datasetID, nil
-}
-
-type runsAuthError struct {
-	Message    string
-	StatusCode int
-}
-
-func (e *runsAuthError) Error() string { return e.Message }
 
 func TestSessionMiddleware_IsApplied(t *testing.T) {
 	// Create a minimal mux to test that RequireAuth wraps handlers.
