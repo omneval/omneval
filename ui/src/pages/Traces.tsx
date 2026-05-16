@@ -518,8 +518,6 @@ export default function TracesPage({
     fetchSpans("", false);
   };
 
-
-
   // Reconstruct parent-child relationships from the flat span list.
   const traceGroups = useMemo<Record<string, Span[]>>(() => {
     const groups: Record<string, Span[]> = {};
