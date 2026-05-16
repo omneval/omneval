@@ -100,12 +100,10 @@ function GenerateKeyDialog({
   projectId,
   kind,
   onClose,
-  onGenerated,
 }: {
   projectId: string;
   kind: "project" | "service";
   onClose: () => void;
-  onGenerated: (rawKey: string) => void;
 }) {
   const { addToast } = useToast();
   const [serviceName, setServiceName] = useState("");
@@ -139,7 +137,12 @@ function GenerateKeyDialog({
       }
 
       const data = await res.json();
-      setRawKey(data.raw_key);
+      const rawKey = data?.raw_key;
+      if (typeof rawKey !== "string" || rawKey === "") {
+        addToast("error", "Server returned an invalid key — please try again");
+        return;
+      }
+      setRawKey(rawKey);
     } catch {
       addToast("error", "Failed to generate API key");
     } finally {
@@ -183,7 +186,6 @@ function GenerateKeyDialog({
             <button
               onClick={() => {
                 handleCopy();
-                onGenerated(rawKey);
                 addToast("success", `${kind === "service" ? "Service" : "Project"} API key generated`);
                 handleClose();
               }}
@@ -488,8 +490,7 @@ export default function SettingsPage({
         <GenerateKeyDialog
           projectId={activeProject}
           kind={generateKind}
-          onClose={() => setGenerateKind(null)}
-          onGenerated={() => {
+          onClose={() => {
             setGenerateKind(null);
             fetchKeys();
           }}
