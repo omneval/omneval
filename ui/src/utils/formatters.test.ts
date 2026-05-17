@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   formatTime,
   formatTimeWithYear,
+  formatDuration,
   safeExtractInputOutput,
   formatJsonPreview,
   truncate,
@@ -152,5 +153,67 @@ describe("truncate", () => {
 
   it("handles zero length limit", () => {
     expect(truncate("hello", 0)).toBe("…");
+  });
+});
+
+// ── formatDuration ─────────────────────────────────────────────────
+
+describe("formatDuration", () => {
+  it("returns < 1ms for identical start and end times (0ms)", () => {
+    const iso = "2025-01-15T10:00:00.000Z";
+    expect(formatDuration(iso, iso)).toBe("< 1ms");
+  });
+
+  it("returns < 1ms for sub-millisecond durations (999µs)", () => {
+    const start = "2025-01-15T10:00:00.000Z";
+    const end = "2025-01-15T10:00:00.000999Z";
+    expect(formatDuration(start, end)).toBe("< 1ms");
+  });
+
+  it("returns Xms for durations >= 1ms and < 1000ms", () => {
+    const start = "2025-01-15T10:00:00.001Z";
+    const end = "2025-01-15T10:00:00.002Z";
+    expect(formatDuration(start, end)).toBe("1ms");
+  });
+
+  it("returns Xms for 500ms duration", () => {
+    const start = "2025-01-15T10:00:00.000Z";
+    const end = "2025-01-15T10:00:00.500Z";
+    expect(formatDuration(start, end)).toBe("500ms");
+  });
+
+  it("returns seconds with one decimal for durations >= 1000ms", () => {
+    const start = "2025-01-15T10:00:00.000Z";
+    const end = "2025-01-15T10:00:01.000Z";
+    expect(formatDuration(start, end)).toBe("1.0s");
+  });
+
+  it("returns 5.2s for 5200ms duration", () => {
+    const start = "2025-01-15T10:00:00.000Z";
+    const end = "2025-01-15T10:00:05.200Z";
+    expect(formatDuration(start, end)).toBe("5.2s");
+  });
+
+  it("returns seconds with one decimal for 1.5s", () => {
+    const start = "2025-01-15T10:00:00.000Z";
+    const end = "2025-01-15T10:00:01.500Z";
+    expect(formatDuration(start, end)).toBe("1.5s");
+  });
+
+  it("handles negative duration gracefully", () => {
+    const start = "2025-01-15T10:00:01.000Z";
+    const end = "2025-01-15T10:00:00.000Z";
+    expect(formatDuration(start, end)).toBe("0ms");
+  });
+
+  it("handles empty string inputs gracefully", () => {
+    expect(formatDuration("", "")).toBe("N/A");
+  });
+
+  it("handles real-world LLM span durations", () => {
+    // LLM call taking 1234ms
+    const start = "2025-01-15T10:00:00.000Z";
+    const end = "2025-01-15T10:00:01.234Z";
+    expect(formatDuration(start, end)).toBe("1.2s");
   });
 });

@@ -37,12 +37,16 @@ export function formatTimeWithYear(iso: string): string {
 
 /**
  * Format a duration from two ISO timestamps.
- * Returns milliseconds as "Xms" or seconds as "X.XXs".
+ * Returns `< 1ms` for sub-millisecond durations, `Xms` for
+ * millisecond ranges, and `X.Xs` for second ranges.
  */
 export function formatDuration(start: string, end: string): string {
+  if (!start || !end) return "N/A";
   const ms = new Date(end).getTime() - new Date(start).getTime();
+  if (ms < 0) return "0ms";
+  if (ms < 1) return "< 1ms";
   if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 /**
