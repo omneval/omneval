@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import EvalRulesPage from "./EvalRules";
+import EvalRulesPage, { type EvalRule } from "./EvalRules";
 import { ToastProvider } from "@/components/Toast";
 
 function renderWithToast(ui: React.ReactElement) {
@@ -245,112 +245,67 @@ describe("EvalRulesPage", () => {
     });
   });
 
-  it("handles null sample_rate without showing NaN", async () => {
-    const rulesWithNullSampleRate = [
-      {
+  it.each([
+    {
+      sampleRate: null as unknown as number | null,
+      judgeModel: "gpt-4",
+      ruleName: "null sampleRate",
+      expectNaN: false,
+      expectEmDash: false,
+    },
+    {
+      sampleRate: undefined as unknown as number | null,
+      judgeModel: "gpt-4",
+      ruleName: "undefined sampleRate",
+      expectNaN: false,
+      expectEmDash: false,
+    },
+    {
+      sampleRate: 1.0,
+      judgeModel: "",
+      ruleName: "empty model",
+      expectNaN: true,
+      expectEmDash: true,
+    },
+    {
+      sampleRate: null as unknown as number | null,
+      judgeModel: "",
+      ruleName: "both null values",
+      expectNaN: false,
+      expectEmDash: true,
+    },
+  ])(
+    "handles $ruleName without showing NaN or blank model",
+    async ({ sampleRate, judgeModel, ruleName, expectNaN, expectEmDash }) => {
+      const rule: EvalRule = {
         RuleID: "rule-1",
         ProjectID: "proj-1",
-        Name: "Rule With Null Sample Rate",
-        JudgeModel: "gpt-4",
+        Name: `Rule with ${ruleName}`,
+        JudgeModel: judgeModel,
         PromptName: "judge-v1",
         PromptVersion: 1,
-        SampleRate: null as unknown as number,
+        SampleRate: sampleRate,
         Enabled: true,
         CreatedAt: "2026-05-13T10:00:00Z",
         Filter: null,
-      },
-    ];
+      };
 
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules(rulesWithNullSampleRate));
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules([rule]));
 
-    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+      renderWithToast(<EvalRulesPage activeProject="proj-1" />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Rule With Null Sample Rate")).toBeInTheDocument();
-    });
+      await waitFor(() => {
+        expect(screen.getByText(`Rule with ${ruleName}`)).toBeInTheDocument();
+      });
 
-    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
-  });
-
-  it("handles undefined sample_rate without showing NaN", async () => {
-    const rulesWithUndefinedSampleRate = [
-      {
-        RuleID: "rule-1",
-        ProjectID: "proj-1",
-        Name: "Rule With Undefined Sample Rate",
-        JudgeModel: "gpt-4",
-        PromptName: "judge-v1",
-        PromptVersion: 1,
-        SampleRate: undefined as unknown as number,
-        Enabled: true,
-        CreatedAt: "2026-05-13T10:00:00Z",
-        Filter: null,
-      },
-    ];
-
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules(rulesWithUndefinedSampleRate));
-
-    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
-
-    await waitFor(() => {
-      expect(screen.getByText("Rule With Undefined Sample Rate")).toBeInTheDocument();
-    });
-
-    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
-  });
-
-  it("handles null model without showing blank", async () => {
-    const rulesWithNullModel = [
-      {
-        RuleID: "rule-1",
-        ProjectID: "proj-1",
-        Name: "Rule With Null Model",
-        JudgeModel: "" as unknown as string,
-        PromptName: "judge-v1",
-        PromptVersion: 1,
-        SampleRate: 1.0,
-        Enabled: true,
-        CreatedAt: "2026-05-13T10:00:00Z",
-        Filter: null,
-      },
-    ];
-
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules(rulesWithNullModel));
-
-    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
-
-    await waitFor(() => {
-      expect(screen.getByText("Rule With Null Model")).toBeInTheDocument();
-    });
-
-    expect(screen.getByText(/—/)).toBeInTheDocument();
-  });
-
-  it("handles rule with both null sample_rate and null model without NaN or blank model", async () => {
-    const rulesWithNulls = [
-      {
-        RuleID: "rule-1",
-        ProjectID: "proj-1",
-        Name: "Rule With All Nulls",
-        JudgeModel: "" as unknown as string,
-        PromptName: "judge-v1",
-        PromptVersion: 1,
-        SampleRate: null as unknown as number,
-        Enabled: true,
-        CreatedAt: "2026-05-13T10:00:00Z",
-        Filter: null,
-      },
-    ];
-
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules(rulesWithNulls));
-
-    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
-
-    await waitFor(() => {
-      expect(screen.getByText("Rule With All Nulls")).toBeInTheDocument();
-    });
-
-    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
-    expect(screen.getByText(/—/)).toBeInTheDocument();
-  });
+      if (expectNaN) {
+        expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
+      } else {
+        expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
+      }
+      if (expectEmDash) {
+        expect(screen.getByText(/—/)).toBeInTheDocument();
+      }
+    }
+  );
 });

@@ -20,14 +20,14 @@ interface PreviewResult {
   match_count_24h: number;
 }
 
-interface EvalRule {
+export interface EvalRule {
   RuleID: string;
   ProjectID: string;
   Name: string;
-  JudgeModel: string;
+  JudgeModel: string | null;
   PromptName: string;
   PromptVersion: number;
-  SampleRate: number;
+  SampleRate: number | null;
   Enabled: boolean;
   CreatedAt: string;
   Filter: EvalFilter | null | undefined;
