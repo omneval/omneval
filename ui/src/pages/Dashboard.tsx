@@ -32,6 +32,7 @@ interface DashboardPageProps {
 interface AnalyticsRequest {
   from: string;
   to: string;
+  project_id: string;
   filters: { field: string; op: string; value: unknown }[];
   group_by: { field: string; truncate?: string }[];
   order_by: { field: string; desc: boolean }[];
@@ -524,9 +525,11 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
       const body = {
         from,
         to,
+        project_id: activeProject,
         filters: [],
         group_by: [],
         order_by: [],
+        aggregations: [],
       };
 
       // ── Traces by Name ──

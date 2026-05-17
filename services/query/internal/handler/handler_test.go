@@ -15,6 +15,7 @@ import (
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/zbloss/lantern/internal/domain"
+	"github.com/zbloss/lantern/services/query/internal/auth"
 )
 
 const spansTableDDL = `
@@ -1103,23 +1104,261 @@ func TestHandleSpansQuery_FiltersAsString(t *testing.T) {
 	}
 }
 
+// ── Analytics Endpoint Tests ──────────────────────────────────────
+
+func TestHandleAnalyticsSpans_AuthRequired(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+
+	h := &SpanHandler{
+		SessionStore: &FakeSessionStore{},
+	}
+
+	h.HandleAnalyticsSpans(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestHandleAnalyticsSpans_MethodNotAllowed(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/analytics/spans", nil)
+	w := httptest.NewRecorder()
+
+	h := &SpanHandler{
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	h.HandleAnalyticsSpans(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestHandleAnalyticsSpans_WithDatabase_ProjectFromSession(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "lantern-analytics-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, project_id, model, start_time, end_time, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"span-001", "trace-abc", "test-proj", "gpt-4",
+		baseTime, baseTime.Add(10*time.Second), 100, 50, 0.002); err != nil {
+		t.Fatalf("insert span: %v", err)
+	}
+
+	h := &SpanHandler{
+		DB:           db,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	body := strings.NewReader(`{
+		"from": "2025-01-01T00:00:00Z",
+		"to": "2025-01-02T00:00:00Z",
+		"group_by": [{"field": "model"}],
+		"aggregations": [{"function": "count", "field": "*", "alias": "count"}]
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", body)
+	w := httptest.NewRecorder()
+
+	h.HandleAnalyticsSpans(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d. body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if len(resp.Rows) == 0 {
+		t.Fatal("expected rows in analytics response")
+	}
+
+	// Verify the model group is present.
+	found := false
+	for _, row := range resp.Rows {
+		if name, ok := row["model"].(string); ok && name == "gpt-4" {
+			found = true
+			count := row["count"]
+			_ = count
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected row with model=gpt-4, got rows: %v", resp.Rows)
+	}
+}
+
+func TestHandleAnalyticsSpans_ProjectIDOverride(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "lantern-analytics-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	// Insert spans for TWO different projects.
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, project_id, model, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
+		"span-a", "trace-a", "proj-a", "gpt-4", baseTime, baseTime.Add(10*time.Second)); err != nil {
+		t.Fatalf("insert span-a: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, project_id, model, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
+		"span-b", "trace-b", "proj-b", "claude-3", baseTime, baseTime.Add(5*time.Second)); err != nil {
+		t.Fatalf("insert span-b: %v", err)
+	}
+
+	userProjects := []*domain.Project{
+		{ProjectID: "proj-a"},
+		{ProjectID: "proj-b"},
+	}
+
+	// Session returns proj-a, but the request overrides to proj-b.
+	h := &SpanHandler{
+		DB: db,
+		SessionStore: &FakeSessionStore{
+			projectID:   "proj-a",
+			userProjects: userProjects,
+		},
+	}
+
+	body := strings.NewReader(`{
+		"from": "2025-01-01T00:00:00Z",
+		"to": "2025-01-02T00:00:00Z",
+		"project_id": "proj-b",
+		"group_by": [{"field": "model"}],
+		"aggregations": [{"function": "count", "field": "*", "alias": "count"}]
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", body)
+	// Add the current user to the request context (auth middleware normally does this).
+	req = req.WithContext(context.WithValue(req.Context(), auth.CurrentUserKey, &auth.CurrentUser{UserID: "user-1"}))
+	w := httptest.NewRecorder()
+
+	h.HandleAnalyticsSpans(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d. body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if len(resp.Rows) == 0 {
+		t.Fatal("expected rows when querying proj-b")
+	}
+
+	// Should only contain claude-3 (proj-b), not gpt-4 (proj-a).
+	for _, row := range resp.Rows {
+		if name, ok := row["model"].(string); ok {
+			if name != "claude-3" {
+				t.Errorf("expected model=claude-3 for proj-b, got model=%s", name)
+			}
+		}
+	}
+}
+
+func TestHandleAnalyticsSpans_ProjectIDForbidden(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "lantern-analytics-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	h := &SpanHandler{
+		DB: db,
+		SessionStore: &FakeSessionStore{
+			projectID: "proj-a",
+			userProjects: []*domain.Project{
+				{ProjectID: "proj-a"},
+			},
+		},
+	}
+
+	body := strings.NewReader(`{
+		"from": "2025-01-01T00:00:00Z",
+		"to": "2025-01-02T00:00:00Z",
+		"project_id": "proj-unknown"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", body)
+	req = req.WithContext(context.WithValue(req.Context(), auth.CurrentUserKey, &auth.CurrentUser{UserID: "user-1"}))
+	w := httptest.NewRecorder()
+
+	h.HandleAnalyticsSpans(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusForbidden)
+	}
+}
+
 // FakeSessionStore is a test fake implementing SessionStore.
 type FakeSessionStore struct {
-	projectID string
+	projectID   string
+	userProjects []*domain.Project
 }
 
 func (f *FakeSessionStore) ProjectID(r *http.Request) (string, bool) {
-	if f.projectID == "" {
+	if f.projectID == "" && len(f.userProjects) == 0 {
 		return "", false
 	}
-	return f.projectID, true
+	if f.projectID != "" {
+		return f.projectID, true
+	}
+	if len(f.userProjects) > 0 {
+		return f.userProjects[0].ProjectID, true
+	}
+	return "", false
 }
 
 func (f *FakeSessionStore) ListProjects(r *http.Request) ([]*domain.Project, error) {
-	if f.projectID == "" {
+	if len(f.userProjects) == 0 {
+		if f.projectID != "" {
+			return []*domain.Project{{ProjectID: f.projectID}}, nil
+		}
 		return nil, fmt.Errorf("unauthenticated")
 	}
-	return []*domain.Project{{ProjectID: f.projectID}}, nil
+	return f.userProjects, nil
 }
 
 func TestHandleProjects_ReturnsSnakeCaseJSON(t *testing.T) {

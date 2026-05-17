@@ -11,6 +11,7 @@ import (
 
 	"github.com/zbloss/lantern/internal/domain"
 	"github.com/zbloss/lantern/internal/idgen"
+	"github.com/zbloss/lantern/services/query/internal/auth"
 	"github.com/zbloss/lantern/services/query/internal/dsl"
 	"github.com/zbloss/lantern/services/query/internal/metrics"
 	"github.com/zbloss/lantern/services/query/internal/query"
@@ -367,11 +368,42 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Extract project_id from the authenticated session — never from client input.
-	projectID, ok := h.SessionStore.ProjectID(r)
-	if !ok || projectID == "" {
-		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
-		return
+	// Determine project_id: prefer the one from the request body,
+	// fall back to the session-derived project. The session-derived
+	// value always returns the first project of the user's org, so
+	// the Dashboard can override it by including project_id in the
+	// request body.
+	projectID := req.ProjectID
+	if projectID == "" {
+		var ok bool
+		projectID, ok = h.SessionStore.ProjectID(r)
+		if !ok || projectID == "" {
+			writeJSONError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+	} else {
+		// Validate that the requested project belongs to the user's org.
+		user := auth.CurrentUserFromContext(r)
+		if user == nil {
+			writeJSONError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		userProjects, err := h.SessionStore.ListProjects(r)
+		if err != nil {
+			writeJSONError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var allowed bool
+		for _, p := range userProjects {
+			if p.ProjectID == projectID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			writeJSONError(w, "project_id not found in user's organizations", http.StatusForbidden)
+			return
+		}
 	}
 
 	// Compile the query — all fields are validated against allowlists.

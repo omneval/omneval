@@ -469,6 +469,7 @@ type OrderClause struct {
 type Query struct {
 	From         time.Time      `json:"from"`
 	To           time.Time      `json:"to"`
+	ProjectID    string         `json:"project_id,omitempty"`
 	Filters      []Filter       `json:"filters"`
 	Aggregations []Aggregation  `json:"aggregations"`
 	GroupBy      []GroupByField `json:"group_by"`
