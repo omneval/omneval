@@ -626,26 +626,27 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                               })}
                             </div>
 
-                            {/* Compare versions button */}
-                            {versions.length >= 2 && (
-                              <button
-                                onClick={() => openDiffPanel(prompt.name, versions)}
-                                className="mt-2 flex items-center gap-1.5 text-xs font-medium rounded transition-colors"
-                                style={{
-                                  color: colors.accents.emberFlare,
-                                  backgroundColor: "transparent",
-                                }}
-                                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(255,87,34,0.08)")}
-                                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                              >
-                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                                  <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                                </svg>
-                                Compare versions
-                              </button>
-                            )}
                           </div>
                         ))}
+
+                        {/* Compare versions button (outside version loop) */}
+                        {versions.length >= 2 && (
+                          <button
+                            onClick={() => openDiffPanel(prompt.name, versions)}
+                            className="mt-3 flex items-center gap-1.5 text-xs font-medium rounded transition-colors"
+                            style={{
+                              color: colors.accents.emberFlare,
+                              backgroundColor: "transparent",
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(255,87,34,0.08)")}
+                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                              <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                            </svg>
+                            Compare versions
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
