@@ -114,7 +114,11 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
   const toggleExpand = (name: string) => {
     setExpandedNames((prev) => {
       const next = new Set(prev);
-      next.has(name) ? next.delete(name) : next.add(name);
+      if (next.has(name)) {
+        next.delete(name);
+      } else {
+        next.add(name);
+      }
       return next;
     });
   };
@@ -260,12 +264,6 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
     setDiffData(null);
   };
 
-  // ── Form field handlers ──────────────────────────────────────────
-
-  const clearFieldError = (field: string) => {
-    setFormErrors((prev) => ({ ...prev, [field]: "" }));
-  };
-
   // ── Render ───────────────────────────────────────────────────────
 
   if (loading) {
@@ -335,7 +333,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
               <input
                 type="text"
                 value={newName}
-                onChange={(e) => { setNewName(e.target.value); clearFieldError("name"); }}
+                onChange={(e) => { setNewName(e.target.value); setFormErrors((prev) => ({ ...prev, name: "" })); }}
                 placeholder="e.g. greeting"
                 className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.name ? "border-lantern-danger" : ""}`}
                 style={{
@@ -353,7 +351,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
               <input
                 type="text"
                 value={newModel}
-                onChange={(e) => { setNewModel(e.target.value); clearFieldError("model"); }}
+                onChange={(e) => { setNewModel(e.target.value); setFormErrors((prev) => ({ ...prev, model: "" })); }}
                 placeholder="e.g. gpt-4"
                 className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.model ? "border-lantern-danger" : ""}`}
                 style={{
@@ -377,7 +375,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 min={0}
                 max={2}
                 step={0.1}
-                onChange={(e) => { setNewTemperature(parseFloat(e.target.value) || 0); clearFieldError("temperature"); }}
+                onChange={(e) => { setNewTemperature(parseFloat(e.target.value) || 0); setFormErrors((prev) => ({ ...prev, temperature: "" })); }}
                 className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.temperature ? "border-lantern-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
@@ -395,7 +393,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 type="number"
                 value={newMaxTokens}
                 min={1}
-                onChange={(e) => { setNewMaxTokens(parseInt(e.target.value) || 0); clearFieldError("maxTokens"); }}
+                onChange={(e) => { setNewMaxTokens(parseInt(e.target.value) || 0); setFormErrors((prev) => ({ ...prev, maxTokens: "" })); }}
                 className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.maxTokens ? "border-lantern-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
@@ -418,7 +416,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
             </label>
             <textarea
               value={newTemplate}
-              onChange={(e) => { setNewTemplate(e.target.value); clearFieldError("template"); }}
+              onChange={(e) => { setNewTemplate(e.target.value); setFormErrors((prev) => ({ ...prev, template: "" })); }}
               placeholder="Hello {{name}}, welcome to {{place}}!"
               rows={4}
               className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors font-mono resize-none input-focus ${formErrors.template ? "border-lantern-danger" : ""}`}
@@ -628,27 +626,26 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                               })}
                             </div>
 
+                            {/* Compare versions button */}
+                            {versions.length >= 2 && (
+                              <button
+                                onClick={() => openDiffPanel(prompt.name, versions)}
+                                className="mt-2 flex items-center gap-1.5 text-xs font-medium rounded transition-colors"
+                                style={{
+                                  color: colors.accents.emberFlare,
+                                  backgroundColor: "transparent",
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(255,87,34,0.08)")}
+                                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                              >
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                  <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                                </svg>
+                                Compare versions
+                              </button>
+                            )}
                           </div>
                         ))}
-
-                        {/* Compare versions button (outside version loop) */}
-                        {versions.length >= 2 && (
-                          <button
-                            onClick={() => openDiffPanel(prompt.name, versions)}
-                            className="mt-3 flex items-center gap-1.5 text-xs font-medium rounded transition-colors"
-                            style={{
-                              color: colors.accents.emberFlare,
-                              backgroundColor: "transparent",
-                            }}
-                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(255,87,34,0.08)")}
-                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                          >
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                              <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                            </svg>
-                            Compare versions
-                          </button>
-                        )}
                       </div>
                     )}
                   </div>
@@ -769,30 +766,33 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                         </div>
                       );
                     }
-                    const lineStyles = {
-                      backgroundColor:
-                        line.type === "added"
-                          ? "rgba(34, 197, 94, 0.08)"
-                          : line.type === "removed"
-                          ? "rgba(239, 68, 68, 0.08)"
-                          : "transparent",
-                      borderLeft: `3px solid ${
-                        line.type === "added"
-                          ? "#22c55e"
-                          : line.type === "removed"
-                          ? "#ef4444"
-                          : colors.backgrounds.caveWall
-                      }`,
-                      color:
-                        line.type === "removed"
-                          ? colors.accents.dangerLight
-                          : colors.typography.pureLight,
-                    };
+                    const bg =
+                      line.type === "added"
+                        ? "rgba(34, 197, 94, 0.08)"
+                        : line.type === "removed"
+                        ? "rgba(239, 68, 68, 0.08)"
+                        : "transparent";
+                    const text =
+                      line.type === "added"
+                        ? colors.typography.pureLight
+                        : line.type === "removed"
+                        ? colors.accents.dangerLight
+                        : colors.typography.pureLight;
+                    const leftBorder =
+                      line.type === "added"
+                        ? "#22c55e"
+                        : line.type === "removed"
+                        ? "#ef4444"
+                        : colors.backgrounds.caveWall;
                     return (
                       <div
                         key={idx}
                         className="px-3 py-0.5 whitespace-pre-wrap break-all"
-                        style={lineStyles}
+                        style={{
+                          backgroundColor: bg,
+                          borderLeft: `3px solid ${leftBorder}`,
+                          color: text,
+                        }}
                       >
                         <span className="mr-2 select-none text-lantern-ash" style={{ opacity: 0.4, minWidth: "2ch", display: "inline-block", textAlign: "right" }}>
                           {idx}
