@@ -1,6 +1,8 @@
 """Tests for LanternClient."""
 import json
 import time
+
+import requests
 import responses
 
 from lantern_sdk.client import LanternClient
@@ -138,6 +140,96 @@ class TestWriteScore:
             assert False, "Expected ValueError"
         except ValueError as e:
             assert "span_id is required" in str(e)
+
+    @responses.activate
+    def test_write_score_includes_project_id(self):
+        """write_score automatically includes project_id in the request payload."""
+        responses.add(
+            responses.POST,
+            "http://localhost:8080/api/v1/scores",
+            json={"score_id": "score-456"},
+            status=201,
+        )
+
+        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        client.write_score("span-abc", "helpfulness", 0.8, "Great answer")
+
+        body = json.loads(responses.calls[0].request.body)
+        assert "project_id" in body, "project_id must be in the request payload"
+        assert body["project_id"] == "test"
+
+    @responses.activate
+    def test_write_score_400_without_project_id(self):
+        """write_score raises an HTTPError when the server returns 400 (missing project_id)."""
+        responses.add(
+            responses.POST,
+            "http://localhost:8080/api/v1/scores",
+            json={"error": "span_id, trace_id, and project_id are required"},
+            status=400,
+        )
+
+        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        try:
+            client.write_score("span-abc", "helpfulness", 0.8)
+            assert False, "Expected requests.HTTPError"
+        except requests.HTTPError as e:
+            assert e.response.status_code == 400
+
+    @responses.activate
+    def test_write_score_500_error(self):
+        """write_score raises an HTTPError when the server returns 500."""
+        responses.add(
+            responses.POST,
+            "http://localhost:8080/api/v1/scores",
+            json={"error": "internal error"},
+            status=500,
+        )
+
+        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        try:
+            client.write_score("span-abc", "helpfulness", 0.8)
+            assert False, "Expected requests.HTTPError"
+        except requests.HTTPError as e:
+            assert e.response.status_code == 500
+
+    @responses.activate
+    def test_write_score_with_explicit_project_id(self):
+        """write_score uses the explicit project_id when provided."""
+        responses.add(
+            responses.POST,
+            "http://localhost:8080/api/v1/scores",
+            json={"score_id": "score-789"},
+            status=201,
+        )
+
+        client = LanternClient(
+            "http://localhost:8080",
+            "ltn_proj_key123",
+            project_id="explicit-project",  # override
+        )
+        client.write_score("span-abc", "helpfulness", 0.8)
+
+        body = json.loads(responses.calls[0].request.body)
+        assert body["project_id"] == "explicit-project"
+
+    def test_project_id_extracted_from_project_key(self):
+        """project_id is extracted from ltn_proj_ prefix keys."""
+        client = LanternClient("http://localhost:8080", "ltn_proj_my-project-123")
+        assert client._project_id == "my-project-123"
+
+    def test_project_id_extracted_from_service_key(self):
+        """project_id is extracted from ltn_svc_ prefix keys."""
+        client = LanternClient("http://localhost:8080", "ltn_svc_my-service")
+        assert client._project_id == "my-service"
+
+    def test_project_id_override(self):
+        """Explicit project_id overrides the value extracted from api_key."""
+        client = LanternClient(
+            "http://localhost:8080",
+            "ltn_proj_key123",
+            project_id="override-id",
+        )
+        assert client._project_id == "override-id"
 
 
 class TestGetPromptVersion:

@@ -27,16 +27,35 @@ class LanternClient:
 
     Args:
         base_url: Base URL of the Lantern Query API (e.g. http://localhost:8080).
-        api_key: API key for authentication (reserved for future use).
+        api_key: API key for authentication (e.g. ltn_proj_<43 base58>).
+                 The project_id is extracted from the API key suffix and
+                 automatically included in score write requests.
+        project_id: Optional explicit project ID. If provided, overrides the
+                    value extracted from the API key.
     """
 
-    def __init__(self, base_url: str, api_key: str = "") -> None:
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str = "",
+        project_id: Optional[str] = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._http = requests.Session()
         self._label_cache: dict[str, _CacheEntry] = {}
         self._version_cache: dict[str, str] = {}
         self._label_lock = threading.Lock()
         self._version_lock = threading.Lock()
+        self._project_id = project_id or self._extract_project_id(api_key)
+
+    @staticmethod
+    def _extract_project_id(api_key: str) -> str:
+        """Extract the project_id suffix from an API key like ltn_proj_<suffix>."""
+        if api_key.startswith("ltn_proj_"):
+            return api_key[len("ltn_proj_"):]
+        if api_key.startswith("ltn_svc_"):
+            return api_key[len("ltn_svc_"):]
+        return api_key
 
     def get_prompt(self, name: str, label: str = "production") -> dict[str, Any]:
         """Fetch a prompt by name and label.
@@ -154,6 +173,7 @@ class LanternClient:
         payload = {
             "span_id": span_id,
             "trace_id": trace_id,
+            "project_id": self._project_id,
             "eval_name": eval_name,
             "value": value,
             "reasoning": reasoning,

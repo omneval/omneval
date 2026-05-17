@@ -61,14 +61,45 @@ Attach token counts to a span as `gen_ai.usage.input_tokens` and `gen_ai.usage.o
 
 Return the currently active span from the context variable. Returns `None` outside a decorated function.
 
-### `lantern_sdk.LanternClient(base_url, api_key)`
+### `lantern_sdk.LanternClient(base_url, api_key, project_id=None)`
 
 HTTP client for prompt fetching and manual score writes.
 
+The `project_id` is automatically extracted from the API key suffix
+(e.g. `ltn_proj_my-project` → `my-project`). Pass `project_id` explicitly
+to override this behavior.
+
 ```python
-client = lantern_sdk.LanternClient("http://localhost:8080", "ltn_proj_key")
+client = lantern_sdk.LanternClient("http://localhost:8080", "ltn_proj_my-project")
 prompt = client.get_prompt("greeting", "production")
 client.write_score("span-id-123", "helpfulness", 0.8, "Good reasoning")
+```
+
+### `client.write_score(span_id, eval_name, value, reasoning="")`
+
+Submit a manual score for a span. The `project_id` from the client
+configuration is automatically included in the request.
+
+**Args:**
+- `span_id` (str, required): The span ID to score.
+- `eval_name` (str): Name of the evaluation (e.g. "helpfulness", "correctness").
+- `value` (float): Numeric score value (typically 0.0–1.0).
+- `reasoning` (str, optional): Human-readable reasoning for the score.
+
+**Returns:** `None` on success (201 Created).
+
+**Raises:**
+- `ValueError`: If `span_id` is empty.
+- `requests.HTTPError`: If the server returns an error (e.g. 400 Bad Request,
+  500 Internal Server Error).
+
+```python
+client.write_score(
+    span_id="span-abc123",
+    eval_name="correctness",
+    value=0.9,
+    reasoning="The answer correctly identified the entity",
+)
 ```
 
 ## Exports
