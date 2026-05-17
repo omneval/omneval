@@ -139,8 +139,9 @@ function buildFilter(form: NewRuleFormState): EvalFilter {
   return filter;
 }
 
-function sampleRatePercent(rate: number): string {
-  return `${(rate * 100).toFixed(0)}%`;
+function sampleRatePercent(rate: unknown): string {
+  if (typeof rate !== "number" || !Number.isFinite(rate)) return "N/A";
+  return `${Math.round(rate * 100)}%`;
 }
 
 function filterDisplayText(filter: EvalFilter | null | undefined): string {
@@ -279,7 +280,7 @@ function RuleCard({ rule, onDelete }: { rule: EvalRule; onDelete: (ruleId: strin
             <StatusBadge enabled={rule.Enabled} />
           </div>
           <div className="flex items-center gap-4 mt-1 text-xs text-lantern-ash">
-            <span>Model: <span className="text-lantern-pure">{rule.JudgeModel}</span></span>
+            <span>Model: <span className="text-lantern-pure">{rule.JudgeModel || "—"}</span></span>
             {rule.PromptName && (
               <span>Prompt: <span className="text-lantern-pure">{rule.PromptName}{rule.PromptVersion > 1 ? ` v${rule.PromptVersion}` : ""}</span></span>
             )}
