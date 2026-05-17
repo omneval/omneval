@@ -1012,10 +1012,14 @@ func (s *Store) ListDatasetItemsPaginated(ctx context.Context, datasetID, cursor
 
 func (s *Store) CreateDatasetRun(ctx context.Context, run *domain.DatasetRun) error {
 	now := time.Now().UTC().Format(time.RFC3339)
+	status := run.Status
+	if status == "" {
+		status = domain.DatasetRunStatusPending
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO dataset_runs (run_id, dataset_id, eval_rule_id, prompt_version, created_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		run.RunID, run.DatasetID, run.EvalRuleID, run.PromptVersion, now,
+		`INSERT INTO dataset_runs (run_id, dataset_id, eval_rule_id, prompt_version, status, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		run.RunID, run.DatasetID, run.EvalRuleID, run.PromptVersion, status, now,
 	)
 	if err != nil {
 		return fmt.Errorf("sqlite: create dataset run: %w", err)
@@ -1024,12 +1028,12 @@ func (s *Store) CreateDatasetRun(ctx context.Context, run *domain.DatasetRun) er
 }
 
 func (s *Store) GetDatasetRun(ctx context.Context, runID string) (*domain.DatasetRun, error) {
-	var datasetID, evalRuleID string
+	var datasetID, evalRuleID, status string
 	var promptVersion int64
 	var createdAt string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT dataset_id, eval_rule_id, prompt_version, created_at FROM dataset_runs WHERE run_id = ?`, runID,
-	).Scan(&datasetID, &evalRuleID, &promptVersion, &createdAt)
+		`SELECT dataset_id, eval_rule_id, prompt_version, status, created_at FROM dataset_runs WHERE run_id = ?`, runID,
+	).Scan(&datasetID, &evalRuleID, &promptVersion, &status, &createdAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, metadata.ErrNotFound
@@ -1042,6 +1046,7 @@ func (s *Store) GetDatasetRun(ctx context.Context, runID string) (*domain.Datase
 		DatasetID:     datasetID,
 		EvalRuleID:    evalRuleID,
 		PromptVersion: promptVersion,
+		Status:        status,
 		CreatedAt:     t,
 	}, nil
 }

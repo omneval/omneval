@@ -845,10 +845,14 @@ func (s *Store) ListDatasetItemsPaginated(ctx context.Context, datasetID, cursor
 }
 
 func (s *Store) CreateDatasetRun(ctx context.Context, run *domain.DatasetRun) error {
+	status := run.Status
+	if status == "" {
+		status = domain.DatasetRunStatusPending
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO dataset_runs (run_id, dataset_id, eval_rule_id, prompt_version, created_at)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		run.RunID, run.DatasetID, run.EvalRuleID, run.PromptVersion, run.CreatedAt,
+		`INSERT INTO dataset_runs (run_id, dataset_id, eval_rule_id, prompt_version, status, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		run.RunID, run.DatasetID, run.EvalRuleID, run.PromptVersion, status, run.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: create dataset run: %w", err)
