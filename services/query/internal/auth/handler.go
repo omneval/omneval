@@ -132,24 +132,23 @@ func (h *Handler) HandleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up user to get org_id
+	// Look up the user record to obtain the org_id needed for the projects lookup.
 	storedUser, err := h.store.GetUserByID(r.Context(), user.UserID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to look up user"})
 		return
 	}
 
-	// Get projects for this user's org
 	projects, err := h.store.ListProjects(r.Context(), storedUser.OrgID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list projects"})
 		return
 	}
 
-	// Convert to ProjectInfo (minimal representation)
-	projectInfo := make([]ProjectInfo, len(projects))
+	// Build a minimal project representation for the response.
+	projectsList := make([]ProjectInfo, len(projects))
 	for i, p := range projects {
-		projectInfo[i] = ProjectInfo{
+		projectsList[i] = ProjectInfo{
 			ProjectID: p.ProjectID,
 			Name:      p.Name,
 		}
@@ -158,7 +157,7 @@ func (h *Handler) HandleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, MeResponse{
 		UserID:   user.UserID,
 		Email:    storedUser.Email,
-		Projects: projectInfo,
+		Projects: projectsList,
 	})
 }
 

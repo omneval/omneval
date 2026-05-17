@@ -44,7 +44,7 @@ interface Project {
 interface MeResponse {
   user_id: string;
   email: string;
-  projects: Array<{ project_id: string; name: string; org_id?: string }>;
+  projects: Array<{ project_id: string; name: string }>;
 }
 
 export default function App() {
@@ -57,17 +57,14 @@ export default function App() {
   const [timeRange, setTimeRange] = useState("1d");
   const [environment, setEnvironment] = useState("default");
 
-  // Check for existing session on mount by calling GET /api/v1/me.
-  // We cannot read document.cookie because the lantern_session cookie is HttpOnly.
+  // Detect an existing session on mount. We call GET /api/v1/me instead of
+  // reading document.cookie because the lantern_session cookie is HttpOnly.
   const initialSessionCheck = useRef(true);
 
   useEffect(() => {
     if (!initialSessionCheck.current) return;
     initialSessionCheck.current = false;
 
-    // Call /me to detect if a valid session exists.
-    // This works because the browser automatically sends HttpOnly cookies
-    // with fetch requests — no need to read document.cookie.
     fetch("/api/v1/me")
       .then((res) => {
         if (res.ok) return res.json() as Promise<MeResponse>;
@@ -75,7 +72,7 @@ export default function App() {
       })
       .then((data) => {
         if (Array.isArray(data.projects) && data.projects.length > 0) {
-          // Transform ProjectInfo to Project (org_id is not provided by /me)
+          // The /me endpoint does not include org_id; set it to empty.
           const projects: Project[] = data.projects.map((p) => ({
             project_id: p.project_id,
             name: p.name,
@@ -84,13 +81,13 @@ export default function App() {
           setProjects(projects);
           setActiveProject(projects[0].project_id);
         } else {
-          // Fallback: fetch projects via the normal endpoint
+          // No projects on /me — fetch them via the normal projects endpoint.
           fetchProjects("fallback-session-id");
         }
         setPage("traces");
       })
       .catch(() => {
-        // No valid session — stay on login page.
+        // No valid session — the page stays on login.
       });
   }, []);
 

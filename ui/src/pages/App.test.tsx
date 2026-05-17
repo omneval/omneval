@@ -5,7 +5,7 @@ import App from "@/App";
 // ── Mock the entire App component's fetch calls ───────────────────
 
 const mockProjects = [
-  { project_id: "proj-1", name: "Test Project", org_id: "org-1" },
+  { project_id: "proj-1", name: "Test Project" },
 ];
 
 // ── Session persistence tests ────────────────────────────────────
