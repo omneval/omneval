@@ -214,7 +214,7 @@ function SectionAccordion({
         <>
           <button
             onClick={() => setOpen(!open)}
-            className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs font-semibold tracking-wide text-lantern-ash/70 hover:text-lantern-pure transition-colors"
+            className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs font-semibold tracking-wide text-lantern-mid hover:text-lantern-pure transition-colors"
           >
             <ChevronIcon open={open} />
             {label.toUpperCase()}

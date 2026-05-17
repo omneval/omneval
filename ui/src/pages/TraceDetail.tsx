@@ -14,7 +14,7 @@ import Breadcrumb from "@/components/Breadcrumb";
 import JsonCodeBlock from "@/components/JsonCodeBlock";
 import { Skeleton } from "@/components/Skeleton";
 import { EmptyState, LoadingState } from "@/components/EmptyState";
-import { formatTime, formatDuration, formatMs, totalTokens } from "@/utils/formatters";
+import { formatTime, formatDuration, formatMs, totalTokens, parseChatTurns } from "@/utils/formatters";
 import { useToast } from "@/components/Toast";
 import SaveToDatasetModal from "@/components/SaveToDatasetModal";
 
@@ -348,6 +348,58 @@ export default function TraceDetailPage({
   );
 }
 
+// ── Chat Turns Renderer ────────────────────────────────────────────
+
+const ROLE_COLORS: Record<string, string> = {
+  system: colors.typography.ashGrey,
+  user: colors.accents.softGlow,
+  assistant: colors.accents.flicker,
+  tool: colors.accents.amberWarning,
+};
+
+function ChatTurnsView({ value, label }: { value: string; label: string }) {
+  const turns = parseChatTurns(value);
+
+  if (!turns) {
+    return <JsonCodeBlock value={value} label={label} maxHeight={300} />;
+  }
+
+  return (
+    <div>
+      <div className="text-xs font-medium text-lantern-ash mb-2 uppercase tracking-wider">
+        {label}
+      </div>
+      <div
+        className="rounded-md border overflow-hidden"
+        style={{
+          backgroundColor: colors.backgrounds.abyssBlack,
+          borderColor: colors.backgrounds.caveWall,
+        }}
+      >
+        {turns.map((turn, i) => (
+          <div
+            key={i}
+            className="px-3 py-2 text-xs"
+            style={{
+              borderBottom: i < turns.length - 1
+                ? `1px solid ${colors.backgrounds.caveWall}`
+                : undefined,
+            }}
+          >
+            <span
+              className="font-semibold uppercase tracking-wider mr-2"
+              style={{ color: ROLE_COLORS[turn.role] ?? colors.typography.ashGrey, fontSize: "0.65rem" }}
+            >
+              {turn.role}
+            </span>
+            <span className="text-lantern-pure whitespace-pre-wrap">{turn.content}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Score Badges ───────────────────────────────────────────────────
 
 function ScoreBadges({ scores }: { scores: Score[] }) {
@@ -618,12 +670,12 @@ function SlideInDetailPanel({
 
           {/* Input */}
           {hasInput && (
-            <JsonCodeBlock value={span.input!} label="Input" maxHeight={300} />
+            <ChatTurnsView value={span.input!} label="Input" />
           )}
 
           {/* Output */}
           {hasOutput && (
-            <JsonCodeBlock value={span.output!} label="Output" maxHeight={300} />
+            <ChatTurnsView value={span.output!} label="Output" />
           )}
 
           {hasInput && (

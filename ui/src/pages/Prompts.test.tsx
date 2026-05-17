@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import PromptsPage from "./Prompts";
 import { ToastProvider } from "@/components/Toast";
@@ -36,7 +36,7 @@ describe("PromptsPage", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
-  const mockPromptList = [
+  const mockPromptList: { name: string; latest_version: number; labels: Record<string, number> }[] = [
     {
       name: "greeting",
       latest_version: 2,

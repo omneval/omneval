@@ -89,6 +89,53 @@ interface TracesByNameData {
   count: number;
 }
 
+const BarChartIcon = () => (
+  <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+    <rect x="6" y="28" width="8" height="14" rx="1" stroke="currentColor" strokeWidth="2" />
+    <rect x="20" y="18" width="8" height="24" rx="1" stroke="currentColor" strokeWidth="2" />
+    <rect x="34" y="10" width="8" height="32" rx="1" stroke="currentColor" strokeWidth="2" />
+    <path d="M4 44h40" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+  </svg>
+);
+
+const DollarIcon = () => (
+  <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+    <circle cx="24" cy="24" r="18" stroke="currentColor" strokeWidth="2" />
+    <path d="M24 12v24M19 17h7.5a4.5 4.5 0 010 9h-5a4.5 4.5 0 000 9H29" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+  </svg>
+);
+
+const StarIcon = () => (
+  <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+    <path d="M24 6l4.5 9 10 1.5-7.25 7 1.75 10L24 29l-9 4.5 1.75-10L9.5 16.5l10-1.5L24 6z"
+      stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+  </svg>
+);
+
+const ClockIcon = () => (
+  <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+    <circle cx="24" cy="24" r="18" stroke="currentColor" strokeWidth="2" />
+    <path d="M24 14v10l7 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const ChipIcon = () => (
+  <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+    <rect x="14" y="14" width="20" height="20" rx="2" stroke="currentColor" strokeWidth="2" />
+    <path d="M20 14v-4M28 14v-4M20 38v-4M28 38v-4M14 20H10M14 28H10M38 20h-4M38 28h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    <rect x="18" y="18" width="12" height="12" rx="1" stroke="currentColor" strokeWidth="1.5" />
+  </svg>
+);
+
+const UserGroupIcon = () => (
+  <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+    <circle cx="18" cy="18" r="7" stroke="currentColor" strokeWidth="2" />
+    <path d="M4 40c0-7.732 6.268-14 14-14s14 6.268 14 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    <circle cx="34" cy="16" r="5" stroke="currentColor" strokeWidth="2" />
+    <path d="M44 38c0-5.523-4.477-10-10-10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+  </svg>
+);
+
 function TracesByNameChart({ data, loading }: { data: TracesByNameData[]; loading: boolean }) {
   if (loading && data.length === 0) {
     return <LoadingState rows={5} rowHeight="1.25rem" />;
@@ -97,7 +144,8 @@ function TracesByNameChart({ data, loading }: { data: TracesByNameData[]; loadin
   if (data.length === 0) {
     return (
       <EmptyState
-        variant="onboarding"
+        variant="default"
+        icon={<BarChartIcon />}
         title="No traces yet"
         description="Send your first trace to see model breakdown here"
         actionLabel="View Traces"
@@ -176,9 +224,12 @@ function TracesByTimeChart({ data, loading }: { data: TimeSeriesData[]; loading:
 
   if (data.length === 0) {
     return (
-      <div className="text-center py-8 text-lantern-ash text-sm">
-        No time-series data available
-      </div>
+      <EmptyState
+        variant="default"
+        icon={<ClockIcon />}
+        title="No time-series data"
+        description="Trace activity will appear here once data is available"
+      />
     );
   }
 
@@ -241,6 +292,7 @@ function ModelCostsTable({ data, loading }: { data: CostData[]; loading: boolean
     return (
       <EmptyState
         variant="default"
+        icon={<DollarIcon />}
         title="No cost data yet"
         description="Cost breakdown will appear once traces are ingested"
       />
@@ -326,6 +378,7 @@ function ScoresWidget({ loading }: { loading: boolean }) {
   return (
     <EmptyState
       variant="default"
+      icon={<StarIcon />}
       title="No scores yet"
       description="Configure evaluation rules to start scoring traces"
       actionLabel="Go to Settings"
@@ -383,6 +436,7 @@ function ModelUsageWidget({
       {isEmpty ? (
         <EmptyState
           variant="default"
+          icon={<ChipIcon />}
           title="No usage data yet"
           description="Token counts will appear once traces are ingested"
         />
@@ -461,9 +515,12 @@ function UserConsumptionChart({ data, loading }: { data: UserConsumptionData[]; 
 
   if (data.length === 0) {
     return (
-      <div className="text-center py-8 text-lantern-ash text-sm">
-        No user consumption data available
-      </div>
+      <EmptyState
+        variant="default"
+        icon={<UserGroupIcon />}
+        title="No consumption data"
+        description="Trace counts per service will appear here"
+      />
     );
   }
 

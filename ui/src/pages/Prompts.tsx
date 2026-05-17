@@ -285,7 +285,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 px-6 pt-5">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -473,7 +473,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 key={prompt.name}
                 className="rounded-lg border transition-all duration-150 overflow-hidden"
                 style={{
-                  backgroundColor: colors.backgrounds.charcoalDepth,
+                  backgroundColor: colors.backgrounds.slightIllumination,
                   borderColor: isExpanded ? colors.accents.emberFlare : colors.backgrounds.caveWall,
                 }}
                 onMouseEnter={(e) => {
@@ -513,8 +513,8 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
 
                   {/* Latest version */}
                   <span
-                    className="text-xs px-2 py-0.5 rounded"
-                    style={{ backgroundColor: colors.backgrounds.slightIllumination, color: colors.typography.ashGrey }}
+                    className="text-xs px-2 py-0.5 rounded font-mono"
+                    style={{ backgroundColor: colors.backgrounds.caveWall, color: colors.typography.ashGrey }}
                   >
                     v{prompt.latest_version}
                   </span>
@@ -529,13 +529,13 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                           key={label}
                           className="text-xs px-2 py-0.5 rounded font-medium"
                           style={{
-                            backgroundColor: hasLabel ? labelBg(label) : "transparent",
+                            backgroundColor: hasLabel ? labelBg(label) : colors.backgrounds.caveWall,
                             color: hasLabel ? labelColor(label) : colors.typography.ashGrey,
-                            opacity: hasLabel ? 1 : 0.4,
+                            opacity: hasLabel ? 1 : 0.5,
                           }}
                         >
                           {label}
-                          {hasLabel && <span className="ml-0.5">v{version}</span>}
+                          {hasLabel && <span className="ml-0.5 font-mono">v{version}</span>}
                         </span>
                       );
                     })}

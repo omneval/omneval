@@ -119,7 +119,11 @@ function StatusBadge({ enabled }: { enabled: boolean }) {
   return (
     <span
       className="text-xs px-2 py-0.5 rounded font-medium"
-      style={{ backgroundColor: "rgba(161,161,170,0.1)", color: colors.typography.ashGrey }}
+      style={{
+        backgroundColor: "rgba(161,161,170,0.12)",
+        color: colors.typography.ashGrey,
+        border: "1px solid rgba(161,161,170,0.25)",
+      }}
     >
       Disabled
     </span>
@@ -261,7 +265,7 @@ function RuleCard({ rule, onDelete }: { rule: EvalRule; onDelete: (ruleId: strin
     <div
       className="rounded-lg border transition-all duration-150"
       style={{
-        backgroundColor: colors.backgrounds.charcoalDepth,
+        backgroundColor: colors.backgrounds.slightIllumination,
         borderColor: colors.backgrounds.caveWall,
       }}
       onMouseEnter={(e) => {
@@ -494,7 +498,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 px-6 pt-5">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

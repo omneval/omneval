@@ -44,13 +44,34 @@ function KeyCard({
     <div
       className={`flex items-center justify-between px-4 py-3 rounded-md border ${
         isRevoked
-          ? "border-lantern-bg-cave bg-lantern-bg-charcoal/50 opacity-60"
-          : "border-lantern-bg-cave bg-lantern-bg-charcoal"
+          ? "border-lantern-bg-cave bg-lantern-bg-illumination/50 opacity-60"
+          : "border-lantern-bg-cave bg-lantern-bg-illumination"
       }`}
     >
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-mono text-lantern-pure truncate">
+        <div className="flex items-center gap-2 mb-0.5">
+          {/* Primary display name: service_name for service keys, kind label for project keys */}
+          <span className="text-sm font-medium text-lantern-pure truncate">
+            {apiKey.service_name ?? (apiKey.kind === "service" ? "Service Key" : "Project Key")}
+          </span>
+          <span
+            className={`text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${
+              apiKey.kind === "service"
+                ? "text-lantern-ember bg-lantern-accent-ember-glow"
+                : "text-lantern-ash bg-lantern-bg-cave"
+            }`}
+          >
+            {apiKey.kind === "service" ? "Service" : "Project"}
+          </span>
+          {isRevoked && (
+            <span className="text-xs text-lantern-ember bg-lantern-accent-ember-glow px-1.5 py-0.5 rounded font-medium flex-shrink-0">
+              Revoked
+            </span>
+          )}
+        </div>
+        {/* key_id as secondary identifier */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-mono text-lantern-ash truncate">
             {apiKey.key_id}
           </span>
           {!isRevoked && (
@@ -60,26 +81,7 @@ function KeyCard({
               ariaLabel={`Copy API key ${apiKey.kind}`}
             />
           )}
-          <span
-            className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-              apiKey.kind === "service"
-                ? "text-lantern-ember bg-lantern-accent-ember-glow"
-                : "text-lantern-ash bg-lantern-bg-illumination"
-            }`}
-          >
-            {apiKey.kind === "service" ? "Service" : "Project"}
-          </span>
-          {isRevoked && (
-            <span className="text-xs text-lantern-ember bg-lantern-accent-ember-glow px-1.5 py-0.5 rounded font-medium">
-              Revoked
-            </span>
-          )}
         </div>
-        {apiKey.service_name && (
-          <p className="text-xs text-lantern-ash mt-1">
-            Service: <span className="text-lantern-pure">{apiKey.service_name}</span>
-          </p>
-        )}
         <p className="text-xs text-lantern-ash mt-0.5">
           Created: {new Date(apiKey.created_at).toLocaleDateString()}
         </p>

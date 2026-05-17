@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import SettingsPage from "./Settings";
 import { ToastProvider } from "@/components/Toast";
 
@@ -272,8 +272,7 @@ describe("SettingsPage", () => {
     let callCount = 0;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
-      (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString();
+      () => {
         callCount++;
         // First call is GET (list keys), second call is POST (generate key)
         if (callCount === 1) {
@@ -327,8 +326,7 @@ describe("SettingsPage", () => {
     let callCount = 0;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
-      (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString();
+      () => {
         callCount++;
         if (callCount === 1) {
           return Promise.resolve(resolveKeys([]));
@@ -375,8 +373,7 @@ describe("SettingsPage", () => {
     let callCount = 0;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
-      (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString();
+      () => {
         callCount++;
         if (callCount === 1) {
           return Promise.resolve(resolveKeys([]));
@@ -422,8 +419,7 @@ describe("SettingsPage", () => {
     let callCount = 0;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
-      (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString();
+      () => {
         callCount++;
         if (callCount === 1) {
           return Promise.resolve(resolveKeys([]));
@@ -463,8 +459,7 @@ describe("SettingsPage", () => {
     let callCount = 0;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
-      (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString();
+      () => {
         callCount++;
         if (callCount === 1) {
           return Promise.resolve(resolveKeys([]));
@@ -498,8 +493,7 @@ describe("SettingsPage", () => {
     let callCount = 0;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
-      (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString();
+      () => {
         callCount++;
         if (callCount === 1) {
           return Promise.resolve(resolveKeys([]));
@@ -536,8 +530,7 @@ describe("SettingsPage", () => {
     let callCount = 0;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
-      (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString();
+      () => {
         callCount++;
         if (callCount === 1) {
           return Promise.resolve(resolveKeys([]));
@@ -585,8 +578,7 @@ describe("SettingsPage", () => {
     let callCount = 0;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
-      (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString();
+      () => {
         callCount++;
         if (callCount === 1) {
           return Promise.resolve(resolveKeys([]));
@@ -668,8 +660,7 @@ describe("SettingsPage", () => {
     let callCount = 0;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
-      (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString();
+      () => {
         callCount++;
         if (callCount === 1) {
           return Promise.resolve(resolveKeys([]));
@@ -738,8 +729,7 @@ describe("SettingsPage", () => {
     let callCount = 0;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
-      (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString();
+      () => {
         callCount++;
         if (callCount === 1) {
           return Promise.resolve(resolveKeys([]));

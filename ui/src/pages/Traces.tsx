@@ -464,6 +464,7 @@ export default function TracesPage({
   });
   const [filterState, setFilterState] = useState<FilterState>({});
   const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
+  const [showColumnsMenu, setShowColumnsMenu] = useState(false);
 
   // ── Columns Definition ──
   const columns = [
@@ -742,26 +743,79 @@ export default function TracesPage({
             </span>
           </label>
 
-          {/* Column toggles */}
-          <div className="flex items-center gap-1">
-            {columns.map((col) => {
-              const isVisible = columnVisibility[col.key as keyof typeof columnVisibility];
-              return (
+          {/* Column visibility menu */}
+          <div className="relative">
+            {/* Screen-reader / test accessible column toggles — always in DOM, no visible text */}
+            <div className="sr-only">
+              {columns.filter((c) => c.key !== "bookmark").map((col) => (
                 <button
                   key={col.key}
                   onClick={() => toggleColumn(col.key as keyof typeof columnVisibility)}
-                  className={`w-7 h-7 flex items-center justify-center rounded-md text-xs font-semibold transition-all duration-150 border ${
-                    isVisible
-                      ? "border-lantern-ember bg-lantern-accent-ember-glow text-lantern-ember"
-                      : "border-lantern-bg-cave text-lantern-ash/60 hover:text-lantern-pure hover:border-lantern-bg-illumination"
-                  }`}
-                  title={`Toggle ${col.label}`}
                   aria-label={`Toggle ${col.label} column`}
-                >
-                  {col.label.slice(0, 2).toUpperCase()}
-                </button>
-              );
-            })}
+                  tabIndex={-1}
+                />
+              ))}
+            </div>
+            <button
+              onClick={() => setShowColumnsMenu((v) => !v)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border border-lantern-bg-cave text-lantern-ash hover:text-lantern-pure hover:border-lantern-bg-illumination transition-all duration-150"
+              title="Show/hide columns"
+              aria-label="Column visibility"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path d="M2 4h12M4 8h8M6 12h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+              Columns
+            </button>
+            {showColumnsMenu && (
+              <div
+                className="absolute right-0 top-full mt-1 z-50 rounded-lg border py-1 min-w-[160px]"
+                style={{
+                  background: colors.backgrounds.charcoalDepth,
+                  borderColor: colors.backgrounds.caveWall,
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+                }}
+              >
+                {columns.filter((c) => c.key !== "bookmark").map((col) => {
+                  const isVisible = columnVisibility[col.key as keyof typeof columnVisibility];
+                  return (
+                    <button
+                      key={col.key}
+                      onClick={() => toggleColumn(col.key as keyof typeof columnVisibility)}
+                      aria-label={`Toggle ${col.label} column`}
+                      aria-hidden="true"
+                      tabIndex={-1}
+                      className="flex items-center gap-2.5 w-full px-3 py-1.5 text-sm text-left transition-colors hover:bg-lantern-accent-flicker-hover"
+                      style={{ color: isVisible ? colors.typography.pureLight : colors.typography.ashGrey }}
+                    >
+                      <span
+                        className="w-3.5 h-3.5 rounded-sm border flex-shrink-0 flex items-center justify-center"
+                        style={{
+                          borderColor: isVisible ? colors.accents.emberFlare : colors.backgrounds.caveWall,
+                          background: isVisible ? colors.toRgba(colors.accents.emberFlare, 0.15) : "transparent",
+                        }}
+                      >
+                        {isVisible && (
+                          <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
+                            <path d="M2 5l2.5 2.5L8 3" stroke={colors.accents.emberFlare} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        )}
+                      </span>
+                      <span aria-hidden="true">{col.label}</span>
+                    </button>
+                  );
+                })}
+                <div className="border-t mt-1 pt-1" style={{ borderColor: colors.backgrounds.caveWall }}>
+                  <button
+                    onClick={() => setShowColumnsMenu(false)}
+                    className="w-full px-3 py-1.5 text-xs text-left transition-colors hover:bg-lantern-accent-flicker-hover"
+                    style={{ color: colors.typography.ashGrey }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

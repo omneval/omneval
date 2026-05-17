@@ -1,6 +1,45 @@
 @import "tailwindcss";
 @import "./theme.css";
 
+/* ── Tailwind v4 theme tokens ──────────────────────────────
+   @theme registers --color-* variables so Tailwind generates
+   bg-*, text-*, border-* utilities for every token.
+   These mirror the CSS custom properties in theme.css so both
+   Tailwind utility classes AND var() references work.
+   ──────────────────────────────────────────────────────── */
+@theme {
+  /* Background surfaces */
+  --color-lantern-bg-abyss: #000000;
+  --color-lantern-bg-charcoal: #0D0D0D;
+  --color-lantern-bg-illumination: #1A1A1A;
+  --color-lantern-bg-cave: #2D2D2D;
+
+  /* Accent — solid */
+  --color-lantern-accent-ember: #FF5722;
+  --color-lantern-accent-glow: #FF8A65;
+  --color-lantern-accent-flicker: #FFCCBC;
+  --color-lantern-accent-heat: #E64A19;
+  --color-lantern-accent-success: #4ADE80;
+  --color-lantern-accent-warning: #FBBF24;
+  --color-lantern-accent-danger: #EF4444;
+  --color-lantern-accent-danger-light: #FCA5A5;
+
+  /* Accent — semi-transparent derived */
+  --color-lantern-accent-ember-glow: rgba(255, 87, 34, 0.15);
+  --color-lantern-accent-flicker-hover: rgba(255, 204, 188, 0.1);
+  --color-lantern-accent-flicker-hover-strong: rgba(255, 204, 188, 0.15);
+  --color-lantern-accent-heat-glow: rgba(230, 74, 25, 0.15);
+
+  /* Text */
+  --color-lantern-text-pure: #FFFFFF;
+  --color-lantern-text-mid: #C9C9D2;
+  --color-lantern-text-ash: #A1A1AA;
+
+  /* Convenience aliases used directly in components */
+  --color-lantern-danger: #EF4444;
+  --color-lantern-soft: #FFCCBC;
+}
+
 /* ── Global Dark Mode Base ─────────────────────────────── */
 
 @layer base {
@@ -218,7 +257,7 @@
   .empty-state-icon {
     width: 48px;
     height: 48px;
-    color: var(--lantern-bg-cave);
+    color: var(--lantern-text-ash);
     margin-bottom: 0.75rem;
   }
 
@@ -258,3 +297,4 @@
   .card:hover {
     box-shadow: var(--lantern-card-hover-shadow);
   }
+}

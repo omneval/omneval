@@ -53,8 +53,8 @@ export function formatDuration(start: string, end: string): string {
  * Truncate a string to a maximum length, appending an ellipsis.
  */
 export function truncate(str: string | undefined, len: number): string {
-  if (!str) return "\u2014";
-  return str.length > len ? str.slice(0, len) + "\u2026" : str;
+  if (!str) return "—";
+  return str.length > len ? str.slice(0, len) + "…" : str;
 }
 
 /**
@@ -85,29 +85,108 @@ export function safeExtractInputOutput(json: string): string {
   }
 }
 
+// ── Chat message types ─────────────────────────────────────────────
+
+export interface ChatTurn {
+  role: string;
+  content: string;
+}
+
+/**
+ * Parse a string into an array of chat turns (role + content).
+ * Handles JSON arrays of {role, content} objects.
+ * Returns null if the input is not a chat structure.
+ */
+export function parseChatTurns(raw: string): ChatTurn[] | null {
+  if (!raw) return null;
+  // JSON array of {role, content} objects
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      const first = parsed[0] as Record<string, unknown>;
+      if (typeof first?.content === "string" && typeof first?.role === "string") {
+        return (parsed as Record<string, unknown>[])
+          .filter((m) => typeof m?.content === "string" && typeof m?.role === "string")
+          .map((m) => ({ role: m.role as string, content: m.content as string }));
+      }
+    }
+  } catch {
+    // not JSON
+  }
+  // Go-map format: [map[content:... role:...] ...] — Go's fmt.Sprint of []map[string]string
+  // Keys are alphabetically sorted by Go, so content always precedes role.
+  if (raw.includes("map[") && raw.includes("content:") && raw.includes("role:")) {
+    const pairs = [...raw.matchAll(/map\[content:(.*?)\s+role:(\w+)\]/g)];
+    if (pairs.length > 0) {
+      return pairs.map((m) => ({ content: m[1].trim(), role: m[2].trim() }));
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract readable text from a chat-message array (JSON or Go-map format).
+ * Returns null when the input is not a recognised chat structure.
+ */
+function extractChatPreview(raw: string): string | null {
+  // JSON array of {role, content} objects.
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      const first = parsed[0] as Record<string, unknown>;
+      if (typeof first?.content === "string" && typeof first?.role === "string") {
+        return (parsed as Record<string, unknown>[])
+          .filter((m) => typeof m?.content === "string")
+          .map((m) => `${m.role as string}: ${m.content as string}`)
+          .join(" | ");
+      }
+    }
+  } catch {
+    // not JSON — fall through
+  }
+
+  // Go-map format: [map[content:... role:...] ...]
+  // Extract each `content:VALUE` segment (value ends at next key: or closing bracket).
+  if (raw.includes("map[") && raw.includes("content:")) {
+    const matches = [...raw.matchAll(/content:([^\]]*?)(?:\s+\w+:|])/g)];
+    if (matches.length > 0) {
+      return matches.map((m) => m[1].trim()).filter(Boolean).join(" | ");
+    }
+    const cleaned = raw
+      .replace(/\[map\[/g, "")
+      .replace(/map\[/g, "")
+      .replace(/\]\]/g, "")
+      .replace(/\]/g, "")
+      .trim();
+    return cleaned || null;
+  }
+
+  return null;
+}
+
 /**
  * Produce a clean, truncated JSON preview suitable for display in table cells.
- * If the input is valid JSON it will be compacted; otherwise the raw string
- * is cleaned up (Go-map-like syntax becomes plain text) and truncated.
+ * Chat message arrays (JSON or Go-map) render as "role: content" text.
+ * Other JSON is compacted; non-JSON strings are truncated as-is.
  */
 export function formatJsonPreview(json: string, maxLen = 60): string {
-  if (!json) return "\u2014";
+  if (!json) return "—";
+
+  const chat = extractChatPreview(json);
+  if (chat !== null) {
+    if (chat.length <= maxLen) return chat;
+    return chat.slice(0, maxLen) + "…";
+  }
 
   try {
     const obj = JSON.parse(json);
     const compact = JSON.stringify(obj);
     if (compact.length <= maxLen) return compact;
-    return compact.slice(0, maxLen) + "\u2026";
+    return compact.slice(0, maxLen) + "…";
   } catch {
-    // Not valid JSON — sanitise and truncate
-    // Remove Go-map artefacts like "map[content:x role:y]"
-    let cleaned = json
-      .replace(/\[map\[/g, "[")
-      .replace(/map\[/g, "[")
-      .replace(/\]\]/g, "]")
-      .trim();
+    const cleaned = json.trim();
     if (cleaned.length <= maxLen) return cleaned;
-    return cleaned.slice(0, maxLen) + "\u2026";
+    return cleaned.slice(0, maxLen) + "…";
   }
 }
 
