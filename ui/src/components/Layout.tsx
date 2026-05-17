@@ -11,14 +11,13 @@ interface LayoutProps {
 export default function Layout({ children, activeNav, onNavigate, onLogout }: LayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
 
-  // Auto-collapse sidebar on narrow viewports (Issue #102)
+  // Auto-collapse sidebar on narrow viewports
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth < 1024 && !collapsed) {
         setCollapsed(true);
       }
     };
-    // Check initial state
     if (window.innerWidth < 1024) {
       setCollapsed(true);
     }

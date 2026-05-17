@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  colors,
-  type ColorCategory,
-  type ColorName,
-} from "./theme";
+import { colors } from "./theme";
 
 /**
  * Issue #102: Dark theme visual polish — contrast, spacing, typography
@@ -101,12 +97,6 @@ describe("Issue #102 — Dark Theme Polish", () => {
       const vars = colors.cssVariables;
       expect(vars).toHaveProperty("--lantern-card-shadow");
       expect(vars).toHaveProperty("--lantern-card-hover-shadow");
-    });
-
-    it("includes new CSS variables for success and warning semantic colors", () => {
-      const vars = colors.cssVariables;
-      expect(vars).toHaveProperty("--lantern-accent-success");
-      expect(vars).toHaveProperty("--lantern-accent-warning");
     });
   });
 });

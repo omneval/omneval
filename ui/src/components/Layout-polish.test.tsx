@@ -28,16 +28,6 @@ describe("Layout — Issue #102 responsive polish", () => {
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
-  it("passes onLogout to Sidebar when provided", () => {
-    const onLogout = vi.fn();
-    render(
-      <Layout activeNav="traces" onNavigate={mockNavigate} onLogout={onLogout}>
-        <div />
-      </Layout>
-    );
-    expect(onLogout).toBeDefined();
-  });
-
   it("applies responsive auto-collapse on narrow viewports", () => {
     const { container } = render(
       <Layout activeNav="traces" onNavigate={mockNavigate}>

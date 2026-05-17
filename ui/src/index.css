@@ -246,7 +246,7 @@
     }
   }
 
-  /* ── Card elevation — Issue #102 ── */
+  /* ── Card elevation ── */
   .card {
     background: var(--lantern-bg-charcoal);
     border: 1px solid var(--lantern-bg-cave);
