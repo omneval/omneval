@@ -1310,6 +1310,106 @@ func readBody(t *testing.T, resp *http.Response) string {
 	return buf.String()
 }
 
+// ── /me endpoint tests ───────────────────────────────────────────
+
+func TestHandler_Me_Success(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+
+	// Create org, user, and project
+	_ = store.CreateOrganization(nil, &domain.Organization{OrgID: "org-1", Name: "Test Org"})
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "user-1",
+		OrgID:        "org-1",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
+	})
+	_ = store.CreateProject(nil, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "Test Project"})
+
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
+
+	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/me", nil)
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("me request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusOK)
+		t.Logf("body: %s", readBody(t, resp))
+		return
+	}
+
+	var body auth.MeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if body.UserID != "user-1" {
+		t.Errorf("user_id: got %q, want %q", body.UserID, "user-1")
+	}
+	if body.Email != "alice@example.com" {
+		t.Errorf("email: got %q, want %q", body.Email, "alice@example.com")
+	}
+	if len(body.Projects) != 1 {
+		t.Errorf("projects length: got %d, want 1", len(body.Projects))
+	}
+	if len(body.Projects) > 0 && body.Projects[0].ProjectID != "proj-1" {
+		t.Errorf("projects[0].project_id: got %q, want %q", body.Projects[0].ProjectID, "proj-1")
+	}
+}
+
+func TestHandler_Me_401Unauthenticated(t *testing.T) {
+	_, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+
+	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/me", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("me request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["error"] != "unauthorized" {
+		t.Errorf("error: got %q, want %q", body["error"], "unauthorized")
+	}
+}
+
+func TestHandler_Me_JSONContentType(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+
+	_ = store.CreateOrganization(nil, &domain.Organization{OrgID: "org-1", Name: "Test Org"})
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "user-1",
+		OrgID:        "org-1",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
+	})
+	_ = store.CreateProject(nil, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "Test Project"})
+
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
+
+	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/me", nil)
+	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("me request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type: got %q, want %q", ct, "application/json")
+	}
+}
+
 func TestHandler_GenerateAPIKey_EndToEnd(t *testing.T) {
 	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
 

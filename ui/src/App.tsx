@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import LoginPage from "./pages/Login";
 import TracesPage from "./pages/Traces";
 import TraceDetailPage from "./pages/TraceDetail";
@@ -41,6 +41,12 @@ interface Project {
   org_id: string;
 }
 
+interface MeResponse {
+  user_id: string;
+  email: string;
+  projects: Array<{ project_id: string; name: string; org_id?: string }>;
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>("login");
   const [projects, setProjects] = useState<Project[]>([]);
@@ -51,16 +57,41 @@ export default function App() {
   const [timeRange, setTimeRange] = useState("1d");
   const [environment, setEnvironment] = useState("default");
 
-  // Check for existing session on mount
+  // Check for existing session on mount by calling GET /api/v1/me.
+  // We cannot read document.cookie because the lantern_session cookie is HttpOnly.
+  const initialSessionCheck = useRef(true);
+
   useEffect(() => {
-    const cookie = document.cookie
-      .split("; ")
-      .find((c) => c.startsWith("lantern_session="));
-    if (cookie) {
-      const id = cookie.split("=")[1];
-      fetchProjects(id);
-      setPage("traces");
-    }
+    if (!initialSessionCheck.current) return;
+    initialSessionCheck.current = false;
+
+    // Call /me to detect if a valid session exists.
+    // This works because the browser automatically sends HttpOnly cookies
+    // with fetch requests — no need to read document.cookie.
+    fetch("/api/v1/me")
+      .then((res) => {
+        if (res.ok) return res.json() as Promise<MeResponse>;
+        throw new Error("unauthorized");
+      })
+      .then((data) => {
+        if (Array.isArray(data.projects) && data.projects.length > 0) {
+          // Transform ProjectInfo to Project (org_id is not provided by /me)
+          const projects: Project[] = data.projects.map((p) => ({
+            project_id: p.project_id,
+            name: p.name,
+            org_id: "",
+          }));
+          setProjects(projects);
+          setActiveProject(projects[0].project_id);
+        } else {
+          // Fallback: fetch projects via the normal endpoint
+          fetchProjects("fallback-session-id");
+        }
+        setPage("traces");
+      })
+      .catch(() => {
+        // No valid session — stay on login page.
+      });
   }, []);
 
   const fetchProjects = useCallback(async (_session: string) => {

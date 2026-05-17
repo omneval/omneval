@@ -79,6 +79,20 @@ type GenerateAPIKeyResponse struct {
 	CreatedAt   time.Time         `json:"created_at"`
 }
 
+// MeResponse is returned by GET /api/v1/me.
+// It contains the current user's identity and their organization's projects.
+type MeResponse struct {
+	UserID     string     `json:"user_id"`
+	Email      string     `json:"email"`
+	Projects   []ProjectInfo `json:"projects"`
+}
+
+// ProjectInfo is a minimal project representation for the /me endpoint.
+type ProjectInfo struct {
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
+}
+
 // APIKeyInfo represents an API key as returned by list endpoints (never raw key).
 type APIKeyInfo struct {
 	KeyID       string            `json:"key_id"`
@@ -108,8 +122,49 @@ func NewHandler(store metadata.Store, secure bool, sessionTTL time.Duration, adm
 	}
 }
 
+// HandleMe returns the current user's session data (user_id, email, projects)
+// when a valid lantern_session cookie is present, or 401 when no valid session exists.
+// Used by the frontend to detect existing sessions on page load.
+func (h *Handler) HandleMe(w http.ResponseWriter, r *http.Request) {
+	user := CurrentUserFromContext(r)
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	// Look up user to get org_id
+	storedUser, err := h.store.GetUserByID(r.Context(), user.UserID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to look up user"})
+		return
+	}
+
+	// Get projects for this user's org
+	projects, err := h.store.ListProjects(r.Context(), storedUser.OrgID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list projects"})
+		return
+	}
+
+	// Convert to ProjectInfo (minimal representation)
+	projectInfo := make([]ProjectInfo, len(projects))
+	for i, p := range projects {
+		projectInfo[i] = ProjectInfo{
+			ProjectID: p.ProjectID,
+			Name:      p.Name,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, MeResponse{
+		UserID:   user.UserID,
+		Email:    storedUser.Email,
+		Projects: projectInfo,
+	})
+}
+
 // Register mounts auth routes on the given mux.
 func (h *Handler) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/v1/me", h.HandleMe)
 	mux.HandleFunc("POST /login", h.Login)
 	mux.HandleFunc("POST /logout", h.Logout)
 	mux.HandleFunc("POST /api/v1/users/invite", h.Invite)
