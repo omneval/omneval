@@ -224,24 +224,37 @@
 
   .empty-state-title {
     font-size: 0.875rem;
-    font-weight: 500;
-    color: var(--lantern-text-ash);
+    font-weight: 600;
+    color: var(--lantern-text-mid);
   }
 
   .empty-state-description {
     font-size: 0.75rem;
     color: var(--lantern-text-ash);
-    opacity: 0.7;
     margin-top: 0.25rem;
   }
 
-  /* ── Responsive sidebar — auto-collapse below 768px ── */
-  @media (max-width: 767px) {
-    aside { 
-      position: fixed !important; 
-      z-index: 50 !important; 
+  /* ── Responsive sidebar — auto-collapse below 1024px ── */
+  @media (max-width: 1023px) {
+    aside {
+      position: fixed !important;
+      z-index: 50 !important;
       height: 100vh !important;
       box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6) !important;
+      transform: translateX(-100%);
+      transition: transform 0.2s ease;
     }
   }
-}
+
+  /* ── Card elevation — Issue #102 ── */
+  .card {
+    background: var(--lantern-bg-charcoal);
+    border: 1px solid var(--lantern-bg-cave);
+    border-radius: 0.75rem;
+    box-shadow: var(--lantern-card-shadow);
+    transition: box-shadow 0.15s ease;
+  }
+
+  .card:hover {
+    box-shadow: var(--lantern-card-hover-shadow);
+  }

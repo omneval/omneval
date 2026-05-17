@@ -29,11 +29,15 @@
   --lantern-accent-glow: #FF8A65;
   --lantern-accent-flicker: #FFCCBC;
   --lantern-accent-heat: #E64A19;
+  --lantern-accent-ember-glow: #FF7043;
+  --lantern-accent-success: #4ADE80;
+  --lantern-accent-warning: #FBBF24;
   --lantern-accent-danger: #EF4444;
   --lantern-accent-danger-light: #FCA5A5;
 
   /* ── Illumination: Typography ─────────────────────────── */
   --lantern-text-pure: #FFFFFF;
+  --lantern-text-mid: #C9C9D2;
   --lantern-text-ash: #A1A1AA;
 
   /* ── Derived / Convenience ────────────────────────────── */
@@ -51,6 +55,12 @@
   --lantern-focus-ring: rgba(255, 87, 34, 0.25);
   /** Danger ring for validation errors — dangerRed at 30% opacity */
   --lantern-focus-ring-danger: rgba(239, 68, 68, 0.3);
+
+  /* ── Card Elevation ───────────────────────────────────── */
+  /** Default card shadow for depth on dark background */
+  --lantern-card-shadow: 0 1px 4px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.4);
+  /** Hover card shadow for interactive elevation */
+  --lantern-card-hover-shadow: 0 4px 16px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.5);
 
   /* ── Default Dark Mode Palette ────────────────────────── */
   /** Main application background */

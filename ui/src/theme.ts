@@ -58,10 +58,14 @@ export type ColorName =
   | "softGlow"
   | "flicker"
   | "deepHeat"
+  | "emberGlow"
+  | "greenSuccess"
+  | "amberWarning"
   | "dangerRed"
   | "dangerLight"
   // typography
   | "pureLight"
+  | "midTone"
   | "ashGrey";
 
 export type HexColor = `#${string}`;
@@ -86,11 +90,15 @@ const baseColors = {
     softGlow: "#FF8A65",
     flicker: "#FFCCBC",
     deepHeat: "#E64A19",
+    emberGlow: "#FF7043",
+    greenSuccess: "#4ADE80",
+    amberWarning: "#FBBF24",
     dangerRed: "#EF4444",
     dangerLight: "#FCA5A5",
   },
   typography: {
     pureLight: "#FFFFFF",
+    midTone: "#C9C9D2",
     ashGrey: "#A1A1AA",
   },
   cssVariables: {
@@ -102,10 +110,16 @@ const baseColors = {
     "--lantern-accent-glow": "#FF8A65",
     "--lantern-accent-flicker": "#FFCCBC",
     "--lantern-accent-heat": "#E64A19",
+    "--lantern-accent-ember-glow": "#FF7043",
+    "--lantern-accent-success": "#4ADE80",
+    "--lantern-accent-warning": "#FBBF24",
     "--lantern-accent-danger": "#EF4444",
     "--lantern-accent-danger-light": "#FCA5A5",
     "--lantern-text-pure": "#FFFFFF",
+    "--lantern-text-mid": "#C9C9D2",
     "--lantern-text-ash": "#A1A1AA",
+    "--lantern-card-shadow": "0 1px 4px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.4)",
+    "--lantern-card-hover-shadow": "0 4px 16px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.5)",
   },
   /** Chart colors for multi-series visualizations. */
   chartColors: {

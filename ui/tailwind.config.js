@@ -18,8 +18,12 @@ export default {
           glow: "#FF8A65",
           flicker: "#FFCCBC",
           heat: "#E64A19",
+          emberGlow: "#FF7043",
+          success: "#4ADE80",
+          warning: "#FBBF24",
           // Illumination: Typography
           pure: "#FFFFFF",
+          mid: "#C9C9D2",
           ash: "#A1A1AA",
         },
       },

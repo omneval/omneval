@@ -109,6 +109,15 @@ function SettingsIcon() {
   );
 }
 
+function LogoutIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <path d="M8 14H4a1 1 0 01-1-1V5a1 1 0 011-1h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M12 9h3M14 6l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function LanternLogo() {
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
@@ -334,21 +343,38 @@ export default function Sidebar({ collapsed, onToggle, active, onNavigate, onLog
         </div>
       )}
 
-      {/* Bottom section for collapsed state - just icons */}
+      {/* Bottom section for collapsed state - Settings + Logout */}
       {collapsed && (
-        <div className="flex flex-col items-center gap-1 px-1 pb-2">
-          <button
-            onClick={() => onNavigate("settings")}
-            className={`p-2 rounded-md transition-colors duration-150 ${
-              active === "settings"
-                ? "text-lantern-ember bg-lantern-accent-ember-glow"
-                : "text-lantern-ash hover:text-lantern-pure"
-            }`}
-            title="Settings"
-          >
-            <SettingsIcon />
-          </button>
-        </div>
+        <>
+          <div className="border-t border-lantern-bg-cave w-full" />
+          <div className="flex flex-col items-center gap-1 px-1 pb-2">
+            <button
+              onClick={() => onNavigate("settings")}
+              className={`p-2 rounded-md transition-colors duration-150 ${
+                active === "settings"
+                  ? "text-lantern-ember bg-lantern-accent-ember-glow"
+                  : "text-lantern-ash hover:text-lantern-pure"
+              }`}
+              title="Settings"
+              aria-label="Settings"
+            >
+              <SettingsIcon />
+            </button>
+            <button
+              onClick={onLogout}
+              className={`p-2 rounded-md transition-colors duration-150 ${
+                onLogout
+                  ? "text-lantern-ash hover:text-lantern-pure"
+                  : "text-lantern-ash/40 cursor-not-allowed"
+              }`}
+              title="Logout"
+              aria-label="Logout"
+              disabled={!onLogout}
+            >
+              <LogoutIcon />
+            </button>
+          </div>
+        </>
       )}
 
       {/* User section with logout */}
