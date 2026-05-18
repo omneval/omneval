@@ -317,6 +317,8 @@ export default function TraceDetailPage({
                   expandedSpanId={expandedSpanId}
                   onToggleExpand={(id) => setExpandedSpanId(expandedSpanId === id ? null : id)}
                   onShowSaveModal={(span) => setSaveSpan({ span, input: span.input ?? "", output: span.output })}
+                  selectedSpanId={selectedSpanId}
+                  onSelect={(spanId) => setSelectedSpanId(selectedSpanId === spanId ? null : spanId)}
                 />
               )}
             </div>
@@ -707,32 +709,29 @@ function TraceTree({
   expandedSpanId,
   onToggleExpand,
   onShowSaveModal,
+  selectedSpanId,
+  onSelect,
 }: {
   trace: Span;
   expandedSpanId: string | null;
   onToggleExpand: (id: string) => void;
   onShowSaveModal: (span: Span) => void;
+  selectedSpanId: string | null;
+  onSelect: (spanId: string) => void;
 }) {
-  if (!trace.children || trace.children.length === 0) {
-    return (
-      <div className="text-xs text-lantern-ash py-4 text-center">
-        No child spans
-      </div>
-    );
-  }
-
   return (
-    <div className="ml-4 pl-4 border-l-2" style={{ borderColor: colors.backgrounds.caveWall }}>
-      {trace.children.map((child) => (
-        <SpanRow
-          key={child.span_id}
-          span={child}
-          depth={1}
-          onShowSaveModal={onShowSaveModal}
-          isExpanded={expandedSpanId === child.span_id}
-          onToggleExpand={() => onToggleExpand(child.span_id)}
-        />
-      ))}
+    <div>
+      {/* Root span — always rendered as the first item;
+          child spans are rendered inside this SpanRow at depth+1 */}
+      <SpanRow
+        span={trace}
+        depth={0}
+        onShowSaveModal={onShowSaveModal}
+        isExpanded={expandedSpanId === trace.span_id}
+        onToggleExpand={() => onToggleExpand(trace.span_id)}
+        selectedSpanId={selectedSpanId}
+        onSelect={onSelect}
+      />
     </div>
   );
 }
@@ -745,12 +744,16 @@ function SpanRow({
   onShowSaveModal,
   isExpanded,
   onToggleExpand,
+  selectedSpanId,
+  onSelect,
 }: {
   span: Span;
   depth: number;
   onShowSaveModal: (span: Span) => void;
   isExpanded: boolean;
   onToggleExpand: () => void;
+  selectedSpanId: string | null;
+  onSelect: (spanId: string) => void;
 }) {
   const [treeExpanded, setTreeExpanded] = useState(depth <= 1);
   const hasChildren = span.children && span.children.length > 0;
@@ -758,20 +761,31 @@ function SpanRow({
   const hasOutput = span.output && span.output.length > 0;
 
   const indentPx = depth * 20 + 12;
+  const isSelected = selectedSpanId === span.span_id;
 
   return (
     <div>
       {/* Span row */}
       <div
-        className="group flex items-center gap-2 py-1.5 px-2 rounded-md transition-colors cursor-default"
-        style={{ marginLeft: `${indentPx}px` }}
+        className={`group flex items-center gap-2 py-1.5 px-2 rounded-md transition-colors ${
+          isSelected ? "cursor-pointer" : "cursor-default"
+        }`}
+        style={{
+          marginLeft: `${indentPx}px`,
+          backgroundColor: isSelected ? colors.flickerRgba(0.08) : undefined,
+        }}
+        onClick={() => onSelect(span.span_id)}
         onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.background = colors.flickerRgba(0.08);
+          if (!isSelected) (e.currentTarget as HTMLElement).style.background = colors.flickerRgba(0.08);
         }}
         onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "transparent";
+          if (!isSelected) (e.currentTarget as HTMLElement).style.background = "transparent";
         }}
       >
+        <div
+          className="w-2 h-2 rounded-full flex-shrink-0"
+          style={{ background: KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall }}
+        />
         {/* Expand/collapse toggle */}
         {hasChildren ? (
           <button
@@ -827,12 +841,6 @@ function SpanRow({
             <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
         </button>
-
-        {/* Kind indicator */}
-        <div
-          className="w-2 h-2 rounded-full flex-shrink-0"
-          style={{ background: KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall }}
-        />
 
         {/* Span name */}
         <div className="flex-1 min-w-0">

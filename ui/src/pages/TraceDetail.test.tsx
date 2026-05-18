@@ -252,7 +252,30 @@ describe("tree view renders with loaded trace data", () => {
     expect(screen.getByText("tool-use")).toBeInTheDocument();
   });
 
-  it("shows 'No child spans' for traces without children", async () => {
+  it("renders root span as the first item in the tree view", async () => {
+    renderWithProvider(
+      <TraceDetailPage
+        traceId="test-trace-123"
+        activeProject="test-project"
+        onBack={() => {}}
+      />
+    );
+
+    await waitForTraceLoaded();
+
+    const treeTab = screen.getByText("Tree");
+    await act(async () => {
+      fireEvent.click(treeTab);
+    });
+
+    // Root span appears in info bar + tree = 2 occurrences
+    expect(screen.getAllByText("main-trace").length).toBeGreaterThanOrEqual(2);
+    // Child spans should also be visible
+    expect(screen.getByText("llm-call")).toBeInTheDocument();
+    expect(screen.getByText("tool-use")).toBeInTheDocument();
+  });
+
+  it("renders single-span traces in the tree view (not 'No child spans')", async () => {
     const singleSpanTrace = {
       trace_id: "single-trace",
       project_id: "test-project",
@@ -295,7 +318,43 @@ describe("tree view renders with loaded trace data", () => {
       fireEvent.click(treeTab);
     });
 
-    expect(screen.getByText(/No child spans/)).toBeInTheDocument();
+    // Single-span trace shows root span in info bar + tree = 2 occurrences
+    expect(screen.getAllByText("single-span").length).toBeGreaterThanOrEqual(2);
+    // Should NOT show "No child spans"
+    expect(screen.queryByText(/No child spans/)).not.toBeInTheDocument();
+  });
+
+  it("selects a span in the tree view and opens the detail panel", async () => {
+    renderWithProvider(
+      <TraceDetailPage
+        traceId="test-trace-123"
+        activeProject="test-project"
+        onBack={() => {}}
+      />
+    );
+
+    await waitForTraceLoaded();
+
+    const treeTab = screen.getByText("Tree");
+    await act(async () => {
+      fireEvent.click(treeTab);
+    });
+
+    // Click on the detail toggle button for the "llm-call" span
+    // The span row has a button with aria-label="Show details"
+    const showDetailButtons = screen.getAllByLabelText("Show details");
+    // First button is root span, second is first child (llm-call)
+    expect(showDetailButtons.length).toBeGreaterThanOrEqual(2);
+    const llmCallDetailBtn = showDetailButtons[1];
+
+    await act(async () => {
+      fireEvent.click(llmCallDetailBtn);
+    });
+
+    // After expanding, the detail panel should show the span's info
+    // The expanded detail contains the span's model and token count
+    const gpt4Elements = screen.getAllByText("gpt-4");
+    expect(gpt4Elements.length).toBeGreaterThan(0);
   });
 });
 
