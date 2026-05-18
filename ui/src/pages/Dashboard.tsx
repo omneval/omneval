@@ -38,11 +38,15 @@ interface AnalyticsRequest {
   aggregations: { function: string; field: string; alias: string }[];
 }
 
+// ── Constants ──────────────────────────────────────────────────────
+
+const DASHBOARD_DATE_RANGE_DAYS = 7;
+
 // ── Helpers ────────────────────────────────────────────────────────
 
 function getDefaultFromTo(): { from: string; to: string } {
   const now = new Date();
-  const from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const from = new Date(now.getTime() - DASHBOARD_DATE_RANGE_DAYS * 24 * 60 * 60 * 1000);
   return {
     from: from.toISOString(),
     to: now.toISOString(),
