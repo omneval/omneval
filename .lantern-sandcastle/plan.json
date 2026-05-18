@@ -1,0 +1,1 @@
+{"issues": [{"id": "106", "title": "Trace Tree view is missing the root span", "branch": "sandcastle/issue-106-trace-tree-missing-root-span"}, {"id": "107", "title": "Observations tab on Traces page is non-functional", "branch": "sandcastle/issue-107-observations-tab-non-functional"}]}
