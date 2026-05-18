@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
-import TracesPage from "./Traces";
+import TracesPage, { OBSERVATION_KINDS } from "./Traces";
 
 // ── Helper data ──────────────────────────────────────────────────
 
@@ -295,7 +295,7 @@ describe("observations tab", () => {
       json: () =>
         Promise.resolve({
           spans: mockSpans.filter((s) =>
-            ["llm", "tool", "agent", "chain"].includes(s.kind)
+            OBSERVATION_KINDS.includes(s.kind)
           ),
           next: "",
           limit: 25,
@@ -335,7 +335,7 @@ describe("observations tab", () => {
         json: () =>
           Promise.resolve({
             spans: mockSpans.filter((s) =>
-              ["llm", "tool", "agent", "chain"].includes(s.kind)
+              OBSERVATION_KINDS.includes(s.kind)
             ),
             next: "",
             limit: 25,

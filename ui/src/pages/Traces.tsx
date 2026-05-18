@@ -61,6 +61,9 @@ interface FilterState {
   [fieldName: string]: string[];
 }
 
+// Observation-level span kinds shown on the Observations tab.
+export const OBSERVATION_KINDS: string[] = ["llm", "tool", "agent", "chain"];
+
 // ── Observation Level Pills ────────────────────────────────────────
 
 interface ObservationPillsProps {
@@ -514,11 +517,10 @@ export default function TracesPage({
           ];
         }
 
-        // Observations tab: show only observation-level spans (LLM, tool, agent, chain)
-        const observationKinds = ["llm", "tool", "agent", "chain"];
+        // Observations tab: show only observation-level spans (LLM, tool, agent, chain).
         if (activeTab === "observations") {
           body.filters = body.filters ?? [];
-          body.filters.push({ field: "kind", op: "in", value: observationKinds });
+          body.filters.push({ field: "kind", op: "in", value: OBSERVATION_KINDS });
         }
 
         // Apply filter state
