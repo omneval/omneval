@@ -263,4 +263,28 @@ describe("DashboardPage", () => {
       expect(screen.getByText("Network error")).toBeInTheDocument();
     });
   });
+
+  it("defaults to a 7-day date range (not 24 hours)", async () => {
+    // Capture the from/to values by intercepting the first analytics request
+    let capturedFrom = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (url === "/api/v1/analytics/spans" && options?.body) {
+        const body = JSON.parse(options.body as string);
+        capturedFrom = body.from;
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      const now = new Date();
+      const fromD = new Date(capturedFrom);
+      const diffHours = (now.getTime() - fromD.getTime()) / (1000 * 60 * 60);
+      // 7-day range = ~168 hours, 24h range = ~24 hours
+      expect(diffHours).toBeGreaterThan(100);
+      expect(diffHours).toBeLessThanOrEqual(168.5);
+    });
+  });
 });
