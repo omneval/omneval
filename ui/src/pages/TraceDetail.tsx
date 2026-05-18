@@ -721,8 +721,6 @@ function TraceTree({
 }) {
   return (
     <div>
-      {/* Root span — always rendered as the first item;
-          child spans are rendered inside this SpanRow at depth+1 */}
       <SpanRow
         span={trace}
         depth={0}
@@ -935,6 +933,8 @@ function SpanRow({
               onShowSaveModal={onShowSaveModal}
               isExpanded={isExpanded && child.span_id === span.span_id}
               onToggleExpand={() => onToggleExpand()}
+              selectedSpanId={selectedSpanId}
+              onSelect={onSelect}
             />
           ))}
         </div>
