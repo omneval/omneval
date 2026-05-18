@@ -323,6 +323,64 @@ describe("observations tab", () => {
       expect(screen.getByText("tool-use")).toBeInTheDocument();
     });
   });
+
+  it("sends 'kind' filter to API when switching to observations tab", async () => {
+    const fetchBodies: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (init?.body) {
+        fetchBodies.push(String(init.body));
+      }
+      return {
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            spans: mockSpans.filter((s) =>
+              ["llm", "tool", "agent", "chain"].includes(s.kind)
+            ),
+            next: "",
+            limit: 25,
+          }),
+      } as Response;
+    });
+
+    renderTracesPage();
+
+    // Wait for initial fetch (traces tab — no kind filter)
+    await waitFor(
+      () => {
+        expect(fetchBodies.length).toBeGreaterThanOrEqual(1);
+      },
+      { timeout: 2000 }
+    );
+
+    // Initial fetch (traces tab) should NOT have the kind filter
+    expect(fetchBodies[0]).not.toContain("kind");
+    expect(fetchBodies[0]).not.toContain("llm");
+
+    // Click the observations tab
+    const obsTab = screen.getByText("observations");
+    await act(async () => {
+      fireEvent.click(obsTab);
+    });
+
+    // Wait for the second fetch to be initiated (from the useEffect)
+    await waitFor(
+      () => {
+        expect(fetchBodies.length).toBeGreaterThanOrEqual(2);
+      },
+      { timeout: 2000 }
+    );
+
+    // The second fetch (observations tab) MUST include the kind filter
+    // with values ["llm", "tool", "agent", "chain"]
+    const obsBody = fetchBodies[1];
+    expect(obsBody).toContain("kind");
+    expect(obsBody).toContain("in");
+    expect(obsBody).toContain("llm");
+    expect(obsBody).toContain("tool");
+    expect(obsBody).toContain("agent");
+    expect(obsBody).toContain("chain");
+  });
 });
 
 // ── Bookmark tests ───────────────────────────────────────────────

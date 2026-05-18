@@ -567,7 +567,7 @@ export default function TracesPage({
         setLoading(false);
       }
     },
-    [pageSize, filterState, searchQueryRef],
+    [pageSize, filterState, searchQueryRef, activeTab],
   );
 
   useEffect(() => {
