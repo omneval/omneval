@@ -1,0 +1,60 @@
+---
+suite: ingest service
+templates:
+  - ingest-service.yaml
+tests:
+  - it: should create Ingest service
+    asserts:
+      - isKind:
+          of: Service
+      - matchRegex:
+          path: metadata.name
+          pattern: 'RELEASE-NAME-ingest'
+      - equal:
+          path: spec.type
+          value: ClusterIP
+---
+suite: writer service
+templates:
+  - writer-service.yaml
+tests:
+  - it: should create Writer service
+    asserts:
+      - isKind:
+          of: Service
+      - matchRegex:
+          path: metadata.name
+          pattern: 'RELEASE-NAME-writer'
+      - equal:
+          path: spec.type
+          value: ClusterIP
+---
+suite: query service
+templates:
+  - query-service.yaml
+tests:
+  - it: should create Query service
+    asserts:
+      - isKind:
+          of: Service
+      - matchRegex:
+          path: metadata.name
+          pattern: 'RELEASE-NAME-query'
+      - equal:
+          path: spec.type
+          value: ClusterIP
+---
+suite: eval service
+templates:
+  - eval-service.yaml
+tests:
+  - it: should create Eval service
+    asserts:
+      - isKind:
+          of: Service
+      - matchRegex:
+          path: metadata.name
+          pattern: 'RELEASE-NAME-eval'
+      - equal:
+          path: spec.type
+          value: ClusterIP

@@ -1,0 +1,16 @@
+---
+suite: writer_snapshot
+templates:
+  - writer-snapshot-cronjob.yaml
+tests:
+  - it: should not create resources when volumeSnapshot is disabled
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: should create resources when volumeSnapshot is enabled
+    set:
+      writer.volumeSnapshot.enabled: true
+      writer.volumeSnapshot.snapshotClass: "ebs-csi-gp3"
+    asserts:
+      - hasDocuments:
+          count: 5

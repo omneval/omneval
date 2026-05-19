@@ -3,39 +3,81 @@ Lantern YAML configuration ConfigMap.
 
 This ConfigMap holds the lantern.yaml configuration that all Lantern services
 share. Environment variable overrides in each Deployment handle per-service
-secrets (S3 credentials, admin credentials, LLM keys).
+secrets (S3 credentials, admin credentials, LLM keys, Redis credentials).
+
+Infrastructure resolution:
+- When a component is enabled internally (redis.enabled, postgresql.enabled,
+  minio.enabled), the ConfigMap uses the internal service DNS name.
+- When a component is external (enabled: false with external.* set), the
+  ConfigMap uses the external values.
+- When no external values are set, the section is omitted from the config.
 */ -}}
+{{- $name := .Release.Name -}}
+{{- $redisAddr := "" -}}
+{{- if .Values.redis.enabled -}}
+  {{- $redisAddr = printf "%s-redis:6379" $name -}}
+{{- else if .Values.redis.external.addr -}}
+  {{- $redisAddr = .Values.redis.external.addr -}}
+{{- end -}}
+{{- $pgDsn := "" -}}
+{{- if and (eq .Values.database.driver "postgres") (or .Values.postgresql.enabled .Values.database.dsn .Values.postgresql.external.host) -}}
+  {{- if .Values.postgresql.enabled -}}
+    {{- $pgDsn = printf "postgres://%s:%s@%s-postgresql:5432/%s?sslmode=disable"
+      .Values.postgresql.auth.username
+      .Values.postgresql.auth.password
+      $name
+      .Values.postgresql.auth.database -}}
+  {{- else if .Values.postgresql.external.host -}}
+    {{- $pgDsn = printf "postgres://%s:%s@%s:%d/%s?sslmode=%s"
+      .Values.postgresql.external.user
+      .Values.postgresql.external.password
+      .Values.postgresql.external.host
+      .Values.postgresql.external.port
+      .Values.postgresql.external.database
+      .Values.postgresql.external.sslmode -}}
+  {{- else -}}
+    {{- $pgDsn = .Values.database.dsn -}}
+  {{- end -}}
+{{- end -}}
+{{- $storageEndpoint := "" -}}
+{{- if .Values.minio.enabled -}}
+  {{- $storageEndpoint = printf "http://%s-minio:9000" $name -}}
+{{- else if .Values.storage.endpoint -}}
+  {{- $storageEndpoint = .Values.storage.endpoint -}}
+{{- else if .Values.minio.external.endpoint -}}
+  {{- $storageEndpoint = .Values.minio.external.endpoint -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .Release.Name }}-config
+  name: {{ $name }}-config
   labels:
     app.kubernetes.io/name: lantern
-    app.kubernetes.io/instance: {{ .Release.Name }}
-    {{- with .Values.ingest.labels }}
+    app.kubernetes.io/instance: {{ $name }}
+    {{- with .Values.commonLabels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 data:
   lantern.yaml: |
+    {{- if $redisAddr }}
+    redis:
+      addr: {{ $redisAddr | quote }}
+    {{- end }}
+    {{- if $pgDsn }}
     database:
       driver: {{ .Values.database.driver }}
-      {{- if eq .Values.database.driver "postgres" }}
-      dsn: {{ .Values.database.dsn }}
-      {{- end }}
-    redis:
-      {{- if .Values.redis.enabled }}
-      addr: {{ .Release.Name }}-redis-master:6379
-      {{- end }}
+      dsn: {{ $pgDsn | quote }}
+    {{- end }}
+    {{- if $storageEndpoint }}
     storage:
-      {{- with .Values.storage.endpoint }}
-      endpoint: {{ . | quote }}
-      {{- end }}
+      endpoint: {{ $storageEndpoint | quote }}
       {{- with .Values.storage.bucket }}
       bucket: {{ . | quote }}
       {{- end }}
       {{- with .Values.storage.region }}
       region: {{ . | quote }}
       {{- end }}
+    {{- end }}
     auth:
       session_ttl: {{ .Values.query.sessionTTL }}
       secure_cookie: {{ .Values.query.secureCookie }}

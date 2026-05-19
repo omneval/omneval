@@ -1,0 +1,201 @@
+{{- /*
+MinIO Deployment — S3-compatible object store for cold storage.
+
+Deployed when minio.enabled is true. Creates a Deployment with a single
+instance and a PVC for persistent storage. Also creates a startup job
+to initialize the bucket.
+
+External mode: set minio.enabled: false and configure storage.endpoint/
+credentials directly in the storage section.
+*/ -}}
+{{- if .Values.minio.enabled -}}
+{{- $name := .Release.Name -}}
+{{- $m := .Values.minio -}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-minio
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: minio
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ $m.service.type }}
+  ports:
+    - name: api
+      port: {{ $m.service.port }}
+      targetPort: 9000
+      protocol: TCP
+    - name: console
+      port: {{ $m.service.consolePort }}
+      targetPort: 9001
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: minio
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-minio
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: minio
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lantern
+      app.kubernetes.io/instance: {{ $name }}
+      app.kubernetes.io/component: minio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: lantern
+        app.kubernetes.io/instance: {{ $name }}
+        app.kubernetes.io/component: minio
+        {{- with .Values.commonLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with $m.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $m.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $m.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: minio
+          image: "{{ $m.image.repository }}:{{ $m.image.tag }}"
+          imagePullPolicy: {{ $m.image.pullPolicy }}
+          command:
+            - minio
+            - server
+            - /data
+            - --console-address
+            - ":9001"
+          env:
+            - name: MINIO_ROOT_USER
+              value: {{ $m.rootUser | quote }}
+            - name: MINIO_ROOT_PASSWORD
+              value: {{ $m.rootPassword | quote }}
+            - name: MINIO_PROMETHEUS_AUTH_TYPE
+              value: "public"
+          ports:
+            - name: api
+              containerPort: 9000
+              protocol: TCP
+            - name: console
+              containerPort: 9001
+              protocol: TCP
+          volumeMounts:
+            - name: minio-data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: api
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: api
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            {{- toYaml $m.resources | nindent 12 }}
+      {{- if $m.persistence.enabled }}
+      volumes:
+        - name: minio-data
+          persistentVolumeClaim:
+            claimName: {{ $name }}-minio-data
+      {{- end }}
+---
+{{- if $m.persistence.enabled }}
+# PVC for MinIO data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-minio-data
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: minio
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if $m.persistence.storageClass }}
+  storageClassName: {{ $m.persistence.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $m.persistence.size }}
+{{- end }}
+---
+# Job to create the lantern bucket on MinIO startup
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-minio-init
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: minio
+    app.kubernetes.io/part-of: lantern
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation
+    "helm.sh/hook-weight": "1"
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-for-minio
+          image: "busybox:latest"
+          command:
+            - sh
+            - -c
+            - until nc -z {{ $name }}-minio 9000; do echo "Waiting for MinIO..."; sleep 2; done
+      containers:
+        - name: minio-mc
+          image: "minio/mc:latest"
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Waiting for MinIO to be ready..."
+              until mc alias set local http://{{ $name }}-minio:9000 {{ $m.rootUser }} {{ $m.rootPassword }}; do
+                echo "  Retrying..."
+                sleep 2
+              done
+              echo "Creating bucket 'lantern'..."
+              mc mb --ignore-existing local/lantern
+              echo "Bucket initialization complete."
+          env:
+            - name: MINIO_ENDPOINT
+              value: "http://{{ $name }}-minio:9000"
+            - name: MINIO_ROOT_USER
+              value: {{ $m.rootUser | quote }}
+            - name: MINIO_ROOT_PASSWORD
+              value: {{ $m.rootPassword | quote }}
+{{- end }}

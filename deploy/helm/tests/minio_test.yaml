@@ -1,0 +1,31 @@
+---
+suite: minio
+templates:
+  - minio-deployment.yaml
+tests:
+  - it: should create resources when enabled
+    set:
+      minio.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 4
+  - it: should have liveness and readiness probes
+    set:
+      minio.enabled: true
+    asserts:
+      - isNotEmpty:
+          path: spec.template.spec.containers.livenessProbe
+      - isNotEmpty:
+          path: spec.template.spec.containers.readinessProbe
+  - it: should have resource limits
+    set:
+      minio.enabled: true
+    asserts:
+      - isNotEmpty:
+          path: spec.template.spec.containers.resources
+  - it: should not render when minio is disabled
+    set:
+      minio.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

@@ -1,0 +1,46 @@
+---
+suite: configmap
+templates:
+  - configmap.yaml
+tests:
+  - it: should create ConfigMap
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - hasDocuments:
+          count: 1
+      - matchRegex:
+          path: metadata.name
+          pattern: 'RELEASE-NAME-config'
+      - isNotEmpty:
+          path: data
+
+  - it: should include redis config when redis is enabled
+    set:
+      redis.enabled: true
+    asserts:
+      - matchRegex:
+          path: data["lantern.yaml"]
+          pattern: 'redis:'
+
+  - it: should include database config when postgresql is enabled
+    set:
+      postgresql.enabled: true
+    asserts:
+      - matchRegex:
+          path: data["lantern.yaml"]
+          pattern: 'driver: postgres'
+
+  - it: should include storage config when minio is enabled
+    set:
+      minio.enabled: true
+    asserts:
+      - matchRegex:
+          path: data["lantern.yaml"]
+          pattern: 'endpoint:'
+
+  - it: should include auth config
+    asserts:
+      - matchRegex:
+          path: data["lantern.yaml"]
+          pattern: 'session_ttl:'

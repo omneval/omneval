@@ -11,27 +11,32 @@ Requires:
   - A VolumeSnapshotClass provisioned by your cloud CSI driver
   - Storage driver that supports volume snapshots (EBS, GCE PD, Azure Disk, etc.)
 */ -}}
+{{- $name := .Release.Name -}}
 {{- if .Values.writer.volumeSnapshot.enabled }}
 ---
 # ServiceAccount for the CronJob (has permissions to create VolumeSnapshots)
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ .Release.Name }}-volume-snapshot
+  name: {{ $name }}-volume-snapshot
   labels:
     app.kubernetes.io/name: lantern
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: writer
     app.kubernetes.io/part-of: lantern
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+automountServiceAccountToken: false
 ---
 # ClusterRole with permissions for VolumeSnapshot operations
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ .Release.Name }}-volume-snapshot
+  name: {{ $name }}-volume-snapshot
   labels:
     app.kubernetes.io/name: lantern
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: writer
     app.kubernetes.io/part-of: lantern
 rules:
@@ -52,29 +57,29 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ .Release.Name }}-volume-snapshot
+  name: {{ $name }}-volume-snapshot
   labels:
     app.kubernetes.io/name: lantern
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: writer
     app.kubernetes.io/part-of: lantern
 subjects:
   - kind: ServiceAccount
-    name: {{ .Release.Name }}-volume-snapshot
+    name: {{ $name }}-volume-snapshot
     namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
-  name: {{ .Release.Name }}-volume-snapshot
+  name: {{ $name }}-volume-snapshot
   apiGroup: rbac.authorization.k8s.io
 ---
 # ConfigMap holding the VolumeSnapshotClass name
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .Release.Name }}-volume-snapshot-config
+  name: {{ $name }}-volume-snapshot-config
   labels:
     app.kubernetes.io/name: lantern
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: writer
     app.kubernetes.io/part-of: lantern
 data:
@@ -84,10 +89,10 @@ data:
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: {{ .Release.Name }}-writer-volume-snapshot
+  name: {{ $name }}-writer-volume-snapshot
   labels:
     app.kubernetes.io/name: lantern
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: writer
     app.kubernetes.io/part-of: lantern
 spec:
@@ -100,7 +105,7 @@ spec:
       backoffLimit: 1
       template:
         spec:
-          serviceAccountName: {{ .Release.Name }}-volume-snapshot
+          serviceAccountName: {{ $name }}-volume-snapshot
           containers:
             - name: snapshot
               image: bitnami/kubectl:latest
@@ -113,7 +118,7 @@ spec:
 
                   SNAPSHOT_NAME="lantern-writer-$(date +%Y%m%d-%H%M%S)"
                   VOLUME_SNAPSHOT_CLASS="${VOLUME_SNAPSHOT_CLASS:?VOLUME_SNAPSHOT_CLASS is required}"
-                  PVC_NAME="${PVC_NAME:-{{ .Release.Name }}-writer-data-0}"
+                  PVC_NAME="${PVC_NAME:-{{ $name }}-writer-data-0}"
                   NAMESPACE="{{ .Release.Namespace }}"
 
                   echo "Creating VolumeSnapshot $SNAPSHOT_NAME"
@@ -139,11 +144,11 @@ spec:
                 - name: VOLUME_SNAPSHOT_CLASS
                   valueFrom:
                     configMapKeyRef:
-                      name: {{ .Release.Name }}-volume-snapshot-config
+                      name: {{ $name }}-volume-snapshot-config
                       key: snapshot-class
                       optional: false
                 - name: PVC_NAME
-                  value: "{{ .Release.Name }}-writer-data-0"
+                  value: "{{ $name }}-writer-data-0"
                 - name: NAMESPACE
                   value: "{{ .Release.Namespace }}"
               resources:

@@ -2,7 +2,7 @@
 #
 # This chart deploys the Lantern tracing platform to Kubernetes.
 # It includes all four Lantern services (ingest, writer, query, eval)
-# along with Redis and PostgreSQL as backing infrastructure via Bitnami charts.
+# along with Redis, PostgreSQL, and MinIO as backing infrastructure.
 #
 # Usage:
 #   helm install lantern ./deploy/helm --values my-values.yaml
@@ -13,8 +13,24 @@
 #   database.driver: sqlite
 #   storage.bucket: ""
 #   storage.endpoint: ""
-#   postgresql.enabled: false
-#   redis.enabled: false  # (eval will not function)
+#
+# External infrastructure:
+#   Each component (redis, postgresql, minio) supports an "external" mode.
+#   Set <component>.enabled: false and <component>.external.<key>: <value>
+#   to use your own infrastructure. This allows mixing and matching —
+#   you can run Redis internally while pointing to an external PostgreSQL.
+#
+# Example: use external Redis + internal PostgreSQL + external S3
+#   redis:
+#     enabled: false
+#     external:
+#       addr: "redis.mycompany.com:6379"
+#       password: "s3cr3t"
+#   postgresql:
+#     enabled: true   # internal, using sub-chart settings below
+#   storage:
+#     endpoint: "https://s3.amazonaws.com"
+#     bucket: "my-lantern-bucket"
 
 # ============================================================================
 # Image
@@ -27,7 +43,12 @@ image:
   # Image pull policy
   pullPolicy: IfNotPresent
 
+# ============================================================================
+# Common labels applied to all resources
+# ============================================================================
+commonLabels: {}
 
+# ============================================================================
 # Ingest API (port 8000)
 # ============================================================================
 ingest:
@@ -40,13 +61,13 @@ ingest:
   corsAllowedOrigins:
     - "*"
   # Resource limits and requests
-  resources: {}
-    # limits:
-    #   cpu: 500m
-    #   memory: 256Mi
-    # requests:
-    #   cpu: 100m
-    #   memory: 128Mi
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
   # Node selector, affinity, tolerations
   nodeSelector: {}
   affinity: {}
@@ -55,6 +76,17 @@ ingest:
   annotations: {}
   # Pod labels
   labels: {}
+  # Horizontal Pod Autoscaler
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    # targetMemoryUtilizationPercentage: 80
+  # Service account
+  serviceAccount:
+    create: false
+    name: ""
 
 # ============================================================================
 # Writer Service (port 8001)
@@ -84,19 +116,23 @@ writer:
     # Must match your cloud provider's CSI snapshot class (e.g., ebs-csi-gp3, pd.csi.storage.gke.io)
     snapshotClass: ""
   # Resource limits and requests
-  resources: {}
-    # limits:
-    #   cpu: "1"
-    #   memory: 512Mi
-    # requests:
-    #   cpu: 200m
-    #   memory: 256Mi
+  resources:
+    limits:
+      cpu: "1"
+      memory: 512Mi
+    requests:
+      cpu: 200m
+      memory: 256Mi
   # Node selector, affinity, tolerations
   nodeSelector: {}
   affinity: {}
   tolerations: []
   annotations: {}
   labels: {}
+  # Service account
+  serviceAccount:
+    create: false
+    name: ""
 
 # Writer PVC configuration
 pvc:
@@ -126,18 +162,29 @@ query:
   # Set both adminEmail and adminPassword to auto-create the first admin user.
   adminEmail: ""
   adminPassword: ""
-  resources: {}
-    # limits:
-    #   cpu: 500m
-    #   memory: 256Mi
-    # requests:
-    #   cpu: 100m
-    #   memory: 128Mi
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
   nodeSelector: {}
   affinity: {}
   tolerations: []
   annotations: {}
   labels: {}
+  # Horizontal Pod Autoscaler
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    # targetMemoryUtilizationPercentage: 80
+  # Service account
+  serviceAccount:
+    create: false
+    name: ""
 
 # ============================================================================
 # Eval Workers (queue consumer)
@@ -156,18 +203,29 @@ eval:
   judgeTimeout: "90s"
   # Number of retries for failed judge calls
   retryCount: 3
-  resources: {}
-    # limits:
-    #   cpu: 500m
-    #   memory: 256Mi
-    # requests:
-    #   cpu: 100m
-    #   memory: 128Mi
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
   nodeSelector: {}
   affinity: {}
   tolerations: []
   annotations: {}
   labels: {}
+  # Horizontal Pod Autoscaler
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    # targetMemoryUtilizationPercentage: 80
+  # Service account
+  serviceAccount:
+    create: false
+    name: ""
 
 # ============================================================================
 # Storage (S3-compatible object store)
@@ -185,34 +243,81 @@ storage:
   secretKey: ""
 
 # ============================================================================
+# MinIO (S3-compatible object store)
+#
+# Set enabled: false to use an external S3-compatible store.
+# When enabled: false, configure storage.endpoint/credentials instead.
+# ============================================================================
+minio:
+  enabled: false
+  # When external, specify the connection details
+  external:
+    endpoint: ""
+    bucket: ""
+    region: "us-east-1"
+    accessKey: ""
+    secretKey: ""
+  # Internal MinIO settings (when enabled: true)
+  image:
+    repository: minio/minio
+    tag: latest
+    pullPolicy: IfNotPresent
+  # MinIO service account credentials (auto-generated if not set)
+  rootUser: minio
+  rootPassword: minio123
+  # MinIO resources
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  # MinIO PVC for data storage
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+  # Service type (ClusterIP by default)
+  service:
+    type: ClusterIP
+    port: 9000
+    consolePort: 9001
+  # Node selector, affinity, tolerations
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+
+# ============================================================================
 # Metadata database (PostgreSQL)
+#
+# Set enabled: false to use an external PostgreSQL or SQLite.
+# When enabled: false, configure database.dsn manually.
 # ============================================================================
 database:
   # Driver: "postgres" or "sqlite"
   driver: "postgres"
-  # DSN — generated automatically from postgresql sub-chart when driver is postgres
-  # Override manually when using sqlite
+  # DSN — generated automatically from postgresql when driver is postgres and enabled
+  # Override manually when using sqlite or external postgres
   dsn: ""
 
 # ============================================================================
-# Redis
-# ============================================================================
-redis:
-  enabled: true
-  auth:
-    enabled: false
-    password: ""
-  master:
-    persistence:
-      enabled: false
-  # Redis connection settings (overrides sub-chart defaults)
-  replicas: 1
-
-# ============================================================================
-# PostgreSQL
+# PostgreSQL (metadata store)
+#
+# Set enabled: false to use an external PostgreSQL instance.
+# When enabled: false, configure database.dsn to point to your DB.
 # ============================================================================
 postgresql:
   enabled: true
+  # When external, specify the connection details
+  external:
+    host: ""
+    port: 5432
+    database: ""
+    user: ""
+    password: ""
+    sslmode: "disable"
+  # Internal PostgreSQL settings (when enabled: true)
   auth:
     # Database username
     username: lantern
@@ -220,18 +325,66 @@ postgresql:
     password: lantern
     # Database name
     database: lantern
-    # Secret key to use for the password
+    # Secret key to use for the password (if using existing secret)
     existingSecret: ""
   primary:
     persistence:
       size: 10Gi
-    resources: {}
-      # limits:
-      #   cpu: 500m
-      #   memory: 256Mi
-      # requests:
-      #   cpu: 100m
-      #   memory: 128Mi
+      storageClass: ""
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    service:
+      port: 5432
+  # Read replica configuration (optional)
+  readReplicas:
+    replicaCount: 0
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+# ============================================================================
+# Redis (message broker / queue store)
+#
+# Set enabled: false to use an external Redis instance.
+# When enabled: false, configure redis.external.addr and credentials.
+# ============================================================================
+redis:
+  enabled: true
+  # When external, specify the connection details
+  external:
+    addr: ""
+    password: ""
+  # Internal Redis settings (when enabled: true)
+  auth:
+    enabled: false
+    password: ""
+  master:
+    # Number of replicas (0 for single-instance)
+    replicas: 0
+    persistence:
+      enabled: false
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    service:
+      port: 6379
+  # Node selector, affinity, tolerations
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
 
 # ============================================================================
 # Ingress (optional)

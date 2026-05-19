@@ -1,0 +1,36 @@
+---
+suite: writer
+templates:
+  - writer-statefulset.yaml
+tests:
+  - it: should create StatefulSet
+    asserts:
+      - isKind:
+          of: StatefulSet
+      - hasDocuments:
+          count: 1
+      - matchRegex:
+          path: metadata.name
+          pattern: 'RELEASE-NAME-writer'
+      - equal:
+          path: spec.replicas
+          value: 1
+  - it: should have liveness and readiness probes
+    asserts:
+      - isNotEmpty:
+          path: spec.template.spec.containers.livenessProbe
+      - isNotEmpty:
+          path: spec.template.spec.containers.readinessProbe
+  - it: should have resource limits
+    asserts:
+      - isNotEmpty:
+          path: spec.template.spec.containers.resources
+  - it: should have volumeClaimTemplate
+    asserts:
+      - isNotEmpty:
+          path: spec.volumeClaimTemplates
+  - it: should have serviceName
+    asserts:
+      - matchRegex:
+          path: spec.serviceName
+          pattern: 'RELEASE-NAME-writer'

@@ -1,0 +1,134 @@
+{{- /*
+Redis Deployment — message broker for inter-service queues.
+
+Deployed when redis.enabled is true. Creates a single-instance Deployment.
+Persistent storage is optional (set redis.master.persistence.enabled: true).
+
+External mode: set redis.enabled: false and configure redis.external.addr.
+*/ -}}
+{{- if .Values.redis.enabled -}}
+{{- $name := .Release.Name -}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-redis
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: redis
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-redis
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: redis
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lantern
+      app.kubernetes.io/instance: {{ $name }}
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: lantern
+        app.kubernetes.io/instance: {{ $name }}
+        app.kubernetes.io/component: redis
+        {{- with .Values.commonLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.redis.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.redis.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.redis.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: redis
+          image: "docker.io/library/redis:7-alpine"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          {{- if .Values.redis.auth.enabled }}
+          args:
+            - --requirepass
+            - {{ .Values.redis.auth.password | quote }}
+          {{- end }}
+          {{- if .Values.redis.master.persistence.enabled }}
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+          {{- end }}
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                {{- if .Values.redis.auth.enabled }}
+                - -a
+                - {{ .Values.redis.auth.password | quote }}
+                {{- end }}
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.redis.master.resources | nindent 12 }}
+      {{- if .Values.redis.master.persistence.enabled }}
+      volumes:
+        - name: redis-data
+          persistentVolumeClaim:
+            claimName: {{ $name }}-redis-data
+      {{- end }}
+---
+{{- if .Values.redis.master.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-redis-data
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: redis
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+{{- end }}
+{{- end }}

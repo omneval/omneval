@@ -1,0 +1,40 @@
+---
+suite: ingress
+templates:
+  - ingress.yaml
+tests:
+  - it: should not create Ingress when disabled
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should create Ingress with query host when enabled
+    set:
+      ingress.enabled: true
+      ingress.query.host: "lanterndev.example.com"
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Ingress
+
+  - it: should create Ingress with ingest host when enabled
+    set:
+      ingress.enabled: true
+      ingress.ingest.host: "ingest.example.com"
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Ingress
+
+  - it: should support ingress class name
+    set:
+      ingress.enabled: true
+      ingress.className: "nginx"
+    asserts:
+      - hasDocuments:
+          count: 1
+      - matchRegex:
+          path: metadata.ingressClassName
+          pattern: 'nginx'

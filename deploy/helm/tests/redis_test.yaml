@@ -1,0 +1,29 @@
+---
+suite: redis
+templates:
+  - redis-deployment.yaml
+tests:
+  - it: should create resources when enabled
+    set:
+      redis.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 2
+  - it: should have liveness probe
+    set:
+      redis.enabled: true
+    asserts:
+      - isNotEmpty:
+          path: spec.template.spec.containers.livenessProbe
+  - it: should have readiness probe
+    set:
+      redis.enabled: true
+    asserts:
+      - isNotEmpty:
+          path: spec.template.spec.containers.readinessProbe
+  - it: should not render when redis is disabled
+    set:
+      redis.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

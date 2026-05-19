@@ -1,14 +1,18 @@
 {{- /*
 Ingest API Service — exposes the Ingest API port (8000) and metrics (9090).
 */ -}}
+{{- $name := .Release.Name -}}
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-ingest
+  name: {{ $name }}-ingest
   labels:
     app.kubernetes.io/name: lantern
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: ingest
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   type: ClusterIP
   ports:
@@ -22,5 +26,5 @@ spec:
       protocol: TCP
   selector:
     app.kubernetes.io/name: lantern
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: ingest

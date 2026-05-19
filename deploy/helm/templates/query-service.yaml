@@ -5,14 +5,18 @@ This is the primary ingress point for the UI and REST API.
 An optional Ingress resource (controlled by ingress.enabled) routes
 external traffic to this service.
 */ -}}
+{{- $name := .Release.Name -}}
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-query
+  name: {{ $name }}-query
   labels:
     app.kubernetes.io/name: lantern
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: query
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   type: ClusterIP
   ports:
@@ -26,5 +30,5 @@ spec:
       protocol: TCP
   selector:
     app.kubernetes.io/name: lantern
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: query

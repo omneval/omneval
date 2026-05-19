@@ -4,33 +4,47 @@ Query API Deployment — fully stateless, horizontally scalable.
 Downloads the DuckDB snapshot from S3, polls for updates, and serves
 the REST API, analytics, prompt registry, auth, and embedded React SPA.
 No PVC — all data comes from S3 snapshot and metadata store.
+
+Infrastructure resolution:
+- Database: uses internal PostgreSQL when postgresql.enabled, or postgresql.external
+- Storage: uses internal MinIO when minio.enabled, or storage endpoint
 */ -}}
+{{- $name := .Release.Name -}}
+{{- $redisPassword := "" -}}
+{{- if and .Values.redis.enabled .Values.redis.auth.enabled .Values.redis.auth.password }}
+  {{- $redisPassword = "redis-password" -}}
+{{- else if .Values.redis.external.password }}
+  {{- $redisPassword = "redis-password" -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-query
+  name: {{ $name }}-query
   labels:
     app.kubernetes.io/name: lantern
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: query
-    {{- with .Values.query.labels }}
+    {{- with .Values.commonLabels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
-  {{- if not .Values.query.autoscaling }}
+  {{- if not .Values.query.autoscaling.enabled }}
   replicas: {{ .Values.query.replicas }}
   {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: lantern
-      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/instance: {{ $name }}
       app.kubernetes.io/component: query
   template:
     metadata:
       labels:
         app.kubernetes.io/name: lantern
-        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/instance: {{ $name }}
         app.kubernetes.io/component: query
+        {{- with .Values.commonLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         {{- with .Values.query.labels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -39,6 +53,9 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
+      {{- if .Values.query.serviceAccount.create }}
+      serviceAccountName: {{ $name }}-query
+      {{- end }}
       {{- with .Values.query.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -69,22 +86,21 @@ spec:
             - name: LANTERN_AUTH_ADMIN_EMAIL
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-secret
+                  name: {{ $name }}-secret
                   key: admin-email
                   optional: true
             - name: LANTERN_AUTH_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-secret
+                  name: {{ $name }}-secret
                   key: admin-password
                   optional: true
-            {{- if .Values.redis.enabled }}
+            {{- if $redisPassword }}
             - name: LANTERN_REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-secret
+                  name: {{ $name }}-secret
                   key: redis-password
-                  optional: true
             {{- end }}
             {{- with .Values.storage.endpoint }}
             - name: LANTERN_STORAGE_ENDPOINT
@@ -98,17 +114,17 @@ spec:
             - name: LANTERN_STORAGE_REGION
               value: {{ . | quote }}
             {{- end }}
-            {{- if or .Values.storage.accessKey .Values.storage.endpoint }}
+            {{- if .Values.storage.endpoint }}
             - name: LANTERN_STORAGE_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-secret
+                  name: {{ $name }}-secret
                   key: storage-access-key
                   optional: true
             - name: LANTERN_STORAGE_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-secret
+                  name: {{ $name }}-secret
                   key: storage-secret-key
                   optional: true
             {{- end }}
@@ -116,7 +132,7 @@ spec:
             - name: LANTERN_DATABASE_DSN
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-secret
+                  name: {{ $name }}-secret
                   key: postgres-dsn
                   optional: true
             {{- end }}
@@ -141,4 +157,51 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: {{ .Release.Name }}-config
+            name: {{ $name }}-config
+---
+{{- if .Values.query.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}-query
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: query
+automountServiceAccountToken: false
+{{- end }}
+{{- if .Values.query.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}-query
+  labels:
+    app.kubernetes.io/name: lantern
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: query
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $name }}-query
+  minReplicas: {{ .Values.query.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.query.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.query.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.query.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.query.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.query.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+{{- end }}

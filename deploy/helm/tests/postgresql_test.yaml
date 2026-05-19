@@ -1,0 +1,29 @@
+---
+suite: postgresql
+templates:
+  - postgresql-statefulset.yaml
+tests:
+  - it: should create StatefulSet when enabled
+    set:
+      postgresql.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 4
+  - it: should have liveness probe
+    set:
+      postgresql.enabled: true
+    asserts:
+      - isNotEmpty:
+          path: spec.template.spec.containers.livenessProbe
+  - it: should have volumeClaimTemplate
+    set:
+      postgresql.enabled: true
+    asserts:
+      - isNotEmpty:
+          path: spec.volumeClaimTemplates
+  - it: should not render when postgresql is disabled
+    set:
+      postgresql.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

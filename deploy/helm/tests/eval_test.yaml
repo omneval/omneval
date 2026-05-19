@@ -1,0 +1,31 @@
+---
+suite: eval
+templates:
+  - eval-deployment.yaml
+tests:
+  - it: should create Deployment
+    asserts:
+      - isKind:
+          of: Deployment
+      - hasDocuments:
+          count: 1
+      - matchRegex:
+          path: metadata.name
+          pattern: 'RELEASE-NAME-eval'
+      - equal:
+          path: spec.replicas
+          value: 2
+  - it: should have exec liveness probe
+    asserts:
+      - isNotEmpty:
+          path: spec.template.spec.containers.livenessProbe
+  - it: should have resource limits
+    asserts:
+      - isNotEmpty:
+          path: spec.template.spec.containers.resources
+  - it: should create HPA when autoscaling is enabled
+    set:
+      eval.autoscaling.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 2

@@ -5,14 +5,18 @@ The Writer is a StatefulSet with a single replica, so the service
 routes to that single pod. Eval Workers use this service for score
 write-back (internal-only, not exposed externally).
 */ -}}
+{{- $name := .Release.Name -}}
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-writer
+  name: {{ $name }}-writer
   labels:
     app.kubernetes.io/name: lantern
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: writer
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   type: ClusterIP
   ports:
@@ -26,5 +30,5 @@ spec:
       protocol: TCP
   selector:
     app.kubernetes.io/name: lantern
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: writer
