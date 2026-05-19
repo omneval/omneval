@@ -41,6 +41,33 @@ replicas:
     count: 1
 
 patches:
+  # Disable Redis (use local SQLite, no Redis needed for minimal dev)
+  - target:
+      kind: Deployment
+      name: lantern-redis
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 0
+
+  # Disable PostgreSQL (use SQLite in dev)
+  - target:
+      kind: StatefulSet
+      name: lantern-postgresql
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 0
+
+  # Disable MinIO (not needed for minimal dev)
+  - target:
+      kind: Deployment
+      name: lantern-minio
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 0
+
   # Reduce Ingest resource limits for dev clusters
   - target:
       kind: Deployment
@@ -118,3 +145,45 @@ patches:
               resources:
                 requests:
                   storage: 1Gi
+
+  # Override ConfigMap for dev (SQLite, no S3)
+  - target:
+      kind: ConfigMap
+      name: lantern-config
+    patch: |
+      - op: replace
+        path: /data/lantern.yaml
+        value: |
+          database:
+            driver: sqlite
+          redis:
+            addr: lantern-redis:6379
+          storage: {}
+          auth:
+            session_ttl: 168h
+            secure_cookie: true
+          ingest:
+            addr: ":8000"
+            log_system_prompt: true
+            cors_allowed_origins:
+              - "*"
+          writer:
+            addr: ":8001"
+            duckdb_path: "/data/lantern.duckdb"
+            sync_interval: 30s
+            flush_interval: 30m
+            flush_age_days: 2
+            leader_election:
+              enabled: false
+              lock_ttl: 15
+          query:
+            addr: ":8002"
+            duckdb_path: "/tmp/lantern-snapshot.duckdb"
+            sync_interval: 30s
+          eval:
+            concurrency: 4
+            judge_timeout: 90s
+            retry_count: 3
+          metrics:
+            addr: ":9090"
+            disable_project_labels: false

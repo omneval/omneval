@@ -7,10 +7,14 @@ metadata:
 data:
   lantern.yaml: |
     database:
-      driver: sqlite
+      driver: postgres
+      dsn: postgres://lantern:lantern@lantern-postgresql:5432/lantern?sslmode=disable
     redis:
-      addr: lantern-redis-master:6379
-    storage: {}
+      addr: lantern-redis:6379
+    storage:
+      endpoint: http://lantern-minio:9000
+      bucket: lantern
+      region: us-east-1
     auth:
       session_ttl: 168h
       secure_cookie: false

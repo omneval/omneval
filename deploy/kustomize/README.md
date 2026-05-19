@@ -11,6 +11,9 @@ deploy/kustomize/
 │   ├── namespace.yaml             # Namespace: lantern
 │   ├── configmap.yaml             # ConfigMap: lantern-config (lantern.yaml)
 │   ├── secret.yaml                # Secret: lantern-secret (credentials)
+│   ├── redis-deployment.yaml      # Redis Deployment + Service + PVC
+│   ├── postgresql-statefulset.yaml # PostgreSQL StatefulSet + Service + ConfigMap
+│   ├── minio-deployment.yaml      # MinIO Deployment + Service + PVC + init Job
 │   ├── ingest-deployment.yaml     # Ingest API Deployment (port 8000)
 │   ├── writer-statefulset.yaml    # Writer StatefulSet with PVC (port 8001)
 │   ├── writer-snapshot-cronjob.yaml  # CronJob: PVC VolumeSnapshot (daily at 02:00 UTC)
@@ -23,9 +26,11 @@ deploy/kustomize/
 │   ├── query-service.yaml         # Query ClusterIP Service
 │   └── eval-service.yaml          # Eval metrics-only ClusterIP Service
 ├── overlays/
-│   ├── production/                # Production: 3+ replicas, larger resources
+│   ├── production/                # Production: 3+ replicas, HPAs enabled
+│   │   └── kustomization.yaml     # Replicas + resource patches + HPAs
+│   ├── staging/                   # Staging: 2 replicas, moderate resources
 │   │   └── kustomization.yaml     # Replicas + resource patches
-│   └── dev/                       # Development: 1 replica, small resources, emptyDir
+│   └── dev/                       # Development: 1 replica, small resources
 │       └── kustomization.yaml     # Replicas + resource patches + PVC → emptyDir
 ```
 
@@ -40,6 +45,9 @@ kustomize build deploy/kustomize/base
 # Production overlay
 kustomize build deploy/kustomize/overlays/production
 
+# Staging overlay
+kustomize build deploy/kustomize/overlays/staging
+
 # Dev overlay
 kustomize build deploy/kustomize/overlays/dev
 ```
@@ -48,6 +56,84 @@ kustomize build deploy/kustomize/overlays/dev
 
 ```bash
 kustomize build deploy/kustomize/overlays/production | kubectl apply -f -
+```
+
+## Infrastructure Options
+
+The Lantern application requires three pieces of infrastructure:
+
+1. **Redis** — Message broker / queue store for inter-service communication
+2. **PostgreSQL** — Metadata store (prompts, eval rules, API keys, sessions)
+3. **S3-compatible storage** — Cold storage for traces (via MinIO or any S3 provider)
+
+Each can be deployed by our overlays OR you can use your own infrastructure:
+
+### Deploying All Infrastructure (Default)
+
+The base manifests include Redis, PostgreSQL, and MinIO. Just apply an overlay:
+
+```bash
+kustomize build deploy/kustomize/overlays/production | kubectl apply -f -
+```
+
+### Using External Infrastructure
+
+To use your own infrastructure, disable the internal components by setting `replicas: 0` and configure the addresses in the ConfigMap:
+
+```yaml
+# overlays/staging/kustomization.yaml
+resources:
+  - ../../base
+
+namespace: lantern
+
+replicas:
+  - name: lantern-redis
+    count: 0
+  - name: lantern-postgresql
+    count: 0
+  - name: lantern-minio
+    count: 0
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: lantern-config
+    patch: |-
+      - op: replace
+        path: /data/lantern.yaml
+        value: |
+          database:
+            driver: postgres
+            dsn: postgres://lantern:secret@your-redis-host:5432/lantern?sslmode=disable
+          redis:
+            addr: your-redis-host:6379
+          storage:
+            endpoint: https://s3.amazonaws.com
+            bucket: your-lantern-bucket
+            region: us-east-1
+```
+
+You can mix and match — run Redis internally while using an external PostgreSQL and S3.
+
+### Using SQLite Instead of PostgreSQL
+
+For minimal deployments (no metadata persistence needed), use SQLite:
+
+```yaml
+patches:
+  - target:
+      kind: ConfigMap
+      name: lantern-config
+    patch: |-
+      - op: replace
+        path: /data/lantern.yaml
+        value: |
+          database:
+            driver: sqlite
+          redis:
+            addr: lantern-redis:6379
+          storage: {}
 ```
 
 ## Flux CD Integration
@@ -69,7 +155,7 @@ spec:
   prune: true
   # Wait for all resources to become healthy
   wait: true
-  # Depends on Redis and PostgreSQL being ready first
+  # Depends on infrastructure being ready first
   dependsOn:
     - name: redis
       namespace: flux-system
@@ -98,6 +184,7 @@ spec:
   sourceRef:
     kind: GitRepository
     name: flux-system
+    namespace: flux-system
 ```
 
 ## ArgoCD Integration
@@ -131,7 +218,7 @@ spec:
 
 ### Multi-env ArgoCD setup
 
-Use a single ArgoCD app with environment-override directories:
+Use separate ArgoCD `Application` resources for each environment:
 
 ```
 deploy/kustomize/
@@ -142,13 +229,13 @@ deploy/kustomize/
 │   └── production/
 ```
 
-Point separate ArgoCD `Application` resources at each overlay, all reading from the same Git repo.
+Point each ArgoCD `Application` at its respective overlay directory.
 
 ## Configuration
 
 ### Secrets
 
-The base includes a `Secret` with placeholder values. Override per environment:
+The base includes a `Secret` with default values. Override per environment:
 
 | Key | Description | Per-service env var |
 |-----|-------------|---------------------|
@@ -174,19 +261,16 @@ patches:
       kind: ConfigMap
       name: lantern-config
     patch: |-
-      apiVersion: v1
-      kind: ConfigMap
-      metadata:
-        name: lantern-config
-      data:
-        lantern.yaml: |
+      - op: replace
+        path: /data/lantern.yaml
+        value: |
           database:
             driver: postgres
             dsn: postgres://lantern:secret@lantern-postgresql:5432/lantern
           redis:
-            addr: lantern-redis-master:6379
+            addr: lantern-redis:6379
           storage:
-            endpoint: http://minio:9000
+            endpoint: http://lantern-minio:9000
             bucket: lantern-staging
           ...
 ```
@@ -231,12 +315,10 @@ patches:
       kind: ConfigMap
       name: lantern-volume-snapshot-config
     patch: |-
-      apiVersion: v1
-      kind: ConfigMap
-      metadata:
-        name: lantern-volume-snapshot-config
-      data:
-        snapshot-class: "ebs-csi-gp3"
+      - op: replace
+        path: /data/lantern.yaml
+        value: |
+          snapshot-class: "ebs-csi-gp3"
 ```
 
 Common snapshot class names by cloud provider:
@@ -250,10 +332,26 @@ Common snapshot class names by cloud provider:
 
 See `docs/restore-from-snapshot.md` for full restore procedures.
 
+## Horizontal Pod Autoscalers
+
+The production and staging overlays include HPAs for stateless services:
+
+| Service | Min Replicas | Max Replicas | Target CPU |
+|---------|-------------|-------------|------------|
+| Ingest | 2 | 10 | 70% |
+| Query | 2 | 10 | 70% |
+| Eval | 2 | 10 | 70% |
+
+The Writer Service uses a StatefulSet with a single replica (DuckDB does not
+support concurrent writes) and does not have an HPA.
+
 ## Architecture Notes
 
 - **Writer** is a StatefulSet with a `ReadWriteOnce` PVC for the DuckDB file. It must remain single-replica (DuckDB does not support concurrent writes).
 - **Query API** is fully stateless — reads its DuckDB snapshot from S3, never mounts the PVC.
 - **Eval Workers** have no HTTP port (queue consumers). Their Service only exposes the metrics endpoint (9090) for Prometheus scraping.
 - **Leader election** for Writer is disabled by default. Enable it in `lantern.yaml` for multi-replica HA (`writer.leader_election.enabled: true`).
+- **Redis** is deployed as a single-instance Deployment with a PVC. For production, consider using a managed Redis service and disabling the internal deployment.
+- **PostgreSQL** is deployed as a single-replica StatefulSet with a PVC. For production, consider using a managed PostgreSQL service.
+- **MinIO** is deployed as a single-instance Deployment with a PVC and an init Job to create the bucket. For production, consider using a managed S3-compatible service.
 - All services mount the `lantern-config` ConfigMap at `/etc/lantern/lantern.yaml` and can override individual settings via `LANTERN_*` environment variables.

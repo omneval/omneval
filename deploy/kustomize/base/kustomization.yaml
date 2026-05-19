@@ -22,6 +22,9 @@ resources:
   - namespace.yaml
   - configmap.yaml
   - secret.yaml
+  - redis-deployment.yaml
+  - postgresql-statefulset.yaml
+  - minio-deployment.yaml
   - ingest-deployment.yaml
   - writer-statefulset.yaml
   - writer-snapshot-cronjob.yaml

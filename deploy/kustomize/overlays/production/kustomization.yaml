@@ -38,6 +38,9 @@ kind: Kustomization
 
 resources:
   - ../../base
+  - ingress-hpa.yaml
+  - query-hpa.yaml
+  - eval-hpa.yaml
 
 namespace: lantern
 
