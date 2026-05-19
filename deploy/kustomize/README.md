@@ -105,7 +105,7 @@ patches:
         value: |
           database:
             driver: postgres
-            dsn: postgres://lantern:secret@your-redis-host:5432/lantern?sslmode=disable
+            dsn: postgres://lantern:secret@your-postgres-host:5432/lantern?sslmode=disable
           redis:
             addr: your-redis-host:6379
           storage:
@@ -247,6 +247,8 @@ The base includes a `Secret` with default values. Override per environment:
 | `admin-email` | First admin user email | `LANTERN_AUTH_ADMIN_EMAIL` |
 | `postgres-dsn` | PostgreSQL connection string | `LANTERN_DATABASE_DSN` |
 | `postgres-password` | PostgreSQL password | (via DSN) |
+| `minio-root-user` | MinIO root user (internal only) | — |
+| `minio-root-password` | MinIO root password (internal only) | — |
 
 **Recommended**: Use SealedSecrets, External Secrets, or SOPS to inject real values in production. Do not commit real credentials to Git.
 
@@ -334,7 +336,7 @@ See `docs/restore-from-snapshot.md` for full restore procedures.
 
 ## Horizontal Pod Autoscalers
 
-The production and staging overlays include HPAs for stateless services:
+The production overlay includes HPAs for stateless services:
 
 | Service | Min Replicas | Max Replicas | Target CPU |
 |---------|-------------|-------------|------------|

@@ -80,13 +80,15 @@ spec:
             - ":9001"
           env:
             - name: MINIO_ROOT_USER
-              value: minio
+              valueFrom:
+                secretKeyRef:
+                  name: lantern-secret
+                  key: minio-root-user
             - name: MINIO_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: lantern-secret
-                  key: storage-access-key
-                  optional: true
+                  key: minio-root-password
             - name: MINIO_PROMETHEUS_AUTH_TYPE
               value: "public"
           ports:
@@ -173,7 +175,7 @@ spec:
             - |
               set -e
               echo "Waiting for MinIO to be ready..."
-              until mc alias set local http://lantern-minio:9000 minio minio123; do
+              until mc alias set local http://lantern-minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
                 echo "  Retrying..."
                 sleep 2
               done
@@ -182,6 +184,12 @@ spec:
               echo "Bucket initialization complete."
           env:
             - name: MINIO_ROOT_USER
-              value: minio
+              valueFrom:
+                secretKeyRef:
+                  name: lantern-secret
+                  key: minio-root-user
             - name: MINIO_ROOT_PASSWORD
-              value: minio123
+              valueFrom:
+                secretKeyRef:
+                  name: lantern-secret
+                  key: minio-root-password
