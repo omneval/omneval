@@ -8,6 +8,7 @@ import DatasetDetailPage from "./pages/DatasetDetail";
 import DatasetsPage from "./pages/Datasets";
 import SettingsPage, { NewProjectModal } from "./pages/Settings";
 import EvalRulesPage from "./pages/EvalRules";
+import AdminPage from "./pages/Admin";
 import Header from "./components/Header";
 import Layout from "./components/Layout";
 import { ToastProvider } from "./components/Toast";
@@ -23,7 +24,8 @@ type Page =
   | "datasets"
   | "dataset-detail"
   | "settings"
-  | "eval-rules";
+  | "eval-rules"
+  | "admin";
 
 const NAV_MAP: Record<string, Page> = {
   dashboard: "dashboard",
@@ -33,6 +35,7 @@ const NAV_MAP: Record<string, Page> = {
   "dataset-detail": "dataset-detail",
   settings: "settings",
   "eval-rules": "eval-rules",
+  admin: "admin",
 } as const;
 
 interface Project {
@@ -213,6 +216,11 @@ export default function App() {
             )}
             {page === "eval-rules" && (
               <EvalRulesPage
+                activeProject={activeProject}
+              />
+            )}
+            {page === "admin" && (
+              <AdminPage
                 activeProject={activeProject}
               />
             )}

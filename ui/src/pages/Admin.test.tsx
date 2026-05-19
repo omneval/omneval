@@ -1,0 +1,573 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import AdminPage from "./Admin";
+import { ToastProvider } from "@/components/Toast";
+
+function renderWithToast(ui: React.ReactElement) {
+  return render(<ToastProvider>{ui}</ToastProvider>);
+}
+
+const mockKeys = [
+  {
+    key_id: "ltn_proj_abc123",
+    kind: "project" as const,
+    created_at: "2026-05-13T10:00:00Z",
+  },
+  {
+    key_id: "ltn_svc_worker-1",
+    kind: "service" as const,
+    service_name: "my-agent",
+    created_at: "2026-05-14T08:00:00Z",
+  },
+];
+
+const mockProjects = [
+  { project_id: "proj-1", name: "Test Project", org_id: "" },
+  { project_id: "proj-2", name: "Other Project", org_id: "" },
+];
+
+function resolveKeys(keys: unknown[]) {
+  return ({ ok: true, json: () => Promise.resolve(keys) } as Response);
+}
+
+function resolveProjects(projects: unknown[]) {
+  return ({ ok: true, json: () => Promise.resolve(projects) } as Response);
+}
+
+beforeEach(() => {
+  vi.restoreAllMocks();
+  vi.spyOn(console, "error").mockImplementation(() => {});
+});
+
+describe("AdminPage", () => {
+  it("renders the API Keys tab by default", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys([]);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects([]);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("API Keys")).toBeInTheDocument();
+    });
+  });
+
+  it("renders all three tabs", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys([]);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects([]);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("API Keys")).toBeInTheDocument();
+      expect(screen.getByText("Projects")).toBeInTheDocument();
+      expect(screen.getByText("Traces")).toBeInTheDocument();
+    });
+  });
+
+  it("shows empty state when no keys exist", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys([]);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects([]);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("No API keys found.")).toBeInTheDocument();
+    });
+  });
+
+  it("renders API keys with kind badges", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys(mockKeys);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects([]);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("ltn_proj_abc123")).toBeInTheDocument();
+      expect(screen.getByText("ltn_svc_worker-1")).toBeInTheDocument();
+    });
+  });
+
+  it("groups keys by kind (project vs service)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys(mockKeys);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects([]);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project Keys (1)")).toBeInTheDocument();
+      expect(screen.getByText("Service Keys (1)")).toBeInTheDocument();
+    });
+  });
+
+  it("shows delete button for each key", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys(mockKeys);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects([]);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      const deleteButtons = screen.getAllByRole("button", { name: /delete/i });
+      expect(deleteButtons.length).toBe(2);
+    });
+  });
+
+  it("opens confirm dialog when deleting a key", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys(mockKeys);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects([]);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("ltn_proj_abc123")).toBeInTheDocument();
+    });
+
+    const deleteButtons = screen.getAllByRole("button", { name: /delete/i });
+    fireEvent.click(deleteButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText("Delete API Key")).toBeInTheDocument();
+    });
+  });
+
+  it("deletes a key via DELETE API and refreshes", async () => {
+    let callCount = 0;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      callCount++;
+      if (url === "/api/v1/admin/api-keys" && init?.method !== "DELETE") {
+        return resolveKeys(mockKeys);
+      }
+      if (url === "/api/v1/admin/api-keys/ltn_proj_abc123" && init?.method === "DELETE") {
+        return ({ ok: true } as Response);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects([]);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("ltn_proj_abc123")).toBeInTheDocument();
+    });
+
+    const deleteButtons = screen.getAllByRole("button", { name: /delete/i });
+    fireEvent.click(deleteButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText("Delete API Key")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Delete Key"));
+
+    await waitFor(() => {
+      // Should show "API key deleted" toast
+      expect(screen.getByText("API key deleted")).toBeInTheDocument();
+    });
+  });
+
+  it("switches to the Projects tab", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys([]);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects(mockProjects);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Projects")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Projects"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Test Project")).toBeInTheDocument();
+      expect(screen.getByText("Other Project")).toBeInTheDocument();
+    });
+  });
+
+  it("shows projects with delete buttons", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys([]);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects(mockProjects);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Projects")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Projects"));
+
+    await waitFor(() => {
+      const deleteButtons = screen.getAllByRole("button", { name: /delete/i });
+      expect(deleteButtons.length).toBe(2);
+    });
+  });
+
+  it("switches to the Traces tab", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys([]);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects([]);
+      }
+      if (url === "/api/v1/admin/traces/proj-1/count") {
+        return ({
+          ok: true,
+          json: () => Promise.resolve({ count: 42 }),
+        } as Response);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Traces")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Traces"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Delete All Traces")).toBeInTheDocument();
+    });
+  });
+
+  it("shows trace count in the Traces tab", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys([]);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects([]);
+      }
+      if (url === "/api/v1/admin/traces/proj-1/count") {
+        return ({
+          ok: true,
+          json: () => Promise.resolve({ count: 123 }),
+        } as Response);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Traces")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Traces"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Total traces: 123/)).toBeInTheDocument();
+    });
+  });
+
+  it("shows the active project name in the Traces tab", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys([]);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects([]);
+      }
+      if (url === "/api/v1/admin/traces/proj-1/count") {
+        return ({
+          ok: true,
+          json: () => Promise.resolve({ count: 0 }),
+        } as Response);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Traces")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Traces"));
+
+    await waitFor(() => {
+      expect(screen.getByText("proj-1")).toBeInTheDocument();
+    });
+  });
+
+  it("opens confirm dialog when clicking Delete All Traces", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys([]);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects([]);
+      }
+      if (url === "/api/v1/admin/traces/proj-1/count") {
+        return ({
+          ok: true,
+          json: () => Promise.resolve({ count: 10 }),
+        } as Response);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Traces")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Traces"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Delete All Traces")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /delete all traces/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/permanently delete all 10 traces/)).toBeInTheDocument();
+    });
+  });
+
+  it("deletes all traces via DELETE API", async () => {
+    const deleteCalls: string[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys([]);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects([]);
+      }
+      if (url === "/api/v1/admin/traces/proj-1/count") {
+        return ({
+          ok: true,
+          json: () => Promise.resolve({ count: 10 }),
+        } as Response);
+      }
+      if (url === "/api/v1/admin/traces/proj-1") {
+        deleteCalls.push(url);
+        return ({ ok: true } as Response);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Traces")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Traces"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Delete All Traces")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /delete all traces/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/permanently delete all 10 traces/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /yes, delete all/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("All traces deleted")).toBeInTheDocument();
+    });
+
+    expect(deleteCalls).toContain("/api/v1/admin/traces/proj-1");
+  });
+
+  it("shows loading skeletons while fetching", async () => {
+    vi.spyOn(globalThis, "fetch").mockReturnValue(
+      new Promise<Response>(() => {})
+    );
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    // Skeletons should be visible while loading
+    const skeletons = document.querySelectorAll('[class*="animate-pulse"]');
+    expect(skeletons.length).toBeGreaterThan(0);
+  });
+
+  it("handles API errors gracefully for keys", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return ({ ok: false, status: 500 } as Response);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects([]);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("No API keys found.")).toBeInTheDocument();
+    });
+  });
+
+  it("handles API errors gracefully for projects", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys([]);
+      }
+      if (url === "/api/v1/projects") {
+        return ({ ok: false, status: 500 } as Response);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Projects")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Projects"));
+
+    await waitFor(() => {
+      expect(screen.getByText("No projects found.")).toBeInTheDocument();
+    });
+  });
+
+  it("deletes a project via DELETE API", async () => {
+    let callCount = 0;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      callCount++;
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys([]);
+      }
+      if (url === "/api/v1/projects" && init?.method !== "DELETE") {
+        return resolveProjects(mockProjects);
+      }
+      if (url === "/api/v1/admin/projects/proj-1" && init?.method === "DELETE") {
+        return ({ ok: true } as Response);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Projects")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Projects"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Test Project")).toBeInTheDocument();
+    });
+
+    const deleteButtons = screen.getAllByRole("button", { name: /delete/i });
+    fireEvent.click(deleteButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/delete "Test Project"/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /delete project/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Project "Test Project" deleted/)).toBeInTheDocument();
+    });
+  });
+
+  it("displays all keys from all projects in admin", async () => {
+    const allProjectKeys = [
+      {
+        key_id: "ltn_proj_proj1_key",
+        kind: "project" as const,
+        created_at: "2026-05-10T10:00:00Z",
+      },
+      {
+        key_id: "ltn_proj_proj2_key",
+        kind: "project" as const,
+        created_at: "2026-05-11T10:00:00Z",
+      },
+    ];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys(allProjectKeys);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects(mockProjects);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("ltn_proj_proj1_key")).toBeInTheDocument();
+      expect(screen.getByText("ltn_proj_proj2_key")).toBeInTheDocument();
+    });
+  });
+});

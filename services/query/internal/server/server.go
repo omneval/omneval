@@ -222,6 +222,12 @@ func Run() error {
 		}
 	}
 
+	// Admin handler (requires DB and session store).
+	adminHandler := &handler.AdminHandler{
+		DB:           db,
+		SessionStore: h,
+	}
+
 	// Playground handler (requires metadata store).
 	// Always create the handler so the route is registered even when the LLM
 	// is not configured — the handler itself returns 503 in that case.
@@ -243,6 +249,14 @@ func Run() error {
 
 	// Register auth routes (login, logout, invite, change password).
 	h.Register(mux)
+
+	// Admin routes (require admin session).
+	adminMw := auth.RequireAdmin(store, cfg.Auth.SecureCookie, sessionTTL, cfg.Auth.AdminEmail)
+	mux.HandleFunc("GET /api/v1/admin/api-keys", adminMw(http.HandlerFunc(adminHandler.HandleAdminAPIKeysList)).ServeHTTP)
+	mux.HandleFunc("DELETE /api/v1/admin/api-keys/", adminMw(http.HandlerFunc(adminHandler.HandleAdminAPIKeyDelete)).ServeHTTP)
+	mux.HandleFunc("GET /api/v1/admin/traces/", adminMw(http.HandlerFunc(adminHandler.HandleAdminTracesCount)).ServeHTTP)
+	mux.HandleFunc("DELETE /api/v1/admin/traces/", adminMw(http.HandlerFunc(adminHandler.HandleAdminTracesDelete)).ServeHTTP)
+	mux.HandleFunc("DELETE /api/v1/admin/projects/", adminMw(http.HandlerFunc(adminHandler.HandleAdminProjectsDelete)).ServeHTTP)
 
 	// Projects list for the UI project switcher.
 	mux.HandleFunc("GET /api/v1/projects", spanHandler.HandleProjects)

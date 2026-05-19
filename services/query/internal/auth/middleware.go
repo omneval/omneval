@@ -137,4 +137,65 @@ func IsAdmin(r *http.Request, adminEmail string) bool {
 	return user.Email != "" && strings.EqualFold(user.Email, adminEmail)
 }
 
+// AdminContextKey is the context key for the admin email.
+var AdminContextKey ContextKey = "admin_email"
+
+// AdminEmailFromContext returns the admin email from the request context.
+func AdminEmailFromContext(r *http.Request) string {
+	email, _ := r.Context().Value(AdminContextKey).(string)
+	return email
+}
+
+// IsAdminUser checks if the current user is an admin (email matches admin email
+// stored in context). Returns false if no admin email is configured or no user
+// is authenticated.
+func IsAdminUser(r *http.Request) bool {
+	adminEmail := AdminEmailFromContext(r)
+	return IsAdmin(r, adminEmail)
+}
+
+// RequireAdmin wraps an http.Handler with session validation and admin check.
+func RequireAdmin(store metadata.Store, secure bool, sessionTTL time.Duration, adminEmail string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// First validate session
+			cookie, err := r.Cookie("lantern_session")
+			if err != nil {
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+				return
+			}
+
+			session, err := store.GetSession(r.Context(), cookie.Value)
+			if err != nil {
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+				return
+			}
+
+			if time.Now().After(session.ExpiresAt) {
+				_ = store.DeleteSession(r.Context(), session.SessionID)
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+				return
+			}
+
+			user, err := store.GetUserByID(r.Context(), session.UserID)
+			if err != nil {
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+				return
+			}
+
+			if !strings.EqualFold(user.Email, adminEmail) {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden: admin access required"})
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), CurrentUserKey, &CurrentUser{
+				UserID: user.UserID,
+				Email:  user.Email,
+			})
+			ctx = context.WithValue(ctx, AdminContextKey, adminEmail)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
 

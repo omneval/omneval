@@ -109,6 +109,20 @@ function SettingsIcon() {
   );
 }
 
+function AdminIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <path
+        d="M9 3L16 6.5v5L9 15l-7-3.5v-5L9 3z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <path d="M9 9v3M7 12l2 2 2-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function LogoutIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
@@ -165,6 +179,7 @@ const NAV_SECTIONS: {
 
 const BOTTOM_ITEMS: NavItem[] = [
   { id: "settings", label: "Settings", section: "settings", icon: <SettingsIcon /> },
+  { id: "admin", label: "Admin", section: "settings", icon: <AdminIcon /> },
 ];
 
 // ── Section Accordion ──────────────────────────────────────────────
@@ -359,6 +374,18 @@ export default function Sidebar({ collapsed, onToggle, active, onNavigate, onLog
               aria-label="Settings"
             >
               <SettingsIcon />
+            </button>
+            <button
+              onClick={() => onNavigate("admin")}
+              className={`p-2 rounded-md transition-colors duration-150 ${
+                active === "admin"
+                  ? "text-lantern-ember bg-lantern-accent-ember-glow"
+                  : "text-lantern-ash hover:text-lantern-pure"
+              }`}
+              title="Admin"
+              aria-label="Admin"
+            >
+              <AdminIcon />
             </button>
             <button
               onClick={onLogout}
