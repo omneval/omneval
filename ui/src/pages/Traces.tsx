@@ -377,11 +377,13 @@ function PaginationControls({
   onPageSizeChange,
   hasMore,
   loading,
+  onLoadNext,
 }: {
   pageSize: number;
   onPageSizeChange: (size: number) => void;
   hasMore: boolean;
   loading: boolean;
+  onLoadNext: () => void;
 }) {
   const sizes = [10, 25, 50, 100];
 
@@ -404,6 +406,7 @@ function PaginationControls({
       <div className="flex items-center gap-2">
         <button
           disabled={loading || !hasMore}
+          onClick={onLoadNext}
           className="text-sm px-4 py-1.5 rounded-md font-medium text-white transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed hover:brightness-110 active:brightness-90"
           style={{
             background: hasMore ? colors.accents.emberFlare : colors.backgrounds.caveWall,
@@ -915,6 +918,7 @@ export default function TracesPage({
           }}
           hasMore={!!nextCursor}
           loading={loading}
+          onLoadNext={() => fetchSpans(nextCursor, true)}
         />
       </div>
     </div>

@@ -716,6 +716,92 @@ describe("pagination", () => {
 
     expect(screen.getByText("Rows per page:")).toBeInTheDocument();
   });
+
+  it("load next page button calls fetch with cursor when more results exist", async () => {
+    const fetchBodies: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (init?.body) {
+        fetchBodies.push(String(init.body));
+      }
+      const bodyObj = JSON.parse(String(init.body || "{}"));
+      const limit = bodyObj.limit || 25;
+      // Initial fetch (no cursor): return up to `limit` spans + next cursor
+      // Pagination fetch (has cursor): return empty + no cursor
+      if (bodyObj.cursor) {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({ spans: [], next: "", limit }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            spans: mockSpans.slice(0, Math.min(limit, mockSpans.length)),
+            next: "cursor-page-2",
+            limit,
+          }),
+      } as Response;
+    });
+
+    renderTracesPage();
+
+    // Wait for initial fetch with default page size 25
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    }, { timeout: 3000 });
+
+    // The button should show "Load Next Page" since the API returned a cursor
+    expect(screen.getByText("Load Next Page")).toBeInTheDocument();
+
+    // The first API request should NOT have a cursor
+    expect(fetchBodies[0]).not.toContain("cursor");
+
+    // Click "Load Next Page"
+    const loadNextButton = screen.getByText("Load Next Page");
+    await act(async () => {
+      fireEvent.click(loadNextButton);
+    });
+
+    // Wait for the next fetch to include the cursor
+    await waitFor(
+      () => {
+        expect(fetchBodies.length).toBeGreaterThanOrEqual(2);
+      },
+      { timeout: 3000 }
+    );
+
+    // The second request MUST include the cursor from the first page
+    expect(fetchBodies[1]).toContain("cursor-page-2");
+
+    // After second fetch (empty results), button should say "No more data"
+    await waitFor(() => {
+      expect(screen.getByText("No more data")).toBeInTheDocument();
+    }, { timeout: 3000 });
+  });
+
+  it("disables load next page button when no more results", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: mockSpans,
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    }, { timeout: 3000 });
+
+    // With next="", the button should say "No more data" and be disabled
+    const loadNextButton = screen.getByText("No more data");
+    expect(loadNextButton.closest("button")).toBeDisabled();
+  });
 });
 
 // ── Span rendering tests ─────────────────────────────────────────
