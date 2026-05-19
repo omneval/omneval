@@ -387,6 +387,32 @@ function PaginationControls({
 }) {
   const sizes = [10, 25, 50, 100];
 
+  const isButtonDisabled = loading || !hasMore;
+
+  const buttonText = loading ? (
+    <span className="flex items-center gap-2">
+      <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+      </svg>
+      Loading...
+    </span>
+  ) : hasMore ? (
+    "Load Next Page"
+  ) : (
+    "No more data"
+  );
+
+  const buttonStyle: React.CSSProperties = hasMore
+    ? {
+        background: colors.accents.emberFlare,
+        boxShadow: "0 2px 8px rgba(255, 87, 34, 0.25)",
+      }
+    : {
+        background: colors.backgrounds.caveWall,
+        boxShadow: "none",
+      };
+
   return (
     <div className="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: colors.backgrounds.caveWall }}>
       <div className="flex items-center gap-2">
@@ -405,27 +431,12 @@ function PaginationControls({
       </div>
       <div className="flex items-center gap-2">
         <button
-          disabled={loading || !hasMore}
+          disabled={isButtonDisabled}
           onClick={onLoadNext}
           className="text-sm px-4 py-1.5 rounded-md font-medium text-white transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed hover:brightness-110 active:brightness-90"
-          style={{
-            background: hasMore ? colors.accents.emberFlare : colors.backgrounds.caveWall,
-            boxShadow: hasMore ? "0 2px 8px rgba(255, 87, 34, 0.25)" : "none",
-          }}
+          style={buttonStyle}
         >
-          {loading ? (
-            <span className="flex items-center gap-2">
-              <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Loading...
-            </span>
-          ) : hasMore ? (
-            "Load Next Page"
-          ) : (
-            "No more data"
-          )}
+          {buttonText}
         </button>
       </div>
     </div>

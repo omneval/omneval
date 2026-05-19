@@ -723,7 +723,7 @@ describe("pagination", () => {
       if (init?.body) {
         fetchBodies.push(String(init.body));
       }
-      const bodyObj = JSON.parse(String(init.body || "{}"));
+      const bodyObj = JSON.parse(String(init?.body || "{}"));
       const limit = bodyObj.limit || 25;
       // Initial fetch (no cursor): return up to `limit` spans + next cursor
       // Pagination fetch (has cursor): return empty + no cursor
