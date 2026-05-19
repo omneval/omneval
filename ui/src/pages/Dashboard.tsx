@@ -62,7 +62,7 @@ function Card({ title, children, subtitle }: { title: string; children: React.Re
         <div className="flex items-center justify-between">
           <span>{title}</span>
           {subtitle && (
-            <span className="text-xs font-normal text-lantern-ash opacity-60">{subtitle}</span>
+            <span className="text-xs font-normal text-omneval-text-muted opacity-70">{subtitle}</span>
           )}
         </div>
       </div>
@@ -74,14 +74,14 @@ function Card({ title, children, subtitle }: { title: string; children: React.Re
 // ── Shared Chart Config ────────────────────────────────────────────
 
 const chartTooltipStyle: React.CSSProperties = {
-  backgroundColor: colors.backgrounds.charcoalDepth,
-  border: `1px solid ${colors.backgrounds.caveWall}`,
+  backgroundColor: colors.backgrounds.depth,
+  border: `1px solid ${colors.backgrounds.border}`,
   borderRadius: "0.375rem",
   color: colors.typography.pureLight,
   fontSize: "0.875rem",
 };
 
-const gridColor = colors.backgrounds.caveWall;
+const gridColor = colors.backgrounds.border;
 
 /** Series color index for multi-chart consistency. */
 const SERIES_EMBER = 0;
@@ -310,7 +310,7 @@ function ModelCostsTable({ data, loading }: { data: CostData[]; loading: boolean
           <tr
             className="border-b"
             style={{
-              borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
+              borderBottom: `1px solid ${colors.backgrounds.border}`,
               color: colors.typography.ashGrey,
             }}
           >
@@ -334,28 +334,28 @@ function ModelCostsTable({ data, loading }: { data: CostData[]; loading: boolean
               key={row.model}
               className="transition-colors duration-150"
               style={{
-                borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
-                background: i % 2 === 0 ? "transparent" : `${colors.backgrounds.slightIllumination}33`,
+                borderBottom: `1px solid ${colors.backgrounds.border}`,
+                background: i % 2 === 0 ? "transparent" : `${colors.backgrounds.surface}33`,
               }}
               onMouseEnter={(e) => {
                 (e.currentTarget as HTMLElement).style.background =
-                  `rgba(255, 204, 188, 0.1)`;
+                  `rgba(124, 58, 237, 0.1)`;
               }}
               onMouseLeave={(e) => {
                 (e.currentTarget as HTMLElement).style.background =
-                  i % 2 === 0 ? "transparent" : `${colors.backgrounds.slightIllumination}33`;
+                  i % 2 === 0 ? "transparent" : `${colors.backgrounds.surface}33`;
               }}
             >
-              <td className="py-2 px-3 font-medium text-lantern-pure">{row.model}</td>
-              <td className="py-2 px-3 text-right text-lantern-ash">
+              <td className="py-2 px-3 font-medium text-omneval-text-pure">{row.model}</td>
+              <td className="py-2 px-3 text-right text-omneval-text-muted">
                 {formatNumber(row.inputTokens)}
               </td>
-              <td className="py-2 px-3 text-right text-lantern-ash">
+              <td className="py-2 px-3 text-right text-omneval-text-muted">
                 {formatNumber(row.outputTokens)}
               </td>
               <td
                 className="py-2 px-3 text-right font-medium"
-                style={{ color: colors.accents.emberFlare }}
+                style={{ color: colors.accents.violet }}
               >
                 ${row.totalCost.toFixed(4)}
               </td>
@@ -414,15 +414,15 @@ function ModelUsageWidget({
 
   return (
     <div>
-      <div className="flex gap-1 mb-4 border-b" style={{ borderColor: colors.backgrounds.caveWall }}>
+      <div className="flex gap-1 mb-4 border-b" style={{ borderColor: colors.backgrounds.border }}>
         {USAGE_TABS.map((tab, i) => (
           <button
             key={tab}
             onClick={() => setActiveTab(i)}
             className={`px-3 py-1.5 text-sm rounded-t-md transition-colors ${
               i === activeTab
-                ? "text-lantern-ember"
-                : "text-lantern-ash hover:text-lantern-pure"
+                ? "text-omneval-violet-pale"
+                : "text-omneval-text-muted hover:text-omneval-text-pure"
             }`}
             style={
               i === activeTab
@@ -451,7 +451,7 @@ function ModelUsageWidget({
               <tr
                 className="border-b"
                 style={{
-                  borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
+                  borderBottom: `1px solid ${colors.backgrounds.border}`,
                   color: colors.typography.ashGrey,
                 }}
               >
@@ -474,23 +474,23 @@ function ModelUsageWidget({
                     key={row.model}
                     className="transition-colors duration-150"
                     style={{
-                      borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
-                      background: i % 2 === 0 ? "transparent" : `${colors.backgrounds.slightIllumination}33`,
+                      borderBottom: `1px solid ${colors.backgrounds.border}`,
+                      background: i % 2 === 0 ? "transparent" : `${colors.backgrounds.surface}33`,
                     }}
                     onMouseEnter={(e) => {
                       (e.currentTarget as HTMLElement).style.background =
-                        `rgba(255, 204, 188, 0.1)`;
+                        `rgba(124, 58, 237, 0.1)`;
                     }}
                     onMouseLeave={(e) => {
                       (e.currentTarget as HTMLElement).style.background =
-                        i % 2 === 0 ? "transparent" : `${colors.backgrounds.slightIllumination}33`;
+                        i % 2 === 0 ? "transparent" : `${colors.backgrounds.surface}33`;
                     }}
                   >
-                    <td className="py-2 px-3 font-medium text-lantern-pure">{row.model}</td>
-                    <td className="py-2 px-3 text-right text-lantern-ash">
+                    <td className="py-2 px-3 font-medium text-omneval-text-pure">{row.model}</td>
+                    <td className="py-2 px-3 text-right text-omneval-text-muted">
                       {formatNumber(row.inputTokens)}
                     </td>
-                    <td className="py-2 px-3 text-right text-lantern-ash">
+                    <td className="py-2 px-3 text-right text-omneval-text-muted">
                       {formatNumber(row.outputTokens)}
                     </td>
                   </tr>
@@ -755,33 +755,33 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
   }, [activeProject, from, to, fetchData]);
 
   return (
-    <div className="p-6" style={{ background: colors.backgrounds.abyssBlack }}>
+    <div className="p-6" style={{ background: colors.backgrounds.voidBlack }}>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-lantern-pure">Dashboard</h1>
-          <p className="text-sm text-lantern-ash mt-1">{timeRangeLabel(from)}</p>
+          <h1 className="text-xl font-semibold text-omneval-text-pure">Dashboard</h1>
+          <p className="text-sm text-omneval-text-muted mt-1">{timeRangeLabel(from)}</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <label className="text-sm text-lantern-ash">From:</label>
+            <label className="text-sm text-omneval-text-muted">From:</label>
             <input
               type="datetime-local"
               value={new Date(from).toISOString().slice(0, 16)}
               onChange={(e) => setFrom(e.target.value)}
-              className="input-focus text-sm px-2 py-1 rounded-md border border-lantern-bg-cave bg-lantern-bg-illumination text-lantern-pure"
+              className="input-focus text-sm px-2 py-1 rounded-md border border-omneval-border bg-omneval-surface text-omneval-text-pure"
               style={{
                 colorScheme: "dark",
               }}
             />
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-sm text-lantern-ash">To:</label>
+            <label className="text-sm text-omneval-text-muted">To:</label>
             <input
               type="datetime-local"
               value={new Date(to).toISOString().slice(0, 16)}
               onChange={(e) => setTo(e.target.value)}
-              className="input-focus text-sm px-2 py-1 rounded-md border border-lantern-bg-cave bg-lantern-bg-illumination text-lantern-pure"
+              className="input-focus text-sm px-2 py-1 rounded-md border border-omneval-border bg-omneval-surface text-omneval-text-pure"
               style={{
                 colorScheme: "dark",
               }}
@@ -792,8 +792,8 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
             disabled={loading}
             className="text-sm px-3 py-1.5 rounded-md font-medium text-white transition-all duration-150 disabled:opacity-50 hover:brightness-110 active:brightness-90"
             style={{
-              background: colors.accents.emberFlare,
-              boxShadow: "0 2px 8px rgba(255, 87, 34, 0.25)",
+              background: colors.accents.violet,
+              boxShadow: "0 2px 8px rgba(124, 58, 237, 0.3)",
             }}
           >
             {loading ? (

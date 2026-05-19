@@ -39,8 +39,8 @@ const variantIcons: Record<EmptyStateVariant, React.ReactNode> = {
         strokeLinejoin="round"
       />
       <path d="M16 44h24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M28 12v12" stroke={colors.accents.emberFlare} strokeWidth="2.5" strokeLinecap="round" />
-      <circle cx="28" cy="30" r="3" fill={colors.accents.emberFlare} />
+      <path d="M28 12v12" stroke={colors.accents.violet} strokeWidth="2.5" strokeLinecap="round" />
+      <circle cx="28" cy="30" r="3" fill={colors.accents.violet} />
     </svg>
   ),
   search: (
@@ -92,7 +92,7 @@ export function EmptyState({
   const defaultConfig: Record<Exclude<EmptyStateVariant, "loading">, { title: string; description: string }> = {
     onboarding: {
       title: "No traces yet",
-      description: "Get started by sending your first trace to Lantern",
+      description: "Get started by sending your first trace to omneval",
     },
     search: {
       title: "No results found",
@@ -120,19 +120,19 @@ export function EmptyState({
     >
       {/* Icon */}
       <div
-        className={`mb-4 ${variant === "error" ? "text-lantern-danger" : "text-lantern-bg-cave"}`}
+        className={`mb-4 ${variant === "error" ? "text-omneval-danger" : "text-omneval-border"}`}
       >
         {icon ?? variantIcons[variant]}
       </div>
 
       {/* Title */}
-      <p className="text-base font-semibold text-lantern-pure mb-1">
+      <p className="text-base font-semibold text-omneval-text-pure mb-1">
         {resolvedTitle}
       </p>
 
       {/* Description */}
       {resolvedDescription && (
-        <p className="text-sm text-lantern-ash mb-4 opacity-80">
+        <p className="text-sm text-omneval-text-muted mb-4 opacity-80">
           {resolvedDescription}
         </p>
       )}
@@ -143,8 +143,8 @@ export function EmptyState({
           onClick={onAction}
           className="px-4 py-2 text-sm font-medium rounded-md text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
           style={{
-            background: colors.accents.emberFlare,
-            boxShadow: "0 2px 8px rgba(255, 87, 34, 0.25)",
+            background: colors.accents.violet,
+            boxShadow: "0 2px 8px rgba(124, 58, 237, 0.3)",
           }}
         >
           {actionLabel}

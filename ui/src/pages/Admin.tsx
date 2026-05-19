@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useToast } from "@/components/Toast";
 import { Skeleton } from "@/components/Skeleton";
-import { colors } from "@/theme";
-
 // ── Types ──────────────────────────────────────────────────────────
 
 interface APIKey {
@@ -39,8 +37,8 @@ function TabButton({
       onClick={onClick}
       className={`px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${
         active
-          ? "text-lantern-ember bg-lantern-accent-ember-glow border-b-2 border-lantern-ember"
-          : "text-lantern-ash hover:text-lantern-pure hover:bg-lantern-accent-flicker-hover"
+          ? "text-omneval-violet-pale bg-omneval-violet-active border-b-2 border-omneval-violet"
+          : "text-omneval-text-muted hover:text-omneval-text-pure hover:bg-omneval-violet-hover"
       }`}
     >
       {label}
@@ -66,27 +64,27 @@ function ConfirmDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div
-        className="bg-lantern-bg-charcoal border border-lantern-bg-cave rounded-lg p-6 w-full max-w-sm mx-4"
+        className="bg-omneval-depth border border-omneval-border rounded-lg p-6 w-full max-w-sm mx-4"
         style={{ boxShadow: "0 16px 48px rgba(0,0,0,0.5)" }}
       >
-        <h3 className="text-lg font-medium text-lantern-pure mb-2">
+        <h3 className="text-lg font-medium text-omneval-text-pure mb-2">
           {title}
         </h3>
-        <p className="text-sm text-lantern-ash mb-4">{message}</p>
+        <p className="text-sm text-omneval-text-muted mb-4">{message}</p>
         <div className="flex gap-3">
           <button
             onClick={onConfirm}
             className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
               danger
-                ? "text-white bg-lantern-accent-ember hover:bg-lantern-ember"
-                : "bg-lantern-accent-ember-glow text-lantern-ember hover:bg-lantern-accent-ember"
+                ? "text-white bg-omneval-violet hover:bg-omneval-violet"
+                : "bg-omneval-violet-active text-omneval-violet-pale hover:bg-omneval-violet"
             }`}
           >
             {confirmLabel}
           </button>
           <button
             onClick={onCancel}
-            className="flex-1 px-3 py-2 rounded-md text-sm bg-lantern-bg-illumination border border-lantern-bg-cave text-lantern-ash hover:text-lantern-pure transition-colors"
+            className="flex-1 px-3 py-2 rounded-md text-sm bg-omneval-surface border border-omneval-border text-omneval-text-muted hover:text-omneval-text-pure transition-colors"
           >
             Cancel
           </button>
@@ -99,8 +97,8 @@ function ConfirmDialog({
 function SectionHeader({ title, description }: { title: string; description: string }) {
   return (
     <div className="mb-4">
-      <h2 className="text-lg font-medium text-lantern-pure">{title}</h2>
-      <p className="text-sm text-lantern-ash mt-1">{description}</p>
+      <h2 className="text-lg font-medium text-omneval-text-pure">{title}</h2>
+      <p className="text-sm text-omneval-text-muted mt-1">{description}</p>
     </div>
   );
 }
@@ -147,14 +145,14 @@ function AdminKeysSection({
       />
 
       {totalKeys === 0 ? (
-        <div className="text-sm text-lantern-ash py-8 text-center bg-lantern-bg-charcoal/30 rounded-md border border-lantern-bg-cave">
+        <div className="text-sm text-omneval-text-muted py-8 text-center bg-omneval-depth/30 rounded-md border border-omneval-border">
           No API keys found.
         </div>
       ) : (
         <div className="space-y-3">
           {projectKeys.length > 0 && (
             <div>
-              <h3 className="text-sm font-medium text-lantern-mid mb-2">
+              <h3 className="text-sm font-medium text-omneval-text-mid mb-2">
                 Project Keys ({projectKeys.length})
               </h3>
               <div className="space-y-2">
@@ -171,7 +169,7 @@ function AdminKeysSection({
 
           {serviceKeys.length > 0 && (
             <div className="mt-4">
-              <h3 className="text-sm font-medium text-lantern-mid mb-2">
+              <h3 className="text-sm font-medium text-omneval-text-mid mb-2">
                 Service Keys ({serviceKeys.length})
               </h3>
               <div className="space-y-2">
@@ -210,28 +208,28 @@ function KeyRow({
   onDelete: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3 rounded-md border border-lantern-bg-cave bg-lantern-bg-illumination">
+    <div className="flex items-center justify-between px-4 py-3 rounded-md border border-omneval-border bg-omneval-surface">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
-          <span className="text-sm font-medium text-lantern-pure truncate">
+          <span className="text-sm font-medium text-omneval-text-pure truncate">
             {keyData.service_name ?? (keyData.kind === "service" ? "Service Key" : "Project Key")}
           </span>
           <span
             className={`text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${
               keyData.kind === "service"
-                ? "text-lantern-ember bg-lantern-accent-ember-glow"
-                : "text-lantern-ash bg-lantern-bg-cave"
+                ? "text-omneval-violet-pale bg-omneval-violet-active"
+                : "text-omneval-text-muted bg-omneval-border"
             }`}
           >
             {keyData.kind === "service" ? "Service" : "Project"}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="text-xs font-mono text-lantern-ash truncate">
+          <span className="text-xs font-mono text-omneval-text-muted truncate">
             {keyData.key_id}
           </span>
         </div>
-        <p className="text-xs text-lantern-ash mt-0.5">
+        <p className="text-xs text-omneval-text-muted mt-0.5">
           Created: {new Date(keyData.created_at).toLocaleDateString()}
         </p>
       </div>
@@ -287,7 +285,7 @@ function AdminProjectsSection({
       />
 
       {projects.length === 0 ? (
-        <div className="text-sm text-lantern-ash py-8 text-center bg-lantern-bg-charcoal/30 rounded-md border border-lantern-bg-cave">
+        <div className="text-sm text-omneval-text-muted py-8 text-center bg-omneval-depth/30 rounded-md border border-omneval-border">
           No projects found.
         </div>
       ) : (
@@ -326,12 +324,12 @@ function ProjectRow({
   onDelete: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3 rounded-md border border-lantern-bg-cave bg-lantern-bg-illumination">
+    <div className="flex items-center justify-between px-4 py-3 rounded-md border border-omneval-border bg-omneval-surface">
       <div>
-        <span className="text-sm font-medium text-lantern-pure">
+        <span className="text-sm font-medium text-omneval-text-pure">
           {project.name}
         </span>
-        <div className="text-xs text-lantern-ash font-mono mt-0.5">
+        <div className="text-xs text-omneval-text-muted font-mono mt-0.5">
           {project.project_id}
         </div>
       </div>
@@ -378,15 +376,15 @@ function AdminTracesSection({
         description={`Delete all traces for the active project (${count} traces). This is a destructive action.`}
       />
 
-      <div className="flex items-center justify-between px-4 py-4 rounded-md border border-lantern-bg-cave bg-lantern-bg-illumination">
+      <div className="flex items-center justify-between px-4 py-4 rounded-md border border-omneval-border bg-omneval-surface">
         <div>
-          <p className="text-sm text-lantern-pure font-medium">
+          <p className="text-sm text-omneval-text-pure font-medium">
             Active Project
           </p>
-          <p className="text-xs text-lantern-ash font-mono mt-0.5">
+          <p className="text-xs text-omneval-text-muted font-mono mt-0.5">
             {activeProject || "No project selected"}
           </p>
-          <p className="text-xs text-lantern-ash mt-1">
+          <p className="text-xs text-omneval-text-muted mt-1">
             Total traces: {count}
           </p>
         </div>
@@ -547,7 +545,7 @@ export default function AdminPage({
   return (
     <div className="flex flex-col gap-8 py-6 px-6">
       {/* Tab Navigation */}
-      <div className="flex gap-0 border-b border-lantern-bg-cave">
+      <div className="flex gap-0 border-b border-omneval-border">
         {tabs.map((tab) => (
           <TabButton
             key={tab.id}

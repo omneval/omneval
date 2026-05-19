@@ -94,9 +94,9 @@ function ToastItem({ toast, onRemove }: { toast: Toast; onRemove: () => void }) 
   }, []);
 
   const bgMap: Record<ToastType, string> = {
-    success: colors.accents.emberFlare,   // ember for success
+    success: colors.accents.violet,   // ember for success
     error: colors.accents.dangerRed,     // danger red for error
-    info: colors.accents.softGlow,
+    info: colors.accents.cyan,
   };
 
   const iconMap: Record<ToastType, React.ReactNode> = {

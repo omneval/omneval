@@ -42,27 +42,27 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       return (
         <div
           className="flex flex-col items-center justify-center py-16 px-4 text-center"
-          style={{ background: colors.backgrounds.abyssBlack }}
+          style={{ background: colors.backgrounds.voidBlack }}
         >
           <svg
             width="48" height="48" viewBox="0 0 56 56" fill="none"
-            className="mb-4 text-lantern-danger"
+            className="mb-4 text-omneval-danger"
           >
             <circle cx="28" cy="28" r="18" stroke="currentColor" strokeWidth="2" />
             <path d="M28 18v12M28 34v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
           </svg>
-          <p className="text-lg font-semibold text-lantern-pure mb-2">
+          <p className="text-lg font-semibold text-omneval-text-pure mb-2">
             Something went wrong
           </p>
-          <p className="text-sm text-lantern-ash mb-4 max-w-md">
+          <p className="text-sm text-omneval-text-muted mb-4 max-w-md">
             {this.state.error?.message || "An unexpected error occurred"}
           </p>
           <button
             onClick={this.handleReload}
             className="px-4 py-2 text-sm font-medium rounded-md text-white transition-all duration-150 hover:brightness-110"
             style={{
-              background: colors.accents.emberFlare,
-              boxShadow: "0 2px 8px rgba(255, 87, 34, 0.25)",
+              background: colors.accents.violet,
+              boxShadow: "0 2px 8px rgba(124, 58, 237, 0.3)",
             }}
           >
             Reload Page
@@ -114,7 +114,7 @@ function InfoIcon() {
 
 /**
  * ErrorBanner — Shows an error with red icon + text on a dark background.
- * Uses the lantern accent color system for consistent error styling.
+ * Uses the omneval accent color system for consistent error styling.
  */
 function RetryIcon() {
   return (
@@ -166,9 +166,9 @@ export function ErrorBanner({ message, onDismiss, onRetry, retryLabel = "Retry" 
           onClick={onRetry}
           className="flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-all duration-150 hover:brightness-110"
           style={{
-            background: "rgba(255, 87, 34, 0.15)",
-            border: "1px solid rgba(255, 87, 34, 0.3)",
-            color: colors.accents.softGlow,
+            background: "rgba(124, 58, 237, 0.15)",
+            border: "1px solid rgba(124, 58, 237, 0.3)",
+            color: colors.accents.violetPale,
           }}
         >
           <RetryIcon />

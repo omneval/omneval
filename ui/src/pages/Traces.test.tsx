@@ -859,7 +859,7 @@ describe("auto-refresh", () => {
 
     // Auto-refresh should be off initially
     const thirtyLabel = screen.getByText("30s");
-    expect(thirtyLabel).not.toHaveClass("text-lantern-ember");
+    expect(thirtyLabel).not.toHaveClass("text-omneval-violet-pale");
 
     // Enable auto-refresh (the "30s" label is next to the checkbox)
     const checkbox = thirtyLabel.previousElementSibling as HTMLElement;
@@ -867,7 +867,7 @@ describe("auto-refresh", () => {
       fireEvent.click(checkbox);
     });
 
-    expect(thirtyLabel).toHaveClass("text-lantern-ember");
+    expect(thirtyLabel).toHaveClass("text-omneval-violet-pale");
 
     vi.restoreAllMocks();
   });

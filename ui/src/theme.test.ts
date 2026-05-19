@@ -68,36 +68,36 @@ describe("Branding Theme", () => {
   });
 
   describe("specific color values", () => {
-    it("abyssBlack is #000000", () => {
-      expect(colors.backgrounds.abyssBlack).toBe("#000000");
+    it("abyssBlack maps to void black", () => {
+      expect(colors.backgrounds.abyssBlack).toBe("#0A0A0F");
     });
 
-    it("charcoalDepth is #0D0D0D", () => {
-      expect(colors.backgrounds.charcoalDepth).toBe("#0D0D0D");
+    it("charcoalDepth maps to depth surface", () => {
+      expect(colors.backgrounds.charcoalDepth).toBe("#111118");
     });
 
-    it("slightIllumination is #1A1A1A", () => {
-      expect(colors.backgrounds.slightIllumination).toBe("#1A1A1A");
+    it("slightIllumination maps to elevated surface", () => {
+      expect(colors.backgrounds.slightIllumination).toBe("#1C1C28");
     });
 
-    it("caveWall is #2D2D2D", () => {
-      expect(colors.backgrounds.caveWall).toBe("#2D2D2D");
+    it("caveWall maps to border color", () => {
+      expect(colors.backgrounds.caveWall).toBe("#2A2A3A");
     });
 
-    it("emberFlare is #FF5722", () => {
-      expect(colors.accents.emberFlare).toBe("#FF5722");
+    it("emberFlare maps to violet primary", () => {
+      expect(colors.accents.emberFlare).toBe("#7C3AED");
     });
 
-    it("softGlow is #FF8A65", () => {
-      expect(colors.accents.softGlow).toBe("#FF8A65");
+    it("softGlow maps to violet light", () => {
+      expect(colors.accents.softGlow).toBe("#8B5CF6");
     });
 
-    it("flicker is #FFCCBC", () => {
-      expect(colors.accents.flicker).toBe("#FFCCBC");
+    it("flicker maps to violet pale", () => {
+      expect(colors.accents.flicker).toBe("#A78BFA");
     });
 
-    it("deepHeat is #E64A19", () => {
-      expect(colors.accents.deepHeat).toBe("#E64A19");
+    it("deepHeat maps to violet dark", () => {
+      expect(colors.accents.deepHeat).toBe("#6D28D9");
     });
 
     it("dangerRed is #EF4444", () => {
@@ -112,35 +112,35 @@ describe("Branding Theme", () => {
       expect(colors.typography.pureLight).toBe("#FFFFFF");
     });
 
-    it("ashGrey is #A1A1AA", () => {
-      expect(colors.typography.ashGrey).toBe("#A1A1AA");
+    it("ashGrey maps to muted text", () => {
+      expect(colors.typography.ashGrey).toBe("#8B8BA7");
     });
   });
 
   describe("derived utilities", () => {
-    it("flickerRgba produces correct rgba for 10% opacity", () => {
+    it("flickerRgba produces correct rgba for 10% opacity (violet-pale)", () => {
       const result = colors.flickerRgba(0.1);
-      expect(result).toBe("rgba(255, 204, 188, 0.1)");
+      expect(result).toBe("rgba(167, 139, 250, 0.1)");
     });
 
     it("flickerRgba produces correct rgba for 15% opacity", () => {
       const result = colors.flickerRgba(0.15);
-      expect(result).toBe("rgba(255, 204, 188, 0.15)");
+      expect(result).toBe("rgba(167, 139, 250, 0.15)");
     });
 
     it("flickerRgba produces correct rgba for 100% opacity", () => {
       const result = colors.flickerRgba(1);
-      expect(result).toBe("rgba(255, 204, 188, 1)");
+      expect(result).toBe("rgba(167, 139, 250, 1)");
     });
 
     it("flickerRgba produces correct rgba for 0% opacity", () => {
       const result = colors.flickerRgba(0);
-      expect(result).toBe("rgba(255, 204, 188, 0)");
+      expect(result).toBe("rgba(167, 139, 250, 0)");
     });
 
-    it("toRgba converts hex to rgba for emberFlare", () => {
-      const result = colors.toRgba("#FF5722", 0.5);
-      expect(result).toBe("rgba(255, 87, 34, 0.5)");
+    it("toRgba converts hex to rgba for violet primary", () => {
+      const result = colors.toRgba("#7C3AED", 0.5);
+      expect(result).toBe("rgba(124, 58, 237, 0.5)");
     });
 
     it("toRgba converts hex to rgba for abyssBlack", () => {
@@ -150,16 +150,19 @@ describe("Branding Theme", () => {
   });
 
   describe("CSS custom properties", () => {
-    it("cssVariables contains all expected keys", () => {
+    it("cssVariables contains all expected omneval keys", () => {
       const expectedKeys = [
+        "--omneval-void",
+        "--omneval-depth",
+        "--omneval-surface",
+        "--omneval-border",
+        "--omneval-violet",
+        "--omneval-violet-light",
+        "--omneval-text-pure",
+        "--omneval-text-mid",
+        // legacy keys still present for backward compatibility
         "--lantern-bg-abyss",
-        "--lantern-bg-charcoal",
-        "--lantern-bg-illumination",
-        "--lantern-bg-cave",
         "--lantern-accent-ember",
-        "--lantern-accent-glow",
-        "--lantern-accent-flicker",
-        "--lantern-accent-heat",
         "--lantern-text-pure",
         "--lantern-text-ash",
       ];
@@ -169,13 +172,12 @@ describe("Branding Theme", () => {
       });
     });
 
-    it("CSS variable values match hex colors", () => {
-      expect(colors.cssVariables["--lantern-bg-abyss"]).toBe("#000000");
-      expect(colors.cssVariables["--lantern-bg-charcoal"]).toBe("#0D0D0D");
-      expect(colors.cssVariables["--lantern-accent-ember"]).toBe("#FF5722");
-      expect(colors.cssVariables["--lantern-text-pure"]).toBe("#FFFFFF");
-      expect(colors.cssVariables["--lantern-accent-danger"]).toBe("#EF4444");
-      expect(colors.cssVariables["--lantern-accent-danger-light"]).toBe("#FCA5A5");
+    it("CSS variable values match new omneval palette", () => {
+      expect(colors.cssVariables["--omneval-void"]).toBe("#0A0A0F");
+      expect(colors.cssVariables["--omneval-violet"]).toBe("#7C3AED");
+      expect(colors.cssVariables["--omneval-text-pure"]).toBe("#FFFFFF");
+      expect(colors.cssVariables["--omneval-danger"]).toBe("#EF4444");
+      expect(colors.cssVariables["--omneval-danger-light"]).toBe("#FCA5A5");
     });
   });
 });

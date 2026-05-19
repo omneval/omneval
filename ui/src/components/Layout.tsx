@@ -26,7 +26,7 @@ export default function Layout({ children, activeNav, onNavigate, onLogout }: La
   }, [collapsed]);
 
   return (
-    <div className="flex h-screen bg-lantern-bg-abyss">
+    <div className="flex h-screen bg-omneval-void">
       <Sidebar
         collapsed={collapsed}
         onToggle={() => setCollapsed(!collapsed)}

@@ -9,7 +9,7 @@ describe("Skeleton", () => {
     expect(el).not.toBeNull();
     expect(el?.className).toContain("rounded");
     expect(el?.className).toContain("animate-pulse");
-    expect(el?.className).toContain("bg-lantern-bg-cave");
+    expect(el?.className).toContain("bg-omneval-border");
   });
 
   it("accepts a width style prop", () => {

@@ -6,7 +6,7 @@ import { CopyButton } from "./CopyButton";
  * create API key, and send a trace.
  */
 export function OnboardingEmptyState() {
-  const installCommand = "pip install lantern-sdk";
+  const installCommand = "pip install omneval-sdk";
   const apiKeyCommand =
     'curl -X POST http://localhost:8080/api/v1/projects/<project-id>/api-keys -H "Content-Type: application/json" -d \'{"kind":"project"}\'';
 
@@ -17,7 +17,7 @@ export function OnboardingEmptyState() {
         height="56"
         viewBox="0 0 56 56"
         fill="none"
-        className="mb-4 text-lantern-accent-ember"
+        className="mb-4 text-omneval-violet"
       >
         <path
           d="M20 6h16v4l6 6v14a10 10 0 01-20 0V16l6-6V6z"
@@ -30,31 +30,31 @@ export function OnboardingEmptyState() {
         <circle cx="28" cy="30" r="3" fill="currentColor" />
       </svg>
 
-      <p className="text-base font-semibold text-lantern-pure mb-1">
+      <p className="text-base font-semibold text-omneval-text-pure mb-1">
         No traces yet
       </p>
-      <p className="text-sm text-lantern-ash mb-6">
+      <p className="text-sm text-omneval-text-muted mb-6">
         Get started in 3 simple steps:
       </p>
 
       <div className="w-full max-w-md space-y-3">
         {/* Step 1: Install SDK */}
-        <div className="flex items-center gap-3 bg-lantern-bg-charcoal rounded-lg px-4 py-2.5 border border-lantern-bg-cave">
-          <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold bg-lantern-accent-ember/20 text-lantern-ember">
+        <div className="flex items-center gap-3 bg-omneval-depth rounded-lg px-4 py-2.5 border border-omneval-border">
+          <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold bg-omneval-violet-active text-omneval-violet-pale">
             1
           </span>
-          <span className="text-sm text-lantern-pure flex-1 text-left">
+          <span className="text-sm text-omneval-text-pure flex-1 text-left">
             Install the SDK
           </span>
           <CopyButton text={installCommand} copyLabel="Copy" ariaLabel="Copy install command" />
         </div>
 
         {/* Step 2: Create API Key */}
-        <div className="flex items-center gap-3 bg-lantern-bg-charcoal rounded-lg px-4 py-2.5 border border-lantern-bg-cave">
-          <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold bg-lantern-accent-ember/20 text-lantern-ember">
+        <div className="flex items-center gap-3 bg-omneval-depth rounded-lg px-4 py-2.5 border border-omneval-border">
+          <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold bg-omneval-violet-active text-omneval-violet-pale">
             2
           </span>
-          <span className="text-sm text-lantern-pure flex-1 text-left">
+          <span className="text-sm text-omneval-text-pure flex-1 text-left">
             Create an API key
           </span>
           <CopyButton
@@ -65,18 +65,18 @@ export function OnboardingEmptyState() {
         </div>
 
         {/* Step 3: Send first trace */}
-        <div className="flex items-center gap-3 bg-lantern-bg-charcoal rounded-lg px-4 py-2.5 border border-lantern-bg-cave">
-          <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold bg-lantern-accent-ember/20 text-lantern-ember">
+        <div className="flex items-center gap-3 bg-omneval-depth rounded-lg px-4 py-2.5 border border-omneval-border">
+          <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold bg-omneval-violet-active text-omneval-violet-pale">
             3
           </span>
-          <span className="text-sm text-lantern-pure flex-1 text-left">
+          <span className="text-sm text-omneval-text-pure flex-1 text-left">
             Send your first trace
           </span>
           <a
             href="/docs/ingest"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs text-lantern-ember hover:underline flex-shrink-0"
+            className="text-xs text-omneval-violet-pale hover:underline flex-shrink-0"
           >
             View ingest docs →
           </a>

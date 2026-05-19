@@ -39,8 +39,8 @@ function BreadcrumbButton({
       onClick={onClick}
       className={`transition-colors ${
         isLast
-          ? "text-lantern-pure font-medium"
-          : "text-lantern-ash hover:text-lantern-pure"
+          ? "text-omneval-text-pure font-medium"
+          : "text-omneval-text-muted hover:text-omneval-text-pure"
       }`}
       disabled={isLast}
       aria-current={isLast ? "page" : undefined}

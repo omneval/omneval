@@ -33,10 +33,10 @@ export function CopyButton({
     <button
       onClick={handleCopy}
       aria-label={ariaLabel}
-      className="inline-flex items-center gap-1 text-xs text-lantern-ash hover:text-lantern-pure transition-colors px-2 py-1 rounded hover:bg-lantern-bg-illumination"
+      className="inline-flex items-center gap-1 text-xs text-omneval-text-muted hover:text-omneval-text-pure transition-colors px-2 py-1 rounded hover:bg-omneval-surface"
     >
       {copied ? (
-        <span className="text-lantern-ember font-medium">Copied!</span>
+        <span className="text-omneval-violet-pale font-medium">Copied!</span>
       ) : (
         <>
           <svg

@@ -66,9 +66,9 @@ describe("session persistence on page load", () => {
 
     render(<App />);
 
-    // The login page should be rendered (Sign in to Lantern)
+    // The login page should be rendered (omneval login)
     await waitFor(() => {
-      expect(screen.getByText("Sign in to Lantern")).toBeInTheDocument();
+      expect(screen.getByText("Sign in to")).toBeInTheDocument();
     });
   });
 

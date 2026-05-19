@@ -58,10 +58,10 @@ function Dropdown({
     <div className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 px-2.5 py-1.5 text-sm rounded-md bg-lantern-bg-illumination border border-lantern-bg-cave text-lantern-ash hover:border-lantern-accent-glow hover:text-lantern-pure transition-all duration-150"
+        className="flex items-center gap-2 px-2.5 py-1.5 text-sm rounded-md bg-omneval-surface border border-omneval-border text-omneval-text-muted hover:border-omneval-violet hover:text-omneval-text-pure transition-all duration-150"
       >
-        <span className="text-lantern-ash font-medium">{label}:</span>
-        <span className="text-lantern-pure">{selected?.label ?? value}</span>
+        <span className="text-omneval-text-muted font-medium">{label}:</span>
+        <span className="text-omneval-text-pure">{selected?.label ?? value}</span>
         <svg
           width="12"
           height="12"
@@ -83,8 +83,8 @@ function Dropdown({
 
           {/* Dropdown menu */}
           <div
-            className="absolute z-50 mt-1 w-48 bg-lantern-bg-charcoal border border-lantern-bg-cave rounded-md shadow-lg overflow-hidden"
-            style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.6)" }}
+            className="absolute z-50 mt-1 w-48 bg-omneval-depth border border-omneval-border rounded-md shadow-lg overflow-hidden"
+            style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.7)" }}
           >
             {options.map((option) => (
               <button
@@ -95,8 +95,8 @@ function Dropdown({
                 }}
                 className={`w-full px-3 py-2 text-sm text-left transition-colors ${
                   option.value === value
-                    ? "text-lantern-ember bg-lantern-accent-ember-glow"
-                    : "text-lantern-ash hover:text-lantern-pure hover:bg-lantern-accent-flicker-hover"
+                    ? "text-omneval-violet-pale bg-omneval-violet-active"
+                    : "text-omneval-text-muted hover:text-omneval-text-pure hover:bg-omneval-violet-hover"
                 }`}
               >
                 {option.label}
@@ -111,16 +111,16 @@ function Dropdown({
 
 function EnvironmentBadge({ env }: { env: string }) {
   const colorMap: Record<string, string> = {
-    production: "text-lantern-heat bg-lantern-accent-heat-glow",
-    staging: "text-lantern-glow bg-lantern-accent-flicker-hover",
-    development: "text-lantern-ash bg-lantern-bg-illumination",
-    default: "text-lantern-ash bg-lantern-bg-illumination",
+    production: "text-amber-400 bg-amber-400/10 border border-amber-400/20",
+    staging: "text-omneval-cyan-light bg-omneval-cyan/10 border border-omneval-cyan/20",
+    development: "text-omneval-text-muted bg-omneval-surface border border-omneval-border",
+    default: "text-omneval-text-muted bg-omneval-surface border border-omneval-border",
   };
 
-  const textColor = colorMap[env] ?? colorMap.default;
+  const cls = colorMap[env] ?? colorMap.default;
 
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium ${textColor}`}>
+    <span className={`px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
       {env}
     </span>
   );
@@ -140,14 +140,14 @@ export default function Header({
 }: HeaderProps) {
   return (
     <header
-      className="flex items-center justify-between px-4 py-2 bg-lantern-bg-charcoal border-b border-lantern-bg-cave"
+      className="flex items-center justify-between px-4 py-2 bg-omneval-depth border-b border-omneval-border"
       style={{ height: "3rem" }}
     >
       {/* Left: project selector */}
       <div className="flex items-center gap-2">
         <button
           onClick={onNewProject}
-          className="p-1.5 rounded-md text-lantern-ash hover:text-lantern-pure hover:bg-lantern-bg-illumination transition-colors"
+          className="p-1.5 rounded-md text-omneval-text-muted hover:text-omneval-text-pure hover:bg-omneval-surface transition-colors"
           title="New project"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">

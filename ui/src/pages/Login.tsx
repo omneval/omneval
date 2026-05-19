@@ -5,18 +5,43 @@ interface LoginPageProps {
   onLogin: (email: string, password: string) => boolean | Promise<boolean>;
 }
 
-function LanternIcon() {
+function OmnevalIcon() {
   return (
-    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" className="mx-auto mb-4">
-      <path
-        d="M14 4h12v4l5 5v11a8 8 0 01-16 0V13l5-5V4z"
-        stroke={colors.accents.emberFlare}
-        strokeWidth="2"
-        strokeLinejoin="round"
+    <svg width="52" height="52" viewBox="0 0 52 52" fill="none" className="mx-auto mb-6">
+      {/* Outer orbital ring */}
+      <circle
+        cx="26"
+        cy="26"
+        r="22"
+        stroke={colors.accents.violet}
+        strokeWidth="1"
+        strokeDasharray="4 3"
+        opacity="0.5"
       />
-      <path d="M10 32h20" stroke={colors.accents.emberFlare} strokeWidth="2" strokeLinecap="round" />
-      <path d="M20 8v10" stroke={colors.accents.emberFlare} strokeWidth="2.5" strokeLinecap="round" />
-      <circle cx="20" cy="22" r="2.5" fill={colors.accents.emberFlare} />
+      {/* Middle precision ring */}
+      <circle
+        cx="26"
+        cy="26"
+        r="14"
+        stroke={colors.accents.violetLight}
+        strokeWidth="1.5"
+        opacity="0.7"
+      />
+      {/* Core node */}
+      <circle cx="26" cy="26" r="6" fill={colors.accents.violet} />
+      <circle cx="26" cy="26" r="3" fill={colors.accents.violetPale} />
+      {/* Cross-hair data points */}
+      <path
+        d="M26 8v6M26 38v6M8 26h6M38 26h6"
+        stroke={colors.accents.violetLight}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      {/* Orbital dots */}
+      <circle cx="26" cy="4" r="2" fill={colors.accents.cyan} />
+      <circle cx="48" cy="26" r="2" fill={colors.accents.cyan} />
+      <circle cx="26" cy="48" r="2" fill={colors.accents.violetPale} />
+      <circle cx="4" cy="26" r="2" fill={colors.accents.violetPale} />
     </svg>
   );
 }
@@ -48,28 +73,42 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     <div
       className="flex items-center justify-center min-h-screen"
       style={{
-        background: `radial-gradient(ellipse at center top, #1a0a00 0%, transparent 60%), ${colors.backgrounds.abyssBlack}`,
+        background: `radial-gradient(ellipse at 50% 0%, rgba(124, 58, 237, 0.15) 0%, transparent 60%), ${colors.backgrounds.voidBlack}`,
       }}
     >
+      {/* Subtle grid background */}
       <div
-        className="w-full max-w-sm mx-4 p-8 rounded-xl"
+        className="absolute inset-0 pointer-events-none"
         style={{
-          background: "rgba(13, 13, 13, 0.95)",
-          border: `1px solid ${colors.backgrounds.caveWall}`,
-          boxShadow: "0 16px 48px rgba(0, 0, 0, 0.6)",
+          backgroundImage: `linear-gradient(rgba(124, 58, 237, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(124, 58, 237, 0.04) 1px, transparent 1px)`,
+          backgroundSize: "48px 48px",
+        }}
+      />
+
+      <div
+        className="relative w-full max-w-sm mx-4 p-8 rounded-2xl"
+        style={{
+          background: "rgba(17, 17, 24, 0.95)",
+          border: `1px solid ${colors.backgrounds.border}`,
+          boxShadow: "0 24px 64px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(124, 58, 237, 0.1)",
+          backdropFilter: "blur(12px)",
         }}
       >
-        <LanternIcon />
-        <h1 className="text-xl font-semibold text-center text-lantern-pure mb-1">
-          Sign in to Lantern
-        </h1>
-        <p className="text-sm text-center text-lantern-ash mb-6 leading-relaxed">
-          LLM/Agent tracing, evaluation &amp; cost observability
-          <br />
-          <span className="text-xs text-lantern-ash opacity-60">
-            Self-hostable · Open source · Privacy-first
-          </span>
-        </p>
+        <OmnevalIcon />
+
+        <div className="text-center mb-6">
+          <h1 className="text-2xl font-bold tracking-tight text-omneval-text-pure mb-2">
+            Sign in to{" "}
+            <span style={{ color: colors.accents.violetLight }}>omneval</span>
+          </h1>
+          <p className="text-sm text-omneval-text-muted leading-relaxed">
+            Omni-coverage LLM evaluation &amp; tracing
+            <br />
+            <span className="text-xs opacity-70">
+              Precision-focused · Self-hostable · Privacy-first
+            </span>
+          </p>
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
@@ -89,10 +128,11 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
               {error}
             </div>
           )}
+
           <div>
             <label
               htmlFor="email"
-              className="block text-xs font-medium text-lantern-ash mb-1.5"
+              className="block text-xs font-medium text-omneval-text-muted mb-1.5"
             >
               Email
             </label>
@@ -101,16 +141,29 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2.5 text-sm rounded-lg border bg-black/40 text-lantern-pure placeholder-lantern-ash/50 focus:outline-none focus:ring-2 focus:ring-[#FF5722] focus:border-transparent transition-all"
-              style={{ borderColor: colors.backgrounds.caveWall }}
+              className="w-full px-3 py-2.5 text-sm rounded-lg border bg-black/40 text-omneval-text-pure placeholder-omneval-text-muted/50 focus:outline-none transition-all"
+              style={{
+                borderColor: colors.backgrounds.border,
+                boxShadow: "none",
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = colors.accents.violet;
+                e.currentTarget.style.boxShadow = `0 0 0 2px ${colors.focusRing.normal}`;
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = colors.backgrounds.border;
+                e.currentTarget.style.boxShadow = "none";
+              }}
               required
               autoComplete="email"
+              placeholder="you@company.com"
             />
           </div>
+
           <div>
             <label
               htmlFor="password"
-              className="block text-xs font-medium text-lantern-ash mb-1.5"
+              className="block text-xs font-medium text-omneval-text-muted mb-1.5"
             >
               Password
             </label>
@@ -119,24 +172,67 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2.5 text-sm rounded-lg border bg-black/40 text-lantern-pure placeholder-lantern-ash/50 focus:outline-none focus:ring-2 focus:ring-[#FF5722] focus:border-transparent transition-all"
-              style={{ borderColor: colors.backgrounds.caveWall }}
+              className="w-full px-3 py-2.5 text-sm rounded-lg border bg-black/40 text-omneval-text-pure placeholder-omneval-text-muted/50 focus:outline-none transition-all"
+              style={{
+                borderColor: colors.backgrounds.border,
+                boxShadow: "none",
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = colors.accents.violet;
+                e.currentTarget.style.boxShadow = `0 0 0 2px ${colors.focusRing.normal}`;
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = colors.backgrounds.border;
+                e.currentTarget.style.boxShadow = "none";
+              }}
               required
               autoComplete="current-password"
+              placeholder="••••••••"
             />
           </div>
+
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 px-4 rounded-lg text-sm font-medium text-white transition-all duration-150 disabled:opacity-50 hover:brightness-110 active:brightness-90"
+            className="w-full py-2.5 px-4 rounded-lg text-sm font-semibold text-white transition-all duration-150 disabled:opacity-50"
             style={{
-              background: colors.accents.emberFlare,
-              boxShadow: `0 2px 8px rgba(255, 87, 34, 0.3)`,
+              background: `linear-gradient(135deg, ${colors.accents.violet} 0%, ${colors.accents.violetLight} 100%)`,
+              boxShadow: `0 4px 16px rgba(124, 58, 237, 0.35)`,
+            }}
+            onMouseEnter={(e) => {
+              if (!loading) {
+                (e.currentTarget as HTMLElement).style.boxShadow = `0 6px 24px rgba(124, 58, 237, 0.5)`;
+                (e.currentTarget as HTMLElement).style.transform = "translateY(-1px)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.boxShadow = `0 4px 16px rgba(124, 58, 237, 0.35)`;
+              (e.currentTarget as HTMLElement).style.transform = "none";
             }}
           >
-            {loading ? "Signing in..." : "Sign in"}
+            {loading ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Authenticating...
+              </span>
+            ) : (
+              "Sign in"
+            )}
           </button>
         </form>
+
+        {/* Brand footer */}
+        <div className="mt-6 text-center">
+          <span
+            className="text-xs font-semibold tracking-widest uppercase"
+            style={{ color: colors.accents.violet, letterSpacing: "0.15em" }}
+          >
+            omneval
+          </span>
+        </div>
       </div>
     </div>
   );

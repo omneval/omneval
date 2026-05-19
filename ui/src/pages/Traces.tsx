@@ -261,7 +261,7 @@ function TextFilter({
         value={input}
         onChange={(e) => setInput(e.target.value)}
         placeholder={placeholder ?? "Enter values…"}
-        className="input-focus w-full text-sm px-2 py-1.5 rounded border border-lantern-bg-cave bg-lantern-bg-illumination text-lantern-pure placeholder-lantern-ash"
+        className="input-focus w-full text-sm px-2 py-1.5 rounded border border-omneval-border bg-omneval-surface text-omneval-text-pure placeholder-omneval-text-muted"
       />
       <button
         type="button"
@@ -301,7 +301,7 @@ function CheckboxFilter({
       {options.map((option) => (
         <label
           key={option}
-          className="flex items-center gap-2 text-sm text-lantern-ash hover:text-lantern-pure cursor-pointer"
+          className="flex items-center gap-2 text-sm text-omneval-text-muted hover:text-omneval-text-pure cursor-pointer"
         >
           <input
             type="checkbox"
@@ -351,26 +351,26 @@ function RangeFilterField({
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <div className="flex-1">
-          <span className="text-xs text-lantern-ash mb-1 block">{minLabel}</span>
+          <span className="text-xs text-omneval-text-muted mb-1 block">{minLabel}</span>
           <input
             type="number"
             value={value.min}
             onChange={handleMin}
             placeholder={placeholder}
             min={0}
-            className="input-focus w-full text-sm px-2 py-1.5 rounded border border-lantern-bg-cave bg-lantern-bg-illumination text-lantern-pure placeholder-lantern-ash"
+            className="input-focus w-full text-sm px-2 py-1.5 rounded border border-omneval-border bg-omneval-surface text-omneval-text-pure placeholder-omneval-text-muted"
           />
         </div>
-        <span className="text-lantern-ash pt-5">—</span>
+        <span className="text-omneval-text-muted pt-5">—</span>
         <div className="flex-1">
-          <span className="text-xs text-lantern-ash mb-1 block">{maxLabel}</span>
+          <span className="text-xs text-omneval-text-muted mb-1 block">{maxLabel}</span>
           <input
             type="number"
             value={value.max}
             onChange={handleMax}
             placeholder={placeholder}
             min={0}
-            className="input-focus w-full text-sm px-2 py-1.5 rounded border border-lantern-bg-cave bg-lantern-bg-illumination text-lantern-pure placeholder-lantern-ash"
+            className="input-focus w-full text-sm px-2 py-1.5 rounded border border-omneval-border bg-omneval-surface text-omneval-text-pure placeholder-omneval-text-muted"
           />
         </div>
       </div>
@@ -415,16 +415,16 @@ function FilterSection({
     >
       <button
         onClick={onToggle}
-        className="flex items-center justify-between w-full px-3 py-2 text-sm font-medium text-lantern-pure hover:bg-lantern-accent-flicker-hover transition-colors"
+        className="flex items-center justify-between w-full px-3 py-2 text-sm font-medium text-omneval-text-pure hover:bg-omneval-violet-hover transition-colors"
       >
         <span>{label}</span>
         {isRange && (
-          <span className="text-xs text-lantern-ash font-normal ml-2">
+          <span className="text-xs text-omneval-text-muted font-normal ml-2">
             {formatRange(value.min, value.max)}
           </span>
         )}
         {!isRange && Array.isArray(value) && value.length > 0 && (
-          <span className="text-xs text-lantern-ash font-normal ml-2">
+          <span className="text-xs text-omneval-text-muted font-normal ml-2">
             {value.length} selected
           </span>
         )}
@@ -513,7 +513,7 @@ function TableCellRenderer({
       );
     case "timestamp":
       return (
-        <span key={col.key} className="text-lantern-ash text-xs">
+        <span key={col.key} className="text-omneval-text-muted text-xs">
           {formatTimeWithYear(span.start_time)}
         </span>
       );
@@ -528,21 +528,21 @@ function TableCellRenderer({
           className="text-left block w-full"
           title="View trace waterfall"
         >
-          <div className="text-lantern-pure font-medium">{span.name}</div>
-          <div className="text-lantern-ash text-xs font-mono truncate max-w-[120px]">
+          <div className="text-omneval-text-pure font-medium">{span.name}</div>
+          <div className="text-omneval-text-muted text-xs font-mono truncate max-w-[120px]">
             {span.trace_id.slice(0, 12)}…
           </div>
         </button>
       );
     case "input":
       return (
-        <div key={col.key} className="max-w-[200px] text-lantern-ash text-xs font-mono">
+        <div key={col.key} className="max-w-[200px] text-omneval-text-muted text-xs font-mono">
           {span.input ? formatJsonPreview(span.input, 40) : "\u2014"}
         </div>
       );
     case "output":
       return (
-        <div key={col.key} className="max-w-[200px] text-lantern-ash text-xs font-mono">
+        <div key={col.key} className="max-w-[200px] text-omneval-text-muted text-xs font-mono">
           {span.output ? formatJsonPreview(span.output, 40) : "\u2014"}
         </div>
       );
@@ -550,15 +550,15 @@ function TableCellRenderer({
       return <ObservationPills key={col.key} childSpans={childSpans} />;
     case "latency":
       return (
-        <span key={col.key} className="text-lantern-ash">
+        <span key={col.key} className="text-omneval-text-muted">
           {formatDuration(span.start_time, span.end_time)}
         </span>
       );
     case "tokens":
       return (
-        <span key={col.key} className="text-lantern-ash">
+        <span key={col.key} className="text-omneval-text-muted">
           {totalTokens(span).toLocaleString()}
-          <span className="text-lantern-ash opacity-60 text-xs ml-1">
+          <span className="text-omneval-text-muted opacity-60 text-xs ml-1">
             ({span.input_tokens}+{span.output_tokens})
           </span>
         </span>
@@ -574,7 +574,7 @@ function TableCellRenderer({
         </span>
       );
     case "environment":
-      return <span key={col.key} className="text-lantern-ash text-xs">default</span>;
+      return <span key={col.key} className="text-omneval-text-muted text-xs">default</span>;
     default:
       return null;
   }
@@ -626,11 +626,11 @@ function PaginationControls({
   return (
     <div className="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: colors.backgrounds.caveWall }}>
       <div className="flex items-center gap-2">
-        <span className="text-sm text-lantern-ash">Rows per page:</span>
+        <span className="text-sm text-omneval-text-muted">Rows per page:</span>
         <select
           value={pageSize}
           onChange={(e) => onPageSizeChange(Number(e.target.value))}
-          className="input-focus text-sm px-2 py-1 rounded border border-lantern-bg-cave bg-lantern-bg-illumination text-lantern-pure"
+          className="input-focus text-sm px-2 py-1 rounded border border-omneval-border bg-omneval-surface text-omneval-text-pure"
         >
           {sizes.map((s) => (
             <option key={s} value={s}>
@@ -845,7 +845,7 @@ export default function TracesPage({
         }}
       >
         <div className="px-3 py-3 border-b" style={{ borderColor: colors.backgrounds.caveWall }}>
-          <h3 className="text-sm font-medium text-lantern-pure">Filters</h3>
+          <h3 className="text-sm font-medium text-omneval-text-pure">Filters</h3>
         </div>
         <div className="flex-1 py-1">
           {FILTER_SECTIONS.map((section) => (
@@ -904,8 +904,8 @@ export default function TracesPage({
                 onClick={() => setActiveTab(tab)}
                 className={`px-3 py-1.5 text-sm rounded-md transition-colors capitalize ${
                   tab === activeTab
-                    ? "text-lantern-ember"
-                    : "text-lantern-ash hover:text-lantern-pure"
+                    ? "text-omneval-violet-pale"
+                    : "text-omneval-text-muted hover:text-omneval-text-pure"
                 }`}
                 style={
                   tab === activeTab
@@ -932,11 +932,11 @@ export default function TracesPage({
               searchQueryRef.current = e.target.value;
               fetchSpans("", false);
             }}
-            className="input-focus w-48 text-sm px-2.5 py-1.5 rounded border border-lantern-bg-cave bg-lantern-bg-charcoal text-lantern-pure placeholder-lantern-ash"
+            className="input-focus w-48 text-sm px-2.5 py-1.5 rounded border border-omneval-border bg-omneval-depth text-omneval-text-pure placeholder-omneval-text-muted"
           />
 
           {/* Auto-refresh toggle */}
-          <label className="flex items-center gap-2 text-sm text-lantern-ash cursor-pointer">
+          <label className="flex items-center gap-2 text-sm text-omneval-text-muted cursor-pointer">
             <input
               type="checkbox"
               checked={autoRefresh}
@@ -944,7 +944,7 @@ export default function TracesPage({
               className="rounded"
               style={{ accentColor: colors.accents.emberFlare }}
             />
-            <span className={autoRefresh ? "text-lantern-ember" : ""}>
+            <span className={autoRefresh ? "text-omneval-violet-pale" : ""}>
               30s
             </span>
           </label>
@@ -964,7 +964,7 @@ export default function TracesPage({
             </div>
             <button
               onClick={() => setShowColumnsMenu((v) => !v)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border border-lantern-bg-cave text-lantern-ash hover:text-lantern-pure hover:border-lantern-bg-illumination transition-all duration-150"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border border-omneval-border text-omneval-text-muted hover:text-omneval-text-pure hover:border-omneval-surface transition-all duration-150"
               title="Show/hide columns"
               aria-label="Column visibility"
             >
@@ -991,7 +991,7 @@ export default function TracesPage({
                       aria-label={`Toggle ${col.label} column`}
                       aria-hidden="true"
                       tabIndex={-1}
-                      className="flex items-center gap-2.5 w-full px-3 py-1.5 text-sm text-left transition-colors hover:bg-lantern-accent-flicker-hover"
+                      className="flex items-center gap-2.5 w-full px-3 py-1.5 text-sm text-left transition-colors hover:bg-omneval-violet-hover"
                       style={{ color: isVisible ? colors.typography.pureLight : colors.typography.ashGrey }}
                     >
                       <span
@@ -1014,7 +1014,7 @@ export default function TracesPage({
                 <div className="border-t mt-1 pt-1" style={{ borderColor: colors.backgrounds.caveWall }}>
                   <button
                     onClick={() => setShowColumnsMenu(false)}
-                    className="w-full px-3 py-1.5 text-xs text-left transition-colors hover:bg-lantern-accent-flicker-hover"
+                    className="w-full px-3 py-1.5 text-xs text-left transition-colors hover:bg-omneval-violet-hover"
                     style={{ color: colors.typography.ashGrey }}
                   >
                     Close

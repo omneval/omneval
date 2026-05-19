@@ -19,13 +19,13 @@ function highlightJson(json: string): string {
   // Highlight JSON keys (quoted strings followed by colon)
   escaped = escaped.replace(
     /(".*?"(?!\w):)/g,
-    '<span style="color: var(--lantern-accent-glow)">"$1</span>:'
+    '<span style="color: var(--omneval-violet-light)">"$1</span>:'
   );
 
   // Highlight JSON string values
   escaped = escaped.replace(
     /:\s*("(?:[^"\\]|\\.)*")/g,
-    ': <span style="color: var(--lantern-accent-flicker)">$1</span>'
+    ': <span style="color: var(--omneval-violet-pale)">$1</span>'
   );
 
   // Highlight JSON numbers
@@ -50,7 +50,7 @@ export default function JsonCodeBlock({
 }: JsonCodeBlockProps) {
   if (!value) {
     return (
-      <div className="text-xs text-lantern-ash opacity-60 px-3 py-2">
+      <div className="text-xs text-omneval-text-muted opacity-60 px-3 py-2">
         — empty —
       </div>
     );
@@ -69,15 +69,15 @@ export default function JsonCodeBlock({
 
   return (
     <div className="rounded-lg overflow-hidden border"
-      style={{ borderColor: colors.backgrounds.caveWall }}
+      style={{ borderColor: colors.backgrounds.border }}
     >
       {label && (
         <div
           className="px-3 py-1.5 text-xs font-medium border-b"
           style={{
-            background: colors.backgrounds.slightIllumination,
+            background: colors.backgrounds.surface,
             color: colors.typography.ashGrey,
-            borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
+            borderBottom: `1px solid ${colors.backgrounds.border}`,
           }}
         >
           {label}
@@ -86,7 +86,7 @@ export default function JsonCodeBlock({
       <pre
         className="overflow-auto p-3 text-xs font-mono"
         style={{
-          background: colors.backgrounds.charcoalDepth,
+          background: colors.backgrounds.depth,
           maxHeight: `${maxHeight}px`,
           color: colors.typography.ashGrey,
           lineHeight: 1.5,

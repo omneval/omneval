@@ -132,18 +132,19 @@ function LogoutIcon() {
   );
 }
 
-function LanternLogo() {
+/** omneval brand logo — abstract data-node / orbital eye */
+function OmnevalLogo() {
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M9 2h6v2l3 3v7a5 5 0 01-10 0V7l3-3V2z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-      <path d="M7 19h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <path d="M12 4v6" stroke={colors.accents.emberFlare} strokeWidth="2" strokeLinecap="round" />
-      <circle cx="12" cy="14" r="1.5" fill={colors.accents.emberFlare} />
+      {/* Outer dashed orbital ring */}
+      <circle cx="12" cy="12" r="10" stroke={colors.accents.violetLight} strokeWidth="1" strokeDasharray="3 2" opacity="0.6" />
+      {/* Inner ring */}
+      <circle cx="12" cy="12" r="6" stroke={colors.accents.violet} strokeWidth="1.5" />
+      {/* Core */}
+      <circle cx="12" cy="12" r="3" fill={colors.accents.violet} />
+      <circle cx="12" cy="12" r="1.5" fill={colors.accents.violetPale} />
+      {/* Axis ticks */}
+      <path d="M12 2v2M12 20v2M2 12h2M20 12h2" stroke={colors.accents.violetLight} strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   );
 }
@@ -210,8 +211,8 @@ function SectionAccordion({
             onClick={() => onNavigate(item.id)}
             className={`p-2 rounded-md transition-colors duration-150 ${
               active === item.id
-                ? "text-lantern-ember bg-lantern-accent-ember-glow"
-                : "text-lantern-ash hover:text-lantern-pure"
+                ? "text-omneval-violet-pale bg-omneval-violet-active"
+                : "text-omneval-text-muted hover:text-omneval-text-pure"
             }`}
             title={item.label}
             aria-label={item.label}
@@ -229,14 +230,14 @@ function SectionAccordion({
         <>
           <button
             onClick={() => setOpen(!open)}
-            className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs font-semibold tracking-wide text-lantern-mid hover:text-lantern-pure transition-colors"
+            className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs font-semibold tracking-wide text-omneval-text-muted hover:text-omneval-text-pure transition-colors"
           >
             <ChevronIcon open={open} />
             {label.toUpperCase()}
           </button>
           <div
             className="h-px mx-2"
-            style={{ background: "rgba(45, 45, 45, 0.6)" }}
+            style={{ background: "rgba(42, 42, 58, 0.7)" }}
           />
         </>
       )}
@@ -272,18 +273,21 @@ function NavItemButton({
       onClick={() => onNavigate(item.id)}
       className={`group flex items-center gap-3 w-full px-2 py-2 text-sm rounded-md transition-all duration-150 relative ${
         isActive
-          ? "text-lantern-ember bg-lantern-accent-ember-glow"
-          : "text-lantern-ash hover:text-lantern-pure hover:bg-lantern-accent-flicker-hover"
+          ? "text-omneval-violet-pale bg-omneval-violet-active"
+          : "text-omneval-text-muted hover:text-omneval-text-pure hover:bg-omneval-violet-hover"
       }`}
     >
-      {/* Orange left border for active state */}
+      {/* Violet left border for active state */}
       {isActive && (
         <span
-          className="absolute left-0 top-0 bottom-0 bg-lantern-ember rounded-r"
-          style={{ width: "2px" }}
+          className="absolute left-0 top-0 bottom-0 rounded-r"
+          style={{
+            width: "2px",
+            background: `linear-gradient(180deg, ${colors.accents.violetLight}, ${colors.accents.violet})`,
+          }}
         />
       )}
-      <span className={isActive ? "text-lantern-ember" : "text-current group-hover:text-lantern-pure"}>
+      <span className={isActive ? "text-omneval-violet-pale" : "text-current group-hover:text-omneval-text-pure"}>
         {item.icon}
       </span>
       <span className="truncate">{item.label}</span>
@@ -296,37 +300,50 @@ function NavItemButton({
 export default function Sidebar({ collapsed, onToggle, active, onNavigate, onLogout }: SidebarProps) {
   return (
     <aside
-      className={`flex flex-col bg-lantern-bg-charcoal border-r border-lantern-bg-cave transition-all duration-200 ${
+      className={`flex flex-col bg-omneval-depth border-r border-omneval-border transition-all duration-200 ${
         collapsed ? "w-14" : "w-56"
       }`}
       style={{ minWidth: collapsed ? "3.5rem" : "14rem" }}
     >
       {/* Top section: logo + toggle */}
-      <div className="flex items-center justify-between px-2 py-3 border-b border-lantern-bg-cave">
+      <div className="flex items-center justify-between px-2 py-3 border-b border-omneval-border">
         <div className={`flex items-center gap-2 ${collapsed ? "justify-center w-full" : ""}`}>
-          <span className="text-lantern-ember">
-            <LanternLogo />
+          <span className="text-omneval-violet">
+            <OmnevalLogo />
           </span>
           {!collapsed && (
-            <span className="text-sm font-semibold text-lantern-pure">
-              Lantern
+            <span
+              className="text-sm font-bold tracking-wide"
+              style={{ color: colors.accents.violetPale, letterSpacing: "0.04em" }}
+            >
+              omneval
             </span>
           )}
         </div>
-        <button
-          onClick={onToggle}
-          className="p-1 rounded hover:bg-lantern-bg-illumination text-lantern-ash hover:text-lantern-pure transition-colors"
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            {collapsed ? (
-              <path d="M10 2l4 4-4 4M6 6H14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            ) : (
+        {!collapsed && (
+          <button
+            onClick={onToggle}
+            className="p-1 rounded hover:bg-omneval-surface text-omneval-text-muted hover:text-omneval-text-pure transition-colors"
+            title="Collapse sidebar"
+            aria-label="Collapse sidebar"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M6 2L2 6l4 4M10 6H2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            )}
-          </svg>
-        </button>
+            </svg>
+          </button>
+        )}
+        {collapsed && (
+          <button
+            onClick={onToggle}
+            className="p-1 rounded hover:bg-omneval-surface text-omneval-text-muted hover:text-omneval-text-pure transition-colors"
+            title="Expand sidebar"
+            aria-label="Expand sidebar"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M10 2l4 4-4 4M6 6H14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Navigation sections */}
@@ -346,7 +363,7 @@ export default function Sidebar({ collapsed, onToggle, active, onNavigate, onLog
 
       {/* Bottom section */}
       {!collapsed && (
-        <div className="border-t border-lantern-bg-cave py-2 px-1">
+        <div className="border-t border-omneval-border py-2 px-1">
           {BOTTOM_ITEMS.map((item) => (
             <NavItemButton
               key={item.id}
@@ -361,14 +378,14 @@ export default function Sidebar({ collapsed, onToggle, active, onNavigate, onLog
       {/* Bottom section for collapsed state - Settings + Logout */}
       {collapsed && (
         <>
-          <div className="border-t border-lantern-bg-cave w-full" />
+          <div className="border-t border-omneval-border w-full" />
           <div className="flex flex-col items-center gap-1 px-1 pb-2">
             <button
               onClick={() => onNavigate("settings")}
               className={`p-2 rounded-md transition-colors duration-150 ${
                 active === "settings"
-                  ? "text-lantern-ember bg-lantern-accent-ember-glow"
-                  : "text-lantern-ash hover:text-lantern-pure"
+                  ? "text-omneval-violet-pale bg-omneval-violet-active"
+                  : "text-omneval-text-muted hover:text-omneval-text-pure"
               }`}
               title="Settings"
               aria-label="Settings"
@@ -379,8 +396,8 @@ export default function Sidebar({ collapsed, onToggle, active, onNavigate, onLog
               onClick={() => onNavigate("admin")}
               className={`p-2 rounded-md transition-colors duration-150 ${
                 active === "admin"
-                  ? "text-lantern-ember bg-lantern-accent-ember-glow"
-                  : "text-lantern-ash hover:text-lantern-pure"
+                  ? "text-omneval-violet-pale bg-omneval-violet-active"
+                  : "text-omneval-text-muted hover:text-omneval-text-pure"
               }`}
               title="Admin"
               aria-label="Admin"
@@ -391,8 +408,8 @@ export default function Sidebar({ collapsed, onToggle, active, onNavigate, onLog
               onClick={onLogout}
               className={`p-2 rounded-md transition-colors duration-150 ${
                 onLogout
-                  ? "text-lantern-ash hover:text-lantern-pure"
-                  : "text-lantern-ash/40 cursor-not-allowed"
+                  ? "text-omneval-text-muted hover:text-omneval-text-pure"
+                  : "text-omneval-text-muted/40 cursor-not-allowed"
               }`}
               title="Logout"
               aria-label="Logout"
@@ -406,10 +423,10 @@ export default function Sidebar({ collapsed, onToggle, active, onNavigate, onLog
 
       {/* User section with logout */}
       {!collapsed && (
-        <div className="border-t border-lantern-bg-cave py-2 px-3">
+        <div className="border-t border-omneval-border py-2 px-3">
           <button
             onClick={onLogout}
-            className="flex items-center gap-2 w-full text-sm text-lantern-ash hover:text-lantern-pure transition-colors px-2 py-1.5 rounded-md hover:bg-lantern-bg-illumination"
+            className="flex items-center gap-2 w-full text-sm text-omneval-text-muted hover:text-omneval-text-pure transition-colors px-2 py-1.5 rounded-md hover:bg-omneval-surface"
             title="Logout"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">

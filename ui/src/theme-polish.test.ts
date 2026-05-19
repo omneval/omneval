@@ -88,15 +88,15 @@ describe("Issue #102 — Dark Theme Polish", () => {
   describe("CSS custom properties", () => {
     it("includes new CSS variables for semantic colors", () => {
       const vars = colors.cssVariables;
-      expect(vars).toHaveProperty("--lantern-text-mid");
-      expect(vars).toHaveProperty("--lantern-accent-success");
-      expect(vars).toHaveProperty("--lantern-accent-warning");
+      expect(vars).toHaveProperty("--omneval-text-mid");
+      expect(vars).toHaveProperty("--omneval-success");
+      expect(vars).toHaveProperty("--omneval-warning");
     });
 
     it("includes new CSS variables for card elevation", () => {
       const vars = colors.cssVariables;
-      expect(vars).toHaveProperty("--lantern-card-shadow");
-      expect(vars).toHaveProperty("--lantern-card-hover-shadow");
+      expect(vars).toHaveProperty("--omneval-card-shadow");
+      expect(vars).toHaveProperty("--omneval-card-hover-shadow");
     });
   });
 });

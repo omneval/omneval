@@ -229,8 +229,8 @@ export default function TraceDetailPage({
             Back
           </button>
           <div className="flex-1" />
-          <span className="text-xs text-lantern-ash">
-            <span className="font-mono text-lantern-pure">{traceId}</span>
+          <span className="text-xs text-omneval-text-muted">
+            <span className="font-mono text-omneval-text-pure">{traceId}</span>
           </span>
         </div>
       </div>
@@ -243,8 +243,8 @@ export default function TraceDetailPage({
             onClick={() => setViewMode(mode)}
             className={`px-3 py-1.5 text-sm rounded-md transition-colors capitalize ${
               mode === viewMode
-                ? "text-lantern-ember"
-                : "text-lantern-ash hover:text-lantern-pure"
+                ? "text-omneval-violet-pale"
+                : "text-omneval-text-muted hover:text-omneval-text-pure"
             }`}
             style={
               mode === viewMode
@@ -274,7 +274,7 @@ export default function TraceDetailPage({
             }}
           >
             <div className="flex items-center gap-3 mb-1">
-              <span className="text-sm font-semibold text-lantern-pure">{trace.name}</span>
+              <span className="text-sm font-semibold text-omneval-text-pure">{trace.name}</span>
               {trace.kind && (
                 <span
                   className="text-xs px-2 py-0.5 rounded-full font-medium"
@@ -287,10 +287,10 @@ export default function TraceDetailPage({
                 </span>
               )}
               {trace.model && (
-                <span className="text-xs font-mono text-lantern-ash">{trace.model}</span>
+                <span className="text-xs font-mono text-omneval-text-muted">{trace.model}</span>
               )}
             </div>
-            <div className="flex items-center gap-4 text-xs text-lantern-ash">
+            <div className="flex items-center gap-4 text-xs text-omneval-text-muted">
               <span>{formatTime(trace.start_time)}</span>
               <span>{formatDuration(trace.start_time, trace.end_time)}</span>
               <span>{totalTokens(trace).toLocaleString()} tokens</span>
@@ -368,7 +368,7 @@ function ChatTurnsView({ value, label }: { value: string; label: string }) {
 
   return (
     <div>
-      <div className="text-xs font-medium text-lantern-ash mb-2 uppercase tracking-wider">
+      <div className="text-xs font-medium text-omneval-text-muted mb-2 uppercase tracking-wider">
         {label}
       </div>
       <div
@@ -394,7 +394,7 @@ function ChatTurnsView({ value, label }: { value: string; label: string }) {
             >
               {turn.role}
             </span>
-            <span className="text-lantern-pure whitespace-pre-wrap">{turn.content}</span>
+            <span className="text-omneval-text-pure whitespace-pre-wrap">{turn.content}</span>
           </div>
         ))}
       </div>
@@ -457,7 +457,7 @@ function GanttWaterfall({
         }}
       >
         <div className="px-4 py-2 border-b" style={{ borderColor: colors.backgrounds.caveWall }}>
-          <span className="text-xs font-medium text-lantern-ash uppercase tracking-wider">Waterfall Timeline</span>
+          <span className="text-xs font-medium text-omneval-text-muted uppercase tracking-wider">Waterfall Timeline</span>
         </div>
         <div className="overflow-x-auto">
           <ResponsiveContainer width="100%" height={Math.max(60, data.length * 40)}>
@@ -523,7 +523,7 @@ function GanttWaterfall({
         }}
       >
         <div className="px-4 py-2 border-b" style={{ borderColor: colors.backgrounds.caveWall }}>
-          <span className="text-xs font-medium text-lantern-ash uppercase tracking-wider">Spans ({data.length})</span>
+          <span className="text-xs font-medium text-omneval-text-muted uppercase tracking-wider">Spans ({data.length})</span>
         </div>
         {data.map((entry, i) => (
           <div
@@ -531,7 +531,7 @@ function GanttWaterfall({
             className={`flex items-center gap-3 px-4 py-2 cursor-pointer transition-colors ${
               selectedSpanId === entry.spanId
                 ? ""
-                : "hover:bg-lantern-accent-flicker-hover"
+                : "hover:bg-omneval-violet-hover"
             }`}
             style={{
               backgroundColor: selectedSpanId === entry.spanId
@@ -549,12 +549,12 @@ function GanttWaterfall({
           >
             <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }} />
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-lantern-pure truncate">{entry.name}</div>
+              <div className="text-xs font-medium text-omneval-text-pure truncate">{entry.name}</div>
               {entry.model && (
-                <div className="text-xs text-lantern-ash font-mono truncate max-w-[150px]">{entry.model}</div>
+                <div className="text-xs text-omneval-text-muted font-mono truncate max-w-[150px]">{entry.model}</div>
               )}
             </div>
-            <span className="text-xs text-lantern-ash flex-shrink-0">{formatMs(entry.duration)}</span>
+            <span className="text-xs text-omneval-text-muted flex-shrink-0">{formatMs(entry.duration)}</span>
           </div>
         ))}
       </div>
@@ -597,7 +597,7 @@ function SlideInDetailPanel({
         <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: colors.backgrounds.caveWall }}>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-lantern-pure truncate">{span.name}</span>
+              <span className="text-sm font-semibold text-omneval-text-pure truncate">{span.name}</span>
               {span.kind && (
                 <span
                   className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0"
@@ -610,7 +610,7 @@ function SlideInDetailPanel({
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-3 text-xs text-lantern-ash mt-1">
+            <div className="flex items-center gap-3 text-xs text-omneval-text-muted mt-1">
               <span>{formatDuration(span.start_time, span.end_time)}</span>
               <span>{totalTokens(span).toLocaleString()} tokens</span>
               {span.cost_usd > 0 && (
@@ -637,27 +637,27 @@ function SlideInDetailPanel({
           {/* Metadata */}
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div>
-              <span className="text-lantern-ash">Span ID</span>
-              <div className="font-mono text-lantern-pure mt-0.5 truncate" title={span.span_id}>
+              <span className="text-omneval-text-muted">Span ID</span>
+              <div className="font-mono text-omneval-text-pure mt-0.5 truncate" title={span.span_id}>
                 {span.span_id}
               </div>
             </div>
             <div>
-              <span className="text-lantern-ash">Parent ID</span>
-              <div className="font-mono text-lantern-pure mt-0.5 truncate" title={span.parent_id}>
+              <span className="text-omneval-text-muted">Parent ID</span>
+              <div className="font-mono text-omneval-text-pure mt-0.5 truncate" title={span.parent_id}>
                 {span.parent_id || "—"}
               </div>
             </div>
             {span.model && (
               <div>
-                <span className="text-lantern-ash">Model</span>
-                <div className="text-lantern-pure mt-0.5">{span.model}</div>
+                <span className="text-omneval-text-muted">Model</span>
+                <div className="text-omneval-text-pure mt-0.5">{span.model}</div>
               </div>
             )}
             {span.status_code && (
               <div>
-                <span className="text-lantern-ash">Status</span>
-                <div className="text-lantern-pure mt-0.5">{span.status_code}</div>
+                <span className="text-omneval-text-muted">Status</span>
+                <div className="text-omneval-text-pure mt-0.5">{span.status_code}</div>
               </div>
             )}
           </div>
@@ -665,7 +665,7 @@ function SlideInDetailPanel({
           {/* Scores */}
           {span.scores && span.scores.length > 0 && (
             <div>
-              <div className="text-xs font-medium text-lantern-ash mb-2">Scores</div>
+              <div className="text-xs font-medium text-omneval-text-muted mb-2">Scores</div>
               <ScoreBadges scores={span.scores} />
             </div>
           )}
@@ -842,8 +842,8 @@ function SpanRow({
 
         {/* Span name */}
         <div className="flex-1 min-w-0">
-          <div className="text-xs text-lantern-pure truncate">{span.name}</div>
-          <div className="text-xs text-lantern-ash font-mono truncate max-w-[200px]">
+          <div className="text-xs text-omneval-text-pure truncate">{span.name}</div>
+          <div className="text-xs text-omneval-text-muted font-mono truncate max-w-[200px]">
             {span.span_id.slice(0, 8)}
             {span.model && (
               <span className="ml-2 opacity-60">{span.model}</span>
@@ -852,12 +852,12 @@ function SpanRow({
         </div>
 
         {/* Duration */}
-        <span className="text-xs text-lantern-ash flex-shrink-0">
+        <span className="text-xs text-omneval-text-muted flex-shrink-0">
           {formatDuration(span.start_time, span.end_time)}
         </span>
 
         {/* Token count */}
-        <span className="text-xs text-lantern-ash flex-shrink-0 hidden sm:block">
+        <span className="text-xs text-omneval-text-muted flex-shrink-0 hidden sm:block">
           {totalTokens(span).toLocaleString()}t
         </span>
 

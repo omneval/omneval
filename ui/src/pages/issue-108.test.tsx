@@ -27,7 +27,7 @@ describe("AC2: Sidebar section labels ≥ 4.5:1 contrast against charcoal backgr
     onLogout: vi.fn(),
   };
 
-  it("section label buttons do not use text-lantern-ash/70 (low-contrast class)", () => {
+  it("section label buttons do not use text-omneval-text-muted/70 (low-contrast class)", () => {
     const { container } = render(<Sidebar {...sidebarProps} />);
     // Section label buttons are accordion toggle buttons with chevron + label text
     const sectionLabelButtons = Array.from(
@@ -39,11 +39,11 @@ describe("AC2: Sidebar section labels ≥ 4.5:1 contrast against charcoal backgr
 
     expect(sectionLabelButtons.length).toBeGreaterThan(0);
     sectionLabelButtons.forEach((btn) => {
-      expect(btn.className).not.toContain("text-lantern-ash/70");
+      expect(btn.className).not.toContain("text-omneval-text-muted/70");
     });
   });
 
-  it("section label buttons use a high-contrast text class (text-lantern-mid or text-lantern-pure)", () => {
+  it("section label buttons use a high-contrast text class (text-omneval-text-muted or text-omneval-text-pure)", () => {
     const { container } = render(<Sidebar {...sidebarProps} />);
     const sectionLabelButtons = Array.from(
       container.querySelectorAll<HTMLButtonElement>("nav button")
@@ -55,7 +55,7 @@ describe("AC2: Sidebar section labels ≥ 4.5:1 contrast against charcoal backgr
     expect(sectionLabelButtons.length).toBeGreaterThan(0);
     sectionLabelButtons.forEach((btn) => {
       const cls = btn.className;
-      const hasHighContrast = cls.includes("text-lantern-mid") || cls.includes("text-lantern-pure");
+      const hasHighContrast = cls.includes("text-omneval-text-muted") || cls.includes("text-omneval-text-pure");
       expect(hasHighContrast).toBe(true);
     });
   });

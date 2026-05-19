@@ -153,7 +153,7 @@ export default function App() {
   // ── Authenticated Layout ──
   return (
     <ErrorBoundary>
-      <div className="flex flex-col h-screen" style={{ background: colors.backgrounds.abyssBlack }}>
+      <div className="flex flex-col h-screen" style={{ background: colors.backgrounds.voidBlack }}>
       {/* Header */}
       <Header
         activeProject={activeProject}
@@ -169,7 +169,7 @@ export default function App() {
       {/* Main Content */}
       <Layout activeNav={page === "trace-detail" ? "traces" : page} onNavigate={handleNavigate} onLogout={handleLogout}>
         <ToastProvider>
-          <div style={{ background: colors.backgrounds.abyssBlack }}>
+          <div style={{ background: colors.backgrounds.voidBlack }}>
             {showNewProject && (
               <NewProjectModal
                 onClose={() => setShowNewProject(false)}

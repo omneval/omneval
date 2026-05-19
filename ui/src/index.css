@@ -9,48 +9,53 @@
    ──────────────────────────────────────────────────────── */
 @theme {
   /* Background surfaces */
-  --color-lantern-bg-abyss: #000000;
-  --color-lantern-bg-charcoal: #0D0D0D;
-  --color-lantern-bg-illumination: #1A1A1A;
-  --color-lantern-bg-cave: #2D2D2D;
+  --color-omneval-void: #0A0A0F;
+  --color-omneval-depth: #111118;
+  --color-omneval-surface: #1C1C28;
+  --color-omneval-border: #2A2A3A;
 
-  /* Accent — solid */
-  --color-lantern-accent-ember: #FF5722;
-  --color-lantern-accent-glow: #FF8A65;
-  --color-lantern-accent-flicker: #FFCCBC;
-  --color-lantern-accent-heat: #E64A19;
-  --color-lantern-accent-success: #4ADE80;
-  --color-lantern-accent-warning: #FBBF24;
-  --color-lantern-accent-danger: #EF4444;
-  --color-lantern-accent-danger-light: #FCA5A5;
+  /* Violet primary accent */
+  --color-omneval-violet: #7C3AED;
+  --color-omneval-violet-light: #8B5CF6;
+  --color-omneval-violet-pale: #A78BFA;
+  --color-omneval-violet-dark: #6D28D9;
 
-  /* Accent — semi-transparent derived */
-  --color-lantern-accent-ember-glow: rgba(255, 87, 34, 0.15);
-  --color-lantern-accent-flicker-hover: rgba(255, 204, 188, 0.1);
-  --color-lantern-accent-flicker-hover-strong: rgba(255, 204, 188, 0.15);
-  --color-lantern-accent-heat-glow: rgba(230, 74, 25, 0.15);
+  /* Cyan secondary accent */
+  --color-omneval-cyan: #06B6D4;
+  --color-omneval-cyan-light: #22D3EE;
+  --color-omneval-cyan-dark: #0891B2;
+
+  /* Semantic states */
+  --color-omneval-success: #10B981;
+  --color-omneval-warning: #F59E0B;
+  --color-omneval-danger: #EF4444;
+  --color-omneval-danger-light: #FCA5A5;
 
   /* Text */
-  --color-lantern-text-pure: #FFFFFF;
-  --color-lantern-text-mid: #C9C9D2;
-  --color-lantern-text-ash: #A1A1AA;
+  --color-omneval-text-pure: #FFFFFF;
+  --color-omneval-text-mid: #C4C4D4;
+  --color-omneval-text-muted: #8B8BA7;
 
-  /* Convenience aliases used directly in components */
-  --color-lantern-danger: #EF4444;
-  --color-lantern-soft: #FFCCBC;
+  /* Derived / semi-transparent — Tailwind can't use rgba directly as tokens,
+     so these are named for hover/active usage via var() in utilities below */
+  --color-omneval-violet-active: rgba(139, 92, 246, 0.15);
+  --color-omneval-violet-hover: rgba(124, 58, 237, 0.12);
+
+  /* Convenience aliases */
+  --color-omneval-danger-alias: #EF4444;
 }
 
 /* ── Global Dark Mode Base ─────────────────────────────── */
 
 @layer base {
   html {
-    background: var(--lantern-bg-abyss);
-    color: var(--lantern-text-pure);
+    background: var(--omneval-void);
+    color: var(--omneval-text-pure);
   }
 
   body {
-    background: var(--lantern-bg-abyss);
-    color: var(--lantern-text-pure);
+    background: var(--omneval-void);
+    color: var(--omneval-text-pure);
     margin: 0;
     padding: 0;
     min-height: 100vh;
@@ -67,16 +72,16 @@
   }
 
   ::-webkit-scrollbar-track {
-    background: var(--lantern-bg-abyss);
+    background: var(--omneval-void);
   }
 
   ::-webkit-scrollbar-thumb {
-    background: var(--lantern-bg-cave);
+    background: var(--omneval-border);
     border-radius: 4px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--lantern-accent-glow);
+    background: var(--omneval-violet-light);
   }
 }
 
@@ -84,41 +89,42 @@
 
 @layer utilities {
   .text-glow {
-    color: var(--lantern-accent-ember);
-    text-shadow: 0 0 8px rgba(255, 87, 34, 0.4);
+    color: var(--omneval-violet-light);
+    text-shadow: 0 0 12px rgba(139, 92, 246, 0.5);
   }
 
   .border-glow {
-    border-color: var(--lantern-accent-ember);
+    border-color: var(--omneval-violet);
   }
 
-  .bg-flicker-hover:hover {
-    background: var(--lantern-accent-flicker-hover);
+  .bg-violet-hover:hover {
+    background: var(--omneval-violet-hover);
   }
 
-  .bg-flicker-hover-strong:hover {
-    background: var(--lantern-accent-flicker-hover-strong);
+  .bg-violet-hover-strong:hover {
+    background: var(--omneval-violet-hover-strong);
   }
 
   /* ── Card elevation ─────────────────────────────────── */
   .card {
-    background: var(--lantern-bg-charcoal);
-    border: 1px solid var(--lantern-bg-cave);
-    border-radius: 0.5rem;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
-    transition: box-shadow 0.15s ease;
+    background: var(--omneval-depth);
+    border: 1px solid var(--omneval-border);
+    border-radius: 0.75rem;
+    box-shadow: var(--omneval-card-shadow);
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
   }
 
   .card:hover {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--omneval-card-hover-shadow);
+    border-color: rgba(124, 58, 237, 0.3);
   }
 
   .card-header {
     padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--lantern-bg-cave);
+    border-bottom: 1px solid var(--omneval-border);
     font-size: 0.875rem;
     font-weight: 500;
-    color: var(--lantern-text-pure);
+    color: var(--omneval-text-pure);
   }
 
   /* ── Form input focus rings ─────────────────────────── */
@@ -128,18 +134,18 @@
   }
 
   .input-focus:focus {
-    border-color: var(--lantern-accent-ember);
-    box-shadow: 0 0 0 2px var(--lantern-focus-ring);
+    border-color: var(--omneval-violet);
+    box-shadow: 0 0 0 2px var(--omneval-focus-ring);
   }
 
   .input-focus.focus-danger {
-    border-color: var(--lantern-accent-danger);
-    box-shadow: 0 0 0 2px var(--lantern-focus-ring-danger);
+    border-color: var(--omneval-danger);
+    box-shadow: 0 0 0 2px var(--omneval-focus-ring-danger);
   }
 
   /* ── Button hierarchy ───────────────────────────────── */
 
-  /* Primary button — brand ember color */
+  /* Primary button — violet brand color */
   .btn-primary {
     display: inline-flex;
     align-items: center;
@@ -150,16 +156,16 @@
     font-size: 0.875rem;
     font-weight: 500;
     color: #ffffff;
-    background: var(--lantern-accent-ember);
-    box-shadow: 0 2px 8px rgba(255, 87, 34, 0.25);
+    background: var(--omneval-violet);
+    box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
     border: none;
     cursor: pointer;
     transition: all 0.15s ease;
   }
 
   .btn-primary:hover:not(:disabled) {
-    background: var(--lantern-accent-glow);
-    box-shadow: 0 4px 12px rgba(255, 87, 34, 0.35);
+    background: var(--omneval-violet-light);
+    box-shadow: 0 4px 16px rgba(124, 58, 237, 0.4);
   }
 
   .btn-primary:active:not(:disabled) {
@@ -181,17 +187,17 @@
     border-radius: 0.5rem;
     font-size: 0.875rem;
     font-weight: 500;
-    color: var(--lantern-text-ash);
+    color: var(--omneval-text-muted);
     background: transparent;
-    border: 1px solid var(--lantern-bg-cave);
+    border: 1px solid var(--omneval-border);
     cursor: pointer;
     transition: all 0.15s ease;
   }
 
   .btn-secondary:hover {
-    color: var(--lantern-text-pure);
-    border-color: var(--lantern-accent-glow);
-    background: var(--lantern-accent-flicker-hover);
+    color: var(--omneval-text-pure);
+    border-color: var(--omneval-violet-light);
+    background: var(--omneval-violet-hover);
   }
 
   .btn-secondary:disabled {
@@ -232,7 +238,7 @@
     border-radius: 0.5rem;
     font-size: 0.875rem;
     font-weight: 500;
-    color: var(--lantern-text-ash);
+    color: var(--omneval-text-muted);
     background: transparent;
     border: none;
     cursor: pointer;
@@ -240,8 +246,8 @@
   }
 
   .btn-ghost:hover {
-    color: var(--lantern-text-pure);
-    background: var(--lantern-accent-flicker-hover);
+    color: var(--omneval-text-pure);
+    background: var(--omneval-violet-hover);
   }
 
   /* ── Empty state ────────────────────────────────────── */
@@ -257,19 +263,19 @@
   .empty-state-icon {
     width: 48px;
     height: 48px;
-    color: var(--lantern-text-ash);
+    color: var(--omneval-text-muted);
     margin-bottom: 0.75rem;
   }
 
   .empty-state-title {
     font-size: 0.875rem;
     font-weight: 600;
-    color: var(--lantern-text-mid);
+    color: var(--omneval-text-mid);
   }
 
   .empty-state-description {
     font-size: 0.75rem;
-    color: var(--lantern-text-ash);
+    color: var(--omneval-text-muted);
     margin-top: 0.25rem;
   }
 
@@ -279,22 +285,9 @@
       position: fixed !important;
       z-index: 50 !important;
       height: 100vh !important;
-      box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6) !important;
+      box-shadow: 4px 0 24px rgba(0, 0, 0, 0.7) !important;
       transform: translateX(-100%);
       transition: transform 0.2s ease;
     }
-  }
-
-  /* ── Card elevation ── */
-  .card {
-    background: var(--lantern-bg-charcoal);
-    border: 1px solid var(--lantern-bg-cave);
-    border-radius: 0.75rem;
-    box-shadow: var(--lantern-card-shadow);
-    transition: box-shadow 0.15s ease;
-  }
-
-  .card:hover {
-    box-shadow: var(--lantern-card-hover-shadow);
   }
 }

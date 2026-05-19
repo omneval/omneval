@@ -1,88 +1,78 @@
 /**
- * Lantern Branding — CSS Custom Properties
+ * omneval Branding — CSS Custom Properties
  *
- * Import this file to apply the Lantern brand palette globally.
+ * Import this file to apply the omneval brand palette globally.
  * All colors are exposed as CSS custom properties under the `:root` scope.
  *
  * Usage in any component stylesheet:
  *   .my-element {
- *     background: var(--lantern-bg-abyss);
- *     color: var(--lantern-text-pure);
- *     border: 1px solid var(--lantern-bg-cave);
+ *     background: var(--omneval-void);
+ *     color: var(--omneval-text-pure);
+ *     border: 1px solid var(--omneval-border);
  *   }
  *
- * Usage for hover highlights (flicker at 10–15% opacity):
+ * Usage for hover highlights (violet at 10–15% opacity):
  *   .table-row:hover {
- *     background: var(--lantern-accent-flicker-hover);
+ *     background: var(--omneval-violet-hover);
  *   }
  */
 
 :root {
-  /* ── The Cave: Backgrounds & Surfaces ─────────────────── */
-  --lantern-bg-abyss: #000000;
-  --lantern-bg-charcoal: #0D0D0D;
-  --lantern-bg-illumination: #1A1A1A;
-  --lantern-bg-cave: #2D2D2D;
+  /* ── Void: Backgrounds & Surfaces ─────────────────────────── */
+  --omneval-void: #0A0A0F;
+  --omneval-depth: #111118;
+  --omneval-surface: #1C1C28;
+  --omneval-border: #2A2A3A;
 
-  /* ── The Lantern: Accents & Data Visualization ────────── */
-  --lantern-accent-ember: #FF5722;
-  --lantern-accent-glow: #FF8A65;
-  --lantern-accent-flicker: #FFCCBC;
-  --lantern-accent-heat: #E64A19;
-  --lantern-accent-ember-glow: #FF7043;
-  --lantern-accent-success: #4ADE80;
-  --lantern-accent-warning: #FBBF24;
-  --lantern-accent-danger: #EF4444;
-  --lantern-accent-danger-light: #FCA5A5;
+  /* ── Violet Primary: Accents & Data Visualization ─────────── */
+  --omneval-violet: #7C3AED;
+  --omneval-violet-light: #8B5CF6;
+  --omneval-violet-pale: #A78BFA;
+  --omneval-violet-dark: #6D28D9;
 
-  /* ── Illumination: Typography ─────────────────────────── */
-  --lantern-text-pure: #FFFFFF;
-  --lantern-text-mid: #C9C9D2;
-  --lantern-text-ash: #A1A1AA;
+  /* ── Cyan Secondary: Data highlights & success ────────────── */
+  --omneval-cyan: #06B6D4;
+  --omneval-cyan-light: #22D3EE;
+  --omneval-cyan-dark: #0891B2;
 
-  /* ── Derived / Convenience ────────────────────────────── */
-  /** Flicker at 10% opacity — for subtle row hover highlights */
-  --lantern-accent-flicker-hover: rgba(255, 204, 188, 0.1);
-  /** Flicker at 15% opacity — for stronger hover highlights */
-  --lantern-accent-flicker-hover-strong: rgba(255, 204, 188, 0.15);
-  /** Ember glow for active states — emberFlare at 15% opacity */
-  --lantern-accent-ember-glow: rgba(255, 87, 34, 0.15);
-  /** Deep heat for error states — deepHeat at 15% opacity */
-  --lantern-accent-heat-glow: rgba(230, 74, 25, 0.15);
+  /* ── Semantic States ──────────────────────────────────────── */
+  --omneval-success: #10B981;
+  --omneval-warning: #F59E0B;
+  --omneval-danger: #EF4444;
+  --omneval-danger-light: #FCA5A5;
 
-  /* ── Focus Ring ──────────────────────────────────────── */
-  /** Ember glow ring for focused inputs — emberFlare at 25% opacity */
-  --lantern-focus-ring: rgba(255, 87, 34, 0.25);
+  /* ── Typography ───────────────────────────────────────────── */
+  --omneval-text-pure: #FFFFFF;
+  --omneval-text-mid: #C4C4D4;
+  --omneval-text-muted: #8B8BA7;
+
+  /* ── Derived / Convenience ────────────────────────────────── */
+  /** Violet at 12% opacity — for subtle row hover highlights */
+  --omneval-violet-hover: rgba(124, 58, 237, 0.12);
+  /** Violet at 18% opacity — for stronger hover/active highlights */
+  --omneval-violet-hover-strong: rgba(124, 58, 237, 0.18);
+  /** Violet at 15% opacity — for active state background */
+  --omneval-violet-active-bg: rgba(139, 92, 246, 0.15);
+  /** Cyan at 12% opacity — for success/data highlights */
+  --omneval-cyan-hover: rgba(6, 182, 212, 0.12);
+
+  /* ── Focus Ring ──────────────────────────────────────────── */
+  /** Violet glow ring for focused inputs — at 30% opacity */
+  --omneval-focus-ring: rgba(124, 58, 237, 0.3);
   /** Danger ring for validation errors — dangerRed at 30% opacity */
-  --lantern-focus-ring-danger: rgba(239, 68, 68, 0.3);
+  --omneval-focus-ring-danger: rgba(239, 68, 68, 0.3);
 
-  /* ── Card Elevation ───────────────────────────────────── */
+  /* ── Card Elevation ───────────────────────────────────────── */
   /** Default card shadow for depth on dark background */
-  --lantern-card-shadow: 0 1px 4px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --omneval-card-shadow: 0 1px 4px rgba(0, 0, 0, 0.6), 0 1px 2px rgba(0, 0, 0, 0.4);
   /** Hover card shadow for interactive elevation */
-  --lantern-card-hover-shadow: 0 4px 16px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.5);
+  --omneval-card-hover-shadow: 0 4px 16px rgba(0, 0, 0, 0.7), 0 2px 8px rgba(0, 0, 0, 0.5);
 
-  /* ── Default Dark Mode Palette ────────────────────────── */
-  /** Main application background */
-  --lantern-bg-root: var(--lantern-bg-abyss);
-  /** Sidebar / header background */
-  --lantern-bg-surface: var(--lantern-bg-charcoal);
-  /** Card / widget background */
-  --lantern-bg-card: var(--lantern-bg-charcoal);
-  /** Table header / search bar background */
-  --lantern-bg-elevated: var(--lantern-bg-illumination);
-  /** Border / divider color */
-  --lantern-border: var(--lantern-bg-cave);
-  /** Primary text color */
-  --lantern-text-primary: var(--lantern-text-pure);
-  /** Secondary text color */
-  --lantern-text-secondary: var(--lantern-text-ash);
-  /** Primary CTA / active accent */
-  --lantern-primary: var(--lantern-accent-ember);
-  /** Secondary accent */
-  --lantern-secondary: var(--lantern-accent-glow);
-  /** Error / critical alert */
-  --lantern-danger: var(--lantern-accent-danger);
-  /** Error light text */
-  --lantern-danger-light: var(--lantern-accent-danger-light);
+  /* ── Semantic Aliases ─────────────────────────────────────── */
+  --omneval-bg-root: var(--omneval-void);
+  --omneval-bg-surface: var(--omneval-depth);
+  --omneval-bg-card: var(--omneval-depth);
+  --omneval-bg-elevated: var(--omneval-surface);
+  --omneval-primary: var(--omneval-violet);
+  --omneval-secondary: var(--omneval-violet-light);
 }

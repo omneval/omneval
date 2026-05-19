@@ -91,7 +91,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function RunningDot() {
   return (
-    <span className="inline-block w-1.5 h-1.5 rounded-full bg-lantern-ember animate-pulse" />
+    <span className="inline-block w-1.5 h-1.5 rounded-full bg-omneval-violet animate-pulse" />
   );
 }
 
@@ -202,7 +202,7 @@ function NewRunModal({ datasetId, activeProject, onClose, onSuccess }: NewRunMod
         <div className="flex items-center justify-between px-5 py-4 border-b"
           style={{ borderColor: colors.backgrounds.caveWall }}
         >
-          <h2 className="text-sm font-semibold text-lantern-pure">
+          <h2 className="text-sm font-semibold text-omneval-text-pure">
             New Dataset Run
           </h2>
           <button
@@ -222,17 +222,17 @@ function NewRunModal({ datasetId, activeProject, onClose, onSuccess }: NewRunMod
         {/* Body */}
         <div className="px-5 py-4 space-y-4">
           {loading ? (
-            <div className="text-xs text-lantern-ash py-4 flex items-center justify-center gap-2">
+            <div className="text-xs text-omneval-text-muted py-4 flex items-center justify-center gap-2">
               <Spinner size={14} /> Loading eval rules…
             </div>
           ) : rules.length === 0 ? (
-            <div className="text-xs text-lantern-ash py-4 text-center">
+            <div className="text-xs text-omneval-text-muted py-4 text-center">
               No active eval rules found. Create an eval rule to start a run.
             </div>
           ) : (
             <>
               <div>
-                <label className="text-xs font-medium text-lantern-ash mb-1 block">
+                <label className="text-xs font-medium text-omneval-text-muted mb-1 block">
                   Eval Rule
                 </label>
                 <select
@@ -328,7 +328,7 @@ function ItemResultRow({ item }: { item: RunItemEntry }) {
           >
             {item.score.toFixed(1)}
           </span>
-          <span className="text-xs text-lantern-ash truncate max-w-xs">
+          <span className="text-xs text-omneval-text-muted truncate max-w-xs">
             {truncate(item.input, 80)}
           </span>
         </div>
@@ -348,7 +348,7 @@ function ItemResultRow({ item }: { item: RunItemEntry }) {
           style={{ borderColor: colors.backgrounds.caveWall }}
         >
           <div>
-            <label className="text-xs font-medium text-lantern-ash mb-1 block">Input</label>
+            <label className="text-xs font-medium text-omneval-text-muted mb-1 block">Input</label>
             <div
               className="text-xs font-mono px-3 py-2 rounded border overflow-auto max-h-32"
               style={{
@@ -361,7 +361,7 @@ function ItemResultRow({ item }: { item: RunItemEntry }) {
             </div>
           </div>
           <div>
-            <label className="text-xs font-medium text-lantern-ash mb-1 block">Expected Output</label>
+            <label className="text-xs font-medium text-omneval-text-muted mb-1 block">Expected Output</label>
             <div
               className="text-xs font-mono px-3 py-2 rounded border overflow-auto max-h-32"
               style={{
@@ -374,7 +374,7 @@ function ItemResultRow({ item }: { item: RunItemEntry }) {
             </div>
           </div>
           <div>
-            <label className="text-xs font-medium text-lantern-ash mb-1 block">Reasoning</label>
+            <label className="text-xs font-medium text-omneval-text-muted mb-1 block">Reasoning</label>
             <div
               className="text-xs px-3 py-2 rounded border"
               style={{
@@ -495,7 +495,7 @@ function RunsTab({ datasetId, activeProject }: RunsTabProps) {
     <div className="space-y-4">
       {/* Header with New Run button */}
       <div className="flex items-center justify-between">
-        <p className="text-xs text-lantern-ash">
+        <p className="text-xs text-omneval-text-muted">
           {runs.length} run{runs.length !== 1 ? "s" : ""}
         </p>
         <button
@@ -511,7 +511,7 @@ function RunsTab({ datasetId, activeProject }: RunsTabProps) {
       </div>
 
       {runs.length === 0 ? (
-        <div className="text-xs text-lantern-ash py-8 text-center">
+        <div className="text-xs text-omneval-text-muted py-8 text-center">
           No runs yet. Create a run to evaluate dataset items.
         </div>
       ) : (
@@ -539,11 +539,11 @@ function RunsTab({ datasetId, activeProject }: RunsTabProps) {
                     {/* Status */}
                     <StatusBadge status={run.status} />
                     {/* Run ID */}
-                    <span className="text-xs font-mono text-lantern-ash truncate" title={run.run_id}>
+                    <span className="text-xs font-mono text-omneval-text-muted truncate" title={run.run_id}>
                       {truncate(run.run_id, 12)}
                     </span>
                     {/* Eval rule */}
-                    <span className="text-xs text-lantern-ash truncate max-w-[200px]">
+                    <span className="text-xs text-omneval-text-muted truncate max-w-[200px]">
                       {run.eval_rule_id}
                     </span>
                   </div>
@@ -565,11 +565,11 @@ function RunsTab({ datasetId, activeProject }: RunsTabProps) {
                       </span>
                     )}
                     {/* Item count */}
-                    <span className="text-xs text-lantern-ash">
+                    <span className="text-xs text-omneval-text-muted">
                       {run.item_count} item{run.item_count !== 1 ? "s" : ""}
                     </span>
                     {/* Created date */}
-                    <span className="text-xs text-lantern-ash hidden md:block">
+                    <span className="text-xs text-omneval-text-muted hidden md:block">
                       {formatTime(run.created_at)}
                     </span>
                     {/* Chevron */}
@@ -601,11 +601,11 @@ function RunsTab({ datasetId, activeProject }: RunsTabProps) {
                         <ItemResultRow key={idx} item={item} />
                       ))
                     ) : run.status === "running" ? (
-                      <div className="text-xs text-lantern-ash py-4 flex items-center gap-2">
+                      <div className="text-xs text-omneval-text-muted py-4 flex items-center gap-2">
                         <Spinner size={14} /> Scoring items…
                       </div>
                     ) : (
-                      <div className="text-xs text-lantern-ash py-4">No items scored yet.</div>
+                      <div className="text-xs text-omneval-text-muted py-4">No items scored yet.</div>
                     )}
                   </div>
                 )}
@@ -681,7 +681,7 @@ function ItemsTab({ datasetId, activeProject }: ItemsTabProps) {
   return (
     <div className="space-y-2">
       {items.length === 0 ? (
-        <div className="text-xs text-lantern-ash py-8 text-center">
+        <div className="text-xs text-omneval-text-muted py-8 text-center">
           No items in this dataset. Save spans from traces to build your dataset.
         </div>
       ) : (
@@ -696,16 +696,16 @@ function ItemsTab({ datasetId, activeProject }: ItemsTabProps) {
           >
             <div className="px-4 py-3">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-mono text-lantern-ash">
+                <span className="text-xs font-mono text-omneval-text-muted">
                   #{idx + 1}
                 </span>
-                <span className="text-xs text-lantern-ash">
+                <span className="text-xs text-omneval-text-muted">
                   {formatTime(item.created_at)}
                 </span>
               </div>
               <div className="space-y-2">
                 <div>
-                  <label className="text-xs font-medium text-lantern-ash mb-1 block">
+                  <label className="text-xs font-medium text-omneval-text-muted mb-1 block">
                     Input
                   </label>
                   <div
@@ -721,7 +721,7 @@ function ItemsTab({ datasetId, activeProject }: ItemsTabProps) {
                 </div>
                 {item.expected_output && (
                   <div>
-                    <label className="text-xs font-medium text-lantern-ash mb-1 block">
+                    <label className="text-xs font-medium text-omneval-text-muted mb-1 block">
                       Expected Output
                     </label>
                     <div
@@ -774,15 +774,15 @@ export default function DatasetDetail({ datasetId, activeProject, onBack }: Data
   const tabBtnClass = (tab: "items" | "runs") =>
     `px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
       activeTab === tab
-        ? "text-lantern-ember border-b-2 border-lantern-ember"
-        : "text-lantern-ash hover:text-lantern-pure"
+        ? "text-omneval-violet-pale border-b-2 border-omneval-violet"
+        : "text-omneval-text-muted hover:text-omneval-text-pure"
     }`;
 
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-24">
         <Spinner size={32} />
-        <p className="text-sm text-lantern-ash mt-3">Loading dataset…</p>
+        <p className="text-sm text-omneval-text-muted mt-3">Loading dataset…</p>
       </div>
     );
   }
@@ -829,10 +829,10 @@ export default function DatasetDetail({ datasetId, activeProject, onBack }: Data
             </svg>
           </button>
           <div>
-            <h1 className="text-base font-semibold text-lantern-pure">
+            <h1 className="text-base font-semibold text-omneval-text-pure">
               {dataset.name}
             </h1>
-            <p className="text-xs text-lantern-ash mt-0.5">
+            <p className="text-xs text-omneval-text-muted mt-0.5">
               {dataset.item_count} item{dataset.item_count !== 1 ? "s" : ""} · Created {formatTime(dataset.created_at)}
             </p>
           </div>

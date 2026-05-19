@@ -269,8 +269,8 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh]">
-        <div className="animate-spin rounded-full h-10 w-10 border-2 border-lantern-ember border-t-transparent" />
-        <p className="text-sm text-lantern-ash mt-3">Loading prompts...</p>
+        <div className="animate-spin rounded-full h-10 w-10 border-2 border-omneval-violet border-t-transparent" />
+        <p className="text-sm text-omneval-text-muted mt-3">Loading prompts...</p>
       </div>
     );
   }
@@ -278,8 +278,8 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh]">
-        <div className="text-lantern-ember text-xl mb-2">⚠</div>
-        <p className="text-sm text-lantern-ash">{error}</p>
+        <div className="text-omneval-violet-pale text-xl mb-2">⚠</div>
+        <p className="text-sm text-omneval-text-muted">{error}</p>
       </div>
     );
   }
@@ -289,8 +289,8 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-lantern-pure">Prompt Registry</h1>
-          <p className="text-sm text-lantern-ash mt-0.5">
+          <h1 className="text-xl font-semibold text-omneval-text-pure">Prompt Registry</h1>
+          <p className="text-sm text-omneval-text-muted mt-0.5">
             {prompts.length} prompt{prompts.length !== 1 ? "s" : ""} · {activeProject}
           </p>
         </div>
@@ -314,7 +314,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
             borderColor: colors.backgrounds.caveWall,
           }}
         >
-          <h3 className="text-sm font-medium text-lantern-pure mb-4">New Prompt</h3>
+          <h3 className="text-sm font-medium text-omneval-text-pure mb-4">New Prompt</h3>
 
           {createError && (
             <div className="mb-3 px-3 py-2 rounded text-sm" style={{ backgroundColor: "rgba(255,87,34,0.1)", color: colors.accents.emberFlare }}>
@@ -329,13 +329,13 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
 
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div>
-              <label className="block text-xs text-lantern-ash mb-1">Prompt Name</label>
+              <label className="block text-xs text-omneval-text-muted mb-1">Prompt Name</label>
               <input
                 type="text"
                 value={newName}
                 onChange={(e) => { setNewName(e.target.value); setFormErrors((prev) => ({ ...prev, name: "" })); }}
                 placeholder="e.g. greeting"
-                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.name ? "border-lantern-danger focus-danger" : ""}`}
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.name ? "border-omneval-danger focus-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
                   borderColor: formErrors.name ? colors.accents.dangerRed : colors.backgrounds.caveWall,
@@ -347,13 +347,13 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
               )}
             </div>
             <div>
-              <label className="block text-xs text-lantern-ash mb-1">Model</label>
+              <label className="block text-xs text-omneval-text-muted mb-1">Model</label>
               <input
                 type="text"
                 value={newModel}
                 onChange={(e) => { setNewModel(e.target.value); setFormErrors((prev) => ({ ...prev, model: "" })); }}
                 placeholder="e.g. gpt-4"
-                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.model ? "border-lantern-danger focus-danger" : ""}`}
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.model ? "border-omneval-danger focus-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
                   borderColor: formErrors.model ? colors.accents.dangerRed : colors.backgrounds.caveWall,
@@ -368,7 +368,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
 
           <div className="grid grid-cols-3 gap-4 mb-4">
             <div>
-              <label className="block text-xs text-lantern-ash mb-1">Temperature (0–2)</label>
+              <label className="block text-xs text-omneval-text-muted mb-1">Temperature (0–2)</label>
               <input
                 type="number"
                 value={newTemperature}
@@ -376,7 +376,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 max={2}
                 step={0.1}
                 onChange={(e) => { setNewTemperature(parseFloat(e.target.value) || 0); setFormErrors((prev) => ({ ...prev, temperature: "" })); }}
-                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.temperature ? "border-lantern-danger focus-danger" : ""}`}
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.temperature ? "border-omneval-danger focus-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
                   borderColor: formErrors.temperature ? colors.accents.dangerRed : colors.backgrounds.caveWall,
@@ -388,13 +388,13 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
               )}
             </div>
             <div>
-              <label className="block text-xs text-lantern-ash mb-1">Max Tokens</label>
+              <label className="block text-xs text-omneval-text-muted mb-1">Max Tokens</label>
               <input
                 type="number"
                 value={newMaxTokens}
                 min={1}
                 onChange={(e) => { setNewMaxTokens(parseInt(e.target.value) || 0); setFormErrors((prev) => ({ ...prev, maxTokens: "" })); }}
-                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.maxTokens ? "border-lantern-danger focus-danger" : ""}`}
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.maxTokens ? "border-omneval-danger focus-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
                   borderColor: formErrors.maxTokens ? colors.accents.dangerRed : colors.backgrounds.caveWall,
@@ -408,10 +408,10 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
           </div>
 
           <div className="mb-4">
-            <label className="block text-xs text-lantern-ash mb-1">
+            <label className="block text-xs text-omneval-text-muted mb-1">
               Template
-              <span className="text-lantern-ash ml-2 text-xs">
-                (use <code className="text-lantern-soft">{'{{variable}}'}</code> syntax)
+              <span className="text-omneval-text-muted ml-2 text-xs">
+                (use <code className="text-omneval-violet-pale">{'{{variable}}'}</code> syntax)
               </span>
             </label>
             <textarea
@@ -419,7 +419,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
               onChange={(e) => { setNewTemplate(e.target.value); setFormErrors((prev) => ({ ...prev, template: "" })); }}
               placeholder="Hello {{name}}, welcome to {{place}}!"
               rows={4}
-              className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors font-mono resize-none input-focus ${formErrors.template ? "border-lantern-danger focus-danger" : ""}`}
+              className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors font-mono resize-none input-focus ${formErrors.template ? "border-omneval-danger focus-danger" : ""}`}
               style={{
                 backgroundColor: colors.backgrounds.abyssBlack,
                 borderColor: formErrors.template ? colors.accents.dangerRed : colors.backgrounds.caveWall,
@@ -429,7 +429,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
             {formErrors.template && (
               <p className="text-xs mt-1" style={{ color: colors.accents.dangerRed }}>{formErrors.template}</p>
             )}
-            <p className="text-xs text-lantern-ash mt-1 opacity-60">{newTemplate.length.toLocaleString()} / 32,000 chars</p>
+            <p className="text-xs text-omneval-text-muted mt-1 opacity-60">{newTemplate.length.toLocaleString()} / 32,000 chars</p>
           </div>
 
           <div className="flex gap-3">
@@ -501,13 +501,13 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                     height="16"
                     viewBox="0 0 16 16"
                     fill="none"
-                    className={`text-lantern-ash transition-transform duration-200 flex-shrink-0 ${isExpanded ? "rotate-90" : ""}`}
+                    className={`text-omneval-text-muted transition-transform duration-200 flex-shrink-0 ${isExpanded ? "rotate-90" : ""}`}
                   >
                     <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
 
                   {/* Name */}
-                  <span className="text-sm font-medium text-lantern-pure truncate flex-1">
+                  <span className="text-sm font-medium text-omneval-text-pure truncate flex-1">
                     {prompt.name}
                   </span>
 
@@ -546,7 +546,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 {isExpanded && (
                   <div className="border-t px-5 py-4" style={{ borderColor: colors.backgrounds.caveWall }}>
                     {versions.length === 0 ? (
-                      <p className="text-xs text-lantern-ash">No version history</p>
+                      <p className="text-xs text-omneval-text-muted">No version history</p>
                     ) : (
                       <div className="space-y-3">
                         {versions.map((v) => (
@@ -566,14 +566,14 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                               >
                                 Version {v.version}
                               </span>
-                              <span className="text-xs text-lantern-ash">{formatTime(v.created_at)}</span>
+                              <span className="text-xs text-omneval-text-muted">{formatTime(v.created_at)}</span>
                             </div>
 
                             {/* Template */}
                             <div className="mb-2">
-                              <div className="text-xs text-lantern-ash mb-1">Template</div>
+                              <div className="text-xs text-omneval-text-muted mb-1">Template</div>
                               <pre
-                                className="text-xs font-mono text-lantern-pure p-2 rounded"
+                                className="text-xs font-mono text-omneval-text-pure p-2 rounded"
                                 style={{ backgroundColor: colors.backgrounds.charcoalDepth, overflow: "auto", maxHeight: "120px" }}
                               >
                                 {v.template}
@@ -581,10 +581,10 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                             </div>
 
                             {/* Model config */}
-                            <div className="flex gap-4 text-xs text-lantern-ash">
-                              <span>Model: <span className="text-lantern-pure">{v.model}</span></span>
-                              <span>Temp: <span className="text-lantern-pure">{v.temperature}</span></span>
-                              <span>Max: <span className="text-lantern-pure">{v.max_tokens}</span></span>
+                            <div className="flex gap-4 text-xs text-omneval-text-muted">
+                              <span>Model: <span className="text-omneval-text-pure">{v.model}</span></span>
+                              <span>Temp: <span className="text-omneval-text-pure">{v.temperature}</span></span>
+                              <span>Max: <span className="text-omneval-text-pure">{v.max_tokens}</span></span>
                             </div>
 
                             {/* Label assignment dropdowns */}
@@ -673,10 +673,10 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
               style={{ borderColor: colors.backgrounds.caveWall }}
             >
               <div>
-                <h2 className="text-sm font-semibold text-lantern-pure">
+                <h2 className="text-sm font-semibold text-omneval-text-pure">
                   Compare: {diffPromptName}
                 </h2>
-                <p className="text-xs text-lantern-ash mt-0.5">
+                <p className="text-xs text-omneval-text-muted mt-0.5">
                   Version {diffOldVersion} vs {diffNewVersion}
                 </p>
               </div>
@@ -697,7 +697,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
             <div className="flex items-center gap-3 px-5 py-3 border-b"
               style={{ borderColor: colors.backgrounds.caveWall }}
             >
-              <span className="text-xs text-lantern-ash">From:</span>
+              <span className="text-xs text-omneval-text-muted">From:</span>
               <select
                 value={diffOldVersion}
                 onChange={(e) => {
@@ -717,7 +717,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 ))}
               </select>
 
-              <span className="text-xs text-lantern-ash">To:</span>
+              <span className="text-xs text-omneval-text-muted">To:</span>
               <select
                 value={diffNewVersion}
                 onChange={(e) => {
@@ -741,7 +741,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
             <div className="flex-1 overflow-auto">
               {/* Text diff */}
               <div className="px-5 py-4">
-                <h3 className="text-xs font-semibold text-lantern-ash mb-2 uppercase tracking-wider">Template Diff</h3>
+                <h3 className="text-xs font-semibold text-omneval-text-muted mb-2 uppercase tracking-wider">Template Diff</h3>
                 <div
                   className="font-mono text-xs rounded-md border overflow-auto"
                   style={{
@@ -794,7 +794,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                           color: text,
                         }}
                       >
-                        <span className="mr-2 select-none text-lantern-ash" style={{ opacity: 0.4, minWidth: "2ch", display: "inline-block", textAlign: "right" }}>
+                        <span className="mr-2 select-none text-omneval-text-muted" style={{ opacity: 0.4, minWidth: "2ch", display: "inline-block", textAlign: "right" }}>
                           {idx}
                         </span>
                         {line.type === "added" && <span className="mr-1">+</span>}
@@ -812,7 +812,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 <div className="px-5 py-4 border-t"
                   style={{ borderColor: colors.backgrounds.caveWall }}
                 >
-                  <h3 className="text-xs font-semibold text-lantern-ash mb-2 uppercase tracking-wider">Model Config Changes</h3>
+                  <h3 className="text-xs font-semibold text-omneval-text-muted mb-2 uppercase tracking-wider">Model Config Changes</h3>
                   <div
                     className="rounded-md border overflow-hidden"
                     style={{

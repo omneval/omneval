@@ -3,23 +3,23 @@ import { colors } from "@/theme";
 
 describe("Toast color references", () => {
   it("emberFlare is used for success toast background", () => {
-    expect(colors.accents.emberFlare).toBe("#FF5722");
+    expect(colors.accents.emberFlare).toBe("#7C3AED");
   });
 
   it("softGlow is used for info toast background", () => {
-    expect(colors.accents.softGlow).toBe("#FF8A65");
+    expect(colors.accents.softGlow).toBe("#8B5CF6");
   });
 
   it("caveWall is used for borders", () => {
-    expect(colors.backgrounds.caveWall).toBe("#2D2D2D");
+    expect(colors.backgrounds.caveWall).toBe("#2A2A3A");
   });
 
   it("charcoalDepth is used for modal background", () => {
-    expect(colors.backgrounds.charcoalDepth).toBe("#0D0D0D");
+    expect(colors.backgrounds.charcoalDepth).toBe("#111118");
   });
 
   it("abyssBlack is used for input backgrounds", () => {
-    expect(colors.backgrounds.abyssBlack).toBe("#000000");
+    expect(colors.backgrounds.abyssBlack).toBe("#0A0A0F");
   });
 
   it("pureLight is used for text on dark backgrounds", () => {
@@ -27,7 +27,7 @@ describe("Toast color references", () => {
   });
 
   it("ashGrey is used for secondary text", () => {
-    expect(colors.typography.ashGrey).toBe("#A1A1AA");
+    expect(colors.typography.ashGrey).toBe("#8B8BA7");
   });
 });
 

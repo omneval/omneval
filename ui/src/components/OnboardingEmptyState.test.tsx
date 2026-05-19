@@ -24,7 +24,7 @@ describe("OnboardingEmptyState", () => {
     fireEvent.click(screen.getByRole("button", { name: /install/i }));
 
     expect(writeTextMock).toHaveBeenCalledWith(
-      "pip install lantern-sdk"
+      "pip install omneval-sdk"
     );
   });
 

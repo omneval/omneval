@@ -282,7 +282,7 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
       <div className="flex items-center justify-between px-6 py-4 border-b"
         style={{ borderColor: colors.backgrounds.caveWall }}
       >
-        <h1 className="text-base font-semibold text-lantern-pure">Datasets</h1>
+        <h1 className="text-base font-semibold text-omneval-text-pure">Datasets</h1>
         <button
           onClick={() => setShowNewForm(true)}
           className="px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-150 text-white"
@@ -299,7 +299,7 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
         <div className="px-6 py-4 border-b"
           style={{ borderColor: colors.backgrounds.caveWall }}
         >
-          <h3 className="text-sm font-medium text-lantern-pure mb-3">New Dataset</h3>
+          <h3 className="text-sm font-medium text-omneval-text-pure mb-3">New Dataset</h3>
 
           {/* Name input */}
           <div className="flex items-center gap-2 mb-3">
@@ -348,11 +348,11 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
             className="rounded-md border border-dashed p-4 mb-3"
             style={{ borderColor: colors.backgrounds.caveWall }}
           >
-            <label className="block text-xs font-medium text-lantern-ash mb-1">
+            <label className="block text-xs font-medium text-omneval-text-muted mb-1">
               Upload CSV or JSON
             </label>
-            <p className="text-[10px] text-lantern-ash mb-2">
-              Each item needs <span className="text-lantern-pure">input</span> and <span className="text-lantern-pure">expected_output</span> fields. CSV uses headers; JSON uses an array of objects. Unknown columns are ignored.
+            <p className="text-[10px] text-omneval-text-muted mb-2">
+              Each item needs <span className="text-omneval-text-pure">input</span> and <span className="text-omneval-text-pure">expected_output</span> fields. CSV uses headers; JSON uses an array of objects. Unknown columns are ignored.
             </p>
 
             {uploadedFile && (
@@ -360,16 +360,16 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
                 style={{ backgroundColor: colors.backgrounds.charcoalDepth }}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="shrink-0 text-lantern-ember">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="shrink-0 text-omneval-violet-pale">
                     <path d="M11 1H3a1 1 0 00-1 1v12a1 1 0 001 1h10a1 1 0 001-1V5L9.5 1H11z" stroke="currentColor" strokeWidth="1.2" />
                     <path d="M9.5 1v4h4" stroke="currentColor" strokeWidth="1.2" />
                   </svg>
-                  <span className="text-xs text-lantern-pure truncate">{uploadedFile.name}</span>
-                  <span className="text-xs text-lantern-ash">({parsedItems.length} items)</span>
+                  <span className="text-xs text-omneval-text-pure truncate">{uploadedFile.name}</span>
+                  <span className="text-xs text-omneval-text-muted">({parsedItems.length} items)</span>
                 </div>
                 <button
                   onClick={handleCancelImport}
-                  className="text-xs text-lantern-ash hover:text-lantern-pure transition-colors shrink-0"
+                  className="text-xs text-omneval-text-muted hover:text-omneval-text-pure transition-colors shrink-0"
                 >
                   ✕
                 </button>
@@ -384,7 +384,7 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
                 if (file) handleFileChange(file);
                 e.target.value = "";
               }}
-              className="block w-full text-xs text-lantern-ash file:mr-3 file:py-1 file:px-2 file:rounded file:text-xs file:border-0 file:cursor-pointer file:font-medium file:transition-colors"
+              className="block w-full text-xs text-omneval-text-muted file:mr-3 file:py-1 file:px-2 file:rounded file:text-xs file:border-0 file:cursor-pointer file:font-medium file:transition-colors"
               style={{
                 color: colors.typography.ashGrey,
               }}
@@ -399,7 +399,7 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
           {/* Import progress */}
           {importing && (
             <div className="mb-3">
-              <div className="flex items-center justify-between text-xs text-lantern-ash mb-1">
+              <div className="flex items-center justify-between text-xs text-omneval-text-muted mb-1">
                 <span>Importing {parsedItems.length} items…</span>
                 <span>{importProgress}%</span>
               </div>
@@ -433,11 +433,11 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
           <ErrorBanner message={error} />
         ) : datasets.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <svg width="48" height="48" viewBox="0 0 18 18" fill="none" className="mb-4 text-lantern-ash/40">
+            <svg width="48" height="48" viewBox="0 0 18 18" fill="none" className="mb-4 text-omneval-text-muted/40">
               <rect x="2" y="2" width="14" height="14" rx="2" stroke="currentColor" strokeWidth="1.5" />
               <path d="M6 6h6M6 9h4M6 12h6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
             </svg>
-            <p className="text-xs text-lantern-ash">
+            <p className="text-xs text-omneval-text-muted">
               No datasets found. Create one to evaluate model outputs.
             </p>
           </div>
@@ -460,11 +460,11 @@ export default function DatasetsPage({ activeProject, onNavigateToDetail }: Data
               >
                 <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onNavigateToDetail(ds.dataset_id)}>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-medium text-lantern-pure truncate">
+                    <h3 className="text-sm font-medium text-omneval-text-pure truncate">
                       {ds.name}
                     </h3>
                   </div>
-                  <p className="text-xs text-lantern-ash mt-0.5">
+                  <p className="text-xs text-omneval-text-muted mt-0.5">
                     {ds.item_count} item{ds.item_count !== 1 ? "s" : ""} · {formatTime(ds.created_at)}
                   </p>
                 </div>

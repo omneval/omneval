@@ -174,7 +174,7 @@ function FormField({
 }) {
   return (
     <div>
-      <label className="block text-xs text-lantern-ash mb-1">{label}</label>
+      <label className="block text-xs text-omneval-text-muted mb-1">{label}</label>
       {children}
     </div>
   );
@@ -191,7 +191,7 @@ function StyledInput({
     <input
       value={value}
       onChange={onChange}
-      className="input-focus w-full px-3 py-2 text-sm rounded-md border border-lantern-bg-cave transition-colors"
+      className="input-focus w-full px-3 py-2 text-sm rounded-md border border-omneval-border transition-colors"
       style={{
         backgroundColor: colors.backgrounds.abyssBlack,
         color: colors.typography.pureLight,
@@ -213,7 +213,7 @@ function StyledSelect({
     <select
       value={value}
       onChange={onChange}
-      className="input-focus w-full px-3 py-2 text-sm rounded-md border border-lantern-bg-cave transition-colors"
+      className="input-focus w-full px-3 py-2 text-sm rounded-md border border-omneval-border transition-colors"
       style={{
         backgroundColor: colors.backgrounds.abyssBlack,
         color: colors.typography.pureLight,
@@ -278,22 +278,22 @@ function RuleCard({ rule, onDelete }: { rule: EvalRule; onDelete: (ruleId: strin
       <div className="flex items-center gap-4 px-5 py-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-lantern-pure truncate">
+            <span className="text-sm font-medium text-omneval-text-pure truncate">
               {rule.Name}
             </span>
             <StatusBadge enabled={rule.Enabled} />
           </div>
-          <div className="flex items-center gap-4 mt-1 text-xs text-lantern-ash">
-            <span>Model: <span className="text-lantern-pure">{rule.JudgeModel || "—"}</span></span>
+          <div className="flex items-center gap-4 mt-1 text-xs text-omneval-text-muted">
+            <span>Model: <span className="text-omneval-text-pure">{rule.JudgeModel || "—"}</span></span>
             {rule.PromptName && (
-              <span>Prompt: <span className="text-lantern-pure">{rule.PromptName}{rule.PromptVersion > 1 ? ` v${rule.PromptVersion}` : ""}</span></span>
+              <span>Prompt: <span className="text-omneval-text-pure">{rule.PromptName}{rule.PromptVersion > 1 ? ` v${rule.PromptVersion}` : ""}</span></span>
             )}
-            <span>Sample: <span className="text-lantern-pure">{sampleRatePercent(rule.SampleRate)}</span></span>
-            <span className="truncate">Filter: <span className="text-lantern-pure">{truncate(filterDisplayText(rule.Filter), 40)}</span></span>
+            <span>Sample: <span className="text-omneval-text-pure">{sampleRatePercent(rule.SampleRate)}</span></span>
+            <span className="truncate">Filter: <span className="text-omneval-text-pure">{truncate(filterDisplayText(rule.Filter), 40)}</span></span>
           </div>
         </div>
 
-        <span className="text-xs text-lantern-ash flex-shrink-0 hidden sm:block">
+        <span className="text-xs text-omneval-text-muted flex-shrink-0 hidden sm:block">
           {formatTime(rule.CreatedAt)}
         </span>
 
@@ -482,8 +482,8 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh]">
-        <div className="animate-spin rounded-full h-10 w-10 border-2 border-lantern-ember border-t-transparent" />
-        <p className="text-sm text-lantern-ash mt-3">Loading eval rules...</p>
+        <div className="animate-spin rounded-full h-10 w-10 border-2 border-omneval-violet border-t-transparent" />
+        <p className="text-sm text-omneval-text-muted mt-3">Loading eval rules...</p>
       </div>
     );
   }
@@ -491,8 +491,8 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh]">
-        <div className="text-lantern-ember text-xl mb-2">⚠</div>
-        <p className="text-sm text-lantern-ash">{error}</p>
+        <div className="text-omneval-violet-pale text-xl mb-2">⚠</div>
+        <p className="text-sm text-omneval-text-muted">{error}</p>
       </div>
     );
   }
@@ -502,8 +502,8 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-lantern-pure">Eval Rules</h1>
-          <p className="text-sm text-lantern-ash mt-0.5">
+          <h1 className="text-xl font-semibold text-omneval-text-pure">Eval Rules</h1>
+          <p className="text-sm text-omneval-text-muted mt-0.5">
             {rules.length} rule{rules.length !== 1 ? "s" : ""} · {activeProject}
           </p>
         </div>
@@ -527,7 +527,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
             borderColor: colors.backgrounds.caveWall,
           }}
         >
-          <h3 className="text-sm font-medium text-lantern-pure mb-4">New Eval Rule</h3>
+          <h3 className="text-sm font-medium text-omneval-text-pure mb-4">New Eval Rule</h3>
 
           {createError && (
             <div className="mb-3 px-3 py-2 rounded text-sm" style={{ backgroundColor: "rgba(255,87,34,0.1)", color: colors.accents.emberFlare }}>
@@ -630,7 +630,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
             className="p-3 rounded-md border mb-4"
             style={{ backgroundColor: colors.backgrounds.abyssBlack, borderColor: colors.backgrounds.caveWall }}
           >
-            <h4 className="text-xs font-medium text-lantern-ash mb-3 uppercase tracking-wider">Filter Conditions (AND logic)</h4>
+            <h4 className="text-xs font-medium text-omneval-text-muted mb-3 uppercase tracking-wider">Filter Conditions (AND logic)</h4>
 
             <div className="grid grid-cols-3 gap-3 mb-3">
               <FormField label="Span Kind">
@@ -731,7 +731,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
               {previewLoading ? "Previewing..." : "Preview Matching Spans"}
             </button>
             {previewResult && (
-              <span className="text-xs text-lantern-ash">
+              <span className="text-xs text-omneval-text-muted">
                 {previewResult.spans.length} matches in last hour · {previewResult.match_count_24h} in last 24h
               </span>
             )}
@@ -745,7 +745,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
             >
               <button
                 onClick={() => setShowPreview(!showPreview)}
-                className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-lantern-pure transition-colors"
+                className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-omneval-text-pure transition-colors"
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(255,87,34,0.05)")}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
               >
@@ -764,9 +764,9 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
               {showPreview && (
                 <div className="px-4 pb-4">
                   {previewError ? (
-                    <div className="text-sm text-lantern-ember">{previewError}</div>
+                    <div className="text-sm text-omneval-violet-pale">{previewError}</div>
                   ) : previewResult && previewResult.spans.length === 0 ? (
-                    <div className="text-sm text-lantern-ash py-2">No matching spans found.</div>
+                    <div className="text-sm text-omneval-text-muted py-2">No matching spans found.</div>
                   ) : (
                     <div className="space-y-2">
                       {previewResult?.spans.map((span) => (
@@ -775,17 +775,17 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
                           className="flex items-center gap-4 px-3 py-2 rounded text-xs"
                           style={{ backgroundColor: "rgba(255,255,255,0.03)" }}
                         >
-                          <span className="font-mono text-lantern-pure truncate max-w-[120px]" title={span.name}>
+                          <span className="font-mono text-omneval-text-pure truncate max-w-[120px]" title={span.name}>
                             {span.name}
                           </span>
-                          <span className="text-lantern-ash">model: <span className="text-lantern-pure">{span.model}</span></span>
-                          <span className="text-lantern-ash">kind: <span className="text-lantern-pure">{span.kind}</span></span>
-                          <span className="text-lantern-ash">cost: <span className="text-lantern-pure">${span.cost_usd.toFixed(4)}</span></span>
-                          <span className="text-lantern-ash flex-1 text-right truncate" title={span.start_time}>
+                          <span className="text-omneval-text-muted">model: <span className="text-omneval-text-pure">{span.model}</span></span>
+                          <span className="text-omneval-text-muted">kind: <span className="text-omneval-text-pure">{span.kind}</span></span>
+                          <span className="text-omneval-text-muted">cost: <span className="text-omneval-text-pure">${span.cost_usd.toFixed(4)}</span></span>
+                          <span className="text-omneval-text-muted flex-1 text-right truncate" title={span.start_time}>
                             {new Date(span.start_time).toLocaleString()}
                           </span>
-                          <span className="font-mono text-lantern-ash flex-shrink-0">
-                            <span className="text-lantern-pure">trace: </span>{span.trace_id.substring(0, 8)}...
+                          <span className="font-mono text-omneval-text-muted flex-shrink-0">
+                            <span className="text-omneval-text-pure">trace: </span>{span.trace_id.substring(0, 8)}...
                           </span>
                         </div>
                       ))}

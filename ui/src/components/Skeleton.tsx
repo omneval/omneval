@@ -9,7 +9,7 @@ interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
 
 /**
  * Skeleton — Animated shimmer placeholder for loading states.
- * Uses Tailwind's `animate-pulse` and the lantern cave-wall color
+ * Uses Tailwind's `animate-pulse` and the omneval border color
  * to match the dark theme aesthetic.
  */
 export function Skeleton({
@@ -21,7 +21,7 @@ export function Skeleton({
 }: SkeletonProps) {
   return (
     <div
-      className={`animate-pulse rounded bg-lantern-bg-cave ${className}`}
+      className={`animate-pulse rounded bg-omneval-border ${className}`}
       style={{
         width: width ?? "100%",
         height,

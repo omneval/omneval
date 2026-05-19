@@ -26,13 +26,13 @@ describe("Sidebar", () => {
   it("highlights the Traces item as active when active='traces'", () => {
     render(<Sidebar {...defaultProps} active="traces" />);
     const tracesButton = screen.getByRole("button", { name: /Traces/i });
-    expect(tracesButton).toHaveClass("text-lantern-ember");
+    expect(tracesButton).toHaveClass("text-omneval-violet-pale");
   });
 
   it("does not highlight the Traces item when active='dashboard'", () => {
     render(<Sidebar {...defaultProps} active="dashboard" />);
     const tracesButton = screen.getByRole("button", { name: /Traces/i });
-    expect(tracesButton).not.toHaveClass("text-lantern-ember");
+    expect(tracesButton).not.toHaveClass("text-omneval-violet-pale");
   });
 
   it("has an appropriate icon for the Traces nav item", () => {

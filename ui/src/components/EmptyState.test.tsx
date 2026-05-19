@@ -45,7 +45,7 @@ describe("EmptyState", () => {
     expect(handleAction).toHaveBeenCalledTimes(1);
   });
 
-  it("renders the onboarding variant with the lantern icon", () => {
+  it("renders the onboarding variant with the omneval icon", () => {
     render(<EmptyState variant="onboarding" />);
     expect(screen.getByText("No traces yet")).toBeInTheDocument();
   });

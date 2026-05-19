@@ -395,21 +395,22 @@ describe("AdminPage", () => {
   it("deletes all traces via DELETE API", async () => {
     const deleteCalls: string[] = [];
 
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url === "/api/v1/admin/api-keys") {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url: RequestInfo | URL, _init?: RequestInit) => {
+      const urlStr = url instanceof Request ? url.url : String(url);
+      if (urlStr === "/api/v1/admin/api-keys") {
         return resolveKeys([]);
       }
-      if (url === "/api/v1/projects") {
+      if (urlStr === "/api/v1/projects") {
         return resolveProjects([]);
       }
-      if (url === "/api/v1/admin/traces/proj-1/count") {
+      if (urlStr === "/api/v1/admin/traces/proj-1/count") {
         return ({
           ok: true,
           json: () => Promise.resolve({ count: 10 }),
         } as Response);
       }
-      if (url === "/api/v1/admin/traces/proj-1") {
-        deleteCalls.push(url);
+      if (urlStr === "/api/v1/admin/traces/proj-1") {
+        deleteCalls.push(urlStr);
         return ({ ok: true } as Response);
       }
       return resolveKeys([{ count: 0 }]);
