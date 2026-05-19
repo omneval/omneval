@@ -10,12 +10,7 @@ Infrastructure resolution:
 - Auth: admin credentials from secret (optional)
 */ -}}
 {{- $name := .Release.Name -}}
-{{- $redisPassword := "" -}}
-{{- if and .Values.redis.enabled .Values.redis.auth.enabled .Values.redis.auth.password }}
-  {{- $redisPassword = "redis-password" -}}
-{{- else if .Values.redis.external.password }}
-  {{- $redisPassword = "redis-password" -}}
-{{- end -}}
+{{- $redisPassword := include "lantern.redisPassword" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
