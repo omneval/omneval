@@ -1,42 +1,42 @@
-# @lantern/sdk
+# @omneval/sdk
 
-Browser-compatible OpenTelemetry tracer and prompt client for [Lantern](https://github.com/zbloss/lantern).
+Browser-compatible OpenTelemetry tracer and prompt client for [Omneval](https://github.com/omneval/omneval).
 
 Send spans, write scores, and fetch prompts — all using the native Fetch API. No Node.js dependencies required.
 
-For Node.js, use `@lantern/sdk/node` for automatic OpenTelemetry instrumentation of LLM frameworks.
+For Node.js, use `@omneval/sdk/node` for automatic OpenTelemetry instrumentation of LLM frameworks.
 
 ## Quickstart
 
 ```bash
-npm install @lantern/sdk
+npm install @omneval/sdk
 ```
 
 ```ts
-import { Lantern } from "@lantern/sdk";
+import { Omneval } from "@omneval/sdk";
 
-// Initialize with your Lantern Query API URL
-Lantern.init({
+// Initialize with your Omneval Query API URL
+Omneval.init({
   baseUrl: "http://localhost:3000",
-  apiKey: "ltn_proj_your_api_key",
+  apiKey: "oev_proj_your_api_key",
 });
 
 // Start a span
-const spanId = Lantern.startSpan("llm.call", { kind: "llm" });
+const spanId = Omneval.startSpan("llm.call", { kind: "llm" });
 
 // Set span attributes
-Lantern.setModel(spanId, "gpt-4");
-Lantern.setInput(spanId, "Hello!");
-Lantern.setTokens(spanId, 10, 5);
+Omneval.setModel(spanId, "gpt-4");
+Omneval.setInput(spanId, "Hello!");
+Omneval.setTokens(spanId, 10, 5);
 
 // End the span with output
-await Lantern.endSpan(spanId, "Hi there!");
+await Omneval.endSpan(spanId, "Hi there!");
 
 // Fetch a prompt (cached for 30 seconds)
-const template = await Lantern.getPrompt("greeting", "production");
+const template = await Omneval.getPrompt("greeting", "production");
 
 // Write a manual score
-await Lantern.writeScore(spanId, {
+await Omneval.writeScore(spanId, {
   name: "helpfulness",
   value: 0.8,
   reasoning: "Great answer",
@@ -45,127 +45,127 @@ await Lantern.writeScore(spanId, {
 
 ## API Reference
 
-### `Lantern.init(config)`
+### `Omneval.init(config)`
 
 Initializes the SDK. Call once at application startup.
 
 ```ts
-Lantern.init({
+Omneval.init({
   baseUrl: "http://localhost:3000",
-  apiKey?: "ltn_proj_...",
+  apiKey?: "oev_proj_...",
 });
 ```
 
-### `Lantern.startSpan(name, attributes?, kind?, parentSpanId?)`
+### `Omneval.startSpan(name, attributes?, kind?, parentSpanId?)`
 
 Starts a new span. Returns a span ID to use with `endSpan()`.
 
 ```ts
-const spanId = Lantern.startSpan("llm.call", { kind: "llm" });
+const spanId = Omneval.startSpan("llm.call", { kind: "llm" });
 ```
 
-### `Lantern.endSpan(spanId, output?)`
+### `Omneval.endSpan(spanId, output?)`
 
 Ends a span and exports all pending spans.
 
 ```ts
 // String output
-await Lantern.endSpan(spanId, "response text");
+await Omneval.endSpan(spanId, "response text");
 
 // Object with output and attributes
-await Lantern.endSpan(spanId, {
+await Omneval.endSpan(spanId, {
   output: "response text",
   attributes: { custom: "value" },
 });
 ```
 
-### `Lantern.setModel(spanId, model)`
+### `Omneval.setModel(spanId, model)`
 
 Sets the model name on an active span.
 
 ```ts
-Lantern.setModel(spanId, "gpt-4");
+Omneval.setModel(spanId, "gpt-4");
 ```
 
-### `Lantern.setInput(spanId, input)`
+### `Omneval.setInput(spanId, input)`
 
 Sets the input on an active span.
 
 ```ts
-Lantern.setInput(spanId, "Hello!");
+Omneval.setInput(spanId, "Hello!");
 ```
 
-### `Lantern.setTokens(spanId, inputTokens, outputTokens)`
+### `Omneval.setTokens(spanId, inputTokens, outputTokens)`
 
 Sets token counts on an active span.
 
 ```ts
-Lantern.setTokens(spanId, 100, 50);
+Omneval.setTokens(spanId, 100, 50);
 ```
 
-### `Lantern.setPrompt(spanId, name, version?)`
+### `Omneval.setPrompt(spanId, name, version?)`
 
 Sets the prompt name and optional version on an active span.
 
 ```ts
-Lantern.setPrompt(spanId, "greeting", 1);
+Omneval.setPrompt(spanId, "greeting", 1);
 ```
 
-### `Lantern.getPrompt(name, options?)`
+### `Omneval.getPrompt(name, options?)`
 
 Fetches a prompt by name and label (defaults to "production"). Cached client-side for 30 seconds.
 
 ```ts
-const template = await Lantern.getPrompt("greeting", "production");
+const template = await Omneval.getPrompt("greeting", "production");
 
 // Or with options object
-const template = await Lantern.getPrompt("greeting", { label: "staging" });
+const template = await Omneval.getPrompt("greeting", { label: "staging" });
 
 // Or by version (immutable cache, no TTL)
-const template = await Lantern.getPrompt("greeting", { version: 2 });
+const template = await Omneval.getPrompt("greeting", { version: 2 });
 ```
 
-### `Lantern.writeScore(spanId, options)`
+### `Omneval.writeScore(spanId, options)`
 
 Writes a manual score for a span. Generates a trace ID automatically.
 
 ```ts
 // Object syntax
-await Lantern.writeScore(spanId, {
+await Omneval.writeScore(spanId, {
   name: "accuracy",
   value: 0.95,
   reasoning: "Perfect answer",
 });
 
 // Shorthand: writeScore(spanId, evalName, value, reasoning?)
-await Lantern.writeScore(spanId, "helpfulness", 0.8);
+await Omneval.writeScore(spanId, "helpfulness", 0.8);
 ```
 
-### `Lantern.flush()`
+### `Omneval.flush()`
 
 Forces export of all pending spans.
 
 ```ts
-await Lantern.flush();
+await Omneval.flush();
 ```
 
 ## Node.js — Automatic Tracing with OpenTelemetry
 
-For Node.js applications, use the `@lantern/sdk/node` entry point to configure automatic tracing of LLM frameworks (OpenAI, LangChain, etc.) via OpenTelemetry auto-instrumentation.
+For Node.js applications, use the `@omneval/sdk/node` entry point to configure automatic tracing of LLM frameworks (OpenAI, LangChain, etc.) via OpenTelemetry auto-instrumentation.
 
 ```bash
-npm install @lantern/sdk
+npm install @omneval/sdk
 npm install @opentelemetry/sdk-node @opentelemetry/exporter-trace-otlp-http
 npm install @opentelemetry/instrumentation-openai
 ```
 
 ```ts
-import { instrument } from "@lantern/sdk/node";
+import { instrument } from "@omneval/sdk/node";
 
-// Configure the OTel tracer to export traces to Lantern
+// Configure the OTel tracer to export traces to Omneval
 const shutdown = instrument({
   baseUrl: "http://localhost:3000",
-  apiKey: "ltn_proj_your_api_key",
+  apiKey: "oev_proj_your_api_key",
   serviceName: "my-llm-app",
 });
 
@@ -180,12 +180,12 @@ process.exit(0);
 
 ### `instrument(options)`
 
-Configures OpenTelemetry in Node.js to export traces to Lantern.
+Configures OpenTelemetry in Node.js to export traces to Omneval.
 
 ```ts
 const shutdown = instrument({
   baseUrl: "http://localhost:3000",  // Required
-  apiKey?: "ltn_proj_...",            // Optional — sent as Authorization: Bearer
+  apiKey?: "oev_proj_...",            // Optional — sent as Authorization: Bearer
   serviceName?: "my-app",             // Optional — service.name resource attribute
 });
 ```

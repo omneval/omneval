@@ -11,7 +11,7 @@ kind: Ingress
 metadata:
   name: {{ $name }}-ingress
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     {{- with .Values.commonLabels }}
     {{- toYaml . | nindent 4 }}

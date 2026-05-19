@@ -14,7 +14,7 @@ kind: Service
 metadata:
   name: {{ $name }}-redis
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: redis
     {{- with .Values.commonLabels }}
@@ -28,7 +28,7 @@ spec:
       targetPort: 6379
       protocol: TCP
   selector:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: redis
 ---
@@ -37,7 +37,7 @@ kind: Deployment
 metadata:
   name: {{ $name }}-redis
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: redis
     {{- with .Values.commonLabels }}
@@ -47,13 +47,13 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: lantern
+      app.kubernetes.io/name: omneval
       app.kubernetes.io/instance: {{ $name }}
       app.kubernetes.io/component: redis
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: lantern
+        app.kubernetes.io/name: omneval
         app.kubernetes.io/instance: {{ $name }}
         app.kubernetes.io/component: redis
         {{- with .Values.commonLabels }}
@@ -121,7 +121,7 @@ kind: PersistentVolumeClaim
 metadata:
   name: {{ $name }}-redis-data
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: redis
 spec:

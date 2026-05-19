@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: lantern
+  name: omneval
   labels:
-    app.kubernetes.io/name: lantern
-    app.kubernetes.io/part-of: lantern
+    app.kubernetes.io/name: omneval
+    app.kubernetes.io/part-of: omneval

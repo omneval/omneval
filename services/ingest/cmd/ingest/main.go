@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"github.com/zbloss/lantern/services/ingest/internal/server"
+	"github.com/omneval/omneval/services/ingest/internal/server"
 )
 
 func main() {

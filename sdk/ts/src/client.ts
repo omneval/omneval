@@ -1,9 +1,9 @@
-import { GetPromptOptions, LanternConfig, PromptVersion, WriteScoreOptions } from "./types";
+import { GetPromptOptions, OmnevalConfig, PromptVersion, WriteScoreOptions } from "./types";
 import { generateTraceId } from "./id";
 
 const PROMPT_CACHE_TTL_MS = 30_000;
 
-export class LanternClient {
+export class OmnevalClient {
   private readonly baseUrl: string;
   private readonly apiKey?: string;
 
@@ -13,7 +13,7 @@ export class LanternClient {
   >();
   private readonly versionCache = new Map<string, string>();
 
-  constructor(config: LanternConfig) {
+  constructor(config: OmnevalConfig) {
     this.baseUrl = config.baseUrl;
     this.apiKey = config.apiKey;
   }

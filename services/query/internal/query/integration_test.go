@@ -14,7 +14,7 @@ import (
 // TestIntegration_QueryWithDuckDB tests the full query flow with a real DuckDB database.
 func TestIntegration_QueryWithDuckDB(t *testing.T) {
 	// Create a temp DuckDB file path.
-	tmpDir, err := os.MkdirTemp("", "lantern-integration")
+	tmpDir, err := os.MkdirTemp("", "omneval-integration")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}

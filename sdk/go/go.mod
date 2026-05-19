@@ -1,9 +1,9 @@
-module github.com/zbloss/lantern/sdk/go
+module github.com/omneval/omneval/sdk/go
 
 go 1.25.0
 
 require (
-	github.com/zbloss/lantern/internal v0.0.0-00010101000000-000000000000
+	github.com/omneval/omneval/internal v0.0.0-00010101000000-000000000000
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.43.0
 	go.opentelemetry.io/otel/sdk v1.43.0
@@ -30,4 +30,4 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/zbloss/lantern/internal => ../../internal
+replace github.com/omneval/omneval/internal => ../../internal

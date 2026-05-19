@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/duckdb"
-	"github.com/zbloss/lantern/internal/pricing"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/duckdb"
+	"github.com/omneval/omneval/internal/pricing"
 )
 
 // bundledPricing provides a minimal pricing table for tests.

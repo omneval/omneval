@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zbloss/lantern/internal/auth"
-	"github.com/zbloss/lantern/internal/domain"
-	handlers "github.com/zbloss/lantern/internal/handlers"
-	"github.com/zbloss/lantern/services/ingest/internal/metrics"
+	"github.com/omneval/omneval/internal/auth"
+	"github.com/omneval/omneval/internal/domain"
+	handlers "github.com/omneval/omneval/internal/handlers"
+	"github.com/omneval/omneval/services/ingest/internal/metrics"
 )
 
 // --- Types ---
@@ -55,7 +55,7 @@ type SpanQueue interface {
 
 // --- NativeHandler ---
 
-// NativeHandler handles POST /api/v1/spans for the native Lantern REST format.
+// NativeHandler handles POST /api/v1/spans for the native Omneval REST format.
 type NativeHandler struct {
 	queue       SpanQueue
 	validator   Validator

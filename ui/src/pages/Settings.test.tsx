@@ -9,12 +9,12 @@ function renderWithToast(ui: React.ReactElement) {
 
 const mockApiKeys = [
   {
-    key_id: "ltn_proj_abc123",
+    key_id: "oev_proj_abc123",
     kind: "project" as const,
     created_at: "2026-05-13T10:00:00Z",
   },
   {
-    key_id: "ltn_svc_worker-1",
+    key_id: "oev_svc_worker-1",
     kind: "service" as const,
     service_name: "my-agent",
     created_at: "2026-05-14T08:00:00Z",
@@ -71,8 +71,8 @@ describe("SettingsPage", () => {
     renderWithToast(<SettingsPage activeProject="proj-1" />);
 
     await waitFor(() => {
-      expect(screen.getByText("ltn_proj_abc123")).toBeInTheDocument();
-      expect(screen.getByText("ltn_svc_worker-1")).toBeInTheDocument();
+      expect(screen.getByText("oev_proj_abc123")).toBeInTheDocument();
+      expect(screen.getByText("oev_svc_worker-1")).toBeInTheDocument();
     });
   });
 
@@ -120,7 +120,7 @@ describe("SettingsPage", () => {
   it("shows revoked badge for revoked keys", async () => {
     const revokedKey = [
       {
-        key_id: "ltn_proj_revoked",
+        key_id: "oev_proj_revoked",
         kind: "project" as const,
         created_at: "2026-05-10T10:00:00Z",
         revoked_at: "2026-05-15T12:00:00Z",
@@ -139,7 +139,7 @@ describe("SettingsPage", () => {
   it("hides Revoke button for revoked keys", async () => {
     const revokedKey = [
       {
-        key_id: "ltn_proj_revoked",
+        key_id: "oev_proj_revoked",
         kind: "project" as const,
         created_at: "2026-05-10T10:00:00Z",
         revoked_at: "2026-05-15T12:00:00Z",
@@ -268,7 +268,7 @@ describe("SettingsPage", () => {
   });
 
   it("generates API key and shows success dialog", async () => {
-    const generatedKey = "ltn_proj_XYZ123abc456def789ghi012jkl345mno678";
+    const generatedKey = "oev_proj_XYZ123abc456def789ghi012jkl345mno678";
     let callCount = 0;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
@@ -526,7 +526,7 @@ describe("SettingsPage", () => {
   });
 
   it("copies key to clipboard when Copy Key is clicked", async () => {
-    const generatedKey = "ltn_proj_testKey123";
+    const generatedKey = "oev_proj_testKey123";
     let callCount = 0;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
@@ -591,7 +591,7 @@ describe("SettingsPage", () => {
               key_id: "key-123",
               project_id: "proj-1",
               kind: "project",
-              raw_key: "ltn_proj_test123",
+              raw_key: "oev_proj_test123",
               created_at: new Date().toISOString(),
             }),
         } as Response);
@@ -656,7 +656,7 @@ describe("SettingsPage", () => {
   });
 
   it("shows the generated key with CopyButton", async () => {
-    const generatedKey = "ltn_proj_testKey123";
+    const generatedKey = "oev_proj_testKey123";
     let callCount = 0;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
@@ -725,7 +725,7 @@ describe("SettingsPage", () => {
   });
 
   it("generates service key with service name", async () => {
-    const generatedKey = "ltn_svc_myagent123abc456def789ghi";
+    const generatedKey = "oev_svc_myagent123abc456def789ghi";
     let callCount = 0;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(

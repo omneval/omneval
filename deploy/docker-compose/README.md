@@ -1,7 +1,7 @@
-# Lantern Local Development with Docker Compose
+# Omneval Local Development with Docker Compose
 
 This directory contains a `docker-compose.yml` that starts all infrastructure
-and application services needed to run Lantern locally.
+and application services needed to run Omneval locally.
 
 ## Prerequisites
 
@@ -62,7 +62,7 @@ An admin user is bootstrapped on first start:
 | Access Key | `minio_s3_access_key` |
 | Secret Key | `minio_s3_secret_key` |
 
-The `lantern` bucket is created automatically on first start by the `minio-init`
+The `omneval` bucket is created automatically on first start by the `minio-init`
 helper container.
 
 ## Customizing Infrastructure Credentials
@@ -82,7 +82,7 @@ docker compose up --build
 docker compose logs -f
 
 # View logs from a specific service
-docker compose logs -f lantern-query
+docker compose logs -f omneval-query
 
 # Stop all services (preserves data in named volumes)
 docker compose down
@@ -94,7 +94,7 @@ docker compose down -v
 docker compose up --build
 
 # Scale eval workers (horizontal scaling)
-docker compose up -d --scale lantern-eval=3
+docker compose up -d --scale omneval-eval=3
 ```
 
 ## Service Commands
@@ -103,7 +103,7 @@ Run arbitrary commands inside a service container (useful for debugging):
 
 ```bash
 # Run a shell inside the query service
-docker compose run --rm lantern-query sh
+docker compose run --rm omneval-query sh
 ```
 
 ## Data Persistence
@@ -128,7 +128,7 @@ docker compose ps
 
 ### MinIO bucket not created
 
-The `minio-init` container creates the `lantern` bucket once and exits. If it
+The `minio-init` container creates the `omneval` bucket once and exits. If it
 fails, the application services will also fail:
 
 ```bash
@@ -147,4 +147,4 @@ docker compose up -d
 ### Out of memory
 
 Reduce eval concurrency or limit the number of running services. The default
-eval concurrency is 4; set `LANTERN_EVAL_CONCURRENCY` to a lower value if needed.
+eval concurrency is 4; set `OMNEVAL_EVAL_CONCURRENCY` to a lower value if needed.

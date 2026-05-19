@@ -20,7 +20,7 @@ tests:
       redis.enabled: true
     asserts:
       - matchRegex:
-          path: data["lantern.yaml"]
+          path: data["omneval.yaml"]
           pattern: 'redis:'
 
   - it: should include database config when postgresql is enabled
@@ -28,7 +28,7 @@ tests:
       postgresql.enabled: true
     asserts:
       - matchRegex:
-          path: data["lantern.yaml"]
+          path: data["omneval.yaml"]
           pattern: 'driver: postgres'
 
   - it: should include storage config when minio is enabled
@@ -36,11 +36,11 @@ tests:
       minio.enabled: true
     asserts:
       - matchRegex:
-          path: data["lantern.yaml"]
+          path: data["omneval.yaml"]
           pattern: 'endpoint:'
 
   - it: should include auth config
     asserts:
       - matchRegex:
-          path: data["lantern.yaml"]
+          path: data["omneval.yaml"]
           pattern: 'session_ttl:'

@@ -10,20 +10,20 @@ tests:
       redis.external.password: "externalpass"
     asserts:
       - matchRegex:
-          path: data["lantern.yaml"]
+          path: data["omneval.yaml"]
           pattern: 'redis.mycompany.com:6379'
   - it: should use external postgres in configmap
     set:
       postgresql.enabled: false
       postgresql.external.host: "pg.mycompany.com"
       postgresql.external.port: 5432
-      postgresql.external.database: "lantern"
-      postgresql.external.user: "lantern"
+      postgresql.external.database: "omneval"
+      postgresql.external.user: "omneval"
       postgresql.external.password: "secret"
       database.driver: postgres
     asserts:
       - matchRegex:
-          path: data["lantern.yaml"]
+          path: data["omneval.yaml"]
           pattern: 'pg.mycompany.com'
 ---
 suite: infrastructure disabled

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/metadata"
-	"github.com/zbloss/lantern/internal/metadata/postgres"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/metadata"
+	"github.com/omneval/omneval/internal/metadata/postgres"
 	testpg "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -18,7 +18,7 @@ import (
 func openTestStore(ctx context.Context, t *testing.T) *postgres.Store {
 	t.Helper()
 	pc, err := testpg.RunContainer(ctx,
-		testpg.WithDatabase("lantern"),
+		testpg.WithDatabase("omneval"),
 		testpg.WithUsername("postgres"),
 		testpg.WithPassword("postgres"),
 	)

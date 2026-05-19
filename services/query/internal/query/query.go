@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/storage"
-	"github.com/zbloss/lantern/services/query/internal/cursor"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/storage"
+	"github.com/omneval/omneval/services/query/internal/cursor"
 )
 
 // FilterOp is an allowlisted comparison operator for span queries.
@@ -202,9 +202,9 @@ const (
 	DefaultLimit = 50
 	// MaxLimit is the maximum page size allowed.
 	MaxLimit = 500
-	// lanternBucket is the default S3 bucket for both the Writer's flusher
+	// omnevalBucket is the default S3 bucket for both the Writer's flusher
 	// and the Query API's cold Parquet reads. Must match config.Storage.Bucket.
-	lanternBucket = "lantern"
+	omnevalBucket = "omneval"
 )
 
 // SpanQuery builds a parameterized SQL query for POST /api/v1/spans/query.
@@ -279,7 +279,7 @@ func (q *SpanQuery) hotSQL() (string, []any, error) {
 // It uses read_parquet with hive_partitioning=true to read Hive-partitioned
 // Parquet files from s3://bucket/archive/project_id={id}/date={date}/spans/.
 // Only reads when S3 is configured (s3Store != nil).
-// The bucket defaults to "lantern" — matching the Writer's s3URL default.
+// The bucket defaults to "omneval" — matching the Writer's s3URL default.
 func (q *SpanQuery) coldSQL() string {
 	if q.s3Store == nil {
 		// No S3 configured: return a no-op that produces zero rows.
@@ -288,7 +288,7 @@ func (q *SpanQuery) coldSQL() string {
 
 	parquetPrefix := fmt.Sprintf(
 		"s3://%s/archive/project_id=%s/**/*.parquet",
-		lanternBucket,
+		omnevalBucket,
 		q.projectID,
 	)
 

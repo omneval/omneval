@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
+	"github.com/omneval/omneval/internal/domain"
 )
 
 func TestMatchesFilter_AllNil(t *testing.T) {

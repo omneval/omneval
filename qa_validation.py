@@ -1,8 +1,8 @@
 """
-Lantern QA Validation Script
+Omneval QA Validation Script
 =============================
-Tests the Lantern platform end-to-end:
-  1. Lantern Python SDK trace sending
+Tests the Omneval platform end-to-end:
+  1. Omneval Python SDK trace sending
   2. Raw OTLP HTTP trace sending
   3. Native REST ingest API
   4. Query API (auth, span query, trace detail, analytics)
@@ -22,7 +22,7 @@ import traceback
 import requests
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-API_KEY = "ltn_proj_HqP4ESPKqdcTPqsj1eGG4vD2THLPL3tge8b85NHsBTKv"
+API_KEY = "oev_proj_HqP4ESPKqdcTPqsj1eGG4vD2THLPL3tge8b85NHsBTKv"
 PROJECT_ID = "d81rkuaodocs73apq400"
 INGEST_URL = "http://localhost:8000"
 QUERY_URL = "http://localhost:8002"
@@ -70,38 +70,38 @@ def ingest_headers():
 
 
 print("=" * 65)
-print("Lantern QA Validation Suite")
+print("Omneval QA Validation Suite")
 print("=" * 65)
 
 # ═══════════════════════════════════════════════════════════════════
-# SECTION 1: Lantern Python SDK
+# SECTION 1: Omneval Python SDK
 # ═══════════════════════════════════════════════════════════════════
-print("\n── Section 1: Lantern Python SDK ─────────────────────────────")
+print("\n── Section 1: Omneval Python SDK ─────────────────────────────")
 
 try:
-    sys.path.insert(0, "/c/Users/altoz/Projects/lantern/sdk/python")
-    import lantern_sdk
+    sys.path.insert(0, "/c/Users/altoz/Projects/omneval/sdk/python")
+    import omneval_sdk
 
-    lantern_sdk.configure(endpoint=INGEST_URL, api_key=API_KEY)
+    omneval_sdk.configure(endpoint=INGEST_URL, api_key=API_KEY)
 
-    @lantern_sdk.trace
+    @omneval_sdk.trace
     def sdk_outer():
-        span = lantern_sdk.get_active_span()
+        span = omneval_sdk.get_active_span()
         if span:
-            lantern_sdk.set_model(span, "gpt-4o")
-            lantern_sdk.set_input(span, "QA SDK outer call: explain quantum computing")
-            lantern_sdk.set_output(span, "Quantum computing uses quantum bits (qubits) that can be in superposition...")
-            lantern_sdk.set_tokens(span, 75, 125)
+            omneval_sdk.set_model(span, "gpt-4o")
+            omneval_sdk.set_input(span, "QA SDK outer call: explain quantum computing")
+            omneval_sdk.set_output(span, "Quantum computing uses quantum bits (qubits) that can be in superposition...")
+            omneval_sdk.set_tokens(span, 75, 125)
         return sdk_inner()
 
-    @lantern_sdk.trace
+    @omneval_sdk.trace
     def sdk_inner():
-        span = lantern_sdk.get_active_span()
+        span = omneval_sdk.get_active_span()
         if span:
-            lantern_sdk.set_model(span, "gpt-4o-mini")
-            lantern_sdk.set_input(span, "Summarize quantum computing in one sentence")
-            lantern_sdk.set_output(span, "Quantum computers leverage quantum mechanics to process information exponentially faster.")
-            lantern_sdk.set_tokens(span, 20, 45)
+            omneval_sdk.set_model(span, "gpt-4o-mini")
+            omneval_sdk.set_input(span, "Summarize quantum computing in one sentence")
+            omneval_sdk.set_output(span, "Quantum computers leverage quantum mechanics to process information exponentially faster.")
+            omneval_sdk.set_tokens(span, 20, 45)
         return "sdk-inner-result"
 
     result = sdk_outer()
@@ -111,7 +111,7 @@ try:
         report("SDK: nested @trace decorators work", FAIL, f"unexpected result: {result!r}")
 
     # Test error handling
-    @lantern_sdk.trace
+    @omneval_sdk.trace
     def sdk_error_fn():
         raise ValueError("intentional QA test error")
 
@@ -122,7 +122,7 @@ try:
         report("SDK: error span recorded (exception propagates)", PASS)
 
 except ImportError as e:
-    report("SDK: import", SKIP, f"lantern_sdk not importable: {e}")
+    report("SDK: import", SKIP, f"omneval_sdk not importable: {e}")
 except Exception as e:
     report("SDK: unexpected error", FAIL, traceback.format_exc()[:300])
 
@@ -138,28 +138,28 @@ try:
     from opentelemetry.sdk.resources import Resource, SERVICE_NAME
     from opentelemetry import trace as otel_trace
 
-    resource = Resource.create({SERVICE_NAME: "lantern-qa-validation"})
+    resource = Resource.create({SERVICE_NAME: "omneval-qa-validation"})
     provider = TracerProvider(resource=resource)
     exporter = OTLPSpanExporter(
         endpoint=f"{INGEST_URL}/v1/traces",
         headers={"X-API-Key": API_KEY},
     )
     provider.add_span_processor(SimpleSpanProcessor(exporter))
-    tracer = provider.get_tracer("lantern-qa")
+    tracer = provider.get_tracer("omneval-qa")
 
     with tracer.start_as_current_span("otlp-qa-root") as root:
         root.set_attribute("gen_ai.request.model", "claude-3-5-sonnet")
         root.set_attribute("gen_ai.usage.input_tokens", 100)
         root.set_attribute("gen_ai.usage.output_tokens", 200)
-        root.set_attribute("lantern.input", "What is the capital of France?")
-        root.set_attribute("lantern.output", "The capital of France is Paris.")
+        root.set_attribute("omneval.input", "What is the capital of France?")
+        root.set_attribute("omneval.output", "The capital of France is Paris.")
 
         with tracer.start_as_current_span("otlp-qa-tool-call") as child:
             child.set_attribute("gen_ai.request.model", "claude-3-haiku")
             child.set_attribute("gen_ai.usage.input_tokens", 50)
             child.set_attribute("gen_ai.usage.output_tokens", 30)
-            child.set_attribute("lantern.input", "search('capital of France')")
-            child.set_attribute("lantern.output", "Paris")
+            child.set_attribute("omneval.input", "search('capital of France')")
+            child.set_attribute("omneval.output", "Paris")
 
     provider.shutdown()
     report("OTLP: parent-child span exported without error", PASS)
@@ -187,7 +187,7 @@ except Exception as e:
 # 3b. Auth: bad API key → 401
 try:
     r = requests.post(f"{INGEST_URL}/api/v1/spans",
-                      headers={"X-API-Key": "ltn_proj_" + "x" * 43},
+                      headers={"X-API-Key": "oev_proj_" + "x" * 43},
                       json={"spans": [make_span("bad-key")]}, timeout=10)
     if r.status_code == 401:
         report("Auth: invalid API key → 401", PASS)

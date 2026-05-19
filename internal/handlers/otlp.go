@@ -15,9 +15,9 @@ import (
 	resourcev1 "go.opentelemetry.io/proto/otlp/resource/v1"
 	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
 
-	"github.com/zbloss/lantern/internal/auth"
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/otlp"
+	"github.com/omneval/omneval/internal/auth"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/otlp"
 	"google.golang.org/protobuf/proto"
 )
 

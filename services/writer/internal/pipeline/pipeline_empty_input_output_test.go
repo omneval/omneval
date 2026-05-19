@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/duckdb"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/duckdb"
 )
 
 // TestPipeline_WriteSpans_EmptyInputOutput verifies that spans with empty

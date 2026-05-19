@@ -61,7 +61,7 @@ export default function App() {
   const [environment, setEnvironment] = useState("default");
 
   // Detect an existing session on mount. We call GET /api/v1/me instead of
-  // reading document.cookie because the lantern_session cookie is HttpOnly.
+  // reading document.cookie because the omneval_session cookie is HttpOnly.
   const initialSessionCheck = useRef(true);
 
   useEffect(() => {

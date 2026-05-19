@@ -1,9 +1,9 @@
 # CronJob that creates a VolumeSnapshot of the writer PVC on a schedule.
 # Requires:
 #   1. A VolumeSnapshotClass (provisioned by the cluster storage driver)
-#   2. A ServiceAccount (lantern-volume-snapshot) with permissions to create
+#   2. A ServiceAccount (omneval-volume-snapshot) with permissions to create
 #      VolumeSnapshot and VolumeSnapshotContent resources
-#   3. A ConfigMap (lantern-volume-snapshot-config) with the key
+#   3. A ConfigMap (omneval-volume-snapshot-config) with the key
 #      "snapshot-class" pointing to the desired VolumeSnapshotClass name
 
 apiVersion: batch/v1
@@ -11,9 +11,9 @@ kind: CronJob
 metadata:
   name: writer-volume-snapshot
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/component: writer
-    app.kubernetes.io/part-of: lantern
+    app.kubernetes.io/part-of: omneval
 spec:
   # Daily at 02:00 UTC
   schedule: "0 2 * * *"
@@ -28,7 +28,7 @@ spec:
       backoffLimit: 1
       template:
         spec:
-          serviceAccountName: lantern-volume-snapshot
+          serviceAccountName: omneval-volume-snapshot
           containers:
             - name: snapshot
               # Minimal kubectl image for creating VolumeSnapshot resources
@@ -40,10 +40,10 @@ spec:
                 - |
                   set -e
 
-                  SNAPSHOT_NAME="lantern-writer-$(date +%Y%m%d-%H%M%S)"
+                  SNAPSHOT_NAME="omneval-writer-$(date +%Y%m%d-%H%M%S)"
                   VOLUME_SNAPSHOT_CLASS="${VOLUME_SNAPSHOT_CLASS:?VOLUME_SNAPSHOT_CLASS is required}"
                   PVC_NAME="${PVC_NAME:-writer-data-0}"
-                  NAMESPACE="${NAMESPACE:-lantern}"
+                  NAMESPACE="${NAMESPACE:-omneval}"
 
                   echo "Creating VolumeSnapshot $SNAPSHOT_NAME"
                   echo "  Source PVC:       $PVC_NAME"
@@ -70,7 +70,7 @@ spec:
                 - name: VOLUME_SNAPSHOT_CLASS
                   valueFrom:
                     configMapKeyRef:
-                      name: lantern-volume-snapshot-config
+                      name: omneval-volume-snapshot-config
                       key: snapshot-class
                       optional: false
                 # PVC name ({statefulset-name}-{volumeClaimTemplate-name}-{ordinal} from StatefulSet volumeClaimTemplates)
@@ -78,7 +78,7 @@ spec:
                   value: "writer-data-0"
                 # Kubernetes namespace
                 - name: NAMESPACE
-                  value: "lantern"
+                  value: "omneval"
               resources:
                 requests:
                   cpu: 50m

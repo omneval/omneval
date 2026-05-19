@@ -3,26 +3,26 @@ kind: StatefulSet
 metadata:
   name: writer
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/component: writer
 spec:
   serviceName: writer
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: lantern
+      app.kubernetes.io/name: omneval
       app.kubernetes.io/component: writer
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: lantern
+        app.kubernetes.io/name: omneval
         app.kubernetes.io/component: writer
     spec:
       containers:
         - name: writer
-          image: lantern/app:latest
+          image: omneval/app:latest
           imagePullPolicy: IfNotPresent
-          command: ["lantern-writer"]
+          command: ["omneval-writer"]
           ports:
             - name: http
               containerPort: 8001
@@ -31,29 +31,29 @@ spec:
               containerPort: 9090
               protocol: TCP
           env:
-            - name: LANTERN_CONFIG
-              value: "/etc/lantern/lantern.yaml"
-            - name: LANTERN_REDIS_PASSWORD
+            - name: OMNEVAL_CONFIG
+              value: "/etc/omneval/omneval.yaml"
+            - name: OMNEVAL_REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: lantern-secret
+                  name: omneval-secret
                   key: redis-password
                   optional: true
-            - name: LANTERN_STORAGE_ACCESS_KEY
+            - name: OMNEVAL_STORAGE_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: lantern-secret
+                  name: omneval-secret
                   key: storage-access-key
                   optional: true
-            - name: LANTERN_STORAGE_SECRET_KEY
+            - name: OMNEVAL_STORAGE_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: lantern-secret
+                  name: omneval-secret
                   key: storage-secret-key
                   optional: true
           volumeMounts:
             - name: config
-              mountPath: /etc/lantern
+              mountPath: /etc/omneval
               readOnly: true
             - name: data
               mountPath: /data
@@ -79,7 +79,7 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: lantern-config
+            name: omneval-config
   volumeClaimTemplates:
     - metadata:
         name: data

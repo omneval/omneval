@@ -1,6 +1,6 @@
-# Lantern Kustomize Base
+# Omneval Kustomize Base
 
-Kustomize-native Kubernetes manifests for the Lantern tracing platform. Designed for GitOps deployments via **Flux CD** or **ArgoCD**.
+Kustomize-native Kubernetes manifests for the Omneval tracing platform. Designed for GitOps deployments via **Flux CD** or **ArgoCD**.
 
 ## Structure
 
@@ -8,9 +8,9 @@ Kustomize-native Kubernetes manifests for the Lantern tracing platform. Designed
 deploy/kustomize/
 ├── base/                          # Core manifests (no per-env overrides)
 │   ├── kustomization.yaml         # Kustomization referencing all resources
-│   ├── namespace.yaml             # Namespace: lantern
-│   ├── configmap.yaml             # ConfigMap: lantern-config (lantern.yaml)
-│   ├── secret.yaml                # Secret: lantern-secret (credentials)
+│   ├── namespace.yaml             # Namespace: omneval
+│   ├── configmap.yaml             # ConfigMap: omneval-config (omneval.yaml)
+│   ├── secret.yaml                # Secret: omneval-secret (credentials)
 │   ├── redis-deployment.yaml      # Redis Deployment + Service + PVC
 │   ├── postgresql-statefulset.yaml # PostgreSQL StatefulSet + Service + ConfigMap
 │   ├── minio-deployment.yaml      # MinIO Deployment + Service + PVC + init Job
@@ -60,7 +60,7 @@ kustomize build deploy/kustomize/overlays/production | kubectl apply -f -
 
 ## Infrastructure Options
 
-The Lantern application requires three pieces of infrastructure:
+The Omneval application requires three pieces of infrastructure:
 
 1. **Redis** — Message broker / queue store for inter-service communication
 2. **PostgreSQL** — Metadata store (prompts, eval rules, API keys, sessions)
@@ -85,32 +85,32 @@ To use your own infrastructure, disable the internal components by setting `repl
 resources:
   - ../../base
 
-namespace: lantern
+namespace: omneval
 
 replicas:
-  - name: lantern-redis
+  - name: omneval-redis
     count: 0
-  - name: lantern-postgresql
+  - name: omneval-postgresql
     count: 0
-  - name: lantern-minio
+  - name: omneval-minio
     count: 0
 
 patches:
   - target:
       kind: ConfigMap
-      name: lantern-config
+      name: omneval-config
     patch: |-
       - op: replace
-        path: /data/lantern.yaml
+        path: /data/omneval.yaml
         value: |
           database:
             driver: postgres
-            dsn: postgres://lantern:secret@your-postgres-host:5432/lantern?sslmode=disable
+            dsn: postgres://omneval:secret@your-postgres-host:5432/omneval?sslmode=disable
           redis:
             addr: your-redis-host:6379
           storage:
             endpoint: https://s3.amazonaws.com
-            bucket: your-lantern-bucket
+            bucket: your-omneval-bucket
             region: us-east-1
 ```
 
@@ -124,15 +124,15 @@ For minimal deployments (no metadata persistence needed), use SQLite:
 patches:
   - target:
       kind: ConfigMap
-      name: lantern-config
+      name: omneval-config
     patch: |-
       - op: replace
-        path: /data/lantern.yaml
+        path: /data/omneval.yaml
         value: |
           database:
             driver: sqlite
           redis:
-            addr: lantern-redis:6379
+            addr: omneval-redis:6379
           storage: {}
 ```
 
@@ -144,7 +144,7 @@ Create a `Kustomization` resource in your flux-system namespace:
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: lantern-production
+  name: omneval-production
   namespace: flux-system
 spec:
   # Interval for reconciliation (how often Flux re-applies)
@@ -174,7 +174,7 @@ spec:
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: lantern-dev
+  name: omneval-dev
   namespace: flux-system
 spec:
   interval: 5m
@@ -195,18 +195,18 @@ Create an `Application` resource:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: lantern-production
+  name: omneval-production
   namespace: argocd
 spec:
   project: default
   # Point to the overlay directory (not the base)
   source:
-    repoURL: https://github.com/<org>/lantern.git
+    repoURL: https://github.com/<org>/omneval.git
     targetRevision: main
     path: deploy/kustomize/overlays/production
   destination:
     server: https://kubernetes.default.svc
-    namespace: lantern
+    namespace: omneval
   # Auto-sync enabled for GitOps workflow
   syncPolicy:
     automated:
@@ -239,13 +239,13 @@ The base includes a `Secret` with default values. Override per environment:
 
 | Key | Description | Per-service env var |
 |-----|-------------|---------------------|
-| `storage-access-key` | S3-compatible storage access key | `LANTERN_STORAGE_ACCESS_KEY` |
-| `storage-secret-key` | S3-compatible storage secret key | `LANTERN_STORAGE_SECRET_KEY` |
-| `eval-llm-api-key` | Judge LLM API key | `LANTERN_EVAL_LLM_API_KEY` |
-| `redis-password` | Redis auth password | `LANTERN_REDIS_PASSWORD` |
-| `admin-password` | First admin user password | `LANTERN_AUTH_ADMIN_PASSWORD` |
-| `admin-email` | First admin user email | `LANTERN_AUTH_ADMIN_EMAIL` |
-| `postgres-dsn` | PostgreSQL connection string | `LANTERN_DATABASE_DSN` |
+| `storage-access-key` | S3-compatible storage access key | `OMNEVAL_STORAGE_ACCESS_KEY` |
+| `storage-secret-key` | S3-compatible storage secret key | `OMNEVAL_STORAGE_SECRET_KEY` |
+| `eval-llm-api-key` | Judge LLM API key | `OMNEVAL_EVAL_LLM_API_KEY` |
+| `redis-password` | Redis auth password | `OMNEVAL_REDIS_PASSWORD` |
+| `admin-password` | First admin user password | `OMNEVAL_AUTH_ADMIN_PASSWORD` |
+| `admin-email` | First admin user email | `OMNEVAL_AUTH_ADMIN_EMAIL` |
+| `postgres-dsn` | PostgreSQL connection string | `OMNEVAL_DATABASE_DSN` |
 | `postgres-password` | PostgreSQL password | (via DSN) |
 | `minio-root-user` | MinIO root user (internal only) | — |
 | `minio-root-password` | MinIO root password (internal only) | — |
@@ -254,26 +254,26 @@ The base includes a `Secret` with default values. Override per environment:
 
 ### ConfigMap
 
-The `lantern-config` ConfigMap holds `lantern.yaml` with default values. Override per environment by patching the ConfigMap in your overlay:
+The `omneval-config` ConfigMap holds `omneval.yaml` with default values. Override per environment by patching the ConfigMap in your overlay:
 
 ```yaml
 # overlays/staging/kustomization.yaml
 patches:
   - target:
       kind: ConfigMap
-      name: lantern-config
+      name: omneval-config
     patch: |-
       - op: replace
-        path: /data/lantern.yaml
+        path: /data/omneval.yaml
         value: |
           database:
             driver: postgres
-            dsn: postgres://lantern:secret@lantern-postgresql:5432/lantern
+            dsn: postgres://omneval:secret@omneval-postgresql:5432/omneval
           redis:
-            addr: lantern-redis:6379
+            addr: omneval-redis:6379
           storage:
-            endpoint: http://lantern-minio:9000
-            bucket: lantern-staging
+            endpoint: http://omneval-minio:9000
+            bucket: omneval-staging
           ...
 ```
 
@@ -284,8 +284,8 @@ Override the container image in your overlay:
 ```yaml
 # overlays/production/kustomization.yaml
 images:
-  - name: lantern/app
-    newName: ghcr.io/myorg/lantern
+  - name: omneval/app
+    newName: ghcr.io/myorg/omneval
     newTag: v1.2.3
 ```
 
@@ -306,7 +306,7 @@ patches:
 
 ### PVC snapshot configuration
 
-The `lantern-volume-snapshot-config` ConfigMap holds the `VolumeSnapshotClass`
+The `omneval-volume-snapshot-config` ConfigMap holds the `VolumeSnapshotClass`
 name. Override this in your overlay to match your cloud provider's snapshot
 class:
 
@@ -315,10 +315,10 @@ class:
 patches:
   - target:
       kind: ConfigMap
-      name: lantern-volume-snapshot-config
+      name: omneval-volume-snapshot-config
     patch: |-
       - op: replace
-        path: /data/lantern.yaml
+        path: /data/omneval.yaml
         value: |
           snapshot-class: "ebs-csi-gp3"
 ```
@@ -352,8 +352,8 @@ support concurrent writes) and does not have an HPA.
 - **Writer** is a StatefulSet with a `ReadWriteOnce` PVC for the DuckDB file. It must remain single-replica (DuckDB does not support concurrent writes).
 - **Query API** is fully stateless — reads its DuckDB snapshot from S3, never mounts the PVC.
 - **Eval Workers** have no HTTP port (queue consumers). Their Service only exposes the metrics endpoint (9090) for Prometheus scraping.
-- **Leader election** for Writer is disabled by default. Enable it in `lantern.yaml` for multi-replica HA (`writer.leader_election.enabled: true`).
+- **Leader election** for Writer is disabled by default. Enable it in `omneval.yaml` for multi-replica HA (`writer.leader_election.enabled: true`).
 - **Redis** is deployed as a single-instance Deployment with a PVC. For production, consider using a managed Redis service and disabling the internal deployment.
 - **PostgreSQL** is deployed as a single-replica StatefulSet with a PVC. For production, consider using a managed PostgreSQL service.
 - **MinIO** is deployed as a single-instance Deployment with a PVC and an init Job to create the bucket. For production, consider using a managed S3-compatible service.
-- All services mount the `lantern-config` ConfigMap at `/etc/lantern/lantern.yaml` and can override individual settings via `LANTERN_*` environment variables.
+- All services mount the `omneval-config` ConfigMap at `/etc/omneval/omneval.yaml` and can override individual settings via `OMNEVAL_*` environment variables.

@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/zbloss/lantern/internal/config"
+	"github.com/omneval/omneval/internal/config"
 )
 
 func TestLoad_Defaults(t *testing.T) {
@@ -57,7 +57,7 @@ func TestLoad_FromFile(t *testing.T) {
 	yaml := `
 database:
   driver: postgres
-  dsn: "host=localhost dbname=lantern"
+  dsn: "host=localhost dbname=omneval"
 redis:
   addr: "redis:6380"
   password: "secret"
@@ -71,7 +71,7 @@ eval:
   llm_base_url: "http://litellm:4000/v1"
   llm_api_key: "sk-test"
 `
-	f := filepath.Join(t.TempDir(), "lantern.yaml")
+	f := filepath.Join(t.TempDir(), "omneval.yaml")
 	if err := os.WriteFile(f, []byte(yaml), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -114,11 +114,11 @@ eval:
 }
 
 func TestLoad_EnvOverrides(t *testing.T) {
-	t.Setenv("LANTERN_AUTH_ADMIN_EMAIL", "env@example.com")
-	t.Setenv("LANTERN_AUTH_ADMIN_PASSWORD", "envpass")
-	t.Setenv("LANTERN_REDIS_ADDR", "redis-env:6379")
-	t.Setenv("LANTERN_EVAL_LLM_BASE_URL", "http://env-llm/v1")
-	t.Setenv("LANTERN_EVAL_LLM_API_KEY", "env-key")
+	t.Setenv("OMNEVAL_AUTH_ADMIN_EMAIL", "env@example.com")
+	t.Setenv("OMNEVAL_AUTH_ADMIN_PASSWORD", "envpass")
+	t.Setenv("OMNEVAL_REDIS_ADDR", "redis-env:6379")
+	t.Setenv("OMNEVAL_EVAL_LLM_BASE_URL", "http://env-llm/v1")
+	t.Setenv("OMNEVAL_EVAL_LLM_API_KEY", "env-key")
 
 	cfg, err := config.Load("")
 	if err != nil {
@@ -126,19 +126,19 @@ func TestLoad_EnvOverrides(t *testing.T) {
 	}
 
 	if cfg.Auth.AdminEmail != "env@example.com" {
-		t.Errorf("LANTERN_AUTH_ADMIN_EMAIL: got %q", cfg.Auth.AdminEmail)
+		t.Errorf("OMNEVAL_AUTH_ADMIN_EMAIL: got %q", cfg.Auth.AdminEmail)
 	}
 	if cfg.Auth.AdminPassword != "envpass" {
-		t.Errorf("LANTERN_AUTH_ADMIN_PASSWORD: got %q", cfg.Auth.AdminPassword)
+		t.Errorf("OMNEVAL_AUTH_ADMIN_PASSWORD: got %q", cfg.Auth.AdminPassword)
 	}
 	if cfg.Redis.Addr != "redis-env:6379" {
-		t.Errorf("LANTERN_REDIS_ADDR: got %q", cfg.Redis.Addr)
+		t.Errorf("OMNEVAL_REDIS_ADDR: got %q", cfg.Redis.Addr)
 	}
 	if cfg.Eval.LLMBaseURL != "http://env-llm/v1" {
-		t.Errorf("LANTERN_EVAL_LLM_BASE_URL: got %q", cfg.Eval.LLMBaseURL)
+		t.Errorf("OMNEVAL_EVAL_LLM_BASE_URL: got %q", cfg.Eval.LLMBaseURL)
 	}
 	if cfg.Eval.LLMAPIKey != "env-key" {
-		t.Errorf("LANTERN_EVAL_LLM_API_KEY: got %q", cfg.Eval.LLMAPIKey)
+		t.Errorf("OMNEVAL_EVAL_LLM_API_KEY: got %q", cfg.Eval.LLMAPIKey)
 	}
 }
 
@@ -149,7 +149,7 @@ ingest:
     - http://localhost:3000
     - https://app.example.com
 `
-	f := filepath.Join(t.TempDir(), "lantern.yaml")
+	f := filepath.Join(t.TempDir(), "omneval.yaml")
 	if err := os.WriteFile(f, []byte(yaml), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ ingest:
 }
 
 func TestLoad_CORS_EnvOverride(t *testing.T) {
-	t.Setenv("LANTERN_INGEST_CORS_ALLOWED_ORIGINS", "http://override.com")
+	t.Setenv("OMNEVAL_INGEST_CORS_ALLOWED_ORIGINS", "http://override.com")
 
 	cfg, err := config.Load("")
 	if err != nil {
@@ -198,7 +198,7 @@ func TestLoad_LoggingDefaults(t *testing.T) {
 }
 
 func TestLoad_Logging_EnvOverride(t *testing.T) {
-	t.Setenv("LANTERN_LOG_LEVEL", "debug")
+	t.Setenv("OMNEVAL_LOG_LEVEL", "debug")
 
 	cfg, err := config.Load("")
 	if err != nil {
@@ -206,7 +206,7 @@ func TestLoad_Logging_EnvOverride(t *testing.T) {
 	}
 
 	if cfg.LogLevel != "debug" {
-		t.Errorf("LANTERN_LOG_LEVEL: got %q, want %q", cfg.LogLevel, "debug")
+		t.Errorf("OMNEVAL_LOG_LEVEL: got %q, want %q", cfg.LogLevel, "debug")
 	}
 }
 
@@ -214,7 +214,7 @@ func TestLoad_Logging_FromFile(t *testing.T) {
 	yaml := `
 log_level: debug
 `
-	f := filepath.Join(t.TempDir(), "lantern.yaml")
+	f := filepath.Join(t.TempDir(), "omneval.yaml")
 	if err := os.WriteFile(f, []byte(yaml), 0600); err != nil {
 		t.Fatal(err)
 	}

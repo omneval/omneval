@@ -11,9 +11,9 @@ import (
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
-	"github.com/zbloss/lantern/internal/config"
-	"github.com/zbloss/lantern/internal/storage"
-	"github.com/zbloss/lantern/services/writer/internal/metrics"
+	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/storage"
+	"github.com/omneval/omneval/services/writer/internal/metrics"
 )
 
 // mockStore implements storage.ObjectStore for testing.
@@ -129,7 +129,7 @@ func TestRun_NoStore(t *testing.T) {
 
 func TestDoSync_Success(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 
 	// Create a dummy DB file.
 	if err := os.WriteFile(dbPath, []byte("fake duckdb"), 0644); err != nil {
@@ -203,7 +203,7 @@ func TestDoSync_NonExistentDB(t *testing.T) {
 
 func TestDoSync_UploadFailure(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 	if err := os.WriteFile(dbPath, []byte("test"), 0644); err != nil {
 		t.Fatalf("create temp db: %v", err)
 	}
@@ -245,7 +245,7 @@ func (f *failingStore) Stat(_ context.Context, key string) (*storage.ObjectStat,
 
 func TestRun_FinalSyncOnShutdown(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 	if err := os.WriteFile(dbPath, []byte("fake duckdb"), 0644); err != nil {
 		t.Fatalf("create temp db: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestRun_FinalSyncOnShutdown(t *testing.T) {
 
 func TestRun_SyncIntervalTriggeredSync(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 	if err := os.WriteFile(dbPath, []byte("fake duckdb"), 0644); err != nil {
 		t.Fatalf("create temp db: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestRun_SyncIntervalTriggeredSync(t *testing.T) {
 
 func TestDoSync_CheckpointsWALBeforeUpload(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 
 	// Open a real DuckDB connection. DuckDB v1.4+ uses WAL by default.
 	db, err := sql.Open("duckdb", dbPath)
@@ -387,7 +387,7 @@ func TestDoSync_CheckpointsWALBeforeUpload(t *testing.T) {
 // see empty tables.
 func TestDoSync_SnapshotContainsWrittenData(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 
 	// Open a real DuckDB connection — this is the "Writer".
 	writerDB, err := sql.Open("duckdb", dbPath)
@@ -475,7 +475,7 @@ func TestDoSync_SnapshotContainsWrittenData(t *testing.T) {
 // every 30s regardless of changes.
 func TestDoSync_SkipsUploadWhenUnchanged(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 
 	if err := os.WriteFile(dbPath, []byte("fake duckdb content for sync"), 0644); err != nil {
 		t.Fatalf("create temp db: %v", err)
@@ -523,7 +523,7 @@ func TestDoSync_SkipsUploadWhenUnchanged(t *testing.T) {
 // data, the sync uploads; without writing, the next sync is skipped.
 func TestDoSync_DBWriteThenSkip(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 
 	db, err := sql.Open("duckdb", dbPath)
 	if err != nil {
@@ -566,7 +566,7 @@ func TestDoSync_DBWriteThenSkip(t *testing.T) {
 // snapshot is uploaded as-is. This is the backward-compatibility path.
 func TestDoSync_NilDBSkipsCheckpoint(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 
 	if err := os.WriteFile(dbPath, []byte("fake duckdb content for sync"), 0644); err != nil {
 		t.Fatalf("create temp db: %v", err)

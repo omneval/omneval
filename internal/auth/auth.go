@@ -11,13 +11,13 @@ import (
 	"time"
 
 	"github.com/mr-tron/base58"
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/metadata"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/metadata"
 )
 
 const (
-	PrefixProject = "ltn_proj_"
-	PrefixService = "ltn_svc_"
+	PrefixProject = "oev_proj_"
+	PrefixService = "oev_svc_"
 	// CacheTTL is the duration a validated key is served from the in-memory
 	// cache before a metadata store lookup is required. A revoked key may be
 	// accepted for up to this duration after revocation.

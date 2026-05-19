@@ -3,7 +3,7 @@ package s3
 import (
 	"testing"
 
-	"github.com/zbloss/lantern/internal/config"
+	"github.com/omneval/omneval/internal/config"
 )
 
 func TestNew(t *testing.T) {

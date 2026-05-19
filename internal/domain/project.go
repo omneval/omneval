@@ -36,8 +36,8 @@ type Session struct {
 type APIKeyKind string
 
 const (
-	APIKeyKindProject APIKeyKind = "project" // ltn_proj_ prefix
-	APIKeyKindService APIKeyKind = "service"  // ltn_svc_ prefix
+	APIKeyKindProject APIKeyKind = "project" // oev_proj_ prefix
+	APIKeyKindService APIKeyKind = "service"  // oev_svc_ prefix
 )
 
 type APIKey struct {

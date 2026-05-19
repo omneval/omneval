@@ -1,7 +1,7 @@
 """
-Lantern QA Test Script
+Omneval QA Test Script
 ======================
-Sends traces to Lantern via the native REST API and OTLP/OTel path,
+Sends traces to Omneval via the native REST API and OTLP/OTel path,
 then validates the data is queryable through the Query API.
 
 Prerequisites:
@@ -26,7 +26,7 @@ except ImportError:
     sys.exit(1)
 
 # ── Configuration ──────────────────────────────────────────────────────────────
-API_KEY = "ltn_proj_83JH6C61EWBw7KAGDkpKw6X7eqy8fHLZeT3XaHp7o2CH"
+API_KEY = "oev_proj_83JH6C61EWBw7KAGDkpKw6X7eqy8fHLZeT3XaHp7o2CH"
 PROJECT_ID = "d81rkuaodocs73apq400"
 INGEST_URL = "http://localhost:8000"
 QUERY_URL = "http://localhost:8002"
@@ -74,7 +74,7 @@ def ingest_headers():
 
 
 print("=" * 65)
-print("Lantern QA Test Suite")
+print("Omneval QA Test Suite")
 print("=" * 65)
 
 # ═══════════════════════════════════════════════════════════════════
@@ -96,7 +96,7 @@ except Exception as e:
 # 1b. Auth rejection — bad API key
 try:
     r = requests.post(f"{INGEST_URL}/api/v1/spans",
-                      headers={"X-API-Key": "ltn_proj_invalid00000000000000000000000000000000000"},
+                      headers={"X-API-Key": "oev_proj_invalid00000000000000000000000000000000000"},
                       json={"spans": [make_span("bad-key-test")]}, timeout=10)
     if r.status_code == 401:
         report("Auth: invalid API key rejected with 401", PASS)
@@ -187,14 +187,14 @@ try:
     from opentelemetry.sdk.resources import Resource, SERVICE_NAME
     from opentelemetry import trace as otel_trace
 
-    resource = Resource.create({SERVICE_NAME: "lantern-qa-test"})
+    resource = Resource.create({SERVICE_NAME: "omneval-qa-test"})
     provider = TracerProvider(resource=resource)
     exporter = OTLPSpanExporter(
         endpoint=f"{INGEST_URL}/v1/traces",
         headers={"X-API-Key": API_KEY},
     )
     provider.add_span_processor(SimpleSpanProcessor(exporter))
-    tracer = provider.get_tracer("lantern-qa")
+    tracer = provider.get_tracer("omneval-qa")
 
     with tracer.start_as_current_span("otlp-qa-root") as root:
         root.set_attribute("gen_ai.request.model", "claude-3-5-sonnet")
@@ -217,42 +217,42 @@ except ImportError as e:
     report("OTLP export", SKIP, f"opentelemetry not installed ({e}). pip install opentelemetry-sdk opentelemetry-exporter-otlp-proto-http")
 
 # ═══════════════════════════════════════════════════════════════════
-# SECTION 3: Lantern Python SDK
+# SECTION 3: Omneval Python SDK
 # ═══════════════════════════════════════════════════════════════════
-print("\n── Section 3: Lantern Python SDK ─────────────────────────────")
+print("\n── Section 3: Omneval Python SDK ─────────────────────────────")
 
 try:
-    import lantern_sdk
+    import omneval_sdk
 
-    lantern_sdk.configure(endpoint=INGEST_URL, api_key=API_KEY)
+    omneval_sdk.configure(endpoint=INGEST_URL, api_key=API_KEY)
 
-    @lantern_sdk.trace
+    @omneval_sdk.trace
     def sdk_outer():
-        span = lantern_sdk.get_active_span()
+        span = omneval_sdk.get_active_span()
         if span:
-            lantern_sdk.set_model(span, "gpt-4o")
-            lantern_sdk.set_input(span, "QA SDK outer call input")
-            lantern_sdk.set_output(span, "QA SDK outer call output")
-            lantern_sdk.set_tokens(span, 75, 125)
+            omneval_sdk.set_model(span, "gpt-4o")
+            omneval_sdk.set_input(span, "QA SDK outer call input")
+            omneval_sdk.set_output(span, "QA SDK outer call output")
+            omneval_sdk.set_tokens(span, 75, 125)
         return sdk_inner()
 
-    @lantern_sdk.trace
+    @omneval_sdk.trace
     def sdk_inner():
-        span = lantern_sdk.get_active_span()
+        span = omneval_sdk.get_active_span()
         if span:
-            lantern_sdk.set_model(span, "gpt-4o-mini")
-            lantern_sdk.set_input(span, "QA SDK inner call input")
-            lantern_sdk.set_output(span, "QA SDK inner call output")
+            omneval_sdk.set_model(span, "gpt-4o-mini")
+            omneval_sdk.set_input(span, "QA SDK inner call input")
+            omneval_sdk.set_output(span, "QA SDK inner call output")
         return "sdk-inner-result"
 
     result = sdk_outer()
     if result == "sdk-inner-result":
-        report("Lantern SDK: nested trace decorators work", PASS)
+        report("Omneval SDK: nested trace decorators work", PASS)
     else:
-        report("Lantern SDK: nested trace decorators work", FAIL, f"unexpected result: {result!r}")
+        report("Omneval SDK: nested trace decorators work", FAIL, f"unexpected result: {result!r}")
 
 except ImportError as e:
-    report("Lantern SDK", SKIP, f"lantern_sdk not installed ({e}). pip install -e sdk/python")
+    report("Omneval SDK", SKIP, f"omneval_sdk not installed ({e}). pip install -e sdk/python")
 
 # ═══════════════════════════════════════════════════════════════════
 # SECTION 4: Query API — Authentication

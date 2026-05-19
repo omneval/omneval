@@ -1,23 +1,23 @@
-# Lantern
+# Omneval
 
 **Self-hostable LLM/Agent tracing and evaluation — powered by DuckDB.**
 
-Lantern provides production-grade tracing and observability for LLM-powered agents and applications, with the same class of features as Langfuse — but using DuckDB instead of ClickHouse. This makes it viable for organizations with strict data residency, compliance, or security review requirements that prevent using cloud-hosted OLAP backends.
+Omneval provides production-grade tracing and observability for LLM-powered agents and applications, with the same class of features as Langfuse — but using DuckDB instead of ClickHouse. This makes it viable for organizations with strict data residency, compliance, or security review requirements that prevent using cloud-hosted OLAP backends.
 
-## Why Lantern?
+## Why Omneval?
 
 Teams building LLM agents need to understand what their models are doing, how much they cost, and how well they perform. Today the choices are:
 
 - **Relational-backed tools** (MLflow + Postgres) — easy to self-host but not designed for high-write-throughput trace data or analytical queries.
 - **OLAP-backed tools** (Langfuse, Helicone + ClickHouse) — technically superior for tracing workloads, but ClickHouse's only production self-hosted offering is ClickHouse Cloud, which many organizations cannot use due to compliance or data residency requirements.
 
-Lantern bridges this gap. It accepts traces via OpenTelemetry (OTLP), making it a drop-in destination for any LLM framework already instrumented with OTel — including LangChain, LlamaIndex, CrewAI, and Smolagents — with zero SDK changes.
+Omneval bridges this gap. It accepts traces via OpenTelemetry (OTLP), making it a drop-in destination for any LLM framework already instrumented with OTel — including LangChain, LlamaIndex, CrewAI, and Smolagents — with zero SDK changes.
 
 A minimal development deployment requires a single `docker compose` command in `deploy/docker-compose/`. Production Kubernetes deployments add Postgres, Redis, and S3-compatible object storage.
 
 ## Architecture
 
-Lantern consists of five independently deployable Go services communicating via Redis queues:
+Omneval consists of five independently deployable Go services communicating via Redis queues:
 
 | Service | Role | Deployment |
 |---------|------|------------|
@@ -86,14 +86,14 @@ docker compose run --rm eval
 
 | Language | Package | Status |
 |----------|---------|--------|
-| Go | `github.com/zbloss/lantern/sdk/go` | ✅ Implemented |
-| Python | `lantern-sdk` | ✅ Implemented |
+| Go | `github.com/omneval/omneval/sdk/go` | ✅ Implemented |
+| Python | `omneval-sdk` | ✅ Implemented |
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
-| [PRD](lantern-prd.md) | Product requirements and user stories |
+| [PRD](omneval-prd.md) | Product requirements and user stories |
 | [Architecture Decisions](docs/adr/) | Key design decisions and rationale |
 | [Context](CONTEXT.md) | Bounded context and domain terminology |
 | [CLAUDE](CLAUDE.md) | Development commands and architecture reference |
@@ -101,7 +101,7 @@ docker compose run --rm eval
 
 ## Status
 
-Lantern is under active development. The following features are implemented and tested:
+Omneval is under active development. The following features are implemented and tested:
 
 - **Tracing pipeline** — OTLP + REST span ingest, DuckDB write, snapshot/Parquet archival, hot+cold queries
 - **Evaluation pipeline** — configurable judge LLM rules, score write-back, sample-rate support
@@ -109,7 +109,7 @@ Lantern is under active development. The following features are implemented and 
 - **Analytics** — DSL-based span queries with aggregation, group-by, and percentiles (p50/p95/p99)
 - **Auth** — login, session cookies, admin bootstrap, user invites, password change
 - **UI** — React SPA with traces view, span waterfall, project switcher
-- **SDKs** — Go (`lantern/tracer` + `lantern/client`) and Python (`lantern-sdk` with `@trace` decorator)
+- **SDKs** — Go (`omneval/tracer` + `omneval/client`) and Python (`omneval-sdk` with `@trace` decorator)
 - **Observability** — health/readiness probes, Prometheus metrics on all services, graceful shutdown
 
 See the [ROADMAP](ROADMAP.md) for detailed progress on each component.

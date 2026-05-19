@@ -12,16 +12,16 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
-	"github.com/zbloss/lantern/internal/auth"
-	"github.com/zbloss/lantern/internal/config"
-	"github.com/zbloss/lantern/internal/handlers"
-	"github.com/zbloss/lantern/internal/metadata"
-	"github.com/zbloss/lantern/internal/metadata/postgres"
-	"github.com/zbloss/lantern/internal/metadata/sqlite"
-	"github.com/zbloss/lantern/internal/probe"
-	redisqueue "github.com/zbloss/lantern/internal/queue/redis"
-	"github.com/zbloss/lantern/services/ingest/internal/handler"
-	"github.com/zbloss/lantern/services/ingest/internal/metrics"
+	"github.com/omneval/omneval/internal/auth"
+	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/handlers"
+	"github.com/omneval/omneval/internal/metadata"
+	"github.com/omneval/omneval/internal/metadata/postgres"
+	"github.com/omneval/omneval/internal/metadata/sqlite"
+	"github.com/omneval/omneval/internal/probe"
+	redisqueue "github.com/omneval/omneval/internal/queue/redis"
+	"github.com/omneval/omneval/services/ingest/internal/handler"
+	"github.com/omneval/omneval/services/ingest/internal/metrics"
 )
 
 // levelFromString maps a string to an slog.Level, defaulting to info.

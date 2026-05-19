@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/zbloss/lantern/services/query/internal/auth"
+	"github.com/omneval/omneval/services/query/internal/auth"
 )
 
 // AdminHandler handles admin-only API endpoints:

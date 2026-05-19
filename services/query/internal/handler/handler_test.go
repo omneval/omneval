@@ -14,8 +14,8 @@ import (
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/services/query/internal/auth"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/services/query/internal/auth"
 )
 
 const spansTableDDL = `
@@ -190,7 +190,7 @@ func TestHandleSpansQuery_FieldDecodingErrors(t *testing.T) {
 
 func TestHandleSpansQuery_WithDatabase(t *testing.T) {
 	// Create a temp DuckDB file.
-	tmpDir, err := os.MkdirTemp("", "lantern-handler-test")
+	tmpDir, err := os.MkdirTemp("", "omneval-handler-test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestHandleTraceDetail_HandlerReturnsJSON(t *testing.T) {
 }
 
 func TestHandleTraceDetail_NotFound(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "lantern-trace-test")
+	tmpDir, err := os.MkdirTemp("", "omneval-trace-test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}
@@ -413,7 +413,7 @@ func TestHandleTraceDetail_NotFound(t *testing.T) {
 }
 
 func TestHandleTraceDetail_SingleSpan(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "lantern-trace-test")
+	tmpDir, err := os.MkdirTemp("", "omneval-trace-test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}
@@ -471,7 +471,7 @@ func TestHandleTraceDetail_SingleSpan(t *testing.T) {
 }
 
 func TestHandleTraceDetail_MultiLevelTree(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "lantern-trace-test")
+	tmpDir, err := os.MkdirTemp("", "omneval-trace-test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}
@@ -553,7 +553,7 @@ func TestHandleTraceDetail_MultiLevelTree(t *testing.T) {
 }
 
 func TestHandleTraceDetail_SiblingChildren(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "lantern-trace-test")
+	tmpDir, err := os.MkdirTemp("", "omneval-trace-test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}
@@ -628,7 +628,7 @@ func TestHandleTraceDetail_SiblingChildren(t *testing.T) {
 }
 
 func TestHandleTraceDetail_NoParentFallback(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "lantern-trace-test")
+	tmpDir, err := os.MkdirTemp("", "omneval-trace-test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}
@@ -689,7 +689,7 @@ func TestHandleTraceDetail_NoParentFallback(t *testing.T) {
 }
 
 func TestHandleTraceDetail_ScoresAttached(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "lantern-trace-test")
+	tmpDir, err := os.MkdirTemp("", "omneval-trace-test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}
@@ -758,7 +758,7 @@ func TestHandleTraceDetail_ScoresAttached(t *testing.T) {
 }
 
 func TestHandleTraceDetail_ProjectIsolation(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "lantern-trace-test")
+	tmpDir, err := os.MkdirTemp("", "omneval-trace-test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}
@@ -1137,7 +1137,7 @@ func TestHandleAnalyticsSpans_MethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleAnalyticsSpans_WithDatabase_ProjectFromSession(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "lantern-analytics-test")
+	tmpDir, err := os.MkdirTemp("", "omneval-analytics-test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}
@@ -1209,7 +1209,7 @@ func TestHandleAnalyticsSpans_WithDatabase_ProjectFromSession(t *testing.T) {
 }
 
 func TestHandleAnalyticsSpans_ProjectIDOverride(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "lantern-analytics-test")
+	tmpDir, err := os.MkdirTemp("", "omneval-analytics-test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}
@@ -1293,7 +1293,7 @@ func TestHandleAnalyticsSpans_ProjectIDOverride(t *testing.T) {
 }
 
 func TestHandleAnalyticsSpans_ProjectIDForbidden(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "lantern-analytics-test")
+	tmpDir, err := os.MkdirTemp("", "omneval-analytics-test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}

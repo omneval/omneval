@@ -20,10 +20,10 @@ kind: ServiceAccount
 metadata:
   name: {{ $name }}-volume-snapshot
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: writer
-    app.kubernetes.io/part-of: lantern
+    app.kubernetes.io/part-of: omneval
     {{- with .Values.commonLabels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -35,10 +35,10 @@ kind: ClusterRole
 metadata:
   name: {{ $name }}-volume-snapshot
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: writer
-    app.kubernetes.io/part-of: lantern
+    app.kubernetes.io/part-of: omneval
 rules:
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
@@ -59,10 +59,10 @@ kind: ClusterRoleBinding
 metadata:
   name: {{ $name }}-volume-snapshot
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: writer
-    app.kubernetes.io/part-of: lantern
+    app.kubernetes.io/part-of: omneval
 subjects:
   - kind: ServiceAccount
     name: {{ $name }}-volume-snapshot
@@ -78,10 +78,10 @@ kind: ConfigMap
 metadata:
   name: {{ $name }}-volume-snapshot-config
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: writer
-    app.kubernetes.io/part-of: lantern
+    app.kubernetes.io/part-of: omneval
 data:
   snapshot-class: {{ .Values.writer.volumeSnapshot.snapshotClass | quote }}
 ---
@@ -91,10 +91,10 @@ kind: CronJob
 metadata:
   name: {{ $name }}-writer-volume-snapshot
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: writer
-    app.kubernetes.io/part-of: lantern
+    app.kubernetes.io/part-of: omneval
 spec:
   schedule: {{ .Values.writer.volumeSnapshot.schedule | quote }}
   successfulJobsHistoryLimit: 3
@@ -116,7 +116,7 @@ spec:
                 - |
                   set -e
 
-                  SNAPSHOT_NAME="lantern-writer-$(date +%Y%m%d-%H%M%S)"
+                  SNAPSHOT_NAME="omneval-writer-$(date +%Y%m%d-%H%M%S)"
                   VOLUME_SNAPSHOT_CLASS="${VOLUME_SNAPSHOT_CLASS:?VOLUME_SNAPSHOT_CLASS is required}"
                   PVC_NAME="${PVC_NAME:-{{ $name }}-writer-data-0}"
                   NAMESPACE="{{ .Release.Namespace }}"

@@ -10,13 +10,13 @@ Infrastructure resolution:
 - Database: uses internal PostgreSQL when postgresql.enabled, or postgresql.external
 */ -}}
 {{- $name := .Release.Name -}}
-{{- $redisPassword := include "lantern.redisPassword" . -}}
+{{- $redisPassword := include "omneval.redisPassword" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ $name }}-eval
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: eval
     {{- with .Values.commonLabels }}
@@ -28,13 +28,13 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: lantern
+      app.kubernetes.io/name: omneval
       app.kubernetes.io/instance: {{ $name }}
       app.kubernetes.io/component: eval
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: lantern
+        app.kubernetes.io/name: omneval
         app.kubernetes.io/instance: {{ $name }}
         app.kubernetes.io/component: eval
         {{- with .Values.commonLabels }}
@@ -67,37 +67,37 @@ spec:
         - name: eval
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["lantern-eval"]
+          command: ["omneval-eval"]
           env:
-            - name: LANTERN_CONFIG
-              value: "/etc/lantern/lantern.yaml"
+            - name: OMNEVAL_CONFIG
+              value: "/etc/omneval/omneval.yaml"
             {{- if $redisPassword }}
-            - name: LANTERN_REDIS_PASSWORD
+            - name: OMNEVAL_REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ $name }}-secret
                   key: redis-password
             {{- end }}
             {{- with .Values.storage.endpoint }}
-            - name: LANTERN_STORAGE_ENDPOINT
+            - name: OMNEVAL_STORAGE_ENDPOINT
               value: {{ . | quote }}
             {{- end }}
             {{- with .Values.storage.bucket }}
-            - name: LANTERN_STORAGE_BUCKET
+            - name: OMNEVAL_STORAGE_BUCKET
               value: {{ . | quote }}
             {{- end }}
             {{- with .Values.storage.region }}
-            - name: LANTERN_STORAGE_REGION
+            - name: OMNEVAL_STORAGE_REGION
               value: {{ . | quote }}
             {{- end }}
             {{- if .Values.storage.endpoint }}
-            - name: LANTERN_STORAGE_ACCESS_KEY
+            - name: OMNEVAL_STORAGE_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ $name }}-secret
                   key: storage-access-key
                   optional: true
-            - name: LANTERN_STORAGE_SECRET_KEY
+            - name: OMNEVAL_STORAGE_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ $name }}-secret
@@ -105,15 +105,15 @@ spec:
                   optional: true
             {{- end }}
             {{- if .Values.eval.llmBaseURL }}
-            - name: LANTERN_EVAL_LLM_BASE_URL
+            - name: OMNEVAL_EVAL_LLM_BASE_URL
               value: {{ .Values.eval.llmBaseURL | quote }}
             {{- end }}
             {{- if .Values.eval.llmModel }}
-            - name: LANTERN_EVAL_LLM_MODEL
+            - name: OMNEVAL_EVAL_LLM_MODEL
               value: {{ .Values.eval.llmModel | quote }}
             {{- end }}
             {{- if .Values.eval.llmAPIKey }}
-            - name: LANTERN_EVAL_LLM_API_KEY
+            - name: OMNEVAL_EVAL_LLM_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ $name }}-secret
@@ -121,7 +121,7 @@ spec:
                   optional: true
             {{- end }}
             {{- if .Values.database.dsn }}
-            - name: LANTERN_DATABASE_DSN
+            - name: OMNEVAL_DATABASE_DSN
               valueFrom:
                 secretKeyRef:
                   name: {{ $name }}-secret
@@ -130,7 +130,7 @@ spec:
             {{- end }}
           volumeMounts:
             - name: config
-              mountPath: /etc/lantern
+              mountPath: /etc/omneval
               readOnly: true
           livenessProbe:
             exec:
@@ -152,7 +152,7 @@ kind: ServiceAccount
 metadata:
   name: {{ $name }}-eval
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: eval
 automountServiceAccountToken: false
@@ -164,7 +164,7 @@ kind: HorizontalPodAutoscaler
 metadata:
   name: {{ $name }}-eval
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: eval
 spec:

@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/fake"
-	"github.com/zbloss/lantern/services/query/internal/auth"
-	"github.com/zbloss/lantern/services/query/internal/handler"
-	"github.com/zbloss/lantern/services/query/internal/playground"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/fake"
+	"github.com/omneval/omneval/services/query/internal/auth"
+	"github.com/omneval/omneval/services/query/internal/handler"
+	"github.com/omneval/omneval/services/query/internal/playground"
 )
 
 // setupTestMuxWithMiddleware builds a mux that mirrors server.go's router:
@@ -95,7 +95,7 @@ func loginAndGetCookie(t *testing.T, ts *httptest.Server, email, password string
 	defer resp.Body.Close()
 
 	for _, c := range resp.Cookies() {
-		if c.Name == "lantern_session" {
+		if c.Name == "omneval_session" {
 			return c.Value
 		}
 	}
@@ -243,7 +243,7 @@ func TestProtectedAPI_AuthenticatedRequestSucceeds(t *testing.T) {
 				t.Fatalf("create request: %v", err)
 			}
 			req.Header.Set("Content-Type", "application/json")
-			req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+			req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
@@ -327,7 +327,7 @@ func TestLogout_StillWorksWithoutAuth(t *testing.T) {
 
 	// Logout should work with a valid cookie.
 	req, _ := http.NewRequest("POST", ts.URL+"/logout", nil)
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("logout request: %v", err)
@@ -357,7 +357,7 @@ func TestPlaygroundRunRoute_NoLLMConfig(t *testing.T) {
 		t.Fatalf("create request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -435,7 +435,7 @@ func TestDatasetRunsRoute_NoLLMConfig(t *testing.T) {
 
 	// Request the runs endpoint — should return JSON, not HTML.
 	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/datasets/"+ds.DatasetID+"/runs?project_id=test-proj", nil)
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request: %v", err)
@@ -487,7 +487,7 @@ func TestSessionMiddleware_IsApplied(t *testing.T) {
 		ExpiresAt: time.Now().Add(1 * time.Hour),
 	})
 	req2 := httptest.NewRequest("GET", "/test", nil)
-	req2.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req2.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	w2 := httptest.NewRecorder()
 	wrapped.ServeHTTP(w2, req2)
 	if w2.Code != http.StatusOK {

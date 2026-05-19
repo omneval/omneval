@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zbloss/lantern/internal/auth"
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/metadata"
+	"github.com/omneval/omneval/internal/auth"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/metadata"
 	"github.com/rs/xid"
 )
 
@@ -123,7 +123,7 @@ func NewHandler(store metadata.Store, secure bool, sessionTTL time.Duration, adm
 }
 
 // HandleMe returns the current user's session data (user_id, email, projects)
-// when a valid lantern_session cookie is present, or 401 when no valid session exists.
+// when a valid omneval_session cookie is present, or 401 when no valid session exists.
 // Used by the frontend to detect existing sessions on page load.
 func (h *Handler) HandleMe(w http.ResponseWriter, r *http.Request) {
 	user := CurrentUserFromContext(r)
@@ -220,7 +220,7 @@ func (h *Handler) BootstrapAdmin(ctx context.Context) (bool, error) {
 }
 
 // Login handles POST /login. Validates email + password, creates a session,
-// sets the lantern_session cookie, and returns the session ID.
+// sets the omneval_session cookie, and returns the session ID.
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -265,7 +265,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 // Logout handles POST /logout. Deletes the session and clears the cookie.
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("lantern_session")
+	cookie, err := r.Cookie("omneval_session")
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not logged in"})
 		return

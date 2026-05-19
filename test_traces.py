@@ -1,6 +1,6 @@
 """
-Lantern QA test script — sends OTLP traces to test the ingest pipeline end-to-end.
-Tests both the Lantern Python SDK and raw OTLP HTTP export.
+Omneval QA test script — sends OTLP traces to test the ingest pipeline end-to-end.
+Tests both the Omneval Python SDK and raw OTLP HTTP export.
 """
 
 import time
@@ -16,11 +16,11 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.semconv.resource import ResourceAttributes
 
 INGEST_URL = "http://localhost:8000"
-API_KEY = "ltn_proj_TestKey123456789ABCDEFGHIJKLMNOPQRSTUVWXYZa"
+API_KEY = "oev_proj_TestKey123456789ABCDEFGHIJKLMNOPQRSTUVWXYZa"
 PROJECT_ID = "test-project-001"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Test 1: Raw REST span (Lantern native format)
+# Test 1: Raw REST span (Omneval native format)
 # ─────────────────────────────────────────────────────────────────────────────
 def test_native_rest():
     print("\n=== Test 1: Native REST span ingestion ===")
@@ -60,7 +60,7 @@ def test_otlp():
     print("\n=== Test 2: OTLP HTTP span ingestion ===")
 
     resource = Resource.create({
-        ResourceAttributes.SERVICE_NAME: "lantern-qa-test",
+        ResourceAttributes.SERVICE_NAME: "omneval-qa-test",
         "test.type": "otlp-validation",
     })
 
@@ -71,7 +71,7 @@ def test_otlp():
 
     provider = TracerProvider(resource=resource)
     provider.add_span_processor(SimpleSpanProcessor(exporter))
-    tracer = provider.get_tracer("lantern-qa")
+    tracer = provider.get_tracer("omneval-qa")
 
     with tracer.start_as_current_span("qa-otlp-parent-span") as parent:
         parent.set_attribute("gen_ai.request.model", "gpt-4o-mini")
@@ -96,19 +96,19 @@ def test_otlp():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Test 3: Lantern Python SDK
+# Test 3: Omneval Python SDK
 # ─────────────────────────────────────────────────────────────────────────────
-def test_lantern_sdk():
-    print("\n=== Test 3: Lantern Python SDK ===")
+def test_omneval_sdk():
+    print("\n=== Test 3: Omneval Python SDK ===")
     try:
         import sys
         sys.path.insert(0, "sdk/python")
-        import lantern_sdk
-        from lantern_sdk.trace import set_model, set_input, set_output, set_tokens, get_active_span
+        import omneval_sdk
+        from omneval_sdk.trace import set_model, set_input, set_output, set_tokens, get_active_span
 
-        lantern_sdk.configure(endpoint=INGEST_URL, api_key=API_KEY)
+        omneval_sdk.configure(endpoint=INGEST_URL, api_key=API_KEY)
 
-        @lantern_sdk.trace
+        @omneval_sdk.trace
         def call_llm(prompt: str) -> str:
             span = get_active_span()
             if span:
@@ -121,12 +121,12 @@ def test_lantern_sdk():
                 set_output(span, result)
             return result
 
-        @lantern_sdk.trace
+        @omneval_sdk.trace
         def run_agent(task: str) -> str:
             response = call_llm(f"Complete this task: {task}")
             return response
 
-        result = run_agent("Test the Lantern tracing SDK")
+        result = run_agent("Test the Omneval tracing SDK")
         print(f"  SDK result: {result}")
         return True
     except ImportError as e:
@@ -198,7 +198,7 @@ def test_error_cases():
     # Invalid API key
     r = requests.post(
         f"{INGEST_URL}/api/v1/spans",
-        headers={"X-API-Key": "ltn_proj_invalid"},
+        headers={"X-API-Key": "oev_proj_invalid"},
         json={"spans": []}, timeout=5
     )
     print(f"  Invalid key -> {r.status_code} (expect 401)")
@@ -219,7 +219,7 @@ if __name__ == "__main__":
 
     results["native_rest"] = test_native_rest()
     results["otlp"] = test_otlp()
-    results["sdk"] = test_lantern_sdk()
+    results["sdk"] = test_omneval_sdk()
     results["multi_span"] = test_multi_span_trace()
     results["errors"] = test_error_cases()
 

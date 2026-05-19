@@ -1,4 +1,4 @@
-module github.com/zbloss/lantern/services/writer
+module github.com/omneval/omneval/services/writer
 
 go 1.25.0
 
@@ -7,12 +7,12 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.19.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.42.0
-	github.com/zbloss/lantern/internal v0.0.0
+	github.com/omneval/omneval/internal v0.0.0
 	go.opentelemetry.io/proto/otlp v1.10.0
 	google.golang.org/protobuf v1.36.11
 )
 
-replace github.com/zbloss/lantern/internal => ../../internal
+replace github.com/omneval/omneval/internal => ../../internal
 
 require (
 	dario.cat/mergo v1.0.2 // indirect

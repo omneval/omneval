@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	internalauth "github.com/zbloss/lantern/internal/auth"
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/fake"
-	"github.com/zbloss/lantern/services/query/internal/auth"
+	internalauth "github.com/omneval/omneval/internal/auth"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/fake"
+	"github.com/omneval/omneval/services/query/internal/auth"
 )
 
 // setupAuthServer creates an auth handler and HTTP test server.
@@ -73,7 +73,7 @@ func loginAndGetCookie(t *testing.T, ts *httptest.Server, email, password string
 	defer resp.Body.Close()
 
 	for _, c := range resp.Cookies() {
-		if c.Name == "lantern_session" {
+		if c.Name == "omneval_session" {
 			return c.Value
 		}
 	}
@@ -177,7 +177,7 @@ func TestHandler_Logout_Success(t *testing.T) {
 
 	// Logout
 	req, _ := http.NewRequest("POST", ts.URL+"/logout", nil)
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("logout request failed: %v", err)
@@ -226,7 +226,7 @@ func TestHandler_Invite_Success(t *testing.T) {
 		"org_id": "org-1",
 	})
 	inviteReq, _ := http.NewRequest("POST", ts.URL+"/api/v1/users/invite", bytes.NewReader(invitePayload))
-	inviteReq.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	inviteReq.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	inviteResp, err := http.DefaultClient.Do(inviteReq)
 	if err != nil {
 		t.Fatalf("invite request failed: %v", err)
@@ -275,7 +275,7 @@ func TestHandler_Invite_ForbiddenNonAdmin(t *testing.T) {
 		"org_id": "org-1",
 	})
 	inviteReq, _ := http.NewRequest("POST", ts.URL+"/api/v1/users/invite", bytes.NewReader(invitePayload))
-	inviteReq.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	inviteReq.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	inviteResp, err := http.DefaultClient.Do(inviteReq)
 	if err != nil {
 		t.Fatalf("invite request failed: %v", err)
@@ -303,7 +303,7 @@ func TestHandler_ChangePassword_Success(t *testing.T) {
 		"new_password":     "new-password",
 	})
 	changeReq, _ := http.NewRequest("PUT", ts.URL+"/api/v1/users/me/password", bytes.NewReader(changePayload))
-	changeReq.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	changeReq.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	changeResp, err := http.DefaultClient.Do(changeReq)
 	if err != nil {
 		t.Fatalf("change password request failed: %v", err)
@@ -363,7 +363,7 @@ func TestHandler_ChangePassword_WrongCurrent(t *testing.T) {
 		"new_password":     "new-password",
 	})
 	changeReq, _ := http.NewRequest("PUT", ts.URL+"/api/v1/users/me/password", bytes.NewReader(changePayload))
-	changeReq.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	changeReq.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	changeResp, err := http.DefaultClient.Do(changeReq)
 	if err != nil {
 		t.Fatalf("change password request failed: %v", err)
@@ -388,7 +388,7 @@ func TestHandler_ChangePassword_MissingFields(t *testing.T) {
 
 	changePayload, _ := json.Marshal(map[string]string{})
 	changeReq, _ := http.NewRequest("PUT", ts.URL+"/api/v1/users/me/password", bytes.NewReader(changePayload))
-	changeReq.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	changeReq.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	changeResp, err := http.DefaultClient.Do(changeReq)
 	if err != nil {
 		t.Fatalf("change password request failed: %v", err)
@@ -443,8 +443,8 @@ func TestHandler_ClearSessionCookie(t *testing.T) {
 		t.Fatal("expected session cookie")
 	}
 	c := cookies[0]
-	if c.Name != "lantern_session" {
-		t.Errorf("cookie name: got %q, want %q", c.Name, "lantern_session")
+	if c.Name != "omneval_session" {
+		t.Errorf("cookie name: got %q, want %q", c.Name, "omneval_session")
 	}
 	if c.MaxAge != -1 {
 		t.Errorf("MaxAge: got %d, want -1", c.MaxAge)
@@ -496,7 +496,7 @@ func TestHandler_Logout_ReturnsJSON(t *testing.T) {
 	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "correct-password")
 
 	req, _ := http.NewRequest("POST", ts.URL+"/logout", nil)
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -532,7 +532,7 @@ func TestHandler_Invite_GeneratesResetToken(t *testing.T) {
 		"org_id": "org-1",
 	})
 	inviteReq, _ := http.NewRequest("POST", ts.URL+"/api/v1/users/invite", bytes.NewReader(invitePayload))
-	inviteReq.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	inviteReq.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	inviteResp, err := http.DefaultClient.Do(inviteReq)
 	if err != nil {
 		t.Fatalf("invite request failed: %v", err)
@@ -730,7 +730,7 @@ func TestHandler_CreateProject_Success(t *testing.T) {
 	// Create a project
 	projectPayload, _ := json.Marshal(map[string]string{"name": "My Project"})
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects", bytes.NewReader(projectPayload))
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("create project request failed: %v", err)
@@ -776,7 +776,7 @@ func TestHandler_CreateProject_RequiresName(t *testing.T) {
 	// Empty name
 	projectPayload, _ := json.Marshal(map[string]string{"name": ""})
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects", bytes.NewReader(projectPayload))
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("create project request failed: %v", err)
@@ -823,7 +823,7 @@ func TestHandler_GenerateAPIKey_ProjectKey(t *testing.T) {
 	// Generate a project-scoped API key
 	keyPayload, _ := json.Marshal(map[string]string{"kind": "project"})
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects/proj-1/api-keys", bytes.NewReader(keyPayload))
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("generate key request failed: %v", err)
@@ -848,8 +848,8 @@ func TestHandler_GenerateAPIKey_ProjectKey(t *testing.T) {
 	if body.RawKey == "" {
 		t.Error("expected raw_key in response")
 	}
-	if !strings.HasPrefix(body.RawKey, "ltn_proj_") && !strings.HasPrefix(body.RawKey, "ltn_svc_") {
-		t.Errorf("raw_key prefix: got %q, expected ltn_proj_ or ltn_svc_", body.RawKey)
+	if !strings.HasPrefix(body.RawKey, "oev_proj_") && !strings.HasPrefix(body.RawKey, "oev_svc_") {
+		t.Errorf("raw_key prefix: got %q, expected oev_proj_ or oev_svc_", body.RawKey)
 	}
 }
 
@@ -871,7 +871,7 @@ func TestHandler_GenerateAPIKey_ServiceKey(t *testing.T) {
 		"service_name": "my-agent",
 	})
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects/proj-1/api-keys", bytes.NewReader(keyPayload))
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("generate key request failed: %v", err)
@@ -912,7 +912,7 @@ func TestHandler_GenerateAPIKey_ServiceKeyRequiresServiceName(t *testing.T) {
 
 	keyPayload, _ := json.Marshal(map[string]string{"kind": "service"})
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects/proj-1/api-keys", bytes.NewReader(keyPayload))
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -937,7 +937,7 @@ func TestHandler_GenerateAPIKey_ProjectNotFound(t *testing.T) {
 
 	keyPayload, _ := json.Marshal(map[string]string{"kind": "project"})
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects/nonexistent/api-keys", bytes.NewReader(keyPayload))
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -970,7 +970,7 @@ func TestHandler_ListAPIKeys(t *testing.T) {
 	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
 
 	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/projects/proj-1/api-keys", nil)
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("list keys request failed: %v", err)
@@ -1005,7 +1005,7 @@ func TestHandler_RevokeAPIKey(t *testing.T) {
 	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
 
 	req, _ := http.NewRequest("DELETE", ts.URL+"/api/v1/projects/proj-1/api-keys/key-1", nil)
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("revoke request failed: %v", err)
@@ -1046,7 +1046,7 @@ func TestHandler_RevokeAPIKey_NotFound(t *testing.T) {
 	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
 
 	req, _ := http.NewRequest("DELETE", ts.URL+"/api/v1/projects/proj-1/api-keys/nonexistent", nil)
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -1070,7 +1070,7 @@ func TestHandler_ListAPIKeys_ProjectNotFound(t *testing.T) {
 	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
 
 	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/projects/nonexistent/api-keys", nil)
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -1098,7 +1098,7 @@ func TestHandler_GenerateAPIKey_ReturnsRawKeyOnce(t *testing.T) {
 	// Generate a key
 	keyPayload, _ := json.Marshal(map[string]string{"kind": "project"})
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects/proj-1/api-keys", bytes.NewReader(keyPayload))
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -1114,8 +1114,8 @@ func TestHandler_GenerateAPIKey_ReturnsRawKeyOnce(t *testing.T) {
 	if len(body.RawKey) < 10 {
 		t.Errorf("raw_key too short: %q", body.RawKey)
 	}
-	if body.RawKey[:9] != "ltn_proj_" {
-		t.Errorf("raw_key prefix: got %q, want %q", body.RawKey[:9], "ltn_proj_")
+	if body.RawKey[:9] != "oev_proj_" {
+		t.Errorf("raw_key prefix: got %q, want %q", body.RawKey[:9], "oev_proj_")
 	}
 }
 
@@ -1135,7 +1135,7 @@ func TestHandler_Invite_NoPasswordInResponse(t *testing.T) {
 		"org_id": "org-1",
 	})
 	inviteReq, _ := http.NewRequest("POST", ts.URL+"/api/v1/users/invite", bytes.NewReader(invitePayload))
-	inviteReq.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	inviteReq.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	inviteResp, err := http.DefaultClient.Do(inviteReq)
 	if err != nil {
 		t.Fatalf("invite request failed: %v", err)
@@ -1187,7 +1187,7 @@ func TestHandler_Invite_UsesResetToken(t *testing.T) {
 		"org_id": "org-1",
 	})
 	inviteReq, _ := http.NewRequest("POST", ts.URL+"/api/v1/users/invite", bytes.NewReader(invitePayload))
-	inviteReq.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	inviteReq.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	inviteResp, err := http.DefaultClient.Do(inviteReq)
 	if err != nil {
 		t.Fatalf("invite request failed: %v", err)
@@ -1237,7 +1237,7 @@ func TestHandler_ResetPassword_ValidToken(t *testing.T) {
 		"org_id": "org-1",
 	})
 	inviteReq, _ := http.NewRequest("POST", ts.URL+"/api/v1/users/invite", bytes.NewReader(invitePayload))
-	inviteReq.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	inviteReq.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	inviteResp, err := http.DefaultClient.Do(inviteReq)
 	if err != nil {
 		t.Fatalf("invite request failed: %v", err)
@@ -1328,7 +1328,7 @@ func TestHandler_Me_Success(t *testing.T) {
 	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
 
 	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/me", nil)
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("me request failed: %v", err)
@@ -1398,7 +1398,7 @@ func TestHandler_Me_JSONContentType(t *testing.T) {
 	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
 
 	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/me", nil)
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("me request failed: %v", err)
@@ -1429,7 +1429,7 @@ func TestHandler_GenerateAPIKey_EndToEnd(t *testing.T) {
 	// Generate a project-scoped API key via POST
 	keyPayload, _ := json.Marshal(map[string]string{"kind": "project"})
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects/proj-1/api-keys", bytes.NewReader(keyPayload))
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -1461,7 +1461,7 @@ func TestHandler_GenerateAPIKey_EndToEnd(t *testing.T) {
 	}
 
 	// Verify the raw key format: prefix + 43 base58 chars
-	expectedPrefix := "ltn_proj_"
+	expectedPrefix := "oev_proj_"
 	if len(body.RawKey) < len(expectedPrefix)+43 {
 		t.Errorf("raw_key too short: %q (expected at least %d chars)", body.RawKey, len(expectedPrefix)+43)
 	}
@@ -1503,7 +1503,7 @@ func TestHandler_GenerateAPIKey_ResponseFormat(t *testing.T) {
 	// Generate a key with the exact payload the frontend sends
 	keyPayload, _ := json.Marshal(map[string]string{"kind": "project"})
 	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects/proj-1/api-keys", bytes.NewReader(keyPayload))
-	req.AddCookie(&http.Cookie{Name: "lantern_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -1534,6 +1534,6 @@ func TestHandler_GenerateAPIKey_ResponseFormat(t *testing.T) {
 		t.Fatal("raw_key must not be empty")
 	}
 	if len(rawKey) < 50 {
-		t.Errorf("raw_key too short: %q (expected at least 50 chars: ltn_proj_ + 43 base58)", rawKey)
+		t.Errorf("raw_key too short: %q (expected at least 50 chars: oev_proj_ + 43 base58)", rawKey)
 	}
 }

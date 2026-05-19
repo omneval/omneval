@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
+	"github.com/omneval/omneval/internal/domain"
 )
 
 func TestTranslate_EmptyInput(t *testing.T) {
@@ -275,7 +275,7 @@ func TestTranslate_KindDerivation_Tool(t *testing.T) {
 	}
 }
 
-func TestTranslate_KindDerivation_ExplicitLanternKind(t *testing.T) {
+func TestTranslate_KindDerivation_ExplicitOmnevalKind(t *testing.T) {
 	rss := []ResourceSpans{
 		{
 			Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
@@ -285,7 +285,7 @@ func TestTranslate_KindDerivation_ExplicitLanternKind(t *testing.T) {
 				Name:       "internal-work",
 				StartTime:  time.Now(),
 				EndTime:    time.Now(),
-				Attributes: map[string]any{"lantern.kind": "internal", "gen_ai.request.model": "gpt-4"},
+				Attributes: map[string]any{"omneval.kind": "internal", "gen_ai.request.model": "gpt-4"},
 			}},
 		},
 	}
@@ -295,9 +295,9 @@ func TestTranslate_KindDerivation_ExplicitLanternKind(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Explicit lantern.kind should win over gen_ai heuristic.
+	// Explicit omneval.kind should win over gen_ai heuristic.
 	if spans[0].Kind != domain.SpanKindInternal {
-		t.Errorf("kind: got %q, want %q (explicit lantern.kind should win)", spans[0].Kind, domain.SpanKindInternal)
+		t.Errorf("kind: got %q, want %q (explicit omneval.kind should win)", spans[0].Kind, domain.SpanKindInternal)
 	}
 }
 

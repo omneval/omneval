@@ -16,21 +16,21 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	redisgo "github.com/redis/go-redis/v9"
-	"github.com/zbloss/lantern/internal/config"
-	"github.com/zbloss/lantern/internal/duckdb"
-	"github.com/zbloss/lantern/internal/leader"
-	"github.com/zbloss/lantern/internal/metadata"
-	"github.com/zbloss/lantern/internal/metadata/postgres"
-	"github.com/zbloss/lantern/internal/metadata/sqlite"
-	"github.com/zbloss/lantern/internal/pricing"
-	"github.com/zbloss/lantern/internal/probe"
-	qredis "github.com/zbloss/lantern/internal/queue/redis"
-	s3pkg "github.com/zbloss/lantern/internal/storage/s3"
-	"github.com/zbloss/lantern/services/writer/internal/flush"
-	"github.com/zbloss/lantern/services/writer/internal/handler"
-	"github.com/zbloss/lantern/services/writer/internal/metrics"
-	"github.com/zbloss/lantern/services/writer/internal/pipeline"
-	syncpkg "github.com/zbloss/lantern/services/writer/internal/sync"
+	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/duckdb"
+	"github.com/omneval/omneval/internal/leader"
+	"github.com/omneval/omneval/internal/metadata"
+	"github.com/omneval/omneval/internal/metadata/postgres"
+	"github.com/omneval/omneval/internal/metadata/sqlite"
+	"github.com/omneval/omneval/internal/pricing"
+	"github.com/omneval/omneval/internal/probe"
+	qredis "github.com/omneval/omneval/internal/queue/redis"
+	s3pkg "github.com/omneval/omneval/internal/storage/s3"
+	"github.com/omneval/omneval/services/writer/internal/flush"
+	"github.com/omneval/omneval/services/writer/internal/handler"
+	"github.com/omneval/omneval/services/writer/internal/metrics"
+	"github.com/omneval/omneval/services/writer/internal/pipeline"
+	syncpkg "github.com/omneval/omneval/services/writer/internal/sync"
 )
 
 // Run starts the Writer Service: drains the Redis ingest queue, writes to
@@ -39,7 +39,7 @@ import (
 func Run() error {
 	// Load config.
 	cfgPath := ""
-	if p := os.Getenv("LANTERN_CONFIG"); p != "" {
+	if p := os.Getenv("OMNEVAL_CONFIG"); p != "" {
 		cfgPath = p
 	}
 	cfg, err := config.Load(cfgPath)
@@ -78,7 +78,7 @@ func Run() error {
 	// Open DuckDB.
 	dbPath := cfg.Writer.DuckDBPath
 	if dbPath == "" {
-		dbPath = "lantern.db"
+		dbPath = "omneval.db"
 	}
 	db, err := duckdb.Open(dbPath)
 	if err != nil {
@@ -118,7 +118,7 @@ func Run() error {
 		ops := leader.NewOpsFromRedis(rc)
 		election, err = leader.NewLeaderElection(
 			ops,
-			"lantern:writer:leader",
+			"omneval:writer:leader",
 			fmt.Sprintf("writer-%s-%d", hostname, os.Getpid()),
 			lockTTL,
 		)
@@ -467,7 +467,7 @@ func openMetadataStore(cfg *config.Config) (metadata.Store, error) {
 
 	switch driver {
 	case "", "sqlite":
-		return openSQLiteStore(dsn, "lantern_meta.db")
+		return openSQLiteStore(dsn, "omneval_meta.db")
 	case "postgres":
 		return openPostgresStore(dsn)
 	default:

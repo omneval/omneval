@@ -161,10 +161,10 @@ describe("Branding Theme", () => {
         "--omneval-text-pure",
         "--omneval-text-mid",
         // legacy keys still present for backward compatibility
-        "--lantern-bg-abyss",
-        "--lantern-accent-ember",
-        "--lantern-text-pure",
-        "--lantern-text-ash",
+        "--omneval-bg-abyss",
+        "--omneval-accent-ember",
+        "--omneval-text-pure",
+        "--omneval-text-ash",
       ];
 
       expectedKeys.forEach((key) => {

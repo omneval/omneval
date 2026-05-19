@@ -1,20 +1,20 @@
 /**
- * @lantern/sdk — Browser-compatible tracer and prompt client for Lantern.
+ * @omneval/sdk — Browser-compatible tracer and prompt client for Omneval.
  *
  * Usage:
- *   import { Lantern } from "@lantern/sdk";
- *   Lantern.init({ baseUrl: "http://localhost:3000", apiKey: "ltn_proj_..." });
+ *   import { Omneval } from "@omneval/sdk";
+ *   Omneval.init({ baseUrl: "http://localhost:3000", apiKey: "oev_proj_..." });
  *
- *   const spanId = Lantern.startSpan("llm.call", { model: "gpt-4" });
- *   Lantern.setModel(spanId, "gpt-4");
- *   Lantern.setInput(spanId, "Hello!");
- *   await Lantern.endSpan(spanId, { output: "Hi there!" });
+ *   const spanId = Omneval.startSpan("llm.call", { model: "gpt-4" });
+ *   Omneval.setModel(spanId, "gpt-4");
+ *   Omneval.setInput(spanId, "Hello!");
+ *   await Omneval.endSpan(spanId, { output: "Hi there!" });
  */
 
-export { Lantern, createLantern, LanternSDK } from "./lantern";
+export { Omneval, createOmneval, OmnevalSDK } from "./omneval";
 export type {
-  LanternConfig,
-  LanternSpan,
+  OmnevalConfig,
+  OmnevalSpan,
   SpanAttributes,
   SpanKind,
   PromptVersion,

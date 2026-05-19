@@ -4,14 +4,14 @@ import (
 	"fmt"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/zbloss/lantern/internal/config"
+	"github.com/omneval/omneval/internal/config"
 )
 
 var (
 	// JobsProcessed counts total eval jobs processed, labeled by project_id and rule_id.
 	JobsProcessed = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "lantern_eval",
+			Namespace: "omneval_eval",
 			Name:      "jobs_processed_total",
 			Help:      "Total number of eval jobs processed by the judge.",
 		},
@@ -21,7 +21,7 @@ var (
 	// JobDuration tracks the duration of a single eval job.
 	JobDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
-			Namespace: "lantern_eval",
+			Namespace: "omneval_eval",
 			Name:      "job_duration_seconds",
 			Help:      "Duration of eval jobs in seconds.",
 			Buckets:   prometheus.DefBuckets,
@@ -31,7 +31,7 @@ var (
 	// JudgeErrors counts total judge LLM errors.
 	JudgeErrors = prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: "lantern_eval",
+			Namespace: "omneval_eval",
 			Name:      "judge_errors_total",
 			Help:      "Total number of errors when calling the judge LLM.",
 		},

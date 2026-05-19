@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { LanternClient } from "../src/client";
+import { OmnevalClient } from "../src/client";
 import { mockFetch, createResponse } from "./utils";
 
-describe("LanternClient", () => {
+describe("OmnevalClient", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => vi.restoreAllMocks());
 
@@ -17,7 +17,7 @@ describe("LanternClient", () => {
         });
       });
 
-      const client = new LanternClient({ baseUrl: "http://localhost:3000" });
+      const client = new OmnevalClient({ baseUrl: "http://localhost:3000" });
       const template = await client.getPrompt("greeting", "production");
 
       expect(template).toBe("Hello, {{.Name}}!");
@@ -34,7 +34,7 @@ describe("LanternClient", () => {
         });
       });
 
-      const client = new LanternClient({ baseUrl: "http://localhost:3000" });
+      const client = new OmnevalClient({ baseUrl: "http://localhost:3000" });
       await client.getPrompt("test");
 
       expect(fetchSpy).toHaveBeenCalledOnce();
@@ -49,7 +49,7 @@ describe("LanternClient", () => {
         });
       });
 
-      const client = new LanternClient({ baseUrl: "http://localhost:3000" });
+      const client = new OmnevalClient({ baseUrl: "http://localhost:3000" });
       await client.getPrompt("cached", "production");
       await client.getPrompt("cached", "production");
       await client.getPrompt("cached", "production");
@@ -63,7 +63,7 @@ describe("LanternClient", () => {
         return createResponse(404);
       });
 
-      const client = new LanternClient({ baseUrl: "http://localhost:3000" });
+      const client = new OmnevalClient({ baseUrl: "http://localhost:3000" });
       await expect(
         client.getPrompt("nonexistent", "production")
       ).rejects.toThrow("prompt not found");
@@ -74,7 +74,7 @@ describe("LanternClient", () => {
         return createResponse(500, { error: "internal error" });
       });
 
-      const client = new LanternClient({ baseUrl: "http://localhost:3000" });
+      const client = new OmnevalClient({ baseUrl: "http://localhost:3000" });
       await expect(
         client.getPrompt("test", "production")
       ).rejects.toThrow("get prompt: 500:");
@@ -90,7 +90,7 @@ describe("LanternClient", () => {
         });
       });
 
-      const client = new LanternClient({ baseUrl: "http://localhost:3000" });
+      const client = new OmnevalClient({ baseUrl: "http://localhost:3000" });
       const template = await client.getPrompt("v2", { version: 2 });
 
       expect(template).toBe("version 2 content");
@@ -106,7 +106,7 @@ describe("LanternClient", () => {
         });
       });
 
-      const client = new LanternClient({ baseUrl: "http://localhost:3000" });
+      const client = new OmnevalClient({ baseUrl: "http://localhost:3000" });
       await client.getPrompt("immutable", { version: 1 });
       await client.getPrompt("immutable", { version: 1 });
 
@@ -125,7 +125,7 @@ describe("LanternClient", () => {
         return createResponse(201, { score_id: "score-123" });
       });
 
-      const client = new LanternClient({ baseUrl: "http://localhost:3000" });
+      const client = new OmnevalClient({ baseUrl: "http://localhost:3000" });
       await client.writeScore("span-abc", {
         name: "helpfulness",
         value: 0.8,
@@ -136,7 +136,7 @@ describe("LanternClient", () => {
     });
 
     it("throws on empty span ID", async () => {
-      const client = new LanternClient({ baseUrl: "http://localhost:3000" });
+      const client = new OmnevalClient({ baseUrl: "http://localhost:3000" });
       await expect(
         client.writeScore("", { name: "eval", value: 1.0 })
       ).rejects.toThrow("span_id is required");
@@ -147,7 +147,7 @@ describe("LanternClient", () => {
         return createResponse(500, { error: "internal error" });
       });
 
-      const client = new LanternClient({ baseUrl: "http://localhost:3000" });
+      const client = new OmnevalClient({ baseUrl: "http://localhost:3000" });
       await expect(
         client.writeScore("span-1", { name: "eval", value: 1.0 })
       ).rejects.toThrow("write score: 500:");
@@ -158,15 +158,15 @@ describe("LanternClient", () => {
         return createResponse(201);
       });
 
-      const client = new LanternClient({
+      const client = new OmnevalClient({
         baseUrl: "http://localhost:3000",
-        apiKey: "ltn_proj_test",
+        apiKey: "oev_proj_test",
       });
       await client.writeScore("span-1", { name: "eval", value: 1.0 });
 
       const call = fetchSpy.mock.calls[0];
       const headers = (call[1] as RequestInit)?.headers as Record<string, string>;
-      expect(headers["X-API-Key"]).toBe("ltn_proj_test");
+      expect(headers["X-API-Key"]).toBe("oev_proj_test");
     });
   });
 });

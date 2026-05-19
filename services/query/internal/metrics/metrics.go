@@ -4,14 +4,14 @@ import (
 	"fmt"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/zbloss/lantern/internal/config"
+	"github.com/omneval/omneval/internal/config"
 )
 
 var (
 	// QueryDuration tracks the duration of span query requests (legacy).
 	QueryDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "lantern_query",
+			Namespace: "omneval_query",
 			Name:      "span_duration_seconds",
 			Help:      "Duration of span query requests.",
 			Buckets:   prometheus.DefBuckets,
@@ -22,7 +22,7 @@ var (
 	// QueryErrors tracks the total number of span query errors.
 	QueryErrors = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "lantern_query",
+			Namespace: "omneval_query",
 			Name:      "span_errors_total",
 			Help:      "Total number of span query errors.",
 		},
@@ -32,7 +32,7 @@ var (
 	// SnapshotDownloads tracks the total number of snapshot downloads.
 	SnapshotDownloads = prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: "lantern_query",
+			Namespace: "omneval_query",
 			Name:      "snapshot_downloads_total",
 			Help:      "Total number of snapshot downloads from S3.",
 		},
@@ -41,7 +41,7 @@ var (
 	// SnapshotDownloadsFailed tracks the total number of failed snapshot downloads.
 	SnapshotDownloadsFailed = prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: "lantern_query",
+			Namespace: "omneval_query",
 			Name:      "snapshot_downloads_failed_total",
 			Help:      "Total number of failed snapshot downloads from S3.",
 		},
@@ -50,7 +50,7 @@ var (
 	// RequestDuration tracks the duration of all API requests, labeled by endpoint.
 	RequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "lantern_query",
+			Namespace: "omneval_query",
 			Name:      "request_duration_seconds",
 			Help:      "Duration of Query API requests in seconds.",
 			Buckets:   prometheus.DefBuckets,
@@ -61,7 +61,7 @@ var (
 	// SnapshotAge tracks how stale the current DuckDB snapshot is (in seconds).
 	SnapshotAge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
-			Namespace: "lantern_query",
+			Namespace: "omneval_query",
 			Name:      "snapshot_age_seconds",
 			Help:      "How stale the current DuckDB snapshot is, in seconds since LastModified.",
 		},

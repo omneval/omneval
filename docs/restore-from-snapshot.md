@@ -13,21 +13,21 @@ you can recover the DuckDB database from a Kubernetes `VolumeSnapshot`.
 ## Listing available snapshots
 
 ```bash
-# List all VolumeSnapshots in the lantern namespace
-kubectl get volumesnapshots -n lantern
+# List all VolumeSnapshots in the omneval namespace
+kubectl get volumesnapshots -n omneval
 
-# List snapshots tagged as Lantern backups
-kubectl get volumesnapshots -n lantern -l app.kubernetes.io/component=writer
+# List snapshots tagged as Omneval backups
+kubectl get volumesnapshots -n omneval -l app.kubernetes.io/component=writer
 
 # Get details of a specific snapshot (shows source PVC, ready status, size)
-kubectl describe volumesnapshot lantern-writer-20260507-020000 -n lantern
+kubectl describe volumesnapshot omneval-writer-20260507-020000 -n omneval
 ```
 
 Example output:
 
 ```
 NAME                       READYTOUSE   SOURCEPVC        SOURCESVCPNAME   SIZE       RESTORESIZE   CLASS                AGE
-lantern-writer-20260507    10Gi         data-writer-0    ebs-csi-gp3      10Gi       10Gi          ebs-csi-gp3          2d
+omneval-writer-20260507    10Gi         data-writer-0    ebs-csi-gp3      10Gi       10Gi          ebs-csi-gp3          2d
 ```
 
 The `READYTOUSE` column shows whether the snapshot is ready for restoration.
@@ -43,13 +43,13 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: data-writer-0-restore
-  namespace: lantern
+  namespace: omneval
 spec:
   accessModes:
     - ReadWriteOnce
   # Reference the VolumeSnapshot by name
   dataSource:
-    name: lantern-writer-20260507-020000
+    name: omneval-writer-20260507-020000
     kind: VolumeSnapshot
     apiGroup: snapshot.storage.k8s.io
   resources:
@@ -66,7 +66,7 @@ kubectl apply -f restore-pvc.yaml
 Wait for the PVC to be bound (the CSI driver clones the snapshot data):
 
 ```bash
-kubectl get pvc data-writer-0-restore -n lantern
+kubectl get pvc data-writer-0-restore -n omneval
 # NAME                    STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
 # data-writer-0-restore   Bound    pvc-abc123def456                           10Gi       RWO            gp3            30s
 ```
@@ -80,7 +80,7 @@ with the restored PVC. This avoids recreating the entire StatefulSet.
 
 ```bash
 # Edit the writer StatefulSet to use the restored PVC
-kubectl patch statefulset writer -n lantern --type merge -p '
+kubectl patch statefulset writer -n omneval --type merge -p '
 {
   "spec": {
     "template": {
@@ -104,7 +104,7 @@ kubectl patch statefulset writer -n lantern --type merge -p '
           "accessModes": ["ReadWriteOnce"],
           "volumeName": "",
           "dataSource": {
-            "name": "lantern-writer-20260507-020000",
+            "name": "omneval-writer-20260507-020000",
             "kind": "VolumeSnapshot",
             "apiGroup": "snapshot.storage.k8s.io"
           },
@@ -123,7 +123,7 @@ kubectl patch statefulset writer -n lantern --type merge -p '
 Then delete the writer pod to force a recreation with the new PVC:
 
 ```bash
-kubectl delete pod writer-0 -n lantern
+kubectl delete pod writer-0 -n omneval
 ```
 
 The StatefulSet controller will create a new PVC from the snapshot, and the
@@ -134,7 +134,7 @@ writer pod will mount it.
 1. Delete the existing StatefulSet (preserving the pods):
 
 ```bash
-kubectl delete statefulset writer -n lantern --cascade=orphan
+kubectl delete statefulset writer -n omneval --cascade=orphan
 ```
 
 2. Apply your modified manifest that references the restored PVC:
@@ -148,7 +148,7 @@ kubectl apply -f writer-statefulset-restored.yaml
 3. Create the writer pod from the template:
 
 ```bash
-kubectl create -f <(kubectl get statefulset writer -n lantern -o yaml | sed 's/name: writer/name: writer-new/')
+kubectl create -f <(kubectl get statefulset writer -n omneval -o yaml | sed 's/name: writer/name: writer-new/')
 ```
 
 ## Verifying the restore
@@ -157,13 +157,13 @@ After the writer pod is running, verify the DuckDB file is intact:
 
 ```bash
 # Check the writer pod is ready
-kubectl get pods -n lantern -l app.kubernetes.io/component=writer
+kubectl get pods -n omneval -l app.kubernetes.io/component=writer
 
 # Exec into the pod and check the DuckDB file
-kubectl exec -it writer-0 -n lantern -- duckdb /data/lantern.duckdb -c "SELECT count(*) FROM spans;"
+kubectl exec -it writer-0 -n omneval -- duckdb /data/omneval.duckdb -c "SELECT count(*) FROM spans;"
 
 # Check recent spans are accessible via the Query API
-curl -s http://lantern-query:8002/api/v1/spans?limit=1 | jq
+curl -s http://omneval-query:8002/api/v1/spans?limit=1 | jq
 ```
 
 ## Cleaning up old snapshots
@@ -172,11 +172,11 @@ Old snapshots consume storage and should be cleaned up periodically:
 
 ```bash
 # Delete snapshots older than 7 days
-kubectl delete volumesnapshots -n lantern -l app.kubernetes.io/component=writer \
+kubectl delete volumesnapshots -n omneval -l app.kubernetes.io/component=writer \
   --field-selector metadata.creationTimestamp<$(date -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -v-7d +%Y-%m-%dT%H:%M:%SZ)
 
 # List snapshots for manual review
-kubectl get volumesnapshots -n lantern -o custom-columns='NAME:metadata.name,CREATED:metadata.creationTimestamp,SIZE:status.readyToUse' \
+kubectl get volumesnapshots -n omneval -o custom-columns='NAME:metadata.name,CREATED:metadata.creationTimestamp,SIZE:status.readyToUse' \
   --sort-by=metadata.creationTimestamp
 ```
 
@@ -186,15 +186,15 @@ Or set up a separate CronJob to automate cleanup:
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: lantern-cleanup-old-snapshots
-  namespace: lantern
+  name: omneval-cleanup-old-snapshots
+  namespace: omneval
 spec:
   schedule: "0 3 * * 0"  # Every Sunday at 03:00 UTC
   jobTemplate:
     spec:
       template:
         spec:
-          serviceAccountName: lantern-volume-snapshot
+          serviceAccountName: omneval-volume-snapshot
           containers:
             - name: cleanup
               image: bitnami/kubectl:latest
@@ -203,7 +203,7 @@ spec:
                 - -c
                 - |
                   # Delete snapshots older than 7 days
-                  kubectl delete volumesnapshots -n lantern \
+                  kubectl delete volumesnapshots -n omneval \
                     -l app.kubernetes.io/component=writer \
                     --field-selector metadata.creationTimestamp<$(date -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
           restartPolicy: OnFailure
@@ -217,7 +217,7 @@ If `READYTOUSE` is `false`, the CSI driver is still creating the snapshot.
 Wait and retry:
 
 ```bash
-kubectl wait volumesnapshot lantern-writer-20260507-020000 -n lantern \
+kubectl wait volumesnapshot omneval-writer-20260507-020000 -n omneval \
   --for=jsonpath='{.status.readyToUse}'=true --timeout=300s
 ```
 
@@ -226,7 +226,7 @@ kubectl wait volumesnapshot lantern-writer-20260507-020000 -n lantern \
 Check the PVC events for errors:
 
 ```bash
-kubectl describe pvc data-writer-0-restore -n lantern
+kubectl describe pvc data-writer-0-restore -n omneval
 ```
 
 Common issues:
@@ -241,11 +241,11 @@ Common issues:
 Check if the PVC is bound:
 
 ```bash
-kubectl get pvc -n lantern
+kubectl get pvc -n omneval
 ```
 
 If the PVC is Pending, check the events:
 
 ```bash
-kubectl describe pvc data-writer-0-restore -n lantern
+kubectl describe pvc data-writer-0-restore -n omneval
 ```

@@ -1,6 +1,6 @@
 import { generateSpanId, generateTraceId } from "./id";
 import { SpanExporter } from "./exporter";
-import { LanternSpan, SpanAttributes, SpanKind } from "./types";
+import { OmnevalSpan, SpanAttributes, SpanKind } from "./types";
 
 interface TrackedSpan {
   span_id: string;
@@ -86,7 +86,7 @@ export class ManualTracer {
       return;
     }
 
-    const spans: LanternSpan[] = this.pending.map((s) => ({
+    const spans: OmnevalSpan[] = this.pending.map((s) => ({
       span_id: s.span_id,
       trace_id: s.trace_id,
       parent_id: s.parent_id,

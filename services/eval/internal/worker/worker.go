@@ -9,10 +9,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/zbloss/lantern/internal/config"
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/queue"
-	"github.com/zbloss/lantern/services/eval/internal/judge"
+	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/queue"
+	"github.com/omneval/omneval/services/eval/internal/judge"
 )
 
 // Worker drains the Redis eval queue and dispatches jobs to the judge pipeline.

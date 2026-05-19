@@ -1,26 +1,26 @@
-import { LanternConfig, SpanAttributes, SpanKind } from "./types";
+import { OmnevalConfig, SpanAttributes, SpanKind } from "./types";
 import { ManualTracer } from "./tracer";
 import { SpanExporter } from "./exporter";
-import { LanternClient } from "./client";
+import { OmnevalClient } from "./client";
 
 /**
- * Tracer and prompt client for Lantern.
- * For tests, use createLantern() to get a fresh instance.
+ * Tracer and prompt client for Omneval.
+ * For tests, use createOmneval() to get a fresh instance.
  */
-export class LanternSDK {
-  config?: LanternConfig;
+export class OmnevalSDK {
+  config?: OmnevalConfig;
   tracer?: ManualTracer;
-  client?: LanternClient;
+  client?: OmnevalClient;
   exporter?: SpanExporter;
 
-  init(config: LanternConfig): void {
+  init(config: OmnevalConfig): void {
     this.config = config;
 
     this.exporter = new SpanExporter(config.baseUrl, config.apiKey);
     this.tracer = new ManualTracer(this.exporter);
     this.tracer.init();
 
-    this.client = new LanternClient(config);
+    this.client = new OmnevalClient(config);
   }
 
   startSpan(
@@ -30,7 +30,7 @@ export class LanternSDK {
     parentSpanId?: string
   ): string {
     if (!this.tracer) {
-      console.warn("@lantern/sdk: Lantern.init() not called — startSpan() is a no-op");
+      console.warn("@omneval/sdk: Omneval.init() not called — startSpan() is a no-op");
       return "";
     }
 
@@ -83,7 +83,7 @@ export class LanternSDK {
     labelOrOptions?: string | { label?: string; version?: number }
   ): Promise<string> {
     if (!this.client) {
-      throw new Error("@lantern/sdk: Lantern.init() not called");
+      throw new Error("@omneval/sdk: Omneval.init() not called");
     }
 
     if (typeof labelOrOptions === "string") {
@@ -95,7 +95,7 @@ export class LanternSDK {
 
   async getPromptByVersion(name: string, version: number): Promise<string> {
     if (!this.client) {
-      throw new Error("@lantern/sdk: Lantern.init() not called");
+      throw new Error("@omneval/sdk: Omneval.init() not called");
     }
 
     return this.client.getPromptByVersion(name, version);
@@ -108,7 +108,7 @@ export class LanternSDK {
     reasoning?: string
   ): Promise<void> {
     if (!this.client) {
-      throw new Error("@lantern/sdk: Lantern.init() not called");
+      throw new Error("@omneval/sdk: Omneval.init() not called");
     }
 
     if (typeof evalName === "string") {
@@ -126,8 +126,8 @@ export class LanternSDK {
   }
 }
 
-export function createLantern(): LanternSDK {
-  return new LanternSDK();
+export function createOmneval(): OmnevalSDK {
+  return new OmnevalSDK();
 }
 
-export const Lantern = new LanternSDK();
+export const Omneval = new OmnevalSDK();

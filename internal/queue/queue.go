@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/zbloss/lantern/internal/domain"
+	"github.com/omneval/omneval/internal/domain"
 )
 
 var (
@@ -15,11 +15,11 @@ var (
 const (
 	// KeyIngestSpans is the Redis list key for translated span batches.
 	// Ingest API pushes; Writer Service pops.
-	KeyIngestSpans = "lantern:ingest:spans"
+	KeyIngestSpans = "omneval:ingest:spans"
 
 	// KeyEvalJobs is the Redis list key for eval job entries.
 	// Writer Service pushes; Eval Workers pop.
-	KeyEvalJobs = "lantern:eval:jobs"
+	KeyEvalJobs = "omneval:eval:jobs"
 )
 
 // IngestQueue is the durability buffer between the Ingest API and the Writer.

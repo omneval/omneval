@@ -9,12 +9,12 @@ function renderWithToast(ui: React.ReactElement) {
 
 const mockKeys = [
   {
-    key_id: "ltn_proj_abc123",
+    key_id: "oev_proj_abc123",
     kind: "project" as const,
     created_at: "2026-05-13T10:00:00Z",
   },
   {
-    key_id: "ltn_svc_worker-1",
+    key_id: "oev_svc_worker-1",
     kind: "service" as const,
     service_name: "my-agent",
     created_at: "2026-05-14T08:00:00Z",
@@ -110,8 +110,8 @@ describe("AdminPage", () => {
     renderWithToast(<AdminPage activeProject="proj-1" />);
 
     await waitFor(() => {
-      expect(screen.getByText("ltn_proj_abc123")).toBeInTheDocument();
-      expect(screen.getByText("ltn_svc_worker-1")).toBeInTheDocument();
+      expect(screen.getByText("oev_proj_abc123")).toBeInTheDocument();
+      expect(screen.getByText("oev_svc_worker-1")).toBeInTheDocument();
     });
   });
 
@@ -167,7 +167,7 @@ describe("AdminPage", () => {
     renderWithToast(<AdminPage activeProject="proj-1" />);
 
     await waitFor(() => {
-      expect(screen.getByText("ltn_proj_abc123")).toBeInTheDocument();
+      expect(screen.getByText("oev_proj_abc123")).toBeInTheDocument();
     });
 
     const deleteButtons = screen.getAllByRole("button", { name: /delete/i });
@@ -186,7 +186,7 @@ describe("AdminPage", () => {
       if (url === "/api/v1/admin/api-keys" && init?.method !== "DELETE") {
         return resolveKeys(mockKeys);
       }
-      if (url === "/api/v1/admin/api-keys/ltn_proj_abc123" && init?.method === "DELETE") {
+      if (url === "/api/v1/admin/api-keys/oev_proj_abc123" && init?.method === "DELETE") {
         return ({ ok: true } as Response);
       }
       if (url === "/api/v1/projects") {
@@ -198,7 +198,7 @@ describe("AdminPage", () => {
     renderWithToast(<AdminPage activeProject="proj-1" />);
 
     await waitFor(() => {
-      expect(screen.getByText("ltn_proj_abc123")).toBeInTheDocument();
+      expect(screen.getByText("oev_proj_abc123")).toBeInTheDocument();
     });
 
     const deleteButtons = screen.getAllByRole("button", { name: /delete/i });
@@ -543,12 +543,12 @@ describe("AdminPage", () => {
   it("displays all keys from all projects in admin", async () => {
     const allProjectKeys = [
       {
-        key_id: "ltn_proj_proj1_key",
+        key_id: "oev_proj_proj1_key",
         kind: "project" as const,
         created_at: "2026-05-10T10:00:00Z",
       },
       {
-        key_id: "ltn_proj_proj2_key",
+        key_id: "oev_proj_proj2_key",
         kind: "project" as const,
         created_at: "2026-05-11T10:00:00Z",
       },
@@ -567,8 +567,8 @@ describe("AdminPage", () => {
     renderWithToast(<AdminPage activeProject="proj-1" />);
 
     await waitFor(() => {
-      expect(screen.getByText("ltn_proj_proj1_key")).toBeInTheDocument();
-      expect(screen.getByText("ltn_proj_proj2_key")).toBeInTheDocument();
+      expect(screen.getByText("oev_proj_proj1_key")).toBeInTheDocument();
+      expect(screen.getByText("oev_proj_proj2_key")).toBeInTheDocument();
     });
   });
 });

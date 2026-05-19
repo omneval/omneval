@@ -1,6 +1,6 @@
 """
-Lantern QA Trace Test Script
-Tests both the native REST API and the Lantern Python SDK (OTLP) trace ingestion.
+Omneval QA Trace Test Script
+Tests both the native REST API and the Omneval Python SDK (OTLP) trace ingestion.
 """
 
 import time
@@ -11,7 +11,7 @@ import requests
 # Config
 INGEST_URL = "http://localhost:8000"
 QUERY_URL = "http://localhost:8002"
-API_KEY = "ltn_proj_BrY4nD4xEh7wdeFYSpXnoN5jLTu4E6Z3e5yPmYWp9nr1"
+API_KEY = "oev_proj_BrY4nD4xEh7wdeFYSpXnoN5jLTu4E6Z3e5yPmYWp9nr1"
 
 
 def make_span_id():
@@ -87,7 +87,7 @@ def test_native_rest_invalid_api_key():
     print("\n=== Test 3: Invalid API key returns 401 ===")
     resp = requests.post(
         f"{INGEST_URL}/api/v1/spans",
-        headers={"X-API-Key": "ltn_proj_INVALIDKEYXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", "Content-Type": "application/json"},
+        headers={"X-API-Key": "oev_proj_INVALIDKEYXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", "Content-Type": "application/json"},
         json={"spans": [{"span_id": make_span_id(), "trace_id": make_trace_id(), "name": "bad"}]},
         timeout=10,
     )
@@ -137,33 +137,33 @@ def test_native_rest_span_without_input_output():
 
 
 def test_otlp_sdk():
-    """Test 6: OTLP traces via Lantern Python SDK."""
-    print("\n=== Test 6: OTLP via Lantern Python SDK ===")
+    """Test 6: OTLP traces via Omneval Python SDK."""
+    print("\n=== Test 6: OTLP via Omneval Python SDK ===")
     try:
-        import lantern_sdk as lantern
+        import omneval_sdk as omneval
         from opentelemetry import trace as otel_trace
 
-        lantern.configure(
+        omneval.configure(
             endpoint=INGEST_URL + "/",
             api_key=API_KEY,
         )
-        print("  Lantern SDK configured successfully")
+        print("  Omneval SDK configured successfully")
 
-        @lantern.trace
+        @omneval.trace
         def fake_llm_call(prompt: str) -> str:
-            span = lantern.get_active_span()
+            span = omneval.get_active_span()
             if span:
-                lantern.set_input(span, prompt)
-                lantern.set_model(span, "gpt-4o-mini")
-                lantern.set_tokens(span, input_tokens=20, output_tokens=35)
+                omneval.set_input(span, prompt)
+                omneval.set_model(span, "gpt-4o-mini")
+                omneval.set_tokens(span, input_tokens=20, output_tokens=35)
                 time.sleep(0.05)  # simulate latency
                 result = "The capital of France is Paris, a city known for the Eiffel Tower."
-                lantern.set_output(span, result)
+                omneval.set_output(span, result)
             return result
 
-        @lantern.trace
+        @omneval.trace
         def run_agent(question: str) -> str:
-            span = lantern.get_active_span()
+            span = omneval.get_active_span()
             if span:
                 span.set_attribute("agent.type", "qa-agent")
                 span.set_attribute("qa.test", "sdk_otlp")
@@ -174,7 +174,7 @@ def test_otlp_sdk():
         print("  OK: OTLP spans exported via SDK")
         return True
     except ImportError as e:
-        print(f"  WARN: lantern_sdk not installed ({e}), trying opentelemetry-sdk directly...")
+        print(f"  WARN: omneval_sdk not installed ({e}), trying opentelemetry-sdk directly...")
         return test_otlp_direct()
     except Exception as e:
         print(f"  FAIL: {type(e).__name__}: {e}")
@@ -204,8 +204,8 @@ def test_otlp_direct():
             span.set_attribute("gen_ai.request.model", "gpt-4o-mini")
             span.set_attribute("gen_ai.usage.input_tokens", 25)
             span.set_attribute("gen_ai.usage.output_tokens", 40)
-            span.set_attribute("lantern.input", "What is the capital of Germany?")
-            span.set_attribute("lantern.output", "The capital of Germany is Berlin.")
+            span.set_attribute("omneval.input", "What is the capital of Germany?")
+            span.set_attribute("omneval.output", "The capital of Germany is Berlin.")
             time.sleep(0.05)
 
         provider.force_flush(timeout_millis=5000)
@@ -301,7 +301,7 @@ def test_query_list_spans():
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("Lantern QA Trace Test")
+    print("Omneval QA Trace Test")
     print("=" * 60)
 
     # Core ingest tests

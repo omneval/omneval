@@ -11,7 +11,7 @@ import (
 )
 
 // Config is the top-level configuration structure populated by Viper from
-// lantern.yaml and environment variable overrides.
+// omneval.yaml and environment variable overrides.
 type Config struct {
 	LogLevel  string           `mapstructure:"log_level"`
 	Database  DatabaseConfig   `mapstructure:"database"`
@@ -53,7 +53,7 @@ type AuthConfig struct {
 	SecureCookie bool `mapstructure:"secure_cookie"`
 	// Bootstrap admin credentials. If set and no users exist, the Query API
 	// creates this admin user on startup. Typically set via environment
-	// variables: LANTERN_AUTH_ADMIN_EMAIL / LANTERN_AUTH_ADMIN_PASSWORD.
+	// variables: OMNEVAL_AUTH_ADMIN_EMAIL / OMNEVAL_AUTH_ADMIN_PASSWORD.
 	AdminEmail    string `mapstructure:"admin_email"`
 	AdminPassword string `mapstructure:"admin_password"`
 }
@@ -62,10 +62,10 @@ type IngestConfig struct {
 	Addr             string   `mapstructure:"addr"`
 	// LogSystemPrompt controls whether the system prompt is included as the
 	// first element of a span's Input array. Defaults to true.
-	// Override via LANTERN_INGEST_LOG_SYSTEM_PROMPT=false.
+	// Override via OMNEVAL_INGEST_LOG_SYSTEM_PROMPT=false.
 	LogSystemPrompt bool `mapstructure:"log_system_prompt"`
 	// CORSAllowedOrigins lists allowed origins for CORS requests. Use ["*"] for all origins.
-	// Override via LANTERN_INGEST_CORS_ALLOWED_ORIGINS (comma-separated).
+	// Override via OMNEVAL_INGEST_CORS_ALLOWED_ORIGINS (comma-separated).
 	CORSAllowedOrigins []string `mapstructure:"cors_allowed_origins"`
 }
 
@@ -142,8 +142,8 @@ type MetricsConfig struct {
 	DisableProjectLabels bool `mapstructure:"disable_project_labels"`
 }
 
-// Load reads lantern.yaml and applies environment variable overrides.
-// Environment variables use the LANTERN_ prefix with _ as the key separator.
+// Load reads omneval.yaml and applies environment variable overrides.
+// Environment variables use the OMNEVAL_ prefix with _ as the key separator.
 func Load(path string) (*Config, error) {
 	v := viper.New()
 
@@ -209,52 +209,52 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("unmarshalling config: %w", err)
 	}
 
-	// Apply LANTERN_* environment variable overrides directly.
+	// Apply OMNEVAL_* environment variable overrides directly.
 	// Viper's AutomaticEnv does not reliably propagate env vars into nested
 	// struct fields via Unmarshal — os.Getenv is the only guaranteed path.
-	envString(&cfg.LogLevel,         "LANTERN_LOG_LEVEL")
-	envString(&cfg.Database.Driver,  "LANTERN_DATABASE_DRIVER")
-	envString(&cfg.Database.DSN,     "LANTERN_DATABASE_DSN")
-	envString(&cfg.Redis.Addr,       "LANTERN_REDIS_ADDR")
-	envString(&cfg.Redis.Password,   "LANTERN_REDIS_PASSWORD")
-	envInt(&cfg.Redis.DB,            "LANTERN_REDIS_DB")
-	envString(&cfg.Storage.Endpoint, "LANTERN_STORAGE_ENDPOINT")
-	envString(&cfg.Storage.Bucket,   "LANTERN_STORAGE_BUCKET")
-	envString(&cfg.Storage.Region,   "LANTERN_STORAGE_REGION")
-	envString(&cfg.Storage.AccessKey,"LANTERN_STORAGE_ACCESS_KEY")
-	envString(&cfg.Storage.SecretKey,"LANTERN_STORAGE_SECRET_KEY")
-	envString(&cfg.Auth.SessionTTL,  "LANTERN_AUTH_SESSION_TTL")
-	envBool(&cfg.Auth.SecureCookie,  "LANTERN_AUTH_SECURE_COOKIE")
-	envString(&cfg.Auth.AdminEmail,  "LANTERN_AUTH_ADMIN_EMAIL")
-	envString(&cfg.Auth.AdminPassword,"LANTERN_AUTH_ADMIN_PASSWORD")
-	envString(&cfg.Ingest.Addr,      "LANTERN_INGEST_ADDR")
-	envBool(&cfg.Ingest.LogSystemPrompt, "LANTERN_INGEST_LOG_SYSTEM_PROMPT")
-	if v := os.Getenv("LANTERN_INGEST_CORS_ALLOWED_ORIGINS"); v != "" {
+	envString(&cfg.LogLevel,         "OMNEVAL_LOG_LEVEL")
+	envString(&cfg.Database.Driver,  "OMNEVAL_DATABASE_DRIVER")
+	envString(&cfg.Database.DSN,     "OMNEVAL_DATABASE_DSN")
+	envString(&cfg.Redis.Addr,       "OMNEVAL_REDIS_ADDR")
+	envString(&cfg.Redis.Password,   "OMNEVAL_REDIS_PASSWORD")
+	envInt(&cfg.Redis.DB,            "OMNEVAL_REDIS_DB")
+	envString(&cfg.Storage.Endpoint, "OMNEVAL_STORAGE_ENDPOINT")
+	envString(&cfg.Storage.Bucket,   "OMNEVAL_STORAGE_BUCKET")
+	envString(&cfg.Storage.Region,   "OMNEVAL_STORAGE_REGION")
+	envString(&cfg.Storage.AccessKey,"OMNEVAL_STORAGE_ACCESS_KEY")
+	envString(&cfg.Storage.SecretKey,"OMNEVAL_STORAGE_SECRET_KEY")
+	envString(&cfg.Auth.SessionTTL,  "OMNEVAL_AUTH_SESSION_TTL")
+	envBool(&cfg.Auth.SecureCookie,  "OMNEVAL_AUTH_SECURE_COOKIE")
+	envString(&cfg.Auth.AdminEmail,  "OMNEVAL_AUTH_ADMIN_EMAIL")
+	envString(&cfg.Auth.AdminPassword,"OMNEVAL_AUTH_ADMIN_PASSWORD")
+	envString(&cfg.Ingest.Addr,      "OMNEVAL_INGEST_ADDR")
+	envBool(&cfg.Ingest.LogSystemPrompt, "OMNEVAL_INGEST_LOG_SYSTEM_PROMPT")
+	if v := os.Getenv("OMNEVAL_INGEST_CORS_ALLOWED_ORIGINS"); v != "" {
 		cfg.Ingest.CORSAllowedOrigins = strings.Split(v, ",")
 	}
-	envString(&cfg.Writer.Addr,                 "LANTERN_WRITER_ADDR")
-	envString(&cfg.Writer.DuckDBPath,           "LANTERN_WRITER_DUCKDB_PATH")
-	envString(&cfg.Writer.SyncInterval,         "LANTERN_WRITER_SYNC_INTERVAL")
-	envString(&cfg.Writer.FlushInterval,        "LANTERN_WRITER_FLUSH_INTERVAL")
-	envInt(&cfg.Writer.FlushAgeDays,            "LANTERN_WRITER_FLUSH_AGE_DAYS")
-	envBool(&cfg.Writer.LeaderElection.Enabled,       "LANTERN_WRITER_LEADER_ELECTION_ENABLED")
-	envInt(&cfg.Writer.LeaderElection.LockTTL,         "LANTERN_WRITER_LEADER_ELECTION_LOCK_TTL")
-	envBool(&cfg.Writer.LeaderElection.FencingEnabled, "LANTERN_WRITER_LEADER_ELECTION_FENCING_ENABLED")
-	envString(&cfg.Query.Addr,              "LANTERN_QUERY_ADDR")
-	envString(&cfg.Query.DuckDBPath,        "LANTERN_QUERY_DUCKDB_PATH")
-	envString(&cfg.Query.SyncInterval,      "LANTERN_QUERY_SYNC_INTERVAL")
-	envString(&cfg.Query.PlaygroundLLMBaseURL, "LANTERN_QUERY_PLAYGROUND_LLM_BASE_URL")
-	envString(&cfg.Query.PlaygroundLLMAPIKey,  "LANTERN_QUERY_PLAYGROUND_LLM_API_KEY")
-	envString(&cfg.Query.JudgeLLMBaseURL, "LANTERN_QUERY_JUDGE_LLM_BASE_URL")
-	envString(&cfg.Query.JudgeLLMAPIKey,  "LANTERN_QUERY_JUDGE_LLM_API_KEY")
-	envString(&cfg.Eval.Addr,           "LANTERN_EVAL_ADDR")
-	envInt(&cfg.Eval.Concurrency,       "LANTERN_EVAL_CONCURRENCY")
-	envString(&cfg.Eval.LLMBaseURL,     "LANTERN_EVAL_LLM_BASE_URL")
-	envString(&cfg.Eval.LLMModel,       "LANTERN_EVAL_LLM_MODEL")
-	envString(&cfg.Eval.LLMAPIKey,      "LANTERN_EVAL_LLM_API_KEY")
-	envInt(&cfg.Eval.RetryCount,        "LANTERN_EVAL_RETRY_COUNT")
-	envString(&cfg.Metrics.Addr,        "LANTERN_METRICS_ADDR")
-	envBool(&cfg.Metrics.DisableProjectLabels, "LANTERN_METRICS_DISABLE_PROJECT_LABELS")
+	envString(&cfg.Writer.Addr,                 "OMNEVAL_WRITER_ADDR")
+	envString(&cfg.Writer.DuckDBPath,           "OMNEVAL_WRITER_DUCKDB_PATH")
+	envString(&cfg.Writer.SyncInterval,         "OMNEVAL_WRITER_SYNC_INTERVAL")
+	envString(&cfg.Writer.FlushInterval,        "OMNEVAL_WRITER_FLUSH_INTERVAL")
+	envInt(&cfg.Writer.FlushAgeDays,            "OMNEVAL_WRITER_FLUSH_AGE_DAYS")
+	envBool(&cfg.Writer.LeaderElection.Enabled,       "OMNEVAL_WRITER_LEADER_ELECTION_ENABLED")
+	envInt(&cfg.Writer.LeaderElection.LockTTL,         "OMNEVAL_WRITER_LEADER_ELECTION_LOCK_TTL")
+	envBool(&cfg.Writer.LeaderElection.FencingEnabled, "OMNEVAL_WRITER_LEADER_ELECTION_FENCING_ENABLED")
+	envString(&cfg.Query.Addr,              "OMNEVAL_QUERY_ADDR")
+	envString(&cfg.Query.DuckDBPath,        "OMNEVAL_QUERY_DUCKDB_PATH")
+	envString(&cfg.Query.SyncInterval,      "OMNEVAL_QUERY_SYNC_INTERVAL")
+	envString(&cfg.Query.PlaygroundLLMBaseURL, "OMNEVAL_QUERY_PLAYGROUND_LLM_BASE_URL")
+	envString(&cfg.Query.PlaygroundLLMAPIKey,  "OMNEVAL_QUERY_PLAYGROUND_LLM_API_KEY")
+	envString(&cfg.Query.JudgeLLMBaseURL, "OMNEVAL_QUERY_JUDGE_LLM_BASE_URL")
+	envString(&cfg.Query.JudgeLLMAPIKey,  "OMNEVAL_QUERY_JUDGE_LLM_API_KEY")
+	envString(&cfg.Eval.Addr,           "OMNEVAL_EVAL_ADDR")
+	envInt(&cfg.Eval.Concurrency,       "OMNEVAL_EVAL_CONCURRENCY")
+	envString(&cfg.Eval.LLMBaseURL,     "OMNEVAL_EVAL_LLM_BASE_URL")
+	envString(&cfg.Eval.LLMModel,       "OMNEVAL_EVAL_LLM_MODEL")
+	envString(&cfg.Eval.LLMAPIKey,      "OMNEVAL_EVAL_LLM_API_KEY")
+	envInt(&cfg.Eval.RetryCount,        "OMNEVAL_EVAL_RETRY_COUNT")
+	envString(&cfg.Metrics.Addr,        "OMNEVAL_METRICS_ADDR")
+	envBool(&cfg.Metrics.DisableProjectLabels, "OMNEVAL_METRICS_DISABLE_PROJECT_LABELS")
 
 	return &cfg, nil
 }

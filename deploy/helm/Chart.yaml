@@ -1,5 +1,5 @@
 apiVersion: v2
-name: lantern
+name: omneval
 description: A self-hostable LLM/Agent tracing platform with DuckDB as the OLAP backend
 type: application
 version: 0.2.0
@@ -11,5 +11,5 @@ keywords:
   - duckdb
   - agent
 sources:
-  - https://github.com/zbloss/lantern
+  - https://github.com/omneval/omneval
 dependencies: []

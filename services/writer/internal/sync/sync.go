@@ -7,10 +7,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/zbloss/lantern/internal/config"
-	"github.com/zbloss/lantern/internal/storage"
-	s3 "github.com/zbloss/lantern/internal/storage/s3"
-	"github.com/zbloss/lantern/services/writer/internal/metrics"
+	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/storage"
+	s3 "github.com/omneval/omneval/internal/storage/s3"
+	"github.com/omneval/omneval/services/writer/internal/metrics"
 )
 
 // Syncer copies the live DuckDB file to S3 every sync interval so Query API

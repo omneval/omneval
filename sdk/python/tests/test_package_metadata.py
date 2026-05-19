@@ -16,23 +16,23 @@ class TestPackageMetadata:
     """Verify the package is properly configured for PyPI publishing."""
 
     def test_pyproject_has_correct_name(self):
-        """Package name is 'lantern-sdk' (with hyphen for pip install)."""
-        metadata = importlib.metadata.metadata("lantern-sdk")
-        assert metadata["Name"] == "lantern-sdk"
+        """Package name is 'omneval-sdk' (with hyphen for pip install)."""
+        metadata = importlib.metadata.metadata("omneval-sdk")
+        assert metadata["Name"] == "omneval-sdk"
 
     def test_pyproject_has_version(self):
         """Package has a non-empty version set."""
-        version = importlib.metadata.version("lantern-sdk")
+        version = importlib.metadata.version("omneval-sdk")
         assert version and version != "0.0.0"
 
     def test_pyproject_has_python_requires(self):
         """Package specifies minimum Python version."""
-        requires_python = importlib.metadata.metadata("lantern-sdk").get("Requires-Python", "")
+        requires_python = importlib.metadata.metadata("omneval-sdk").get("Requires-Python", "")
         assert requires_python
 
     def test_dependencies_are_present(self):
         """Required dependencies are declared and installable."""
-        dist = importlib.metadata.distribution("lantern-sdk")
+        dist = importlib.metadata.distribution("omneval-sdk")
         requires = dist.requires or []
 
         dep_names = [_extract_package_name(r) for r in requires]
@@ -43,7 +43,7 @@ class TestPackageMetadata:
 
     def test_dev_dependencies_are_present(self):
         """Development dependencies are declared."""
-        dist = importlib.metadata.distribution("lantern-sdk")
+        dist = importlib.metadata.distribution("omneval-sdk")
         requires = dist.requires or []
 
         dev_deps = [r for r in requires if "extra == 'dev'" in r]
@@ -53,18 +53,18 @@ class TestPackageMetadata:
         assert any("responses" in d for d in dev_dep_names)
 
     def test_package_can_be_imported(self):
-        """lantern_sdk can be imported standalone (no repo clone needed)."""
-        import lantern_sdk
+        """omneval_sdk can be imported standalone (no repo clone needed)."""
+        import omneval_sdk
 
         # Verify all expected exports are accessible
-        assert hasattr(lantern_sdk, "trace")
-        assert hasattr(lantern_sdk, "configure")
-        assert hasattr(lantern_sdk, "LanternClient")
-        assert hasattr(lantern_sdk, "set_input")
-        assert hasattr(lantern_sdk, "set_output")
-        assert hasattr(lantern_sdk, "set_model")
-        assert hasattr(lantern_sdk, "set_tokens")
-        assert hasattr(lantern_sdk, "get_active_span")
+        assert hasattr(omneval_sdk, "trace")
+        assert hasattr(omneval_sdk, "configure")
+        assert hasattr(omneval_sdk, "OmnevalClient")
+        assert hasattr(omneval_sdk, "set_input")
+        assert hasattr(omneval_sdk, "set_output")
+        assert hasattr(omneval_sdk, "set_model")
+        assert hasattr(omneval_sdk, "set_tokens")
+        assert hasattr(omneval_sdk, "get_active_span")
 
     def test_package_files_are_included_in_wheel(self):
         """All source files are included when building the wheel."""
@@ -89,11 +89,11 @@ class TestPackageMetadata:
         with zipfile.ZipFile(wheel_path) as zf:
             names = zf.namelist()
 
-        # Check all lantern_sdk source files are included
-        assert any("lantern_sdk/__init__.py" in n for n in names)
-        assert any("lantern_sdk/client.py" in n for n in names)
-        assert any("lantern_sdk/exporter.py" in n for n in names)
-        assert any("lantern_sdk/trace.py" in n for n in names)
+        # Check all omneval_sdk source files are included
+        assert any("omneval_sdk/__init__.py" in n for n in names)
+        assert any("omneval_sdk/client.py" in n for n in names)
+        assert any("omneval_sdk/exporter.py" in n for n in names)
+        assert any("omneval_sdk/trace.py" in n for n in names)
 
         # Check dist-info metadata
         assert any("METADATA" in n for n in names)
@@ -113,14 +113,14 @@ class TestPackageMetadata:
 
     def test_package_has_license(self):
         """Package declares a license (required for PyPI publishing)."""
-        metadata = importlib.metadata.metadata("lantern-sdk")
+        metadata = importlib.metadata.metadata("omneval-sdk")
         license_field = metadata.get("License-Expression", "") or metadata.get("License", "")
         assert license_field, "Package must declare a license for PyPI publishing"
         assert "Apache" in license_field or "MIT" in license_field or "BSD" in license_field
 
     def test_package_has_classifiers(self):
         """Package has PyPI-relevant classifiers."""
-        dist = importlib.metadata.distribution("lantern-sdk")
+        dist = importlib.metadata.distribution("omneval-sdk")
         classifiers = dist.metadata.get_all("Classifier") or []
 
         classifier_str = " ".join(classifiers)

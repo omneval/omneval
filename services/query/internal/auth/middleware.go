@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zbloss/lantern/internal/metadata"
+	"github.com/omneval/omneval/internal/metadata"
 )
 
 // ContextKey is the type used for context keys to avoid collisions.
@@ -45,7 +45,7 @@ func NewSessionMiddleware(store metadata.Store, secure bool, sessionTTL time.Dur
 // validation. Returns 401 JSON if the session is missing or expired.
 func (m *SessionMiddleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie("lantern_session")
+		cookie, err := r.Cookie("omneval_session")
 		if err != nil {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
@@ -98,7 +98,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 func SetSessionCookie(w http.ResponseWriter, sessionID string, secure bool, sessionTTL time.Duration) {
 	maxAge := int(sessionTTL.Seconds())
 	http.SetCookie(w, &http.Cookie{
-		Name:     "lantern_session",
+		Name:     "omneval_session",
 		Value:    sessionID,
 		Path:     "/",
 		HttpOnly: true,
@@ -111,7 +111,7 @@ func SetSessionCookie(w http.ResponseWriter, sessionID string, secure bool, sess
 // ClearSessionCookie clears the session cookie.
 func ClearSessionCookie(w http.ResponseWriter, secure bool) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     "lantern_session",
+		Name:     "omneval_session",
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
@@ -159,7 +159,7 @@ func RequireAdmin(store metadata.Store, secure bool, sessionTTL time.Duration, a
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// First validate session
-			cookie, err := r.Cookie("lantern_session")
+			cookie, err := r.Cookie("omneval_session")
 			if err != nil {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 				return

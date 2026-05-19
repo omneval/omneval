@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/metadata"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/metadata"
 )
 
 // ---- FakeMetadataStore ----
@@ -215,8 +215,8 @@ func TestHash(t *testing.T) {
 		name string
 		raw  string
 	}{
-		{"project prefix", "ltn_proj_abc123"},
-		{"service prefix", "ltn_svc_worker"},
+		{"project prefix", "oev_proj_abc123"},
+		{"service prefix", "oev_svc_worker"},
 		{"arbitrary input", "random-string"},
 	}
 	for _, tt := range tests {
@@ -234,7 +234,7 @@ func TestHash(t *testing.T) {
 }
 
 func TestHash_Deterministic(t *testing.T) {
-	input := "ltn_proj_test"
+	input := "oev_proj_test"
 	h1 := Hash(input)
 	h2 := Hash(input)
 	if h1 != h2 {
@@ -249,8 +249,8 @@ func TestKindFromRaw(t *testing.T) {
 		expected domain.APIKeyKind
 		wantOk   bool
 	}{
-		{"project prefix", "ltn_proj_abc123", domain.APIKeyKindProject, true},
-		{"service prefix", "ltn_svc_worker-1", domain.APIKeyKindService, true},
+		{"project prefix", "oev_proj_abc123", domain.APIKeyKindProject, true},
+		{"service prefix", "oev_svc_worker-1", domain.APIKeyKindService, true},
 		{"unknown prefix", "ltn_bogus_abc123", "", false},
 		{"empty string", "", "", false},
 	}
@@ -317,7 +317,7 @@ func TestCachingValidator_ValidKey(t *testing.T) {
 func TestCachingValidator_InvalidKey(t *testing.T) {
 	store := NewFakeMetadataStore()
 	validator := NewCachingValidator(store)
-	_, err := validator.Validate(nil, "ltn_proj_nonexistent")
+	_, err := validator.Validate(nil, "oev_proj_nonexistent")
 	if err == nil {
 		t.Fatal("Validate should return error for unknown key")
 	}

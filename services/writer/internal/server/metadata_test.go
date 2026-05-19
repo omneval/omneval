@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zbloss/lantern/internal/config"
-	"github.com/zbloss/lantern/internal/metadata"
+	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/metadata"
 )
 
 func TestOpenMetadataStore(t *testing.T) {
@@ -50,7 +50,7 @@ func TestOpenMetadataStore(t *testing.T) {
 		{
 			name:        "postgres with invalid DSN fails to connect",
 			driver:      "postgres",
-			dsn:         "postgresql://nonexistent:5432/lantern?sslmode=disable",
+			dsn:         "postgresql://nonexistent:5432/omneval?sslmode=disable",
 			wantErr:     true,
 			errContains: "postgres",
 		},

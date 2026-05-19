@@ -9,7 +9,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/zbloss/lantern/services/query/internal/auth"
+	"github.com/omneval/omneval/services/query/internal/auth"
 )
 
 func TestAdminHandler_TracesCount(t *testing.T) {
@@ -172,7 +172,7 @@ func withAdminContext(req *http.Request, email string) *http.Request {
 
 func setupTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	tmpDir, err := os.MkdirTemp("", "lantern-test-*")
+	tmpDir, err := os.MkdirTemp("", "omneval-test-*")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}

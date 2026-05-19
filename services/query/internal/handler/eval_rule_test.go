@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/duckdb"
-	"github.com/zbloss/lantern/internal/fake"
-	"github.com/zbloss/lantern/internal/metadata"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/duckdb"
+	"github.com/omneval/omneval/internal/fake"
+	"github.com/omneval/omneval/internal/metadata"
 )
 
 // ---- Test helpers ----

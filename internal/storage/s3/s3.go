@@ -11,8 +11,8 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
-	"github.com/zbloss/lantern/internal/config"
-	"github.com/zbloss/lantern/internal/storage"
+	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/storage"
 )
 
 // Store is the S3-compatible implementation of storage.ObjectStore.
@@ -47,9 +47,9 @@ func New(cfg *config.StorageConfig) *Store {
 	return &Store{client: client, bucket: cfg.Bucket}
 }
 
-// bucketName returns the configured bucket name, falling back to "lantern"
+// bucketName returns the configured bucket name, falling back to "omneval"
 // when no bucket is set in the config. In tests, override via SetBucket.
-var defaultBucket = "lantern"
+var defaultBucket = "omneval"
 
 // SetBucket overrides the default bucket name (for testing only).
 func SetBucket(name string) {

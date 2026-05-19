@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/pricing"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/pricing"
 )
 
 // FakeEvalQueue captures enqueued eval jobs for test assertions.

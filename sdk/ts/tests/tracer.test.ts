@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ManualTracer } from "../src/tracer";
-import { createLantern } from "../src/lantern";
+import { createOmneval } from "../src/omneval";
 
 describe("ManualTracer", () => {
   type ExportMock = {
@@ -163,51 +163,51 @@ describe("ManualTracer", () => {
   });
 });
 
-describe("createLantern", () => {
-  it("creates a fresh LanternSDK instance", () => {
-    const lantern = createLantern();
-    expect(lantern).toBeDefined();
-    expect(lantern.config).toBeUndefined();
+describe("createOmneval", () => {
+  it("creates a fresh OmnevalSDK instance", () => {
+    const omneval = createOmneval();
+    expect(omneval).toBeDefined();
+    expect(omneval.config).toBeUndefined();
   });
 
   it("init() sets up the SDK", () => {
-    const lantern = createLantern();
-    lantern.init({ baseUrl: "http://localhost:3000", apiKey: "ltn_proj_test" });
-    expect(lantern.config).toBeDefined();
+    const omneval = createOmneval();
+    omneval.init({ baseUrl: "http://localhost:3000", apiKey: "oev_proj_test" });
+    expect(omneval.config).toBeDefined();
   });
 
   it("startSpan returns a span ID after init", () => {
-    const lantern = createLantern();
-    lantern.init({ baseUrl: "http://localhost:3000" });
-    const spanId = lantern.startSpan("test.span");
+    const omneval = createOmneval();
+    omneval.init({ baseUrl: "http://localhost:3000" });
+    const spanId = omneval.startSpan("test.span");
     expect(spanId).toHaveLength(16);
   });
 
   it("startSpan before init returns empty string with warning", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const lantern = createLantern();
-    const spanId = lantern.startSpan("test.span");
+    const omneval = createOmneval();
+    const spanId = omneval.startSpan("test.span");
     expect(spanId).toBe("");
     expect(warnSpy).toHaveBeenCalledWith(
-      "@lantern/sdk: Lantern.init() not called — startSpan() is a no-op"
+      "@omneval/sdk: Omneval.init() not called — startSpan() is a no-op"
     );
     warnSpy.mockRestore();
   });
 
   it("endSpan before init is a no-op", async () => {
-    const lantern = createLantern();
-    await expect(lantern.endSpan("any-id")).resolves.toBeUndefined();
+    const omneval = createOmneval();
+    await expect(omneval.endSpan("any-id")).resolves.toBeUndefined();
   });
 
   it("writeScore throws before init", async () => {
-    const lantern = createLantern();
+    const omneval = createOmneval();
     await expect(
-      lantern.writeScore("span-1", { name: "eval", value: 1.0 })
-    ).rejects.toThrow("Lantern.init() not called");
+      omneval.writeScore("span-1", { name: "eval", value: 1.0 })
+    ).rejects.toThrow("Omneval.init() not called");
   });
 
   it("getPrompt throws before init", async () => {
-    const lantern = createLantern();
-    await expect(lantern.getPrompt("test")).rejects.toThrow("Lantern.init() not called");
+    const omneval = createOmneval();
+    await expect(omneval.getPrompt("test")).rejects.toThrow("Omneval.init() not called");
   });
 });

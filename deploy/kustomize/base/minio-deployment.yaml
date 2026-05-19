@@ -15,23 +15,23 @@
 #   patches:
 #     - target:
 #         kind: Deployment
-#         name: lantern-minio
+#         name: omneval-minio
 #       patch: |-
 #         apiVersion: apps/v1
 #         kind: Deployment
 #         metadata:
-#           name: lantern-minio
+#           name: omneval-minio
 #         spec:
 #           replicas: 0
 
 apiVersion: v1
 kind: Service
 metadata:
-  name: lantern-minio
+  name: omneval-minio
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/component: minio
-    app.kubernetes.io/part-of: lantern
+    app.kubernetes.io/part-of: omneval
 spec:
   type: ClusterIP
   ports:
@@ -44,29 +44,29 @@ spec:
       targetPort: 9001
       protocol: TCP
   selector:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/component: minio
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: lantern-minio
+  name: omneval-minio
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/component: minio
-    app.kubernetes.io/part-of: lantern
+    app.kubernetes.io/part-of: omneval
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: lantern
+      app.kubernetes.io/name: omneval
       app.kubernetes.io/component: minio
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: lantern
+        app.kubernetes.io/name: omneval
         app.kubernetes.io/component: minio
-        app.kubernetes.io/part-of: lantern
+        app.kubernetes.io/part-of: omneval
     spec:
       containers:
         - name: minio
@@ -82,12 +82,12 @@ spec:
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
-                  name: lantern-secret
+                  name: omneval-secret
                   key: minio-root-user
             - name: MINIO_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: lantern-secret
+                  name: omneval-secret
                   key: minio-root-password
             - name: MINIO_PROMETHEUS_AUTH_TYPE
               value: "public"
@@ -123,15 +123,15 @@ spec:
       volumes:
         - name: minio-data
           persistentVolumeClaim:
-            claimName: lantern-minio-data
+            claimName: omneval-minio-data
 ---
 # PVC for MinIO data
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: lantern-minio-data
+  name: omneval-minio-data
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/component: minio
 spec:
   accessModes:
@@ -140,15 +140,15 @@ spec:
     requests:
       storage: 10Gi
 ---
-# Job to create the lantern bucket on MinIO startup
+# Job to create the omneval bucket on MinIO startup
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: lantern-minio-init
+  name: omneval-minio-init
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/component: minio
-    app.kubernetes.io/part-of: lantern
+    app.kubernetes.io/part-of: omneval
 spec:
   backoffLimit: 3
   template:
@@ -161,7 +161,7 @@ spec:
             - sh
             - -c
             - |
-              until nc -z lantern-minio 9000; do
+              until nc -z omneval-minio 9000; do
                 echo "Waiting for MinIO...";
                 sleep 2;
               done
@@ -175,21 +175,21 @@ spec:
             - |
               set -e
               echo "Waiting for MinIO to be ready..."
-              until mc alias set local http://lantern-minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+              until mc alias set local http://omneval-minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
                 echo "  Retrying..."
                 sleep 2
               done
-              echo "Creating bucket 'lantern'..."
-              mc mb --ignore-existing local/lantern
+              echo "Creating bucket 'omneval'..."
+              mc mb --ignore-existing local/omneval
               echo "Bucket initialization complete."
           env:
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
-                  name: lantern-secret
+                  name: omneval-secret
                   key: minio-root-user
             - name: MINIO_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: lantern-secret
+                  name: omneval-secret
                   key: minio-root-password

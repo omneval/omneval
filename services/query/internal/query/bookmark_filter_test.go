@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zbloss/lantern/internal/storage"
+	"github.com/omneval/omneval/internal/storage"
 )
 
 func TestCompileSpecialFilter_Bookmarked(t *testing.T) {

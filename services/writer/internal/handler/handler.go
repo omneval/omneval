@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
+	"github.com/omneval/omneval/internal/domain"
 )
 
 // ScoreMux handles POST /internal/v1/scores — the internal-only endpoint

@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/zbloss/lantern/internal/config"
-	redisqueue "github.com/zbloss/lantern/internal/queue/redis"
-	"github.com/zbloss/lantern/services/eval/internal/judge"
-	"github.com/zbloss/lantern/services/eval/internal/worker"
+	"github.com/omneval/omneval/internal/config"
+	redisqueue "github.com/omneval/omneval/internal/queue/redis"
+	"github.com/omneval/omneval/services/eval/internal/judge"
+	"github.com/omneval/omneval/services/eval/internal/worker"
 )
 
 const workerShutdownTimeout = 120 * time.Second

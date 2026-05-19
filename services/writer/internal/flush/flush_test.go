@@ -12,8 +12,8 @@ import (
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
-	"github.com/zbloss/lantern/internal/config"
-	"github.com/zbloss/lantern/internal/storage"
+	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/storage"
 )
 
 // mockStore implements storage.ObjectStore for testing.

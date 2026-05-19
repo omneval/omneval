@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { instrument, _setFactory, _resetFactory } from "../src/node/index";
 
-describe("@lantern/sdk/node conditional export", () => {
+describe("@omneval/sdk/node conditional export", () => {
   it("exports instrument function", async () => {
     const mod = await import("../src/node/index");
     expect(typeof mod.instrument).toBe("function");
@@ -48,7 +48,7 @@ describe("instrument()", () => {
 
     const shutdown = instrument({
       baseUrl: "http://localhost:3000",
-      apiKey: "ltn_proj_test",
+      apiKey: "oev_proj_test",
       serviceName: "test",
     });
 
@@ -68,7 +68,7 @@ describe("instrument()", () => {
 
     // @ts-expect-error baseUrl is required
     expect(() => {
-      instrument({ apiKey: "ltn_proj_test", serviceName: "test" });
+      instrument({ apiKey: "oev_proj_test", serviceName: "test" });
     }).toThrow("baseUrl is required");
   });
 });
@@ -111,7 +111,7 @@ describe("instrument() — OTel integration", () => {
   it("configures OTLP exporter to point at {baseUrl}/v1/traces", async () => {
     const shutdown = instrument({
       baseUrl: "http://localhost:3000",
-      apiKey: "ltn_proj_test",
+      apiKey: "oev_proj_test",
       serviceName: "my-app",
     });
 
@@ -122,7 +122,7 @@ describe("instrument() — OTel integration", () => {
   it("sets Authorization: Bearer header when apiKey is provided", async () => {
     const shutdown = instrument({
       baseUrl: "http://localhost:3000",
-      apiKey: "ltn_proj_abc123",
+      apiKey: "oev_proj_abc123",
       serviceName: "my-app",
     });
 
@@ -133,7 +133,7 @@ describe("instrument() — OTel integration", () => {
   it("includes service name in resource attributes", async () => {
     const shutdown = instrument({
       baseUrl: "http://localhost:3000",
-      apiKey: "ltn_proj_test",
+      apiKey: "oev_proj_test",
       serviceName: "test-service",
     });
 
@@ -145,7 +145,7 @@ describe("instrument() — OTel integration", () => {
   it("does not set resource when serviceName is omitted", async () => {
     const shutdown = instrument({
       baseUrl: "http://localhost:3000",
-      apiKey: "ltn_proj_test",
+      apiKey: "oev_proj_test",
     });
 
     expect(capturedConfig).not.toBeNull();
@@ -155,7 +155,7 @@ describe("instrument() — OTel integration", () => {
   it("strips trailing slashes from baseUrl", async () => {
     const shutdown = instrument({
       baseUrl: "http://localhost:3000/",
-      apiKey: "ltn_proj_test",
+      apiKey: "oev_proj_test",
       serviceName: "my-app",
     });
 
@@ -165,7 +165,7 @@ describe("instrument() — OTel integration", () => {
   it("returns a shutdown function that calls nodeSDK.shutdown()", async () => {
     const shutdown = instrument({
       baseUrl: "http://localhost:3000",
-      apiKey: "ltn_proj_test",
+      apiKey: "oev_proj_test",
       serviceName: "my-app",
     });
 

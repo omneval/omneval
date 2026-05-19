@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zbloss/lantern/internal/config"
-	"github.com/zbloss/lantern/internal/duckdb"
-	"github.com/zbloss/lantern/internal/leader"
-	"github.com/zbloss/lantern/internal/storage"
-	"github.com/zbloss/lantern/services/writer/internal/metrics"
+	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/duckdb"
+	"github.com/omneval/omneval/internal/leader"
+	"github.com/omneval/omneval/internal/storage"
+	"github.com/omneval/omneval/services/writer/internal/metrics"
 )
 
 // --- Fake S3 implementation ---
@@ -151,7 +151,7 @@ func fakeRedisOps(state *fakeRedisState) leader.Ops {
 //     visible.
 func TestIntegrationWriterFailoverSnapshotReconciliation(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 	snapshotKey := "snapshots/duckdb.db"
 
 	// Shared fake state.
@@ -166,7 +166,7 @@ func TestIntegrationWriterFailoverSnapshotReconciliation(t *testing.T) {
 	// Instance 1 acquires lock.
 	election1, err := leader.NewLeaderElection(
 		fakeRedisOps(redisState),
-		"lantern:writer:leader",
+		"omneval:writer:leader",
 		"writer-instance-1",
 		15*time.Second,
 	)
@@ -245,7 +245,7 @@ func TestIntegrationWriterFailoverSnapshotReconciliation(t *testing.T) {
 
 	election2, err := leader.NewLeaderElection(
 		fakeRedisOps(redisState),
-		"lantern:writer:leader",
+		"omneval:writer:leader",
 		"writer-instance-2",
 		15*time.Second,
 	)
@@ -432,7 +432,7 @@ func TestConfigFencingEnabled_WhenLeaderElectionDisabled(t *testing.T) {
 // to prevent dual-writer data corruption.
 func TestIntegration_DuckDBClosedOnLockLoss(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 
 	// Create a valid DuckDB file.
 	db, err := duckdb.Open(dbPath)
@@ -477,7 +477,7 @@ func TestIntegration_DuckDBClosedOnLockLoss(t *testing.T) {
 // opened by DuckDB.
 func TestIntegration_Reconciler_DownloadsSnapshot_VerifiesDuckDB(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 	snapshotKey := "snapshots/duckdb.db"
 
 	// First, create a valid DuckDB file.
@@ -563,7 +563,7 @@ func TestMetrics_NewWriterMetrics_NoPanic(t *testing.T) {
 // when no S3 store is configured.
 func TestReconciler_NoS3Store_NoOp(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 
 	// Create a minimal DuckDB file.
 	db, err := duckdb.Open(dbPath)

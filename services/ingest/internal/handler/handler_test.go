@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/queue"
-	"github.com/zbloss/lantern/services/ingest/internal/handler"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/queue"
+	"github.com/omneval/omneval/services/ingest/internal/handler"
 )
 
 // fakeIngestQueue stores enqueued spans in-memory for testing.

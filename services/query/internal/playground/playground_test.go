@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/judge"
-	"github.com/zbloss/lantern/internal/metadata"
-	"github.com/zbloss/lantern/services/query/internal/handler"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/judge"
+	"github.com/omneval/omneval/internal/metadata"
+	"github.com/omneval/omneval/services/query/internal/handler"
 )
 
 // ---- Tests for Interpolate ----

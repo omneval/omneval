@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zbloss/lantern/internal/storage"
+	"github.com/omneval/omneval/internal/storage"
 )
 
 // fakeS3Store implements storage.ObjectStore for testing.
@@ -88,7 +88,7 @@ func TestReconciler_NoStore(t *testing.T) {
 
 func TestReconciler_LocalFileMissing(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 	snapshotKey := "snapshots/duckdb.db"
 
 	store := &fakeS3Store{
@@ -120,7 +120,7 @@ func TestReconciler_LocalFileMissing(t *testing.T) {
 
 func TestReconciler_S3Newer(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 	snapshotKey := "snapshots/duckdb.db"
 
 	// Create local file with old mtime.
@@ -164,7 +164,7 @@ func TestReconciler_S3Newer(t *testing.T) {
 
 func TestReconciler_LocalNewer(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 	snapshotKey := "snapshots/duckdb.db"
 
 	// Create local file with recent mtime.
@@ -208,7 +208,7 @@ func TestReconciler_LocalNewer(t *testing.T) {
 
 func TestReconciler_SameMtime(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 	snapshotKey := "snapshots/duckdb.db"
 
 	sameMtime := time.Now().Add(-1 * time.Hour)
@@ -250,7 +250,7 @@ func TestReconciler_SameMtime(t *testing.T) {
 
 func TestReconciler_AtomicallyOverwrites(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "lantern.db")
+	dbPath := filepath.Join(tmpDir, "omneval.db")
 	snapshotKey := "snapshots/duckdb.db"
 
 	// S3 has a snapshot.

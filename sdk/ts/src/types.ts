@@ -1,4 +1,4 @@
-// Types for the Lantern TypeScript SDK
+// Types for the Omneval TypeScript SDK
 
 /** Span kind classification. */
 export type SpanKind =
@@ -11,8 +11,8 @@ export type SpanKind =
 /** Attributes attached to a span. */
 export type SpanAttributes = Record<string, string | number | boolean>;
 
-/** A span ready to be exported to the Lantern ingest API. */
-export interface LanternSpan {
+/** A span ready to be exported to the Omneval ingest API. */
+export interface OmnevalSpan {
   span_id: string;
   trace_id: string;
   parent_id?: string;
@@ -30,9 +30,9 @@ export interface LanternSpan {
   end_time?: number;   // epoch milliseconds
 }
 
-/** Configuration for Lantern.init(). */
-export interface LanternConfig {
-  /** Base URL of the Lantern Query API (e.g. http://localhost:3000). */
+/** Configuration for Omneval.init(). */
+export interface OmnevalConfig {
+  /** Base URL of the Omneval Query API (e.g. http://localhost:3000). */
   baseUrl: string;
   /** API key for authentication (sent as X-API-Key header). */
   apiKey?: string;

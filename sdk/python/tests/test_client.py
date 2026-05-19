@@ -1,15 +1,15 @@
-"""Tests for LanternClient."""
+"""Tests for OmnevalClient."""
 import json
 import time
 
 import requests
 import responses
 
-from lantern_sdk.client import LanternClient
+from omneval_sdk.client import OmnevalClient
 
 
 class TestGetPrompt:
-    """Tests for LanternClient.get_prompt."""
+    """Tests for OmnevalClient.get_prompt."""
 
     @responses.activate
     def test_get_prompt_returns_cached_value(self):
@@ -28,7 +28,7 @@ class TestGetPrompt:
             status=200,
         )
 
-        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        client = OmnevalClient("http://localhost:8080", "oev_proj_test")
 
         # First call — should hit the server.
         result1 = client.get_prompt("greeting", "production")
@@ -58,7 +58,7 @@ class TestGetPrompt:
             status=200,
         )
 
-        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        client = OmnevalClient("http://localhost:8080", "oev_proj_test")
         result = client.get_prompt("eval", "staging")
         assert result["template"] == "Evaluate: {{.Input}}"
 
@@ -82,14 +82,14 @@ class TestGetPrompt:
             callback=capture_request,
         )
 
-        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        client = OmnevalClient("http://localhost:8080", "oev_proj_test")
         client.get_prompt("test", "")  # empty label should default to production
 
         assert captured_label == "production"
 
 
 class TestWriteScore:
-    """Tests for LanternClient.write_score."""
+    """Tests for OmnevalClient.write_score."""
 
     @responses.activate
     def test_write_score_posts_to_endpoint(self):
@@ -101,7 +101,7 @@ class TestWriteScore:
             status=201,
         )
 
-        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        client = OmnevalClient("http://localhost:8080", "oev_proj_test")
         client.write_score("span-abc", "helpfulness", 0.8, "Great answer")
 
         assert len(responses.calls) == 1
@@ -126,7 +126,7 @@ class TestWriteScore:
             status=201,
         )
 
-        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        client = OmnevalClient("http://localhost:8080", "oev_proj_test")
         client.write_score("span-xyz", "accuracy", 1.0)
 
         body = json.loads(responses.calls[0].request.body)
@@ -134,7 +134,7 @@ class TestWriteScore:
 
     def test_write_score_requires_span_id(self):
         """write_score raises ValueError for empty span_id."""
-        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        client = OmnevalClient("http://localhost:8080", "oev_proj_test")
         try:
             client.write_score("", "eval", 1.0)
             assert False, "Expected ValueError"
@@ -151,7 +151,7 @@ class TestWriteScore:
             status=201,
         )
 
-        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        client = OmnevalClient("http://localhost:8080", "oev_proj_test")
         client.write_score("span-abc", "helpfulness", 0.8, "Great answer")
 
         body = json.loads(responses.calls[0].request.body)
@@ -168,7 +168,7 @@ class TestWriteScore:
             status=400,
         )
 
-        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        client = OmnevalClient("http://localhost:8080", "oev_proj_test")
         try:
             client.write_score("span-abc", "helpfulness", 0.8)
             assert False, "Expected requests.HTTPError"
@@ -185,7 +185,7 @@ class TestWriteScore:
             status=500,
         )
 
-        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        client = OmnevalClient("http://localhost:8080", "oev_proj_test")
         try:
             client.write_score("span-abc", "helpfulness", 0.8)
             assert False, "Expected requests.HTTPError"
@@ -202,9 +202,9 @@ class TestWriteScore:
             status=201,
         )
 
-        client = LanternClient(
+        client = OmnevalClient(
             "http://localhost:8080",
-            "ltn_proj_key123",
+            "oev_proj_key123",
             project_id="explicit-project",  # override
         )
         client.write_score("span-abc", "helpfulness", 0.8)
@@ -213,27 +213,27 @@ class TestWriteScore:
         assert body["project_id"] == "explicit-project"
 
     def test_project_id_extracted_from_project_key(self):
-        """project_id is extracted from ltn_proj_ prefix keys."""
-        client = LanternClient("http://localhost:8080", "ltn_proj_my-project-123")
+        """project_id is extracted from oev_proj_ prefix keys."""
+        client = OmnevalClient("http://localhost:8080", "oev_proj_my-project-123")
         assert client._project_id == "my-project-123"
 
     def test_project_id_extracted_from_service_key(self):
-        """project_id is extracted from ltn_svc_ prefix keys."""
-        client = LanternClient("http://localhost:8080", "ltn_svc_my-service")
+        """project_id is extracted from oev_svc_ prefix keys."""
+        client = OmnevalClient("http://localhost:8080", "oev_svc_my-service")
         assert client._project_id == "my-service"
 
     def test_project_id_override(self):
         """Explicit project_id overrides the value extracted from api_key."""
-        client = LanternClient(
+        client = OmnevalClient(
             "http://localhost:8080",
-            "ltn_proj_key123",
+            "oev_proj_key123",
             project_id="override-id",
         )
         assert client._project_id == "override-id"
 
 
 class TestGetPromptVersion:
-    """Tests for LanternClient.get_prompt_version."""
+    """Tests for OmnevalClient.get_prompt_version."""
 
     @responses.activate
     def test_get_prompt_version_fetches_by_version(self):
@@ -245,7 +245,7 @@ class TestGetPromptVersion:
             status=200,
         )
 
-        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        client = OmnevalClient("http://localhost:8080", "oev_proj_test")
         result = client.get_prompt_version("greeting", 2)
         assert result["template"] == "Welcome!"
         assert result["version"] == 2
@@ -260,7 +260,7 @@ class TestGetPromptVersion:
             status=200,
         )
 
-        client = LanternClient("http://localhost:8080", "ltn_proj_test")
+        client = OmnevalClient("http://localhost:8080", "oev_proj_test")
 
         # First call — hits the server.
         client.get_prompt_version("greeting", 1)

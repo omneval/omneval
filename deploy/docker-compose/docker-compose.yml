@@ -1,6 +1,6 @@
-# Lantern — local development docker-compose
+# Omneval — local development docker-compose
 #
-# Starts: Redis, PostgreSQL, MinIO (S3-compatible), and all four Lantern services.
+# Starts: Redis, PostgreSQL, MinIO (S3-compatible), and all four Omneval services.
 #
 # Usage:
 #   docker compose up          # start all services in foreground
@@ -18,7 +18,7 @@
 services:
   redis:
     image: redis:7-alpine
-    container_name: lantern-redis
+    container_name: omneval-redis
     ports:
       - "6379:6379"
     volumes:
@@ -31,25 +31,25 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    container_name: lantern-postgres
+    container_name: omneval-postgres
     env_file: .env
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-lantern}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lantern}
-      POSTGRES_DB: ${POSTGRES_DB:-lantern}
+      POSTGRES_USER: ${POSTGRES_USER:-omneval}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-omneval}
+      POSTGRES_DB: ${POSTGRES_DB:-omneval}
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lantern}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-omneval}"]
       interval: 5s
       timeout: 3s
       retries: 5
 
   minio:
     image: minio/minio:latest
-    container_name: lantern-minio
+    container_name: omneval-minio
     env_file: .env
     command: server /data --console-address ":9001"
     environment:
@@ -66,11 +66,11 @@ services:
       timeout: 3s
       retries: 5
 
-  # Create the lantern bucket on MinIO so the Writer and Query services
+  # Create the omneval bucket on MinIO so the Writer and Query services
   # don't fail on first-start bucket creation races.
   minio-init:
     image: minio/mc:latest
-    container_name: lantern-minio-init
+    container_name: omneval-minio-init
     depends_on:
       minio:
         condition: service_healthy
@@ -78,18 +78,18 @@ services:
     entrypoint: >
       /bin/sh -c "
       mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minio_s3_access_key} ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key};
-      mc mb --ignore-existing local/lantern;
+      mc mb --ignore-existing local/omneval;
       exit 0;
       "
 
-  # --- Lantern application services ---
+  # --- Omneval application services ---
 
-  lantern-ingest:
+  omneval-ingest:
     build:
       context: ../..
       dockerfile: Dockerfile
-    container_name: lantern-ingest
-    command: lantern-ingest
+    container_name: omneval-ingest
+    command: omneval-ingest
     depends_on:
       redis:
         condition: service_healthy
@@ -101,22 +101,22 @@ services:
       - "8000:8000"
       - "9090:9090"
     environment:
-      LANTERN_DATABASE_DRIVER: postgres
-      LANTERN_DATABASE_DSN: postgres://${POSTGRES_USER:-lantern}:${POSTGRES_PASSWORD:-lantern}@postgres:5432/${POSTGRES_DB:-lantern}?sslmode=disable
-      LANTERN_REDIS_ADDR: redis:6379
-      LANTERN_STORAGE_ENDPOINT: http://minio:9000
-      LANTERN_STORAGE_BUCKET: lantern
-      LANTERN_STORAGE_REGION: us-east-1
-      LANTERN_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_s3_access_key}
-      LANTERN_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key}
-      LANTERN_AUTH_SECURE_COOKIE: "false"
+      OMNEVAL_DATABASE_DRIVER: postgres
+      OMNEVAL_DATABASE_DSN: postgres://${POSTGRES_USER:-omneval}:${POSTGRES_PASSWORD:-omneval}@postgres:5432/${POSTGRES_DB:-omneval}?sslmode=disable
+      OMNEVAL_REDIS_ADDR: redis:6379
+      OMNEVAL_STORAGE_ENDPOINT: http://minio:9000
+      OMNEVAL_STORAGE_BUCKET: omneval
+      OMNEVAL_STORAGE_REGION: us-east-1
+      OMNEVAL_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_s3_access_key}
+      OMNEVAL_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key}
+      OMNEVAL_AUTH_SECURE_COOKIE: "false"
 
-  lantern-writer:
+  omneval-writer:
     build:
       context: ../..
       dockerfile: Dockerfile
-    container_name: lantern-writer
-    command: lantern-writer
+    container_name: omneval-writer
+    command: omneval-writer
     restart: unless-stopped
     depends_on:
       redis:
@@ -129,27 +129,27 @@ services:
       - "8001:8001"
       - "9091:9090"
     environment:
-      LANTERN_DATABASE_DRIVER: postgres
-      LANTERN_DATABASE_DSN: postgres://${POSTGRES_USER:-lantern}:${POSTGRES_PASSWORD:-lantern}@postgres:5432/${POSTGRES_DB:-lantern}?sslmode=disable
-      LANTERN_REDIS_ADDR: redis:6379
-      LANTERN_STORAGE_ENDPOINT: http://minio:9000
-      LANTERN_STORAGE_BUCKET: lantern
-      LANTERN_STORAGE_REGION: us-east-1
-      LANTERN_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_s3_access_key}
-      LANTERN_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key}
-      LANTERN_WRITER_DUCKDB_PATH: /data/lantern.duckdb
-      LANTERN_WRITER_SYNC_INTERVAL: 30s
-      LANTERN_WRITER_FLUSH_INTERVAL: 30m
-      LANTERN_WRITER_FLUSH_AGE_DAYS: 2
+      OMNEVAL_DATABASE_DRIVER: postgres
+      OMNEVAL_DATABASE_DSN: postgres://${POSTGRES_USER:-omneval}:${POSTGRES_PASSWORD:-omneval}@postgres:5432/${POSTGRES_DB:-omneval}?sslmode=disable
+      OMNEVAL_REDIS_ADDR: redis:6379
+      OMNEVAL_STORAGE_ENDPOINT: http://minio:9000
+      OMNEVAL_STORAGE_BUCKET: omneval
+      OMNEVAL_STORAGE_REGION: us-east-1
+      OMNEVAL_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_s3_access_key}
+      OMNEVAL_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key}
+      OMNEVAL_WRITER_DUCKDB_PATH: /data/omneval.duckdb
+      OMNEVAL_WRITER_SYNC_INTERVAL: 30s
+      OMNEVAL_WRITER_FLUSH_INTERVAL: 30m
+      OMNEVAL_WRITER_FLUSH_AGE_DAYS: 2
     volumes:
       - writer-data:/data
 
-  lantern-query:
+  omneval-query:
     build:
       context: ../..
       dockerfile: Dockerfile
-    container_name: lantern-query
-    command: lantern-query
+    container_name: omneval-query
+    command: omneval-query
     depends_on:
       postgres:
         condition: service_healthy
@@ -159,25 +159,25 @@ services:
       - "8002:8002"
       - "9092:9090"
     environment:
-      LANTERN_DATABASE_DRIVER: postgres
-      LANTERN_DATABASE_DSN: postgres://${POSTGRES_USER:-lantern}:${POSTGRES_PASSWORD:-lantern}@postgres:5432/${POSTGRES_DB:-lantern}?sslmode=disable
-      LANTERN_STORAGE_ENDPOINT: http://minio:9000
-      LANTERN_STORAGE_BUCKET: lantern
-      LANTERN_STORAGE_REGION: us-east-1
-      LANTERN_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_s3_access_key}
-      LANTERN_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key}
-      LANTERN_AUTH_SECURE_COOKIE: "false"
-      LANTERN_AUTH_ADMIN_EMAIL: admin@omneval.com
-      LANTERN_AUTH_ADMIN_PASSWORD: admin
-      LANTERN_QUERY_DUCKDB_PATH: /tmp/lantern-snapshot.duckdb
-      LANTERN_QUERY_SYNC_INTERVAL: 30s
+      OMNEVAL_DATABASE_DRIVER: postgres
+      OMNEVAL_DATABASE_DSN: postgres://${POSTGRES_USER:-omneval}:${POSTGRES_PASSWORD:-omneval}@postgres:5432/${POSTGRES_DB:-omneval}?sslmode=disable
+      OMNEVAL_STORAGE_ENDPOINT: http://minio:9000
+      OMNEVAL_STORAGE_BUCKET: omneval
+      OMNEVAL_STORAGE_REGION: us-east-1
+      OMNEVAL_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_s3_access_key}
+      OMNEVAL_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key}
+      OMNEVAL_AUTH_SECURE_COOKIE: "false"
+      OMNEVAL_AUTH_ADMIN_EMAIL: admin@omneval.com
+      OMNEVAL_AUTH_ADMIN_PASSWORD: admin
+      OMNEVAL_QUERY_DUCKDB_PATH: /tmp/omneval-snapshot.duckdb
+      OMNEVAL_QUERY_SYNC_INTERVAL: 30s
 
-  lantern-eval:
+  omneval-eval:
     build:
       context: ../..
       dockerfile: Dockerfile
-    container_name: lantern-eval
-    command: lantern-eval
+    container_name: omneval-eval
+    command: omneval-eval
     depends_on:
       redis:
         condition: service_healthy
@@ -189,17 +189,17 @@ services:
       - "8003:8003"
       - "9093:9090"
     environment:
-      LANTERN_DATABASE_DRIVER: postgres
-      LANTERN_DATABASE_DSN: postgres://${POSTGRES_USER:-lantern}:${POSTGRES_PASSWORD:-lantern}@postgres:5432/${POSTGRES_DB:-lantern}?sslmode=disable
-      LANTERN_REDIS_ADDR: redis:6379
-      LANTERN_STORAGE_ENDPOINT: http://minio:9000
-      LANTERN_STORAGE_BUCKET: lantern
-      LANTERN_STORAGE_REGION: us-east-1
-      LANTERN_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_s3_access_key}
-      LANTERN_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key}
-      LANTERN_EVAL_CONCURRENCY: 4
-      LANTERN_EVAL_LLM_BASE_URL: ""
-      LANTERN_EVAL_LLM_API_KEY: ""
+      OMNEVAL_DATABASE_DRIVER: postgres
+      OMNEVAL_DATABASE_DSN: postgres://${POSTGRES_USER:-omneval}:${POSTGRES_PASSWORD:-omneval}@postgres:5432/${POSTGRES_DB:-omneval}?sslmode=disable
+      OMNEVAL_REDIS_ADDR: redis:6379
+      OMNEVAL_STORAGE_ENDPOINT: http://minio:9000
+      OMNEVAL_STORAGE_BUCKET: omneval
+      OMNEVAL_STORAGE_REGION: us-east-1
+      OMNEVAL_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_s3_access_key}
+      OMNEVAL_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key}
+      OMNEVAL_EVAL_CONCURRENCY: 4
+      OMNEVAL_EVAL_LLM_BASE_URL: ""
+      OMNEVAL_EVAL_LLM_API_KEY: ""
 
 volumes:
   redis-data:

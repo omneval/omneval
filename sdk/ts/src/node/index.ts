@@ -1,21 +1,21 @@
 /**
- * @lantern/sdk/node — Node.js tracer with OTel auto-instrumentation.
+ * @omneval/sdk/node — Node.js tracer with OTel auto-instrumentation.
  *
- * This is a conditional export of @lantern/sdk — it is only loaded when
- * explicitly imported via `import { instrument } from "@lantern/sdk/node"`.
+ * This is a conditional export of @omneval/sdk — it is only loaded when
+ * explicitly imported via `import { instrument } from "@omneval/sdk/node"`.
  *
  * Usage:
- *   import { instrument } from "@lantern/sdk/node";
- *   instrument({ baseUrl: "http://localhost:3000", apiKey: "ltn_proj_...", serviceName: "my-app" });
+ *   import { instrument } from "@omneval/sdk/node";
+ *   instrument({ baseUrl: "http://localhost:3000", apiKey: "oev_proj_...", serviceName: "my-app" });
  *
  * This configures an OpenTelemetry NodeTracerProvider with an OTLP exporter
- * pointing at the Lantern ingest API, enabling zero-change tracing for any
+ * pointing at the Omneval ingest API, enabling zero-change tracing for any
  * framework that uses @opentelemetry/api (OpenAI, Express, etc.).
  *
  * Do NOT import this module in browser code — it is Node.js only.
  */
 
-import { buildLanternExporterConfig } from "./exporter";
+import { buildOmnevalExporterConfig } from "./exporter";
 
 /**
  * OpenTelemetry SDK factory — allows tests to inject mock OTel classes.
@@ -46,7 +46,7 @@ async function loadOTelFactory(): Promise<OTelFactory> {
       err.message.includes("Cannot find module")
     ) {
       throw new Error(
-        "@lantern/sdk/node: @opentelemetry/sdk-node is not installed. " +
+        "@omneval/sdk/node: @opentelemetry/sdk-node is not installed. " +
           "Install it with: npm install @opentelemetry/sdk-node @opentelemetry/exporter-trace-otlp-http"
       );
     }
@@ -82,14 +82,14 @@ function instrumentWithFactory(
   const factory = factoryOverride || _factory;
   if (!factory) {
     throw new Error(
-      "@lantern/sdk/node: OTel factory not available. " +
+      "@omneval/sdk/node: OTel factory not available. " +
         "This should not happen in production. " +
-        "If you see this error, please report it at https://github.com/zbloss/lantern/issues"
+        "If you see this error, please report it at https://github.com/omneval/omneval/issues"
     );
   }
 
-  // Build the OTLP exporter config for Lantern
-  const exporterConfig = buildLanternExporterConfig({ baseUrl, apiKey });
+  // Build the OTLP exporter config for Omneval
+  const exporterConfig = buildOmnevalExporterConfig({ baseUrl, apiKey });
 
   // Build the NodeSDK configuration
   const config: any = {
@@ -113,7 +113,7 @@ function instrumentWithFactory(
 }
 
 export interface InstrumentOptions {
-  /** Base URL of the Lantern ingest API (e.g. http://localhost:3000). */
+  /** Base URL of the Omneval ingest API (e.g. http://localhost:3000). */
   baseUrl: string;
   /** API key for authentication. */
   apiKey?: string;
@@ -128,7 +128,7 @@ export interface InstrumentOptions {
 export type ShutdownFn = () => Promise<void>;
 
 /**
- * Configure OpenTelemetry in Node.js to export traces to Lantern.
+ * Configure OpenTelemetry in Node.js to export traces to Omneval.
  *
  * This function:
  * 1. Imports @opentelemetry/sdk-node and @opentelemetry/exporter-trace-otlp-http
@@ -142,10 +142,10 @@ export type ShutdownFn = () => Promise<void>;
  * @throws If @opentelemetry/sdk-node is not installed, or if configuration is invalid
  *
  * @example
- *   import { instrument } from "@lantern/sdk/node";
+ *   import { instrument } from "@omneval/sdk/node";
  *   const shutdown = instrument({
  *     baseUrl: "http://localhost:3000",
- *     apiKey: "ltn_proj_abc123",
+ *     apiKey: "oev_proj_abc123",
  *     serviceName: "my-llm-app",
  *   });
  *

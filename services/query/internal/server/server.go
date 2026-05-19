@@ -17,17 +17,17 @@ import (
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/zbloss/lantern/internal/config"
-	"github.com/zbloss/lantern/internal/metadata"
-	metadatapg "github.com/zbloss/lantern/internal/metadata/postgres"
-	"github.com/zbloss/lantern/internal/metadata/sqlite"
-	"github.com/zbloss/lantern/internal/probe"
-	"github.com/zbloss/lantern/internal/storage"
-	s3 "github.com/zbloss/lantern/internal/storage/s3"
-	"github.com/zbloss/lantern/services/query/internal/auth"
-	"github.com/zbloss/lantern/services/query/internal/handler"
-	"github.com/zbloss/lantern/services/query/internal/metrics"
-	"github.com/zbloss/lantern/services/query/internal/playground"
+	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/metadata"
+	metadatapg "github.com/omneval/omneval/internal/metadata/postgres"
+	"github.com/omneval/omneval/internal/metadata/sqlite"
+	"github.com/omneval/omneval/internal/probe"
+	"github.com/omneval/omneval/internal/storage"
+	s3 "github.com/omneval/omneval/internal/storage/s3"
+	"github.com/omneval/omneval/services/query/internal/auth"
+	"github.com/omneval/omneval/services/query/internal/handler"
+	"github.com/omneval/omneval/services/query/internal/metrics"
+	"github.com/omneval/omneval/services/query/internal/playground"
 )
 
 //go:embed ui/dist
@@ -101,7 +101,7 @@ func IsPublicAPIPath(path string) bool {
 func Run() error {
 	// Load config.
 	cfgPath := ""
-	if p := os.Getenv("LANTERN_CONFIG"); p != "" {
+	if p := os.Getenv("OMNEVAL_CONFIG"); p != "" {
 		cfgPath = p
 	}
 	cfg, err := config.Load(cfgPath)
@@ -126,7 +126,7 @@ func Run() error {
 	// Resolve DuckDB snapshot path.
 	dbPath := cfg.Query.DuckDBPath
 	if dbPath == "" {
-		dbPath = "/tmp/lantern-snapshot.duckdb"
+		dbPath = "/tmp/omneval-snapshot.duckdb"
 	}
 
 	// Parse sync interval (default 30s).
@@ -184,7 +184,7 @@ func Run() error {
 		slog.Info("query: admin user bootstrapped", "email", cfg.Auth.AdminEmail)
 	} else {
 		if count, _ := store.CountUsers(context.Background()); count == 0 {
-			slog.Warn("query: no admin configured and no users exist — set LANTERN_AUTH_ADMIN_EMAIL and LANTERN_AUTH_ADMIN_PASSWORD to create the first admin user")
+			slog.Warn("query: no admin configured and no users exist — set OMNEVAL_AUTH_ADMIN_EMAIL and OMNEVAL_AUTH_ADMIN_PASSWORD to create the first admin user")
 		}
 	}
 
@@ -546,7 +546,7 @@ func openMetadataStore(cfg *config.Config) (metadata.Store, error) {
 	switch driver {
 	case "", "sqlite":
 		if dsn == "" {
-			dsn = "lantern.db"
+			dsn = "omneval.db"
 		}
 		slog.Info("query: opening SQLite metadata store", "path", dsn)
 		store, err := sqlite.New(dsn)

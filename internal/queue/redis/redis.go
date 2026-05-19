@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/queue"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/queue"
 )
 
 // redisClient defines the subset of go-redis Client methods used by the queue

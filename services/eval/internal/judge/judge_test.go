@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/config"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/config"
 )
 
 func TestEvaluate_Success(t *testing.T) {

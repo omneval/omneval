@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/zbloss/lantern/internal/config"
-	"github.com/zbloss/lantern/internal/domain"
+	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/domain"
 )
 
 // Score represents the structured output from the judge LLM.

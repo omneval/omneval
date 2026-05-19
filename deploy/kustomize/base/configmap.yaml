@@ -1,19 +1,19 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: lantern-config
+  name: omneval-config
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
 data:
-  lantern.yaml: |
+  omneval.yaml: |
     database:
       driver: postgres
-      dsn: postgres://lantern:lantern@lantern-postgresql:5432/lantern?sslmode=disable
+      dsn: postgres://omneval:omneval@omneval-postgresql:5432/omneval?sslmode=disable
     redis:
-      addr: lantern-redis:6379
+      addr: omneval-redis:6379
     storage:
-      endpoint: http://lantern-minio:9000
-      bucket: lantern
+      endpoint: http://omneval-minio:9000
+      bucket: omneval
       region: us-east-1
     auth:
       session_ttl: 168h
@@ -25,7 +25,7 @@ data:
         - "*"
     writer:
       addr: ":8001"
-      duckdb_path: "/data/lantern.duckdb"
+      duckdb_path: "/data/omneval.duckdb"
       sync_interval: 30s
       flush_interval: 30m
       flush_age_days: 2
@@ -34,7 +34,7 @@ data:
         lock_ttl: 15
     query:
       addr: ":8002"
-      duckdb_path: "/tmp/lantern-snapshot.duckdb"
+      duckdb_path: "/tmp/omneval-snapshot.duckdb"
       sync_interval: 30s
     eval:
       concurrency: 4

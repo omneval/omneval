@@ -1,5 +1,5 @@
 {{- /*
-PostgreSQL StatefulSet — metadata store for Lantern.
+PostgreSQL StatefulSet — metadata store for Omneval.
 
 Deployed when postgresql.enabled is true. Creates a StatefulSet with
 a single primary replica. Persistent storage is backed by a PVC.
@@ -16,7 +16,7 @@ kind: Service
 metadata:
   name: {{ $name }}-postgresql
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: postgresql
     {{- with .Values.commonLabels }}
@@ -30,7 +30,7 @@ spec:
       targetPort: 5432
       protocol: TCP
   selector:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: postgresql
 ---
@@ -39,7 +39,7 @@ kind: StatefulSet
 metadata:
   name: {{ $name }}-postgresql
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: postgresql
     {{- with .Values.commonLabels }}
@@ -50,13 +50,13 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: lantern
+      app.kubernetes.io/name: omneval
       app.kubernetes.io/instance: {{ $name }}
       app.kubernetes.io/component: postgresql
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: lantern
+        app.kubernetes.io/name: omneval
         app.kubernetes.io/instance: {{ $name }}
         app.kubernetes.io/component: postgresql
         {{- with .Values.commonLabels }}
@@ -130,7 +130,7 @@ kind: ConfigMap
 metadata:
   name: {{ $name }}-postgresql-config
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: postgresql
 data:
@@ -150,7 +150,7 @@ kind: ServiceAccount
 metadata:
   name: {{ $name }}-postgresql
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: postgresql
 automountServiceAccountToken: false

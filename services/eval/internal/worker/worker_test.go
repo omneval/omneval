@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zbloss/lantern/internal/config"
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/queue"
-	"github.com/zbloss/lantern/services/eval/internal/judge"
+	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/queue"
+	"github.com/omneval/omneval/services/eval/internal/judge"
 )
 
 // fakeEvalQueue returns jobs up to a count, then nil forever.

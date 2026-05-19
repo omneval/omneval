@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/zbloss/lantern/internal/auth"
-	"github.com/zbloss/lantern/internal/domain"
+	"github.com/omneval/omneval/internal/auth"
+	"github.com/omneval/omneval/internal/domain"
 )
 
 // NativeSpan is the REST API request body for a single span.
@@ -33,7 +33,7 @@ type IngestRequest struct {
 	Spans []*NativeSpan `json:"spans"`
 }
 
-// NativeHandler handles POST /api/v1/spans for the native Lantern REST format.
+// NativeHandler handles POST /api/v1/spans for the native Omneval REST format.
 type NativeHandler struct {
 	queue       SpanQueue
 	validator   Validator

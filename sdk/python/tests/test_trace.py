@@ -1,9 +1,9 @@
-"""Tests for @lantern.trace decorator and configure function."""
+"""Tests for @omneval.trace decorator and configure function."""
 import responses
 from unittest import mock
 
-import lantern_sdk
-from lantern_sdk.trace import trace
+import omneval_sdk
+from omneval_sdk.trace import trace
 
 # OTel imports used by test helpers.
 from opentelemetry.sdk.trace import TracerProvider
@@ -14,11 +14,11 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
 
 class TestConfigure:
-    """Tests for lantern.configure(endpoint, api_key)."""
+    """Tests for omneval.configure(endpoint, api_key)."""
 
     def teardown_method(self, method) -> None:
         """Restore tracer provider after each test to avoid state leakage."""
-        lantern_sdk.exporter._tracer_provider = None
+        omneval_sdk.exporter._tracer_provider = None
 
     @responses.activate
     def test_configure_wires_otlp_exporter(self):
@@ -30,7 +30,7 @@ class TestConfigure:
             status=200,
         )
 
-        lantern_sdk.configure("http://localhost:4318", "ltn_proj_testkey")
+        omneval_sdk.configure("http://localhost:4318", "oev_proj_testkey")
 
         @trace
         def dummy():
@@ -44,12 +44,12 @@ class TestConfigure:
         """configure() works with https:// endpoints."""
         responses.add(
             responses.POST,
-            "https://lantern.example.com/v1/traces",
+            "https://omneval.example.com/v1/traces",
             body="ok",
             status=200,
         )
 
-        lantern_sdk.configure("https://lantern.example.com", "ltn_proj_key")
+        omneval_sdk.configure("https://omneval.example.com", "oev_proj_key")
 
         @trace
         def dummy():
@@ -59,7 +59,7 @@ class TestConfigure:
 
 
 class TestTraceDecorator:
-    """Tests for @lantern.trace decorator."""
+    """Tests for @omneval.trace decorator."""
 
     def _make_test_provider(self):
         """Create a TracerProvider with an in-memory exporter for testing."""
@@ -69,12 +69,12 @@ class TestTraceDecorator:
         return provider, exporter
 
     def test_decorator_creates_span(self):
-        """@lantern.trace on a function creates a span exported to OTLP endpoint."""
+        """@omneval.trace on a function creates a span exported to OTLP endpoint."""
         provider, exporter = self._make_test_provider()
-        old_provider = lantern_sdk.exporter._tracer_provider
+        old_provider = omneval_sdk.exporter._tracer_provider
 
         with mock.patch(
-            "lantern_sdk.trace.get_tracer_provider", return_value=provider
+            "omneval_sdk.trace.get_tracer_provider", return_value=provider
         ):
 
             @trace
@@ -88,15 +88,15 @@ class TestTraceDecorator:
             assert len(spans) >= 1
             assert spans[0].name == "my_function"
 
-        lantern_sdk.exporter._tracer_provider = old_provider
+        omneval_sdk.exporter._tracer_provider = old_provider
 
     def test_decorator_function_name_in_span(self):
         """Span is created with the function name as the span name."""
         provider, exporter = self._make_test_provider()
-        old_provider = lantern_sdk.exporter._tracer_provider
+        old_provider = omneval_sdk.exporter._tracer_provider
 
         with mock.patch(
-            "lantern_sdk.trace.get_tracer_provider", return_value=provider
+            "omneval_sdk.trace.get_tracer_provider", return_value=provider
         ):
 
             @trace
@@ -109,15 +109,15 @@ class TestTraceDecorator:
             assert len(spans) >= 1
             assert spans[0].name == "named_function"
 
-        lantern_sdk.exporter._tracer_provider = old_provider
+        omneval_sdk.exporter._tracer_provider = old_provider
 
     def test_nested_decorated_functions_produce_linked_spans(self):
         """Nested decorated functions produce a correctly linked parent-child span tree."""
         provider, exporter = self._make_test_provider()
-        old_provider = lantern_sdk.exporter._tracer_provider
+        old_provider = omneval_sdk.exporter._tracer_provider
 
         with mock.patch(
-            "lantern_sdk.trace.get_tracer_provider", return_value=provider
+            "omneval_sdk.trace.get_tracer_provider", return_value=provider
         ):
 
             @trace
@@ -135,15 +135,15 @@ class TestTraceDecorator:
             assert "outer" in names
             assert "inner" in names
 
-        lantern_sdk.exporter._tracer_provider = old_provider
+        omneval_sdk.exporter._tracer_provider = old_provider
 
     def test_span_has_context_propagation(self):
         """Child spans reference parent span via parent_span_id."""
         provider, exporter = self._make_test_provider()
-        old_provider = lantern_sdk.exporter._tracer_provider
+        old_provider = omneval_sdk.exporter._tracer_provider
 
         with mock.patch(
-            "lantern_sdk.trace.get_tracer_provider", return_value=provider
+            "omneval_sdk.trace.get_tracer_provider", return_value=provider
         ):
 
             @trace
@@ -169,12 +169,12 @@ class TestTraceDecorator:
             assert child_span.parent.span_id == parent_span.context.span_id
 
     def test_decorator_propagates_exceptions(self):
-        """@lantern.trace propagates exceptions raised by the decorated function."""
+        """@omneval.trace propagates exceptions raised by the decorated function."""
         provider, exporter = self._make_test_provider()
-        old_provider = lantern_sdk.exporter._tracer_provider
+        old_provider = omneval_sdk.exporter._tracer_provider
 
         with mock.patch(
-            "lantern_sdk.trace.get_tracer_provider", return_value=provider
+            "omneval_sdk.trace.get_tracer_provider", return_value=provider
         ):
 
             @trace

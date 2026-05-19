@@ -10,13 +10,13 @@ Infrastructure resolution:
 - Auth: admin credentials from secret (optional)
 */ -}}
 {{- $name := .Release.Name -}}
-{{- $redisPassword := include "lantern.redisPassword" . -}}
+{{- $redisPassword := include "omneval.redisPassword" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ $name }}-ingest
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: ingest
     {{- with .Values.commonLabels }}
@@ -28,13 +28,13 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: lantern
+      app.kubernetes.io/name: omneval
       app.kubernetes.io/instance: {{ $name }}
       app.kubernetes.io/component: ingest
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: lantern
+        app.kubernetes.io/name: omneval
         app.kubernetes.io/instance: {{ $name }}
         app.kubernetes.io/component: ingest
         {{- with .Values.commonLabels }}
@@ -67,7 +67,7 @@ spec:
         - name: ingest
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["lantern-ingest"]
+          command: ["omneval-ingest"]
           ports:
             - name: http
               containerPort: 8000
@@ -76,47 +76,47 @@ spec:
               containerPort: 9090
               protocol: TCP
           env:
-            - name: LANTERN_CONFIG
-              value: "/etc/lantern/lantern.yaml"
-            - name: LANTERN_AUTH_ADMIN_EMAIL
+            - name: OMNEVAL_CONFIG
+              value: "/etc/omneval/omneval.yaml"
+            - name: OMNEVAL_AUTH_ADMIN_EMAIL
               valueFrom:
                 secretKeyRef:
                   name: {{ $name }}-secret
                   key: admin-email
                   optional: true
-            - name: LANTERN_AUTH_ADMIN_PASSWORD
+            - name: OMNEVAL_AUTH_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ $name }}-secret
                   key: admin-password
                   optional: true
             {{- if $redisPassword }}
-            - name: LANTERN_REDIS_PASSWORD
+            - name: OMNEVAL_REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ $name }}-secret
                   key: redis-password
             {{- end }}
             {{- with .Values.storage.endpoint }}
-            - name: LANTERN_STORAGE_ENDPOINT
+            - name: OMNEVAL_STORAGE_ENDPOINT
               value: {{ . | quote }}
             {{- end }}
             {{- with .Values.storage.bucket }}
-            - name: LANTERN_STORAGE_BUCKET
+            - name: OMNEVAL_STORAGE_BUCKET
               value: {{ . | quote }}
             {{- end }}
             {{- with .Values.storage.region }}
-            - name: LANTERN_STORAGE_REGION
+            - name: OMNEVAL_STORAGE_REGION
               value: {{ . | quote }}
             {{- end }}
             {{- if .Values.storage.endpoint }}
-            - name: LANTERN_STORAGE_ACCESS_KEY
+            - name: OMNEVAL_STORAGE_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ $name }}-secret
                   key: storage-access-key
                   optional: true
-            - name: LANTERN_STORAGE_SECRET_KEY
+            - name: OMNEVAL_STORAGE_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ $name }}-secret
@@ -125,7 +125,7 @@ spec:
             {{- end }}
           volumeMounts:
             - name: config
-              mountPath: /etc/lantern
+              mountPath: /etc/omneval
               readOnly: true
           livenessProbe:
             httpGet:
@@ -152,7 +152,7 @@ kind: ServiceAccount
 metadata:
   name: {{ $name }}-ingest
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: ingest
 automountServiceAccountToken: false
@@ -164,7 +164,7 @@ kind: HorizontalPodAutoscaler
 metadata:
   name: {{ $name }}-ingest
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: ingest
 spec:

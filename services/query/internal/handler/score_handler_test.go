@@ -12,7 +12,7 @@ import (
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
-	"github.com/zbloss/lantern/internal/domain"
+	"github.com/omneval/omneval/internal/domain"
 )
 
 func TestHandleScores_AuthRequired(t *testing.T) {
@@ -59,7 +59,7 @@ func TestHandleScores_InvalidJSON(t *testing.T) {
 
 func TestHandleScores_WritesToDB(t *testing.T) {
 	// Create a temp DuckDB file.
-	tmpDir, err := os.MkdirTemp("", "lantern-score-test")
+	tmpDir, err := os.MkdirTemp("", "omneval-score-test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestHandleScores_WritesToDB(t *testing.T) {
 }
 
 func TestWithScores_AttachesScoresToSpans(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "lantern-scores-test")
+	tmpDir, err := os.MkdirTemp("", "omneval-scores-test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}

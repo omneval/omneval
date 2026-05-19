@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
+	"github.com/omneval/omneval/internal/domain"
 )
 
 // Resource represents a normalized OTLP Resource (resource-level attributes).
@@ -94,7 +94,7 @@ func translateSpan(projectID string, resource Resource, span Span, opts Options)
 		output = buildMessageArray(span.Attributes, "llm.completion")
 	}
 
-	// Derive Kind: explicit lantern.kind wins, then heuristic.
+	// Derive Kind: explicit omneval.kind wins, then heuristic.
 	kind := deriveKind(span.Attributes)
 
 	// Derive ServiceName from Resource attributes.
@@ -135,17 +135,17 @@ func translateSpan(projectID string, resource Resource, span Span, opts Options)
 	}
 }
 
-// resolvePromptInfo extracts prompt linkage from lantern.* attributes.
+// resolvePromptInfo extracts prompt linkage from omneval.* attributes.
 func resolvePromptInfo(attrs map[string]any) (string, int64) {
 	var promptName string
-	if name, ok := attrs["lantern.prompt.name"]; ok {
+	if name, ok := attrs["omneval.prompt.name"]; ok {
 		if s, ok := name.(string); ok {
 			promptName = s
 		}
 	}
 	var promptVersion int64
-	if _, ok := attrs["lantern.prompt.version"]; ok {
-		promptVersion = extractAttributeInt64(attrs, "lantern.prompt.version")
+	if _, ok := attrs["omneval.prompt.version"]; ok {
+		promptVersion = extractAttributeInt64(attrs, "omneval.prompt.version")
 	}
 	return promptName, promptVersion
 }
@@ -271,8 +271,8 @@ func extractNumberedIndex(key, prefix string) (int, bool) {
 
 // deriveKind determines the SpanKind from attribute heuristics.
 func deriveKind(attrs map[string]any) domain.SpanKind {
-	// Explicit lantern.kind wins.
-	if kind := extractAttributeString(attrs, "lantern.kind"); kind != "" {
+	// Explicit omneval.kind wins.
+	if kind := extractAttributeString(attrs, "omneval.kind"); kind != "" {
 		if dk := domain.SpanKind(kind); dk == domain.SpanKindLLM || dk == domain.SpanKindTool ||
 			dk == domain.SpanKindAgent || dk == domain.SpanKindChain || dk == domain.SpanKindInternal {
 			return dk
@@ -342,8 +342,8 @@ func buildOverflowAttributes(attrs map[string]any, model string, inputTokens, ou
 	}
 
 	// Kind.
-	if _, hasKind := attrs["lantern.kind"]; hasKind {
-		remove["lantern.kind"] = true
+	if _, hasKind := attrs["omneval.kind"]; hasKind {
+		remove["omneval.kind"] = true
 	}
 
 	// Service name.

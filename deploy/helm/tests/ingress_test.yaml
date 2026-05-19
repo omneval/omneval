@@ -11,7 +11,7 @@ tests:
   - it: should create Ingress with query host when enabled
     set:
       ingress.enabled: true
-      ingress.query.host: "lanterndev.example.com"
+      ingress.query.host: "omnevaldev.example.com"
     asserts:
       - hasDocuments:
           count: 1

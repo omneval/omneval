@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Lantern is a self-hostable LLM/Agent tracing and evaluation platform. Its key differentiator: it uses DuckDB (embedded, no separate server) instead of ClickHouse, making it viable for organizations with strict data residency requirements.
+Omneval is a self-hostable LLM/Agent tracing and evaluation platform. Its key differentiator: it uses DuckDB (embedded, no separate server) instead of ClickHouse, making it viable for organizations with strict data residency requirements.
 
 ## Commands
 
@@ -43,7 +43,7 @@ npm run sandcastle   # requires llama-server at localhost:8080
 
 The system is split into five Go services that communicate via Redis queues:
 
-1. **Ingest API** (`services/ingest/`) — Accepts OTLP (proto+JSON) and native REST spans. Validates API keys with a 60s-TTL cache, translates OTLP to `domain.Span`, and enqueues JSON batches to Redis key `lantern:ingest:spans`.
+1. **Ingest API** (`services/ingest/`) — Accepts OTLP (proto+JSON) and native REST spans. Validates API keys with a 60s-TTL cache, translates OTLP to `domain.Span`, and enqueues JSON batches to Redis key `omneval:ingest:spans`.
 
 2. **Writer Service** (`services/writer/`) — Single-replica StatefulSet (owns the DuckDB PVC). `BLPOP`s from ingest queue, upserts to DuckDB (PK: `trace_id, span_id`), syncs a DuckDB snapshot to S3 every 30s, and enqueues eval jobs for spans matching active rules.
 
@@ -51,7 +51,7 @@ The system is split into five Go services that communicate via Redis queues:
 
 4. **Eval Workers** (`services/eval/`) — `BLPOP` eval jobs, call a configurable OpenAI-compatible judge LLM, write scores back via `POST /internal/v1/scores` to the Writer Service. Horizontally scalable; retry with exponential backoff up to 5 minutes.
 
-5. **Shared packages** (`internal/`) — domain types, config (Viper + `lantern.yaml`/`LANTERN_*` env vars), auth (bcrypt + session cookies), metadata SQL (Postgres prod / SQLite demo), DuckDB schema, OTLP translation, pricing, Redis queue abstraction, S3 abstraction.
+5. **Shared packages** (`internal/`) — domain types, config (Viper + `omneval.yaml`/`OMNEVAL_*` env vars), auth (bcrypt + session cookies), metadata SQL (Postgres prod / SQLite demo), DuckDB schema, OTLP translation, pricing, Redis queue abstraction, S3 abstraction.
 
 ### Data Flow
 
@@ -80,7 +80,7 @@ Query API ← S3 Parquet (queried via DuckDB read_parquet + hive_partitioning)
 - **Idempotent upserts**: DuckDB spans table PK is `(trace_id, span_id)`, so duplicate deliveries from Redis are safe.
 - **Cost pre-computed at write time**: `cost_usd` is calculated when spans land in DuckDB using the LiteLLM pricing table (bundled fallback in `internal/pricing/`). No query-time recomputation.
 - **Eval rule cache in Writer**: Rules loaded from metadata store on startup, refreshed every 60s. New rules fire within ~1 minute.
-- **API key format**: `ltn_proj_<43 base58>` (project) or `ltn_svc_<43 base58>` (service). Only the SHA-256 hash is stored.
+- **API key format**: `oev_proj_<43 base58>` (project) or `oev_svc_<43 base58>` (service). Only the SHA-256 hash is stored.
 
 ### OTLP Translation
 
@@ -99,4 +99,4 @@ Query API ← S3 Parquet (queried via DuckDB read_parquet + hive_partitioning)
 
 Most service logic is currently stubbed with `panic("not implemented")`. The domain models, config structure, DuckDB schema, and metadata migrations are the completed foundational pieces. Follow the vertical slice order in `CONTEXT.md` when implementing: metadata → ingest→Redis → writer→DuckDB → query → auth → UI → analytics → OTLP → eval → prompts → SDKs → archival.
 
-Full bounded-context documentation is in `CONTEXT.md`. Architecture decisions are in `docs/adr/`. The PRD is `lantern-prd.md`.
+Full bounded-context documentation is in `CONTEXT.md`. Architecture decisions are in `docs/adr/`. The PRD is `omneval-prd.md`.

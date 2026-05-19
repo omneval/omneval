@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zbloss/lantern/internal/judge"
+	"github.com/omneval/omneval/internal/judge"
 )
 
 // Request is the JSON body for POST /api/v1/playground/run.

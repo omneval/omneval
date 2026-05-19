@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/metadata"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/metadata"
 )
 
 func TestUser_CountUsers(t *testing.T) {

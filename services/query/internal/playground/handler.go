@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/judge"
-	"github.com/zbloss/lantern/services/query/internal/handler"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/judge"
+	"github.com/omneval/omneval/services/query/internal/handler"
 )
 
 // PlaygroundHandler handles POST /api/v1/playground/run.

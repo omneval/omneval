@@ -1,31 +1,31 @@
-# Lantern Python SDK
+# Omneval Python SDK
 
-Python SDK for Lantern LLM tracing and evaluation.
+Python SDK for Omneval LLM tracing and evaluation.
 
 ## Installation
 
 ```bash
-pip install lantern-sdk
+pip install omneval-sdk
 ```
 
 ## Quick Start
 
 ```python
-import lantern_sdk
+import omneval_sdk
 
 # Configure the SDK at application startup
-lantern_sdk.configure(
-    endpoint="http://localhost:4318",  # Lantern ingest endpoint
-    api_key="ltn_proj_your_api_key",
+omneval_sdk.configure(
+    endpoint="http://localhost:4318",  # Omneval ingest endpoint
+    api_key="oev_proj_your_api_key",
 )
 
 # Decorate functions to trace them
-@lantern_sdk.trace
+@omneval_sdk.trace
 def call_llm(prompt):
-    span = lantern_sdk.get_active_span()
-    lantern_sdk.set_model(span, "gpt-4o")
-    lantern_sdk.set_input(span, prompt)
-    lantern_sdk.set_output(span, "Hello!")
+    span = omneval_sdk.get_active_span()
+    omneval_sdk.set_model(span, "gpt-4o")
+    omneval_sdk.set_input(span, prompt)
+    omneval_sdk.set_output(span, "Hello!")
     return "done"
 
 result = call_llm("What is 2+2?")
@@ -33,44 +33,44 @@ result = call_llm("What is 2+2?")
 
 ## API Reference
 
-### `lantern_sdk.configure(endpoint, api_key)`
+### `omneval_sdk.configure(endpoint, api_key)`
 
-Configure the OTLP HTTP exporter pointing at the Lantern ingest API. Must be called once at startup.
+Configure the OTLP HTTP exporter pointing at the Omneval ingest API. Must be called once at startup.
 
-### `@lantern_sdk.trace`
+### `@omneval_sdk.trace`
 
-Decorator that wraps a function in an OTel span sent to Lantern. Nested decorated functions produce correctly linked parent-child span trees.
+Decorator that wraps a function in an OTel span sent to Omneval. Nested decorated functions produce correctly linked parent-child span trees.
 
-### `lantern_sdk.set_input(span, input_value)`
+### `omneval_sdk.set_input(span, input_value)`
 
-Attach input data to a span as the `lantern.input` attribute.
+Attach input data to a span as the `omneval.input` attribute.
 
-### `lantern_sdk.set_output(span, output_value)`
+### `omneval_sdk.set_output(span, output_value)`
 
-Attach output data to a span as the `lantern.output` attribute.
+Attach output data to a span as the `omneval.output` attribute.
 
-### `lantern_sdk.set_model(span, model)`
+### `omneval_sdk.set_model(span, model)`
 
 Attach the model name to a span as the `gen_ai.request.model` attribute.
 
-### `lantern_sdk.set_tokens(span, input_tokens, output_tokens)`
+### `omneval_sdk.set_tokens(span, input_tokens, output_tokens)`
 
 Attach token counts to a span as `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens`.
 
-### `lantern_sdk.get_active_span()`
+### `omneval_sdk.get_active_span()`
 
 Return the currently active span from the context variable. Returns `None` outside a decorated function.
 
-### `lantern_sdk.LanternClient(base_url, api_key, project_id=None)`
+### `omneval_sdk.OmnevalClient(base_url, api_key, project_id=None)`
 
 HTTP client for prompt fetching and manual score writes.
 
 The `project_id` is automatically extracted from the API key suffix
-(e.g. `ltn_proj_my-project` → `my-project`). Pass `project_id` explicitly
+(e.g. `oev_proj_my-project` → `my-project`). Pass `project_id` explicitly
 to override this behavior.
 
 ```python
-client = lantern_sdk.LanternClient("http://localhost:8080", "ltn_proj_my-project")
+client = omneval_sdk.OmnevalClient("http://localhost:8080", "oev_proj_my-project")
 prompt = client.get_prompt("greeting", "production")
 client.write_score("span-id-123", "helpfulness", 0.8, "Good reasoning")
 ```
@@ -104,13 +104,13 @@ client.write_score(
 
 ## Exports
 
-All key helper functions are exported from the top-level `lantern_sdk` package:
+All key helper functions are exported from the top-level `omneval_sdk` package:
 
 ```python
-from lantern_sdk import (
+from omneval_sdk import (
     trace,           # @trace decorator
     configure,       # configure endpoint
-    LanternClient,   # HTTP client
+    OmnevalClient,   # HTTP client
     set_input,       # set input on span
     set_output,      # set output on span
     set_model,       # set model on span

@@ -1,4 +1,4 @@
-module github.com/zbloss/lantern/internal
+module github.com/omneval/omneval/internal
 
 go 1.25.0
 

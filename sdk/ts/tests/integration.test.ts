@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createLantern } from "../src/lantern";
+import { createOmneval } from "../src/omneval";
 import { mockFetch, createResponse } from "./utils";
 
-describe("Lantern SDK Integration", () => {
+describe("Omneval SDK Integration", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => vi.restoreAllMocks());
 
@@ -20,15 +20,15 @@ describe("Lantern SDK Integration", () => {
       return createResponse(202);
     });
 
-    const lantern = createLantern();
-    lantern.init({ baseUrl: "http://localhost:3000", apiKey: "ltn_proj_test" });
+    const omneval = createOmneval();
+    omneval.init({ baseUrl: "http://localhost:3000", apiKey: "oev_proj_test" });
 
-    const spanId = lantern.startSpan("llm.call", { kind: "llm" });
-    lantern.setModel(spanId, "gpt-4");
-    lantern.setInput(spanId, "Hello!");
-    lantern.setTokens(spanId, 10, 5);
+    const spanId = omneval.startSpan("llm.call", { kind: "llm" });
+    omneval.setModel(spanId, "gpt-4");
+    omneval.setInput(spanId, "Hello!");
+    omneval.setTokens(spanId, 10, 5);
 
-    await lantern.endSpan(spanId, "Hi there!");
+    await omneval.endSpan(spanId, "Hi there!");
 
     expect(fetchSpy).toHaveBeenCalledOnce();
   });
@@ -42,11 +42,11 @@ describe("Lantern SDK Integration", () => {
       return createResponse(202);
     });
 
-    const lantern = createLantern();
-    lantern.init({ baseUrl: "http://localhost:3000" });
+    const omneval = createOmneval();
+    omneval.init({ baseUrl: "http://localhost:3000" });
 
-    const spanId = lantern.startSpan("test.span");
-    await lantern.endSpan(spanId, { output: "response", attributes: { custom: "attr" } });
+    const spanId = omneval.startSpan("test.span");
+    await omneval.endSpan(spanId, { output: "response", attributes: { custom: "attr" } });
 
     expect(fetchSpy).toHaveBeenCalledOnce();
   });
@@ -58,15 +58,15 @@ describe("Lantern SDK Integration", () => {
       return createResponse(202);
     });
 
-    const lantern = createLantern();
-    lantern.init({ baseUrl: "http://localhost:3000" });
+    const omneval = createOmneval();
+    omneval.init({ baseUrl: "http://localhost:3000" });
 
-    const id1 = lantern.startSpan("span-1");
-    lantern.setModel(id1, "gpt-4");
-    await lantern.endSpan(id1, "output-1");
+    const id1 = omneval.startSpan("span-1");
+    omneval.setModel(id1, "gpt-4");
+    await omneval.endSpan(id1, "output-1");
 
-    const id2 = lantern.startSpan("span-2");
-    await lantern.endSpan(id2, "output-2");
+    const id2 = omneval.startSpan("span-2");
+    await omneval.endSpan(id2, "output-2");
 
     expect(fetchCalls).toHaveLength(2);
   });
@@ -82,12 +82,12 @@ describe("Lantern SDK Integration", () => {
       });
     });
 
-    const lantern = createLantern();
-    lantern.init({ baseUrl: "http://localhost:3000" });
+    const omneval = createOmneval();
+    omneval.init({ baseUrl: "http://localhost:3000" });
 
-    const t1 = await lantern.getPrompt("greeting", "production");
-    const t2 = await lantern.getPrompt("greeting", "production");
-    const t3 = await lantern.getPrompt("greeting", "staging");
+    const t1 = await omneval.getPrompt("greeting", "production");
+    const t2 = await omneval.getPrompt("greeting", "production");
+    const t3 = await omneval.getPrompt("greeting", "staging");
 
     expect(t1).toBe("Hello, {{.Name}}!");
     expect(t2).toBe("Hello, {{.Name}}!");
@@ -107,11 +107,11 @@ describe("Lantern SDK Integration", () => {
       });
     });
 
-    const lantern = createLantern();
-    lantern.init({ baseUrl: "http://localhost:3000" });
+    const omneval = createOmneval();
+    omneval.init({ baseUrl: "http://localhost:3000" });
 
-    const t1 = await lantern.getPromptByVersion("test", 1);
-    const t2 = await lantern.getPromptByVersion("test", 1);
+    const t1 = await omneval.getPromptByVersion("test", 1);
+    const t2 = await omneval.getPromptByVersion("test", 1);
 
     expect(t1).toBe("v1");
     expect(t2).toBe("v1");
@@ -130,10 +130,10 @@ describe("Lantern SDK Integration", () => {
       return createResponse(201);
     });
 
-    const lantern = createLantern();
-    lantern.init({ baseUrl: "http://localhost:3000" });
+    const omneval = createOmneval();
+    omneval.init({ baseUrl: "http://localhost:3000" });
 
-    await lantern.writeScore("span-abc", {
+    await omneval.writeScore("span-abc", {
       name: "accuracy",
       value: 0.95,
       reasoning: "Perfect answer",
@@ -150,10 +150,10 @@ describe("Lantern SDK Integration", () => {
       return createResponse(201);
     });
 
-    const lantern = createLantern();
-    lantern.init({ baseUrl: "http://localhost:3000" });
+    const omneval = createOmneval();
+    omneval.init({ baseUrl: "http://localhost:3000" });
 
-    await lantern.writeScore("span-1", "helpfulness", 0.8);
+    await omneval.writeScore("span-1", "helpfulness", 0.8);
 
     expect(fetchSpy).toHaveBeenCalledOnce();
   });
@@ -164,20 +164,20 @@ describe("Lantern SDK Integration", () => {
       return createResponse(202);
     });
 
-    const lantern = createLantern();
-    lantern.init({ baseUrl: "http://localhost:3000" });
+    const omneval = createOmneval();
+    omneval.init({ baseUrl: "http://localhost:3000" });
 
-    const id1 = lantern.startSpan("span-1");
-    lantern.setModel(id1, "gpt-4");
-    const id2 = lantern.startSpan("span-2");
+    const id1 = omneval.startSpan("span-1");
+    omneval.setModel(id1, "gpt-4");
+    const id2 = omneval.startSpan("span-2");
 
-    await lantern.flush();
+    await omneval.flush();
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     // After flush, pending spans should be cleared
     // Starting another span and flushing should only send the new one
-    const id3 = lantern.startSpan("span-3");
-    await lantern.flush();
+    const id3 = omneval.startSpan("span-3");
+    await omneval.flush();
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(JSON.parse((fetchSpy.mock.calls[1][1]?.body as string))?.spans).toHaveLength(1);
   });
@@ -190,12 +190,12 @@ describe("Lantern SDK Integration", () => {
       return createResponse(202);
     });
 
-    const lantern = createLantern();
-    lantern.init({ baseUrl: "http://localhost:3000" });
+    const omneval = createOmneval();
+    omneval.init({ baseUrl: "http://localhost:3000" });
 
-    const spanId = lantern.startSpan("test.span");
-    lantern.setPrompt(spanId, "greeting");
-    await lantern.endSpan(spanId);
+    const spanId = omneval.startSpan("test.span");
+    omneval.setPrompt(spanId, "greeting");
+    await omneval.endSpan(spanId);
 
     expect(fetchSpy).toHaveBeenCalledOnce();
   });

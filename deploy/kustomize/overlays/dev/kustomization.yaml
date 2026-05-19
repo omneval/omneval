@@ -1,4 +1,4 @@
-# Development overlay for Lantern
+# Development overlay for Omneval
 #
 # Applies reduced resource requests, single replica, and emptyDir
 # storage (instead of PVC) for the Writer Service. Designed for
@@ -11,7 +11,7 @@
 #   apiVersion: kustomize.toolkit.fluxcd.io/v1
 #   kind: Kustomization
 #   metadata:
-#     name: lantern-dev
+#     name: omneval-dev
 #     namespace: flux-system
 #   spec:
 #     interval: 5m
@@ -27,7 +27,7 @@ kind: Kustomization
 resources:
   - ../../base
 
-namespace: lantern
+namespace: omneval
 
 # Development replica counts — single replica per service
 replicas:
@@ -44,7 +44,7 @@ patches:
   # Disable Redis (use local SQLite, no Redis needed for minimal dev)
   - target:
       kind: Deployment
-      name: lantern-redis
+      name: omneval-redis
     patch: |
       - op: replace
         path: /spec/replicas
@@ -53,7 +53,7 @@ patches:
   # Disable PostgreSQL (use SQLite in dev)
   - target:
       kind: StatefulSet
-      name: lantern-postgresql
+      name: omneval-postgresql
     patch: |
       - op: replace
         path: /spec/replicas
@@ -62,7 +62,7 @@ patches:
   # Disable MinIO (not needed for minimal dev)
   - target:
       kind: Deployment
-      name: lantern-minio
+      name: omneval-minio
     patch: |
       - op: replace
         path: /spec/replicas
@@ -149,15 +149,15 @@ patches:
   # Override ConfigMap for dev (SQLite, no S3)
   - target:
       kind: ConfigMap
-      name: lantern-config
+      name: omneval-config
     patch: |
       - op: replace
-        path: /data/lantern.yaml
+        path: /data/omneval.yaml
         value: |
           database:
             driver: sqlite
           redis:
-            addr: lantern-redis:6379
+            addr: omneval-redis:6379
           storage: {}
           auth:
             session_ttl: 168h
@@ -169,7 +169,7 @@ patches:
               - "*"
           writer:
             addr: ":8001"
-            duckdb_path: "/data/lantern.duckdb"
+            duckdb_path: "/data/omneval.duckdb"
             sync_interval: 30s
             flush_interval: 30m
             flush_age_days: 2
@@ -178,7 +178,7 @@ patches:
               lock_ttl: 15
           query:
             addr: ":8002"
-            duckdb_path: "/tmp/lantern-snapshot.duckdb"
+            duckdb_path: "/tmp/omneval-snapshot.duckdb"
             sync_interval: 30s
           eval:
             concurrency: 4

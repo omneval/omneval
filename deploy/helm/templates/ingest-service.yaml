@@ -7,7 +7,7 @@ kind: Service
 metadata:
   name: {{ $name }}-ingest
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: ingest
     {{- with .Values.commonLabels }}
@@ -25,6 +25,6 @@ spec:
       targetPort: 9090
       protocol: TCP
   selector:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: ingest

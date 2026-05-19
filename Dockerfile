@@ -66,12 +66,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -fsSL "https://dl.min.io/client/mc/release/linux-${TARGETARCH}/mc" -o /usr/local/bin/mc \
     && chmod +x /usr/local/bin/mc
 
-COPY --from=go-builder /build/ingest /usr/local/bin/lantern-ingest
-COPY --from=go-builder /build/writer /usr/local/bin/lantern-writer
-COPY --from=go-builder /build/query /usr/local/bin/lantern-query
-COPY --from=go-builder /build/eval /usr/local/bin/lantern-eval
+COPY --from=go-builder /build/ingest /usr/local/bin/omneval-ingest
+COPY --from=go-builder /build/writer /usr/local/bin/omneval-writer
+COPY --from=go-builder /build/query /usr/local/bin/omneval-query
+COPY --from=go-builder /build/eval /usr/local/bin/omneval-eval
 
 WORKDIR /app
 
-# Default to lantern-ingest; docker-compose overrides this per service.
-CMD ["lantern-ingest"]
+# Default to omneval-ingest; docker-compose overrides this per service.
+CMD ["omneval-ingest"]

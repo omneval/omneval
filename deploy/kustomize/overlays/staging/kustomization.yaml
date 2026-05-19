@@ -1,7 +1,7 @@
-# Staging overlay for Lantern
+# Staging overlay for Omneval
 #
 # Applies staging-grade replica counts and resource limits on top of
-# the Lantern kustomize base. Designed for pre-production testing.
+# the Omneval kustomize base. Designed for pre-production testing.
 #
 # Usage:
 #   kustomize build deploy/kustomize/overlays/staging
@@ -10,7 +10,7 @@
 #   apiVersion: kustomize.toolkit.fluxcd.io/v1
 #   kind: Kustomization
 #   metadata:
-#     name: lantern-staging
+#     name: omneval-staging
 #     namespace: flux-system
 #   spec:
 #     interval: 10m
@@ -24,12 +24,12 @@
 #   apiVersion: argoproj.io/v1alpha1
 #   kind: Application
 #   metadata:
-#     name: lantern-staging
+#     name: omneval-staging
 #     namespace: argocd
 #   spec:
 #     source:
 #       path: deploy/kustomize/overlays/staging
-#       repoURL: https://github.com/<org>/lantern.git
+#       repoURL: https://github.com/<org>/omneval.git
 #       targetRevision: main
 
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -38,7 +38,7 @@ kind: Kustomization
 resources:
   - ../../base
 
-namespace: lantern
+namespace: omneval
 
 # Staging replica counts
 replicas:

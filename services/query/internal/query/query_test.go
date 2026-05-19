@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/services/query/internal/cursor"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/services/query/internal/cursor"
 )
 
 func TestNewSpanQuery_Valid(t *testing.T) {

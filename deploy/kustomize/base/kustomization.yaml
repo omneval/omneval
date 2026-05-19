@@ -1,6 +1,6 @@
-# Kustomize base for Lantern
+# Kustomize base for Omneval
 #
-# This base defines all Lantern services (ingest, writer, query, eval)
+# This base defines all Omneval services (ingest, writer, query, eval)
 # as Kubernetes Deployments, a StatefulSet (writer), Services, a ConfigMap,
 # and a Secret. It is designed to be layered with overlays for different
 # environments (production, dev, etc.) via GitOps tools like Flux CD or ArgoCD.
@@ -13,10 +13,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: lantern
+namespace: omneval
 
 commonLabels:
-  app.kubernetes.io/part-of: lantern
+  app.kubernetes.io/part-of: omneval
 
 resources:
   - namespace.yaml

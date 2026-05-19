@@ -1,4 +1,4 @@
-# Lantern — Roadmap
+# Omneval — Roadmap
 
 Phase 1 implementation progress. All Phase 1 slices are complete. Work is organized as vertical TDD slices, each building on the previous ones.
 
@@ -6,7 +6,7 @@ Phase 1 implementation progress. All Phase 1 slices are complete. Work is organi
 
 ### Slice 1: Metadata Store + Config ✅ (Issues #1, #2, #19)
 
-- [x] Viper config loading with `lantern.yaml` + `LANTERN_*` env var overrides
+- [x] Viper config loading with `omneval.yaml` + `OMNEVAL_*` env var overrides
 - [x] Domain types: Span, Trace, Score, API Key, Prompt, EvalRule, Dataset
 - [x] SQLite metadata store with full CRUD + integration tests
 - [x] Postgres metadata store with full CRUD + integration tests (testcontainers)
@@ -18,12 +18,12 @@ Phase 1 implementation progress. All Phase 1 slices are complete. Work is organi
 
 - [x] REST span ingest endpoint (`POST /api/v1/spans`)
 - [x] OTLP span ingest (`POST /v1/traces`, protobuf + JSON)
-- [x] Redis queue enqueue (`RPUSH` JSON batches to `lantern:ingest:spans`)
+- [x] Redis queue enqueue (`RPUSH` JSON batches to `omneval:ingest:spans`)
 - [x] CORS middleware for browser SDK support
 - [x] API key authentication (project + service scoped keys)
 - [x] `503 Service Unavailable` when Redis is unreachable
 - [x] Structured logging with `log/slog`
-- [x] Prometheus metrics (`lantern_ingest_spans_received_total`, enqueue errors)
+- [x] Prometheus metrics (`omneval_ingest_spans_received_total`, enqueue errors)
 
 ### Slice 3: Writer Service → DuckDB ✅ (Issues #5, #6, #21, #23)
 
@@ -32,7 +32,7 @@ Phase 1 implementation progress. All Phase 1 slices are complete. Work is organi
 - [x] Cost pre-computation at write time (LiteLLM pricing table + bundled fallback)
 - [x] S3 snapshot sync (configurable interval, default 30s)
 - [x] S3 sync with ETag/LastModified comparison to avoid unnecessary downloads
-- [x] Prometheus metrics (`lantern_writer_spans_written_total`, durations)
+- [x] Prometheus metrics (`omneval_writer_spans_written_total`, durations)
 - [x] ObjectStore abstraction (S3, mock, failing)
 - [x] Graceful shutdown on all services
 - [x] Health/readiness probes (`/healthz`, `/readyz`)
@@ -70,7 +70,7 @@ Phase 1 implementation progress. All Phase 1 slices are complete. Work is organi
 - [x] Dashboard with cost/token/latency charts
 - [x] Nav with project switcher
 - [x] Embedded into Query API binary via `embed.FS`
-- [x] Tailwind CSS v4 with custom Lantern dark theme (#000000 bg, orange accents)
+- [x] Tailwind CSS v4 with custom Omneval dark theme (#000000 bg, orange accents)
 - [x] Collapsible Sidebar with 5 navigation sections
 - [x] Header with project/time-range/environment selectors
 - [x] Dashboard widgets: traces-by-name bar chart, model costs table, scores empty state, traces-by-time line chart, model usage tabs, user consumption bar chart
@@ -91,7 +91,7 @@ Phase 1 implementation progress. All Phase 1 slices are complete. Work is organi
 - [x] OTLP JSON decode (`application/json`)
 - [x] Two-step translation: wire format → `ResourceSpans` → `domain.Span`
 - [x] GenAI semantic convention mapping (`gen_ai.request.model`, token counts, prompts)
-- [x] Span kind derivation (explicit `lantern.kind`, `gen_ai.*`, `tool.*`, `internal`)
+- [x] Span kind derivation (explicit `omneval.kind`, `gen_ai.*`, `tool.*`, `internal`)
 - [x] Overflow attributes for unmapped fields
 - [x] Service name resolution (Resource `service.name` + API key override)
 - [x] End-to-end integration with Writer Service

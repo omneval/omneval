@@ -1,4 +1,4 @@
-import { LanternSpan } from "./types";
+import { OmnevalSpan } from "./types";
 
 export class SpanExporter {
   private readonly baseUrl: string;
@@ -10,7 +10,7 @@ export class SpanExporter {
     this.apiKey = apiKey;
   }
 
-  async export(spans: LanternSpan[]): Promise<boolean> {
+  async export(spans: OmnevalSpan[]): Promise<boolean> {
     if (spans.length === 0) {
       return true;
     }

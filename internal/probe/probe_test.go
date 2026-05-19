@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zbloss/lantern/internal/probe"
+	"github.com/omneval/omneval/internal/probe"
 )
 
 func TestHealthHandler_Always200(t *testing.T) {
@@ -140,7 +140,7 @@ func TestFileExists_CheckPasses(t *testing.T) {
 }
 
 func TestFileExists_CheckFailsWhenMissing(t *testing.T) {
-	ch := &probe.FileExists{Path: "/tmp/nonexistent_lantern_probe.db"}
+	ch := &probe.FileExists{Path: "/tmp/nonexistent_omneval_probe.db"}
 	err := ch.Check(context.Background())
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")

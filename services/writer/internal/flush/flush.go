@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zbloss/lantern/internal/config"
-	"github.com/zbloss/lantern/internal/storage"
+	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/storage"
 )
 
-const defaultBucket = "lantern"
+const defaultBucket = "omneval"
 
 // Flusher exports spans older than flushAge from DuckDB to Hive-partitioned
 // Parquet files on S3 and prunes the corresponding rows from the hot store.

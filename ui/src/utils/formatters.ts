@@ -1,5 +1,5 @@
 /**
- * Shared formatting utilities for the Lantern UI.
+ * Shared formatting utilities for the Omneval UI.
  */
 
 /**

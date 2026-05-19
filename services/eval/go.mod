@@ -1,11 +1,11 @@
-module github.com/zbloss/lantern/services/eval
+module github.com/omneval/omneval/services/eval
 
 go 1.25.0
 
 require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.19.0
-	github.com/zbloss/lantern/internal v0.0.0
+	github.com/omneval/omneval/internal v0.0.0
 )
 
 require (
@@ -34,4 +34,4 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/zbloss/lantern/internal => ../../internal
+replace github.com/omneval/omneval/internal => ../../internal

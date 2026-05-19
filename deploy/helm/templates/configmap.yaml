@@ -1,7 +1,7 @@
 {{- /*
-Lantern YAML configuration ConfigMap.
+Omneval YAML configuration ConfigMap.
 
-This ConfigMap holds the lantern.yaml configuration that all Lantern services
+This ConfigMap holds the omneval.yaml configuration that all Omneval services
 share. Environment variable overrides in each Deployment handle per-service
 secrets (S3 credentials, admin credentials, LLM keys, Redis credentials).
 
@@ -13,21 +13,21 @@ Infrastructure resolution:
 - When no external values are set, the section is omitted from the config.
 */ -}}
 {{- $name := .Release.Name -}}
-{{- $redisAddr := include "lantern.redisAddr" . -}}
-{{- $pgDsn := include "lantern.postgresDsn" . -}}
-{{- $storageEndpoint := include "lantern.storageEndpoint" . -}}
+{{- $redisAddr := include "omneval.redisAddr" . -}}
+{{- $pgDsn := include "omneval.postgresDsn" . -}}
+{{- $storageEndpoint := include "omneval.storageEndpoint" . -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ $name }}-config
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/instance: {{ $name }}
     {{- with .Values.commonLabels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 data:
-  lantern.yaml: |
+  omneval.yaml: |
     {{- if $redisAddr }}
     redis:
       addr: {{ $redisAddr | quote }}

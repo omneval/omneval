@@ -1,13 +1,13 @@
-# Lantern Helm Chart — Production Values
+# Omneval Helm Chart — Production Values
 #
-# This chart deploys the Lantern tracing platform to Kubernetes.
-# It includes all four Lantern services (ingest, writer, query, eval)
+# This chart deploys the Omneval tracing platform to Kubernetes.
+# It includes all four Omneval services (ingest, writer, query, eval)
 # along with Redis, PostgreSQL, and MinIO as backing infrastructure.
 #
 # Usage:
-#   helm install lantern ./deploy/helm --values my-values.yaml
-#   helm template lantern ./deploy/helm --values my-values.yaml
-#   helm upgrade lantern ./deploy/helm --values my-values.yaml
+#   helm install omneval ./deploy/helm --values my-values.yaml
+#   helm template omneval ./deploy/helm --values my-values.yaml
+#   helm upgrade omneval ./deploy/helm --values my-values.yaml
 #
 # For a minimal demo with SQLite and no S3, set:
 #   database.driver: sqlite
@@ -30,14 +30,14 @@
 #     enabled: true   # internal, using sub-chart settings below
 #   storage:
 #     endpoint: "https://s3.amazonaws.com"
-#     bucket: "my-lantern-bucket"
+#     bucket: "my-omneval-bucket"
 
 # ============================================================================
 # Image
 # ============================================================================
 image:
-  # Repository of the Lantern image (built via the multi-stage Dockerfile)
-  repository: lantern/app
+  # Repository of the Omneval image (built via the multi-stage Dockerfile)
+  repository: omneval/app
   # Tag — defaults to chart appVersion
   tag: ""
   # Image pull policy
@@ -53,11 +53,11 @@ commonLabels: {}
 # ============================================================================
 ingest:
   replicas: 2
-  # Listen address (override via LANTERN_INGEST_ADDR)
+  # Listen address (override via OMNEVAL_INGEST_ADDR)
   addr: ":8000"
-  # Log system prompt in span input (override via LANTERN_INGEST_LOG_SYSTEM_PROMPT)
+  # Log system prompt in span input (override via OMNEVAL_INGEST_LOG_SYSTEM_PROMPT)
   logSystemPrompt: true
-  # CORS allowed origins, comma-separated (override via LANTERN_INGEST_CORS_ALLOWED_ORIGINS)
+  # CORS allowed origins, comma-separated (override via OMNEVAL_INGEST_CORS_ALLOWED_ORIGINS)
   corsAllowedOrigins:
     - "*"
   # Resource limits and requests
@@ -96,12 +96,12 @@ writer:
   # Listen address for the score handler endpoint
   addr: ":8001"
   # Path to the DuckDB file on the PVC
-  duckdbPath: "/data/lantern.duckdb"
-  # Snapshot sync interval to S3 (override via LANTERN_WRITER_SYNC_INTERVAL)
+  duckdbPath: "/data/omneval.duckdb"
+  # Snapshot sync interval to S3 (override via OMNEVAL_WRITER_SYNC_INTERVAL)
   syncInterval: "30s"
-  # Aged partition flush interval to Parquet on S3 (override via LANTERN_WRITER_FLUSH_INTERVAL)
+  # Aged partition flush interval to Parquet on S3 (override via OMNEVAL_WRITER_FLUSH_INTERVAL)
   flushInterval: "30m"
-  # Flush spans older than N days to cold storage (override via LANTERN_WRITER_FLUSH_AGE_DAYS)
+  # Flush spans older than N days to cold storage (override via OMNEVAL_WRITER_FLUSH_AGE_DAYS)
   flushAgeDays: 2
   # Leader election configuration (for multi-replica HA)
   leaderElection:
@@ -148,17 +148,17 @@ pvc:
 # ============================================================================
 query:
   replicas: 2
-  # Listen address (override via LANTERN_QUERY_ADDR)
+  # Listen address (override via OMNEVAL_QUERY_ADDR)
   addr: ":8002"
   # Path to the DuckDB snapshot file (local, read from S3)
-  duckdbPath: "/tmp/lantern-snapshot.duckdb"
-  # Snapshot poll interval from S3 (override via LANTERN_QUERY_SYNC_INTERVAL)
+  duckdbPath: "/tmp/omneval-snapshot.duckdb"
+  # Snapshot poll interval from S3 (override via OMNEVAL_QUERY_SYNC_INTERVAL)
   syncInterval: "30s"
-  # Session cookie TTL (override via LANTERN_AUTH_SESSION_TTL)
+  # Session cookie TTL (override via OMNEVAL_AUTH_SESSION_TTL)
   sessionTTL: "168h"
-  # Secure cookie flag (override via LANTERN_AUTH_SECURE_COOKIE)
+  # Secure cookie flag (override via OMNEVAL_AUTH_SECURE_COOKIE)
   secureCookie: false
-  # Bootstrap admin user on first startup (override via LANTERN_AUTH_ADMIN_EMAIL / LANTERN_AUTH_ADMIN_PASSWORD)
+  # Bootstrap admin user on first startup (override via OMNEVAL_AUTH_ADMIN_EMAIL / OMNEVAL_AUTH_ADMIN_PASSWORD)
   # Set both adminEmail and adminPassword to auto-create the first admin user.
   adminEmail: ""
   adminPassword: ""
@@ -193,13 +193,13 @@ eval:
   replicas: 2
   # Number of concurrent judge LLM calls
   concurrency: 4
-  # Judge LLM base URL (OpenAI-compatible, override via LANTERN_EVAL_LLM_BASE_URL)
+  # Judge LLM base URL (OpenAI-compatible, override via OMNEVAL_EVAL_LLM_BASE_URL)
   llmBaseURL: ""
-  # Judge LLM model name (override via LANTERN_EVAL_LLM_MODEL)
+  # Judge LLM model name (override via OMNEVAL_EVAL_LLM_MODEL)
   llmModel: "gpt-4"
-  # Judge LLM API key (override via LANTERN_EVAL_LLM_API_KEY)
+  # Judge LLM API key (override via OMNEVAL_EVAL_LLM_API_KEY)
   llmAPIKey: ""
-  # Judge call timeout (override via LANTERN_EVAL_JUDGE_TIMEOUT)
+  # Judge call timeout (override via OMNEVAL_EVAL_JUDGE_TIMEOUT)
   judgeTimeout: "90s"
   # Number of retries for failed judge calls
   retryCount: 3
@@ -233,13 +233,13 @@ eval:
 storage:
   # S3 endpoint URL (e.g. http://minio:9000). If empty, no S3 integration.
   endpoint: ""
-  # S3 bucket name (e.g. "lantern")
+  # S3 bucket name (e.g. "omneval")
   bucket: ""
   # S3 region
   region: "us-east-1"
-  # Access key ID (set via the lantern-secret Secret)
+  # Access key ID (set via the omneval-secret Secret)
   accessKey: ""
-  # Secret access key (set via the lantern-secret Secret)
+  # Secret access key (set via the omneval-secret Secret)
   secretKey: ""
 
 # ============================================================================
@@ -320,11 +320,11 @@ postgresql:
   # Internal PostgreSQL settings (when enabled: true)
   auth:
     # Database username
-    username: lantern
+    username: omneval
     # Database password
-    password: lantern
+    password: omneval
     # Database name
-    database: lantern
+    database: omneval
     # Secret key to use for the password (if using existing secret)
     existingSecret: ""
   primary:
@@ -412,7 +412,7 @@ ingress:
 # Metrics
 # ============================================================================
 metrics:
-  # Listen address for Prometheus /metrics endpoint (override via LANTERN_METRICS_ADDR)
+  # Listen address for Prometheus /metrics endpoint (override via OMNEVAL_METRICS_ADDR)
   addr: ":9090"
   # Disable per-project label cardinality on all metrics
   disableProjectLabels: false

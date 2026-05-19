@@ -4,14 +4,14 @@ import (
 	"fmt"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/zbloss/lantern/internal/config"
+	"github.com/omneval/omneval/internal/config"
 )
 
 var (
 	// SpansReceived counts total spans received, labeled by project_id.
 	SpansReceived = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "lantern_ingest",
+			Namespace: "omneval_ingest",
 			Name:      "spans_received_total",
 			Help:      "Total number of spans received by the ingest API.",
 		},
@@ -21,7 +21,7 @@ var (
 	// EnqueueErrors counts total enqueue failures.
 	EnqueueErrors = prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: "lantern_ingest",
+			Namespace: "omneval_ingest",
 			Name:      "enqueue_errors_total",
 			Help:      "Total number of errors when enqueuing spans to Redis.",
 		},
@@ -30,7 +30,7 @@ var (
 	// RequestDuration tracks request processing time.
 	RequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "lantern_ingest",
+			Namespace: "omneval_ingest",
 			Name:      "request_duration_seconds",
 			Help:      "Duration of ingest API requests in seconds.",
 			Buckets:   prometheus.DefBuckets,

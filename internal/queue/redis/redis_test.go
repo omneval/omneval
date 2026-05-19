@@ -6,17 +6,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/queue"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/queue"
 )
 
 // TestQueueKeys tests that the queue keys are correct.
 func TestQueueKeys(t *testing.T) {
-	if queue.KeyIngestSpans != "lantern:ingest:spans" {
-		t.Errorf("KeyIngestSpans: got %q, want %q", queue.KeyIngestSpans, "lantern:ingest:spans")
+	if queue.KeyIngestSpans != "omneval:ingest:spans" {
+		t.Errorf("KeyIngestSpans: got %q, want %q", queue.KeyIngestSpans, "omneval:ingest:spans")
 	}
-	if queue.KeyEvalJobs != "lantern:eval:jobs" {
-		t.Errorf("KeyEvalJobs: got %q, want %q", queue.KeyEvalJobs, "lantern:eval:jobs")
+	if queue.KeyEvalJobs != "omneval:eval:jobs" {
+		t.Errorf("KeyEvalJobs: got %q, want %q", queue.KeyEvalJobs, "omneval:eval:jobs")
 	}
 }
 

@@ -4,14 +4,14 @@ import (
 	"fmt"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/zbloss/lantern/internal/config"
+	"github.com/omneval/omneval/internal/config"
 )
 
 var (
 	// SpansWritten counts total spans written to DuckDB, labeled by project_id.
 	SpansWritten = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "lantern_writer",
+			Namespace: "omneval_writer",
 			Name:      "spans_written_total",
 			Help:      "Total number of spans written to DuckDB.",
 		},
@@ -21,7 +21,7 @@ var (
 	// DuckDBWriteDuration tracks the duration of DuckDB write transactions.
 	DuckDBWriteDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
-			Namespace: "lantern_writer",
+			Namespace: "omneval_writer",
 			Name:      "duckdb_write_duration_seconds",
 			Help:      "Duration of DuckDB write transactions in seconds.",
 			Buckets:   prometheus.DefBuckets,
@@ -31,7 +31,7 @@ var (
 	// SnapshotSyncDuration tracks the duration of S3 snapshot syncs.
 	SnapshotSyncDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "lantern_writer",
+			Namespace: "omneval_writer",
 			Name:      "snapshot_sync_duration_seconds",
 			Help:      "Duration of DuckDB snapshot sync to S3 in seconds.",
 			Buckets:   prometheus.DefBuckets,
@@ -42,7 +42,7 @@ var (
 	// ArchiveSpans counts total spans archived to Parquet, labeled by project_id.
 	ArchiveSpans = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "lantern_writer",
+			Namespace: "omneval_writer",
 			Name:      "archive_spans_total",
 			Help:      "Total number of spans archived to Parquet on S3.",
 		},
@@ -52,7 +52,7 @@ var (
 	// DequeueErrors counts total dequeue failures from the Redis ingest queue.
 	DequeueErrors = prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: "lantern_writer",
+			Namespace: "omneval_writer",
 			Name:      "dequeue_errors_total",
 			Help:      "Total number of errors encountered when dequeuing from the Redis ingest queue.",
 		},
@@ -61,7 +61,7 @@ var (
 	// WriteErrors counts total DuckDB write failures.
 	WriteErrors = prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: "lantern_writer",
+			Namespace: "omneval_writer",
 			Name:      "write_errors_total",
 			Help:      "Total number of errors encountered when writing spans to DuckDB.",
 		},

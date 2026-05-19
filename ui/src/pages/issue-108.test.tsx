@@ -207,13 +207,13 @@ describe("AC5: parseChatTurns extracts structured chat messages", () => {
 describe("AC3: API key entries display service_name prominently as the display name", () => {
   const mockKeys = [
     {
-      key_id: "ltn_svc_worker-1",
+      key_id: "oev_svc_worker-1",
       kind: "service" as const,
       service_name: "my-agent",
       created_at: "2026-05-14T08:00:00Z",
     },
     {
-      key_id: "ltn_proj_abc123",
+      key_id: "oev_proj_abc123",
       kind: "project" as const,
       created_at: "2026-05-13T10:00:00Z",
     },
@@ -241,10 +241,10 @@ describe("AC3: API key entries display service_name prominently as the display n
   it("project key key_id is shown as secondary/smaller text", async () => {
     renderWithToast(<SettingsPage activeProject="proj-1" />);
     await waitFor(() =>
-      expect(screen.getByText("ltn_proj_abc123")).toBeInTheDocument()
+      expect(screen.getByText("oev_proj_abc123")).toBeInTheDocument()
     );
     // key_id should be in a font-mono secondary element
-    const keyIdEl = screen.getByText("ltn_proj_abc123");
+    const keyIdEl = screen.getByText("oev_proj_abc123");
     expect(keyIdEl.className).toContain("font-mono");
   });
 });

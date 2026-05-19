@@ -11,20 +11,20 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: lantern-volume-snapshot
+  name: omneval-volume-snapshot
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/component: writer
-    app.kubernetes.io/part-of: lantern
+    app.kubernetes.io/part-of: omneval
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: lantern-volume-snapshot
+  name: omneval-volume-snapshot
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/component: writer
-    app.kubernetes.io/part-of: lantern
+    app.kubernetes.io/part-of: omneval
 rules:
   # Allow discovery of PVCs (to find source PV for snapshot)
   - apiGroups: [""]
@@ -44,16 +44,16 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: lantern-volume-snapshot
+  name: omneval-volume-snapshot
   labels:
-    app.kubernetes.io/name: lantern
+    app.kubernetes.io/name: omneval
     app.kubernetes.io/component: writer
-    app.kubernetes.io/part-of: lantern
+    app.kubernetes.io/part-of: omneval
 subjects:
   - kind: ServiceAccount
-    name: lantern-volume-snapshot
-    namespace: lantern
+    name: omneval-volume-snapshot
+    namespace: omneval
 roleRef:
   kind: ClusterRole
-  name: lantern-volume-snapshot
+  name: omneval-volume-snapshot
   apiGroup: rbac.authorization.k8s.io

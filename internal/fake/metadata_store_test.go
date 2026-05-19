@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/fake"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/fake"
 	"golang.org/x/crypto/bcrypt"
 )
 

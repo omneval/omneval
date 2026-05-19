@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
+	"github.com/omneval/omneval/internal/domain"
 )
 
 // ErrNotFound is returned when a requested entity does not exist.

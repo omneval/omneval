@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/zbloss/lantern/internal/storage"
+	"github.com/omneval/omneval/internal/storage"
 )
 
 // Reconciler compares the local DuckDB file's mtime with the S3 snapshot's

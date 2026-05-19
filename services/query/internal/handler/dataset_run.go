@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/judge"
-	"github.com/zbloss/lantern/internal/metadata"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/judge"
+	"github.com/omneval/omneval/internal/metadata"
 )
 
 // DatasetRunHandler handles dataset run endpoints:

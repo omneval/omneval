@@ -10,12 +10,12 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/zbloss/lantern/internal/domain"
-	"github.com/zbloss/lantern/internal/idgen"
-	"github.com/zbloss/lantern/internal/metadata"
-	"github.com/zbloss/lantern/internal/pricing"
-	"github.com/zbloss/lantern/internal/queue"
-	"github.com/zbloss/lantern/services/writer/internal/metrics"
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/idgen"
+	"github.com/omneval/omneval/internal/metadata"
+	"github.com/omneval/omneval/internal/pricing"
+	"github.com/omneval/omneval/internal/queue"
+	"github.com/omneval/omneval/services/writer/internal/metrics"
 )
 
 // insertSpansSQL is the INSERT OR REPLACE statement for the DuckDB spans table.

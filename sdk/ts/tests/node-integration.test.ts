@@ -4,7 +4,7 @@ import { instrument, _setFactory, _resetFactory } from "../src/node/index";
 
 /**
  * Integration test: instrument() configures OTel correctly so that
- * auto-instrumented spans reach the Lantern ingest API.
+ * auto-instrumented spans reach the Omneval ingest API.
  *
  * This test:
  * 1. Starts a mock HTTP server that accepts OTLP traces at /v1/traces
@@ -13,7 +13,7 @@ import { instrument, _setFactory, _resetFactory } from "../src/node/index";
  * 4. Shuts down the SDK
  * 5. Asserts the span was received by the mock server
  */
-describe("@lantern/sdk/node — integration with OTel", () => {
+describe("@omneval/sdk/node — integration with OTel", () => {
   let server: http.Server;
   let serverPort: number;
   let receivedTraces: any[];
@@ -86,7 +86,7 @@ describe("@lantern/sdk/node — integration with OTel", () => {
 
     shutdownFn = instrument({
       baseUrl: `http://127.0.0.1:${serverPort}`,
-      apiKey: "ltn_proj_integration_test",
+      apiKey: "oev_proj_integration_test",
       serviceName: "integration-test",
     });
 
@@ -110,7 +110,7 @@ describe("@lantern/sdk/node — integration with OTel", () => {
       OTLPTraceExporter: mockExporter as any,
     });
 
-    const testApiKey = "ltn_svc_abc123xyz";
+    const testApiKey = "oev_svc_abc123xyz";
     shutdownFn = instrument({
       baseUrl: `http://127.0.0.1:${serverPort}`,
       apiKey: testApiKey,
@@ -162,7 +162,7 @@ describe("@lantern/sdk/node — integration with OTel", () => {
 
     shutdownFn = instrument({
       baseUrl: `http://127.0.0.1:${serverPort}`,
-      apiKey: "ltn_proj_test",
+      apiKey: "oev_proj_test",
       serviceName: "shutdown-test",
     });
 
