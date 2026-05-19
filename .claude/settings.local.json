@@ -4,7 +4,12 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:pi.dev)",
       "Bash(docker compose up *)",
-      "Bash(docker compose *)"
+      "Bash(docker compose *)",
+      "mcp__porkbun__pricing_get",
+      "Bash(python *)",
+      "Bash(uv run *)",
+      "mcp__porkbun__domains_check_availability",
+      "Bash(Start-Sleep -Seconds 15)"
     ]
   }
 }

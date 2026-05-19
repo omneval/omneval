@@ -19,6 +19,14 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 RUN curl -fsSL https://go.dev/dl/go1.26.2.linux-amd64.tar.gz | tar -C /usr/local -xz
 ENV PATH="/usr/local/go/bin:${PATH}"
 
+# Install kubectl
+RUN curl -fsSL "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+  -o /usr/local/bin/kubectl \
+  && chmod +x /usr/local/bin/kubectl
+
+# Install Helm 3
+RUN curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
 # Rename the base image's "node" user (UID 1000) to "agent".
 # This keeps UID 1000 so that --userns=keep-id (Podman) and
 # --user 1000:1000 (Docker) map to the correct home directory owner.
@@ -28,6 +36,9 @@ RUN usermod -d /home/agent -m -l agent node
 RUN npm install -g @mariozechner/pi-coding-agent
 
 USER agent
+
+# Install helm-unittest plugin (baked in so agents don't need network at test time)
+RUN helm plugin install https://github.com/helm-unittest/helm-unittest.git
 
 # Install otel exporter as agent user so it lands in /home/agent/.pi/
 RUN pi install git:github.com/mprokopov/pi-otel-telemetry
