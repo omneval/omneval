@@ -335,7 +335,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 value={newName}
                 onChange={(e) => { setNewName(e.target.value); setFormErrors((prev) => ({ ...prev, name: "" })); }}
                 placeholder="e.g. greeting"
-                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.name ? "border-lantern-danger" : ""}`}
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.name ? "border-lantern-danger focus-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
                   borderColor: formErrors.name ? colors.accents.dangerRed : colors.backgrounds.caveWall,
@@ -353,7 +353,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 value={newModel}
                 onChange={(e) => { setNewModel(e.target.value); setFormErrors((prev) => ({ ...prev, model: "" })); }}
                 placeholder="e.g. gpt-4"
-                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.model ? "border-lantern-danger" : ""}`}
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.model ? "border-lantern-danger focus-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
                   borderColor: formErrors.model ? colors.accents.dangerRed : colors.backgrounds.caveWall,
@@ -376,7 +376,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 max={2}
                 step={0.1}
                 onChange={(e) => { setNewTemperature(parseFloat(e.target.value) || 0); setFormErrors((prev) => ({ ...prev, temperature: "" })); }}
-                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.temperature ? "border-lantern-danger" : ""}`}
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.temperature ? "border-lantern-danger focus-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
                   borderColor: formErrors.temperature ? colors.accents.dangerRed : colors.backgrounds.caveWall,
@@ -394,7 +394,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                 value={newMaxTokens}
                 min={1}
                 onChange={(e) => { setNewMaxTokens(parseInt(e.target.value) || 0); setFormErrors((prev) => ({ ...prev, maxTokens: "" })); }}
-                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.maxTokens ? "border-lantern-danger" : ""}`}
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.maxTokens ? "border-lantern-danger focus-danger" : ""}`}
                 style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
                   borderColor: formErrors.maxTokens ? colors.accents.dangerRed : colors.backgrounds.caveWall,
@@ -419,7 +419,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
               onChange={(e) => { setNewTemplate(e.target.value); setFormErrors((prev) => ({ ...prev, template: "" })); }}
               placeholder="Hello {{name}}, welcome to {{place}}!"
               rows={4}
-              className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors font-mono resize-none input-focus ${formErrors.template ? "border-lantern-danger" : ""}`}
+              className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors font-mono resize-none input-focus ${formErrors.template ? "border-lantern-danger focus-danger" : ""}`}
               style={{
                 backgroundColor: colors.backgrounds.abyssBlack,
                 borderColor: formErrors.template ? colors.accents.dangerRed : colors.backgrounds.caveWall,

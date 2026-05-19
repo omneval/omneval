@@ -132,7 +132,7 @@
     box-shadow: 0 0 0 2px var(--lantern-focus-ring);
   }
 
-  .input-focus:focus-danger {
+  .input-focus.focus-danger {
     border-color: var(--lantern-accent-danger);
     box-shadow: 0 0 0 2px var(--lantern-focus-ring-danger);
   }
