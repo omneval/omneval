@@ -163,6 +163,72 @@ const FILTER_LABELS: Record<string, string> = {
 
 const KNOWN_KINDS = ["llm", "tool", "agent", "chain"];
 
+// Default values for each filter field.
+const DEFAULT_FILTERS: FilterState = {
+  trace_name: [],
+  model: [],
+  kind: [],
+  status: [],
+  duration: { min: "", max: "" },
+  tokens: { min: "", max: "" },
+  cost: { min: "", max: "" },
+};
+
+// Mapping from filter section names to their API field names and operators.
+const filterSectionConfig: Record<
+  string,
+  | { field: string; op: string }
+  | { field: string; op: string; isRange: true }
+> = {
+  trace_name: { field: "name", op: "in" },
+  model: { field: "model", op: "in" },
+  kind: { field: "kind", op: "in" },
+  status: { field: "status_code", op: "in" },
+  duration: { field: "duration_ms", op: "gte", isRange: true },
+  tokens: { field: "input_tokens", op: "gte", isRange: true },
+  cost: { field: "cost_usd", op: "gte", isRange: true },
+};
+
+function isRangeFilter(val: unknown): val is RangeFilter {
+  return (
+    typeof val === "object" &&
+    val !== null &&
+    !Array.isArray(val) &&
+    "min" in val &&
+    "max" in val
+  );
+}
+
+function buildFiltersFromState(
+  filterState: FilterState,
+): QueryFilter[] {
+  const filters: QueryFilter[] = [];
+
+  for (const [section, val] of Object.entries(filterState)) {
+    if (Array.isArray(val)) {
+      if (val.length > 0) {
+        const config = filterSectionConfig[section];
+        if (config && !("isRange" in config)) {
+          filters.push({ field: config.field, op: config.op, value: val });
+        }
+      }
+    } else if (isRangeFilter(val)) {
+      const config = filterSectionConfig[section];
+      if (!config || !("isRange" in config)) continue;
+
+      // Range filters emit two entries: one for the min (gte) and one for max (lte).
+      if (val.min !== "") {
+        filters.push({ field: config.field, op: config.op, value: Number(val.min) });
+      }
+      if (val.max !== "") {
+        filters.push({ field: config.field, op: config.op === "gte" ? "lte" : "gte", value: Number(val.max) });
+      }
+    }
+  }
+
+  return filters;
+}
+
 // ── TextFilter: single free-text input ────────────────────────────
 
 function TextFilter({
@@ -253,6 +319,18 @@ function CheckboxFilter({
 
 // ── RangeFilter: min/max number inputs ────────────────────────────
 
+function makeRangeHandler(
+  key: "min" | "max",
+  onApply: (r: RangeFilter) => void,
+  current: RangeFilter,
+): (e: React.ChangeEvent<HTMLInputElement>) => void {
+  return (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const num = raw === "" ? "" : Math.max(0, Number(raw));
+    onApply({ ...current, [key]: num === "" ? "" : num });
+  };
+}
+
 function RangeFilterField({
   value,
   onApply,
@@ -266,17 +344,8 @@ function RangeFilterField({
   maxLabel: string;
   placeholder?: string;
 }) {
-  const handleMin = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value;
-    const num = raw === "" ? "" : Math.max(0, Number(raw));
-    onApply({ ...value, min: num === "" ? "" : num });
-  };
-
-  const handleMax = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value;
-    const num = raw === "" ? "" : Math.max(0, Number(raw));
-    onApply({ ...value, max: num === "" ? "" : num });
-  };
+  const handleMin = makeRangeHandler("min", onApply, value);
+  const handleMax = makeRangeHandler("max", onApply, value);
 
   return (
     <div className="space-y-2">
@@ -337,7 +406,7 @@ function FilterSection({
   onApply: (field: string, val: string[] | RangeFilter) => void;
   value: string[] | RangeFilter;
 }) {
-  const isRange = typeof value === "object" && !Array.isArray(value) && "min" in value;
+  const isRange = isRangeFilter(value);
 
   return (
     <div
@@ -351,7 +420,7 @@ function FilterSection({
         <span>{label}</span>
         {isRange && (
           <span className="text-xs text-lantern-ash font-normal ml-2">
-            {formatRange((value as RangeFilter).min, (value as RangeFilter).max)}
+            {formatRange(value.min, value.max)}
           </span>
         )}
         {!isRange && Array.isArray(value) && value.length > 0 && (
@@ -372,17 +441,11 @@ function FilterSection({
 
       {expanded && (
         <div className="px-3 pb-3">
-          {name === "trace_name" ? (
+          {name === "trace_name" || name === "model" ? (
             <TextFilter
               value={Array.isArray(value) ? value : []}
               onApply={(vals) => onApply(name, vals)}
-              placeholder="Search trace names…"
-            />
-          ) : name === "model" ? (
-            <TextFilter
-              value={Array.isArray(value) ? value : []}
-              onApply={(vals) => onApply(name, vals)}
-              placeholder="e.g. gpt-4, claude-3…"
+              placeholder={name === "model" ? "e.g. gpt-4, claude-3…" : "Search trace names…"}
             />
           ) : name === "kind" ? (
             <CheckboxFilter
@@ -396,39 +459,22 @@ function FilterSection({
               value={Array.isArray(value) ? value : []}
               onApply={(vals) => onApply(name, vals)}
             />
-          ) : name === "duration" ? (
+          ) : (
             <RangeFilterField
-              value={typeof value === "object" && !Array.isArray(value) && "min" in value ? value : { min: "", max: "" }}
+              value={isRange ? value : { min: "", max: "" }}
               onApply={(r) => onApply(name, r)}
-              minLabel="Min (ms)"
-              maxLabel="Max (ms)"
-              placeholder="ms"
+              minLabel={name === "duration" ? "Min (ms)" : name === "cost" ? "Min ($)" : "Min"}
+              maxLabel={name === "duration" ? "Max (ms)" : name === "cost" ? "Max ($)" : "Max"}
+              placeholder={name === "duration" ? "ms" : name === "cost" ? "USD" : "tokens"}
             />
-          ) : name === "tokens" ? (
-            <RangeFilterField
-              value={typeof value === "object" && !Array.isArray(value) && "min" in value ? value : { min: "", max: "" }}
-              onApply={(r) => onApply(name, r)}
-              minLabel="Min"
-              maxLabel="Max"
-              placeholder="tokens"
-            />
-          ) : name === "cost" ? (
-            <RangeFilterField
-              value={typeof value === "object" && !Array.isArray(value) && "min" in value ? value : { min: "", max: "" }}
-              onApply={(r) => onApply(name, r)}
-              minLabel="Min ($)"
-              maxLabel="Max ($)"
-              placeholder="USD"
-            />
-          ) : null}
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function formatRange(min: number | "", max: number | ""):
-  string {
+function formatRange(min: number | "", max: number | ""): string {
   if (min === "" && max === "") return "";
   const minStr = min === "" ? "0" : String(min);
   const maxStr = max === "" ? "∞" : String(max);
@@ -643,15 +689,7 @@ export default function TracesPage({
   const [expandedFilters, setExpandedFilters] = useState<Record<string, boolean>>({
     trace_name: true,
   });
-  const [filterState, setFilterState] = useState<FilterState>({
-    trace_name: [],
-    model: [],
-    kind: [],
-    status: [],
-    duration: { min: "", max: "" },
-    tokens: { min: "", max: "" },
-    cost: { min: "", max: "" },
-  });
+  const [filterState, setFilterState] = useState<FilterState>(DEFAULT_FILTERS);
   const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
 
@@ -709,46 +747,11 @@ export default function TracesPage({
           body.filters.push({ field: "kind", op: "in", value: OBSERVATION_KINDS });
         }
 
-        // Apply filter state
-        if (Object.keys(filterState).length > 0) {
+        // Apply filter sidebar state.
+        const builtFilters = buildFiltersFromState(filterState);
+        if (builtFilters.length > 0) {
           body.filters = body.filters ?? [];
-          for (const [field, val] of Object.entries(filterState)) {
-            if (Array.isArray(val)) {
-              // Text/checkbox filters: use "in" operator.
-              if (val.length > 0) {
-                if (field === "trace_name") {
-                  body.filters.push({ field: "name", op: "in", value: val });
-                } else if (field === "model") {
-                  body.filters.push({ field: "model", op: "in", value: val });
-                } else if (field === "kind") {
-                  body.filters.push({ field: "kind", op: "in", value: val });
-                } else if (field === "status") {
-                  body.filters.push({ field: "status_code", op: "in", value: val });
-                }
-              }
-            } else if (typeof val === "object" && val !== null) {
-              // Range filters: use gte/lte operators.
-              const r = val as RangeFilter;
-              if (field === "duration" && r.min !== "") {
-                body.filters.push({ field: "duration_ms", op: "gte", value: Number(r.min) });
-              }
-              if (field === "duration" && r.max !== "") {
-                body.filters.push({ field: "duration_ms", op: "lte", value: Number(r.max) });
-              }
-              if (field === "tokens" && r.min !== "") {
-                body.filters.push({ field: "input_tokens", op: "gte", value: Number(r.min) });
-              }
-              if (field === "tokens" && r.max !== "") {
-                body.filters.push({ field: "input_tokens", op: "lte", value: Number(r.max) });
-              }
-              if (field === "cost" && r.min !== "") {
-                body.filters.push({ field: "cost_usd", op: "gte", value: Number(r.min) });
-              }
-              if (field === "cost" && r.max !== "") {
-                body.filters.push({ field: "cost_usd", op: "lte", value: Number(r.max) });
-              }
-            }
-          }
+          body.filters.push(...builtFilters);
         }
 
         const res = await fetch("/api/v1/spans/query", {
@@ -860,15 +863,7 @@ export default function TracesPage({
         <div className="px-3 py-2 border-t" style={{ borderColor: colors.backgrounds.caveWall }}>
           <button
             onClick={() => {
-              setFilterState({
-                trace_name: [],
-                model: [],
-                kind: [],
-                status: [],
-                duration: { min: "", max: "" },
-                tokens: { min: "", max: "" },
-                cost: { min: "", max: "" },
-              });
+              setFilterState(DEFAULT_FILTERS);
               setExpandedFilters({ trace_name: true });
               fetchSpans("", false);
             }}
