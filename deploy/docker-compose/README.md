@@ -44,7 +44,7 @@ After startup, the services will be available at:
 
 An admin user is bootstrapped on first start:
 
-- **Email:** `admin@lantern.dev`
+- **Email:** `admin@omneval.com`
 - **Password:** `admin`
 
 ## Infrastructure Services

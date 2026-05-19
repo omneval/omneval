@@ -26,7 +26,7 @@ API_KEY = "ltn_proj_HqP4ESPKqdcTPqsj1eGG4vD2THLPL3tge8b85NHsBTKv"
 PROJECT_ID = "d81rkuaodocs73apq400"
 INGEST_URL = "http://localhost:8000"
 QUERY_URL = "http://localhost:8002"
-ADMIN_EMAIL = "admin@lantern.dev"
+ADMIN_EMAIL = "admin@omneval.com"
 ADMIN_PASSWORD = "admin"
 
 PASS = "PASS"

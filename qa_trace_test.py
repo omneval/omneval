@@ -258,7 +258,7 @@ def test_query_spans(trace_id: str):
     session = requests.Session()
     login = session.post(
         f"{QUERY_URL}/login",
-        json={"email": "admin@lantern.dev", "password": "admin"},
+        json={"email": "admin@omneval.com", "password": "admin"},
         timeout=10,
     )
     if login.status_code != 200:
@@ -283,7 +283,7 @@ def test_query_list_spans():
     session = requests.Session()
     login = session.post(
         f"{QUERY_URL}/login",
-        json={"email": "admin@lantern.dev", "password": "admin"},
+        json={"email": "admin@omneval.com", "password": "admin"},
         timeout=10,
     )
     if login.status_code != 200:
