@@ -872,3 +872,273 @@ describe("auto-refresh", () => {
     vi.restoreAllMocks();
   });
 });
+
+// ── Filter tests ───────────────────────────────────────────────────
+
+describe("filters", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: mockSpans,
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("renders filter sidebar with all filter sections", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // All filter section headers should be visible in the sidebar
+    const filterSidebar = document.querySelector(".w-64.border-r");
+    expect(filterSidebar).toBeInTheDocument();
+
+    // Check filter section headers exist in sidebar
+    const sidebarText = filterSidebar?.textContent ?? "";
+    expect(sidebarText).toContain("Trace Name");
+    expect(sidebarText).toContain("Model");
+    expect(sidebarText).toContain("Kind");
+    expect(sidebarText).toContain("Status Code");
+    expect(sidebarText).toContain("Duration");
+    expect(sidebarText).toContain("Tokens");
+    expect(sidebarText).toContain("Cost");
+  });
+
+  it("sends model filter as 'in' operator when model values are entered", async () => {
+    const fetchBodies: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (init?.body) {
+        fetchBodies.push(String(init.body));
+      }
+      return {
+        ok: true,
+        json: () =>
+          Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response;
+    });
+
+    renderTracesPage();
+
+    // Wait for initial fetch
+    await waitFor(
+      () => { expect(fetchBodies.length).toBeGreaterThanOrEqual(1); },
+      { timeout: 2000 }
+    );
+
+    // Expand Model filter - click on "Model" text in the sidebar header
+    const modelHeader = screen.getByText("Model");
+    await act(async () => {
+      fireEvent.click(modelHeader);
+    });
+
+    // After expanding, find the expanded content div for Model section
+    // The structure is: border-b div > button (header) > expanded div (content)
+    const modelBorderDiv = modelHeader.closest("div.border-b") as HTMLElement;
+    const expandedContent = modelBorderDiv.querySelector("div.px-3") as HTMLElement;
+    expect(expandedContent).toBeInTheDocument();
+
+    // Get the text input and Apply button from the expanded content
+    const modelInput = expandedContent.querySelector<HTMLInputElement>('input[type="text"]');
+    expect(modelInput).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.change(modelInput!, { target: { value: "gpt-4" } });
+    });
+
+    const applyBtn = expandedContent.querySelector('button');
+    expect(applyBtn).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(applyBtn as HTMLButtonElement);
+    });
+
+    // Wait for the fetch with the filter
+    await waitFor(
+      () => { expect(fetchBodies.length).toBeGreaterThanOrEqual(2); },
+      { timeout: 2000 }
+    );
+
+    // The body should contain model in filter
+    const modelBody = fetchBodies.find((b) => b.includes('"model"') && b.includes('"in"'));
+    expect(modelBody).toBeDefined();
+    expect(modelBody).toContain("gpt-4");
+  });
+
+  it("sends kind filter when kind checkboxes are selected", async () => {
+    const fetchBodies: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (init?.body) {
+        fetchBodies.push(String(init.body));
+      }
+      return {
+        ok: true,
+        json: () =>
+          Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response;
+    });
+
+    renderTracesPage();
+
+    // Wait for initial fetch
+    await waitFor(
+      () => { expect(fetchBodies.length).toBeGreaterThanOrEqual(1); },
+      { timeout: 2000 }
+    );
+
+    // Expand Kind filter
+    const kindHeader = screen.getByText("Kind");
+    await act(async () => {
+      fireEvent.click(kindHeader);
+    });
+
+    // Select the "llm" checkbox within the Kind section
+    const kindBorderDiv = kindHeader.closest("div.border-b") as HTMLElement;
+    const expandedContent = kindBorderDiv.querySelector("div.px-3") as HTMLElement;
+    const llmCheckbox = expandedContent.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    expect(llmCheckbox).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(llmCheckbox!);
+    });
+
+    // Wait for the fetch with the filter
+    await waitFor(
+      () => { expect(fetchBodies.length).toBeGreaterThanOrEqual(2); },
+      { timeout: 2000 }
+    );
+
+    // The body should contain kind in filter with "llm"
+    const kindBody = fetchBodies.find((b) => b.includes('"kind"') && b.includes('"in"'));
+    expect(kindBody).toBeDefined();
+    expect(kindBody).toContain("llm");
+  });
+
+  it("sends duration filter as range with gte/lte operators", async () => {
+    const fetchBodies: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (init?.body) {
+        fetchBodies.push(String(init.body));
+      }
+      return {
+        ok: true,
+        json: () =>
+          Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response;
+    });
+
+    renderTracesPage();
+
+    // Wait for initial fetch
+    await waitFor(
+      () => { expect(fetchBodies.length).toBeGreaterThanOrEqual(1); },
+      { timeout: 2000 }
+    );
+
+    // Expand Duration filter
+    const durationHeader = screen.getByText("Duration");
+    await act(async () => {
+      fireEvent.click(durationHeader);
+    });
+
+    // Set min and max values within the Duration section
+    const durationBorderDiv = durationHeader.closest("div.border-b") as HTMLElement;
+    const expandedContent = durationBorderDiv.querySelector("div.px-3") as HTMLElement;
+    const durationInputs = expandedContent.querySelectorAll<HTMLInputElement>('input[type="number"]');
+    expect(durationInputs.length).toBe(2);
+
+    await act(async () => {
+      fireEvent.change(durationInputs[0], { target: { value: "100" } });
+    });
+    await act(async () => {
+      fireEvent.change(durationInputs[1], { target: { value: "5000" } });
+    });
+
+    // Find Apply button within the Duration section
+    const applyBtn = expandedContent.querySelector('button');
+    expect(applyBtn).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(applyBtn as HTMLButtonElement);
+    });
+
+    // Wait for the fetch with the filter
+    await waitFor(
+      () => { expect(fetchBodies.length).toBeGreaterThanOrEqual(2); },
+      { timeout: 2000 }
+    );
+
+    // The body should contain duration_ms gte and lte filters.
+    // Use the last fetch body since onChange triggers re-fetches for each input change.
+    const lastBody = fetchBodies[fetchBodies.length - 1];
+    expect(lastBody).toContain('"duration_ms"');
+    expect(lastBody).toContain('"gte"');
+    expect(lastBody).toContain('"lte"');
+    expect(lastBody).toContain("100");
+    expect(lastBody).toContain("5000");
+  });
+
+  it("clears all filters and resets to defaults", async () => {
+    const fetchBodies: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (init?.body) {
+        fetchBodies.push(String(init.body));
+      }
+      return {
+        ok: true,
+        json: () =>
+          Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response;
+    });
+
+    renderTracesPage();
+
+    // Wait for initial fetch
+    await waitFor(
+      () => { expect(fetchBodies.length).toBeGreaterThanOrEqual(1); },
+      { timeout: 2000 }
+    );
+
+    // Apply a filter first - expand Model section
+    const modelHeader = screen.getByText("Model");
+    await act(async () => {
+      fireEvent.click(modelHeader);
+    });
+
+    const modelBorderDiv = modelHeader.closest("div.border-b") as HTMLElement;
+    const modelExpanded = modelBorderDiv.querySelector("div.px-3") as HTMLElement;
+    const modelInput = modelExpanded.querySelector<HTMLInputElement>('input[type="text"]');
+    await act(async () => {
+      fireEvent.change(modelInput!, { target: { value: "gpt-4" } });
+    });
+
+    const modelApplyBtn = modelExpanded.querySelector('button');
+    await act(async () => {
+      fireEvent.click(modelApplyBtn as HTMLButtonElement);
+    });
+
+    // Wait for the filtered fetch
+    await waitFor(
+      () => { expect(fetchBodies.length).toBeGreaterThanOrEqual(2); },
+      { timeout: 2000 }
+    );
+
+    // Clear all filters
+    const clearBtn = screen.getByRole("button", { name: "Clear All Filters" });
+    await act(async () => {
+      fireEvent.click(clearBtn);
+    });
+
+    // Should trigger a fresh fetch without filters
+    await waitFor(
+      () => { expect(fetchBodies.length).toBeGreaterThanOrEqual(3); },
+      { timeout: 2000 }
+    );
+  });
+});
+

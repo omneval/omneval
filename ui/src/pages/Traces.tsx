@@ -54,11 +54,7 @@ interface SpanQueryRequest {
 interface QueryFilter {
   field: string;
   op: string;
-  value: string | string[];
-}
-
-interface FilterState {
-  [fieldName: string]: string[];
+  value: string | string[] | number;
 }
 
 // Observation-level span kinds shown on the Observations tab.
@@ -132,31 +128,199 @@ function BookmarkStar({ starred, onClick }: { starred: boolean; onClick: () => v
   );
 }
 
+// ── Filter types ──────────────────────────────────────────────────
+
+interface RangeFilter {
+  min: number | "";
+  max: number | "";
+}
+
+interface FilterState {
+  [fieldName: string]: string[] | RangeFilter;
+}
+
 // ── Filter Sidebar ─────────────────────────────────────────────────
 
 const FILTER_SECTIONS = [
-  "environment",
   "trace_name",
-  "trace_id",
-  "user_id",
-  "session_id",
-  "tags",
-  "latency",
+  "model",
+  "kind",
+  "status",
+  "duration",
   "tokens",
   "cost",
 ];
 
 const FILTER_LABELS: Record<string, string> = {
-  environment: "Environment",
   trace_name: "Trace Name",
-  trace_id: "Trace ID",
-  user_id: "User ID",
-  session_id: "Session ID",
-  tags: "Tags",
-  latency: "Latency",
+  model: "Model",
+  kind: "Kind",
+  status: "Status Code",
+  duration: "Duration",
   tokens: "Tokens",
   cost: "Cost",
 };
+
+const KNOWN_KINDS = ["llm", "tool", "agent", "chain"];
+
+// ── TextFilter: single free-text input ────────────────────────────
+
+function TextFilter({
+  value,
+  onApply,
+  placeholder,
+}: {
+  value: string[];
+  onApply: (vals: string[]) => void;
+  placeholder?: string;
+}) {
+  const [input, setInput] = useState(value.join(", "));
+
+  useEffect(() => {
+    setInput(value.join(", "));
+  }, [value]);
+
+  const handleApply = () => {
+    const vals = input
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    onApply(vals);
+  };
+
+  return (
+    <div className="space-y-2">
+      <input
+        type="text"
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        placeholder={placeholder ?? "Enter values…"}
+        className="input-focus w-full text-sm px-2 py-1.5 rounded border border-lantern-bg-cave bg-lantern-bg-illumination text-lantern-pure placeholder-lantern-ash"
+      />
+      <button
+        type="button"
+        onClick={handleApply}
+        className="text-xs px-2 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
+        style={{
+          background: colors.accents.emberFlare,
+          boxShadow: "0 1px 4px rgba(255, 87, 34, 0.2)",
+        }}
+      >
+        Apply
+      </button>
+    </div>
+  );
+}
+
+// ── CheckboxFilter: multi-select checkboxes ──────────────────────
+
+function CheckboxFilter({
+  options,
+  value,
+  onApply,
+}: {
+  options: string[];
+  value: string[];
+  onApply: (vals: string[]) => void;
+}) {
+  const toggle = (option: string) => {
+    const newVals = value.includes(option)
+      ? value.filter((v) => v !== option)
+      : [...value, option];
+    onApply(newVals);
+  };
+
+  return (
+    <div className="space-y-1">
+      {options.map((option) => (
+        <label
+          key={option}
+          className="flex items-center gap-2 text-sm text-lantern-ash hover:text-lantern-pure cursor-pointer"
+        >
+          <input
+            type="checkbox"
+            checked={value.includes(option)}
+            onChange={() => toggle(option)}
+            className="rounded"
+            style={{ accentColor: colors.accents.emberFlare }}
+          />
+          <span className="capitalize">{option}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+// ── RangeFilter: min/max number inputs ────────────────────────────
+
+function RangeFilterField({
+  value,
+  onApply,
+  minLabel,
+  maxLabel,
+  placeholder,
+}: {
+  value: RangeFilter;
+  onApply: (r: RangeFilter) => void;
+  minLabel: string;
+  maxLabel: string;
+  placeholder?: string;
+}) {
+  const handleMin = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const num = raw === "" ? "" : Math.max(0, Number(raw));
+    onApply({ ...value, min: num === "" ? "" : num });
+  };
+
+  const handleMax = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const num = raw === "" ? "" : Math.max(0, Number(raw));
+    onApply({ ...value, max: num === "" ? "" : num });
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <div className="flex-1">
+          <span className="text-xs text-lantern-ash mb-1 block">{minLabel}</span>
+          <input
+            type="number"
+            value={value.min}
+            onChange={handleMin}
+            placeholder={placeholder}
+            min={0}
+            className="input-focus w-full text-sm px-2 py-1.5 rounded border border-lantern-bg-cave bg-lantern-bg-illumination text-lantern-pure placeholder-lantern-ash"
+          />
+        </div>
+        <span className="text-lantern-ash pt-5">—</span>
+        <div className="flex-1">
+          <span className="text-xs text-lantern-ash mb-1 block">{maxLabel}</span>
+          <input
+            type="number"
+            value={value.max}
+            onChange={handleMax}
+            placeholder={placeholder}
+            min={0}
+            className="input-focus w-full text-sm px-2 py-1.5 rounded border border-lantern-bg-cave bg-lantern-bg-illumination text-lantern-pure placeholder-lantern-ash"
+          />
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => onApply(value)}
+        className="text-xs px-2 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
+        style={{
+          background: colors.accents.emberFlare,
+          boxShadow: "0 1px 4px rgba(255, 87, 34, 0.2)",
+        }}
+      >
+        Apply
+      </button>
+    </div>
+  );
+}
+
+// ── FilterSection: accordion section ──────────────────────────────
 
 function FilterSection({
   name,
@@ -170,46 +334,10 @@ function FilterSection({
   label: string;
   expanded: boolean;
   onToggle: () => void;
-  onApply: (val: string[]) => void;
-  value: string[];
+  onApply: (field: string, val: string[] | RangeFilter) => void;
+  value: string[] | RangeFilter;
 }) {
-  const [input, setInput] = useState(value.join(", "));
-
-  // Sync local input state when the value prop changes from outside.
-  useEffect(() => {
-    setInput(value.join(", "));
-  }, [value]);
-
-  const handleApply = () => {
-    const vals = input
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    onApply(vals);
-  };
-
-  const applyButton = (
-    <button
-      type="button"
-      onClick={handleApply}
-      className="text-xs px-2 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
-      style={{
-        background: colors.accents.emberFlare,
-        boxShadow: "0 1px 4px rgba(255, 87, 34, 0.2)",
-      }}
-    >
-      Apply
-    </button>
-  );
-
-  const filterInput = (
-    <input
-      type="text"
-      value={input}
-      onChange={(e) => setInput(e.target.value)}
-      className="input-focus w-full text-sm px-2 py-1.5 rounded border border-lantern-bg-cave bg-lantern-bg-illumination text-lantern-pure placeholder-lantern-ash"
-    />
-  );
+  const isRange = typeof value === "object" && !Array.isArray(value) && "min" in value;
 
   return (
     <div
@@ -221,6 +349,16 @@ function FilterSection({
         className="flex items-center justify-between w-full px-3 py-2 text-sm font-medium text-lantern-pure hover:bg-lantern-accent-flicker-hover transition-colors"
       >
         <span>{label}</span>
+        {isRange && (
+          <span className="text-xs text-lantern-ash font-normal ml-2">
+            {formatRange((value as RangeFilter).min, (value as RangeFilter).max)}
+          </span>
+        )}
+        {!isRange && Array.isArray(value) && value.length > 0 && (
+          <span className="text-xs text-lantern-ash font-normal ml-2">
+            {value.length} selected
+          </span>
+        )}
         <svg
           width="12"
           height="12"
@@ -235,40 +373,66 @@ function FilterSection({
       {expanded && (
         <div className="px-3 pb-3">
           {name === "trace_name" ? (
-            <div className="space-y-1">
-              {["planner", "implementer", "reviewer", "merger", "coder", "architect"].map((traceName) => (
-                <label
-                  key={traceName}
-                  className="flex items-center gap-2 text-sm text-lantern-ash hover:text-lantern-pure cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={value.includes(traceName)}
-                    onChange={(e) => {
-                      const newVals = e.target.checked
-                        ? [...value, traceName]
-                        : value.filter((v) => v !== traceName);
-                      onApply(newVals);
-                    }}
-                    className="rounded"
-                    style={{
-                      accentColor: colors.accents.emberFlare,
-                    }}
-                  />
-                  {traceName}
-                </label>
-              ))}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {filterInput}
-              {applyButton}
-            </div>
-          )}
+            <TextFilter
+              value={Array.isArray(value) ? value : []}
+              onApply={(vals) => onApply(name, vals)}
+              placeholder="Search trace names…"
+            />
+          ) : name === "model" ? (
+            <TextFilter
+              value={Array.isArray(value) ? value : []}
+              onApply={(vals) => onApply(name, vals)}
+              placeholder="e.g. gpt-4, claude-3…"
+            />
+          ) : name === "kind" ? (
+            <CheckboxFilter
+              options={KNOWN_KINDS}
+              value={Array.isArray(value) ? value : []}
+              onApply={(vals) => onApply(name, vals)}
+            />
+          ) : name === "status" ? (
+            <CheckboxFilter
+              options={["OK", "ERROR"]}
+              value={Array.isArray(value) ? value : []}
+              onApply={(vals) => onApply(name, vals)}
+            />
+          ) : name === "duration" ? (
+            <RangeFilterField
+              value={typeof value === "object" && !Array.isArray(value) && "min" in value ? value : { min: "", max: "" }}
+              onApply={(r) => onApply(name, r)}
+              minLabel="Min (ms)"
+              maxLabel="Max (ms)"
+              placeholder="ms"
+            />
+          ) : name === "tokens" ? (
+            <RangeFilterField
+              value={typeof value === "object" && !Array.isArray(value) && "min" in value ? value : { min: "", max: "" }}
+              onApply={(r) => onApply(name, r)}
+              minLabel="Min"
+              maxLabel="Max"
+              placeholder="tokens"
+            />
+          ) : name === "cost" ? (
+            <RangeFilterField
+              value={typeof value === "object" && !Array.isArray(value) && "min" in value ? value : { min: "", max: "" }}
+              onApply={(r) => onApply(name, r)}
+              minLabel="Min ($)"
+              maxLabel="Max ($)"
+              placeholder="USD"
+            />
+          ) : null}
         </div>
       )}
     </div>
   );
+}
+
+function formatRange(min: number | "", max: number | ""):
+  string {
+  if (min === "" && max === "") return "";
+  const minStr = min === "" ? "0" : String(min);
+  const maxStr = max === "" ? "∞" : String(max);
+  return `${minStr}–${maxStr}`;
 }
 
 // ── Table Cell Rendering ─────────────────────────────────────────
@@ -479,7 +643,15 @@ export default function TracesPage({
   const [expandedFilters, setExpandedFilters] = useState<Record<string, boolean>>({
     trace_name: true,
   });
-  const [filterState, setFilterState] = useState<FilterState>({});
+  const [filterState, setFilterState] = useState<FilterState>({
+    trace_name: [],
+    model: [],
+    kind: [],
+    status: [],
+    duration: { min: "", max: "" },
+    tokens: { min: "", max: "" },
+    cost: { min: "", max: "" },
+  });
   const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
 
@@ -540,25 +712,40 @@ export default function TracesPage({
         // Apply filter state
         if (Object.keys(filterState).length > 0) {
           body.filters = body.filters ?? [];
-          for (const [field, values] of Object.entries(filterState)) {
-            if (values.length > 0) {
-              if (field === "trace_name") {
-                body.filters.push({ field: "name", op: "in", value: values });
-              } else if (field === "latency") {
-                const match = values[0]?.match(/[><=]?\s*(\d+)/);
-                if (match) {
-                  const threshold = parseInt(match[1] ?? "0");
-                  const op = values[0]?.includes(">") && !values[0]?.includes(">=")
-                    ? "gt"
-                    : values[0]?.includes(">=")
-                      ? "gte"
-                      : values[0]?.includes("<") && !values[0]?.includes("<=")
-                        ? "lt"
-                        : values[0]?.includes("<=")
-                          ? "lte"
-                          : "eq";
-                  body.filters.push({ field: "duration_ms", op, value: String(threshold) });
+          for (const [field, val] of Object.entries(filterState)) {
+            if (Array.isArray(val)) {
+              // Text/checkbox filters: use "in" operator.
+              if (val.length > 0) {
+                if (field === "trace_name") {
+                  body.filters.push({ field: "name", op: "in", value: val });
+                } else if (field === "model") {
+                  body.filters.push({ field: "model", op: "in", value: val });
+                } else if (field === "kind") {
+                  body.filters.push({ field: "kind", op: "in", value: val });
+                } else if (field === "status") {
+                  body.filters.push({ field: "status_code", op: "in", value: val });
                 }
+              }
+            } else if (typeof val === "object" && val !== null) {
+              // Range filters: use gte/lte operators.
+              const r = val as RangeFilter;
+              if (field === "duration" && r.min !== "") {
+                body.filters.push({ field: "duration_ms", op: "gte", value: Number(r.min) });
+              }
+              if (field === "duration" && r.max !== "") {
+                body.filters.push({ field: "duration_ms", op: "lte", value: Number(r.max) });
+              }
+              if (field === "tokens" && r.min !== "") {
+                body.filters.push({ field: "input_tokens", op: "gte", value: Number(r.min) });
+              }
+              if (field === "tokens" && r.max !== "") {
+                body.filters.push({ field: "input_tokens", op: "lte", value: Number(r.max) });
+              }
+              if (field === "cost" && r.min !== "") {
+                body.filters.push({ field: "cost_usd", op: "gte", value: Number(r.min) });
+              }
+              if (field === "cost" && r.max !== "") {
+                body.filters.push({ field: "cost_usd", op: "lte", value: Number(r.max) });
               }
             }
           }
@@ -627,10 +814,10 @@ export default function TracesPage({
     setExpandedFilters((prev) => ({ ...prev, [name]: !prev[name] }));
   };
 
-  const applyFilter = (field: string, values: string[]) => {
+  const applyFilter = (field: string, val: string[] | RangeFilter) => {
     setFilterState((prev) => ({
       ...prev,
-      [field]: values,
+      [field]: val,
     }));
     fetchSpans("", false);
   };
@@ -665,7 +852,7 @@ export default function TracesPage({
               label={FILTER_LABELS[section] ?? section}
               expanded={expandedFilters[section]}
               onToggle={() => toggleFilter(section)}
-              onApply={(vals) => applyFilter(section, vals)}
+              onApply={(field, vals) => applyFilter(field, vals)}
               value={filterState[section] ?? []}
             />
           ))}
@@ -673,7 +860,15 @@ export default function TracesPage({
         <div className="px-3 py-2 border-t" style={{ borderColor: colors.backgrounds.caveWall }}>
           <button
             onClick={() => {
-              setFilterState({});
+              setFilterState({
+                trace_name: [],
+                model: [],
+                kind: [],
+                status: [],
+                duration: { min: "", max: "" },
+                tokens: { min: "", max: "" },
+                cost: { min: "", max: "" },
+              });
               setExpandedFilters({ trace_name: true });
               fetchSpans("", false);
             }}

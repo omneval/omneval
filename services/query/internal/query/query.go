@@ -81,7 +81,8 @@ const (
 
 // specialFilterFields are filter fields handled specially (not simple column comparisons).
 var specialFilterFields = map[string]struct{}{
-	"bookmarked": {},
+	"bookmarked":  {},
+	"duration_ms": {},
 }
 
 // allSpanFields is the full allowlist of valid span fields.
@@ -428,29 +429,49 @@ func compileFilter(f SpanQueryFilter) (sql string, args []any, err error) {
 	return fmt.Sprintf("%s %s ?", field, opSymbol), args, nil
 }
 
+// durationMsExpr returns the DuckDB SQL expression for the duration_ms
+// virtual field — computed as milliseconds between end_time and start_time.
+func durationMsExpr() string {
+	return "(EXTRACT(EPOCH FROM (end_time - start_time)) * 1000)"
+}
+
 // compileSpecialFilter generates SQL for non-column filters that require
-// custom logic beyond simple column comparisons. Currently only supports
-// "bookmarked", which checks the bookmarks table for existence.
+// custom logic beyond simple column comparisons. Currently supports
+// "bookmarked" (checks the bookmarks table for existence) and
+// "duration_ms" (computed from end_time - start_time).
 //
 // The caller (buildWhereClause) guarantees that the filter field is a known
 // special field. This method returns an empty string for unsupported
 // operators or values, causing the filter to be silently skipped.
 func (q *SpanQuery) compileSpecialFilter(f SpanQueryFilter) (string, []any) {
-	// Only equality operator is supported for bookmarked filters.
-	if FilterOp(f.Op) != OpEq {
+	switch f.Field {
+	case "bookmarked":
+		// Only equality operator is supported for bookmarked filters.
+		if FilterOp(f.Op) != OpEq {
+			return "", nil
+		}
+
+		bookmarked, ok := f.Value.(bool)
+		if !ok {
+			return "", nil
+		}
+
+		sqlClause := "EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)"
+		if !bookmarked {
+			sqlClause = "NOT EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)"
+		}
+		return sqlClause, []any{q.projectID}
+
+	case "duration_ms":
+		ops, ok := operatorSQL[FilterOp(f.Op)]
+		if !ok {
+			return "", nil
+		}
+		return fmt.Sprintf("%s %s ?", durationMsExpr(), ops), []any{f.Value}
+
+	default:
 		return "", nil
 	}
-
-	bookmarked, ok := f.Value.(bool)
-	if !ok {
-		return "", nil
-	}
-
-	sqlClause := "EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)"
-	if !bookmarked {
-		sqlClause = "NOT EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)"
-	}
-	return sqlClause, []any{q.projectID}
 }
 
 // validateFilter checks that a SpanQueryFilter has a valid field and operator.

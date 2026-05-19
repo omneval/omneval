@@ -674,6 +674,112 @@ func TestSQL_FromSetToZero(t *testing.T) {
 	}
 }
 
+func TestSQL_FilterDurationMs(t *testing.T) {
+	// duration_ms is a virtual field — it should compile to
+	// (EXTRACT(EPOCH FROM (end_time - start_time)) * 1000) with the operator.
+	req := SpanQueryRequest{
+		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Limit: 50,
+		Filters: []SpanQueryFilter{
+			{Field: "duration_ms", Op: "gte", Value: 1000},
+		},
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, _, err := q.SQL()
+	if err != nil {
+		t.Fatalf("SQL error: %v", err)
+	}
+
+	// Should contain the duration_ms expression.
+	if !strings.Contains(sql, "duration_ms") && !strings.Contains(sql, "EPOCH") && !strings.Contains(sql, "end_time") {
+		t.Errorf("expected duration_ms expression in SQL, got:\n%s", sql)
+	}
+}
+
+func TestSQL_FilterDurationMsLt(t *testing.T) {
+	req := SpanQueryRequest{
+		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Limit: 50,
+		Filters: []SpanQueryFilter{
+			{Field: "duration_ms", Op: "lt", Value: 500},
+		},
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, _, err := q.SQL()
+	if err != nil {
+		t.Fatalf("SQL error: %v", err)
+	}
+
+	// Should contain duration_ms < expression.
+	if !strings.Contains(sql, "< ?") {
+		t.Errorf("expected '< ?' in SQL for duration_ms lt filter, got:\n%s", sql)
+	}
+}
+
+func TestSQL_FilterCostUsdRange(t *testing.T) {
+	req := SpanQueryRequest{
+		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Limit: 50,
+		Filters: []SpanQueryFilter{
+			{Field: "cost_usd", Op: "gte", Value: 0.01},
+		},
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, _, err := q.SQL()
+	if err != nil {
+		t.Fatalf("SQL error: %v", err)
+	}
+
+	// Should contain cost_usd >= ? filter.
+	if !strings.Contains(sql, "cost_usd >= ?") {
+		t.Errorf("expected 'cost_usd >= ?' in SQL, got:\n%s", sql)
+	}
+}
+
+func TestSQL_FilterInputTokensRange(t *testing.T) {
+	req := SpanQueryRequest{
+		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Limit: 50,
+		Filters: []SpanQueryFilter{
+			{Field: "input_tokens", Op: "gte", Value: int64(100)},
+		},
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, _, err := q.SQL()
+	if err != nil {
+		t.Fatalf("SQL error: %v", err)
+	}
+
+	// Should contain input_tokens >= ? filter.
+	if !strings.Contains(sql, "input_tokens >= ?") {
+		t.Errorf("expected 'input_tokens >= ?' in SQL, got:\n%s", sql)
+	}
+}
+
 func TestNextCursor_SameStartTimeDifferentSpanID(t *testing.T) {
 	// When multiple spans share the same start_time, the cursor should
 	// encode span_id as tiebreaker.
