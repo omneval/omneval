@@ -87,7 +87,7 @@ export default function App() {
           // No projects on /me — fetch them via the normal projects endpoint.
           fetchProjects("fallback-session-id");
         }
-        setPage("traces");
+        setPage("dashboard");
       })
       .catch(() => {
         // No valid session — the page stays on login.
@@ -114,7 +114,7 @@ export default function App() {
     if (res.ok) {
       const data = await res.json();
       fetchProjects(data.session_id);
-      setPage("traces");
+      setPage("dashboard");
     }
     return res.ok;
   };

@@ -158,8 +158,8 @@ const NAV_SECTIONS: {
   {
     label: "",
     items: [
-      { id: "traces", label: "Traces", section: "traces", icon: <TracesIcon /> },
       { id: "dashboard", label: "Dashboard", section: "home", icon: <HomeIcon /> },
+      { id: "traces", label: "Traces", section: "traces", icon: <TracesIcon /> },
     ],
   },
 
