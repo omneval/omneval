@@ -59,6 +59,7 @@ class TestPackageMetadata:
         # Verify all expected exports are accessible
         assert hasattr(omneval_sdk, "trace")
         assert hasattr(omneval_sdk, "configure")
+        assert hasattr(omneval_sdk, "init")
         assert hasattr(omneval_sdk, "OmnevalClient")
         assert hasattr(omneval_sdk, "set_input")
         assert hasattr(omneval_sdk, "set_output")

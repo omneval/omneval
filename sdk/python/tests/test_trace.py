@@ -224,3 +224,75 @@ class TestSpanHelperNoneSafe:
         """get_active_span() returns None when no span is set."""
         # Without configure(), _current_span should be None.
         assert get_active_span() is None
+
+
+class TestInitAlias:
+    """Tests that `init` is an alias for `configure` (issue #4)."""
+
+    def teardown_method(self, method) -> None:
+        """Restore tracer provider after each test to avoid state leakage."""
+        omneval_sdk.exporter._tracer_provider = None
+
+    def test_init_is_exported(self):
+        """init is available as a top-level export on omneval_sdk."""
+        assert hasattr(omneval_sdk, "init"), "init must be exported from omneval_sdk"
+        assert callable(omneval_sdk.init), "init must be callable"
+
+    def test_init_is_same_as_configure(self):
+        """init and configure are the same function (not separate copies)."""
+        assert omneval_sdk.init is omneval_sdk.configure
+
+    @responses.activate
+    def test_init_works_positionally(self):
+        """init(endpoint, api_key) works with positional arguments."""
+        responses.add(
+            responses.POST,
+            "http://localhost:4318/v1/traces",
+            body="ok",
+            status=200,
+        )
+
+        omneval_sdk.init("http://localhost:4318", "oev_proj_testkey")
+
+        @trace
+        def dummy():
+            return "ok"
+
+        result = dummy()
+        assert result == "ok"
+
+    @responses.activate
+    def test_init_works_with_keywords(self):
+        """init(endpoint=..., api_key=...) works with keyword arguments."""
+        responses.add(
+            responses.POST,
+            "https://omneval.example.com/v1/traces",
+            body="ok",
+            status=200,
+        )
+
+        omneval_sdk.init(endpoint="https://omneval.example.com", api_key="oev_proj_key")
+
+        @trace
+        def dummy():
+            return "ok"
+
+        dummy()
+
+    @responses.activate
+    def test_init_with_trailing_slash(self):
+        """init handles endpoints with trailing slashes."""
+        responses.add(
+            responses.POST,
+            "http://localhost:4318/v1/traces",
+            body="ok",
+            status=200,
+        )
+
+        omneval_sdk.init("http://localhost:4318/", "oev_proj_testkey")
+
+        @trace
+        def dummy():
+            return "ok"
+
+        dummy()

@@ -19,6 +19,12 @@ _EXPORTED_FUNCTIONS = [
     "get_active_span",
 ]
 
+# Also check init and configure are exported at the package level.
+_EXPORTED_CONFIG = [
+    "configure",
+    "init",
+]
+
 
 class TestTopLevelExports:
     """Verify key helper functions are accessible from the top-level omneval_sdk package."""
@@ -105,3 +111,18 @@ class TestTopLevelExports:
                 assert span.attributes.get("gen_ai.usage.output_tokens") == 50
         finally:
             omneval_sdk.exporter._tracer_provider = old_provider
+
+    def test_exported_config_functions_are_accessible_and_callable(self):
+        """configure and init are accessible and callable at package level."""
+        import omneval_sdk
+
+        for name in _EXPORTED_CONFIG:
+            assert hasattr(omneval_sdk, name), f"{name} not exported at package level"
+            func = getattr(omneval_sdk, name)
+            assert callable(func), f"{name} is not callable"
+
+    def test_init_is_same_as_configure(self):
+        """init and configure are the same function object."""
+        import omneval_sdk
+
+        assert omneval_sdk.init is omneval_sdk.configure
