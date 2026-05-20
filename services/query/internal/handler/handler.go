@@ -406,6 +406,12 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	// Validate and apply default time range (last 30 days when omitted).
+	if err := req.Validate(); err != nil {
+		writeJSONError(w, "bad request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	// Compile the query — all fields are validated against allowlists.
 	sqlStr, args, err := dsl.Compile(projectID, req)
 	if err != nil {

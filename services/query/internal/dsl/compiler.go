@@ -464,8 +464,10 @@ type OrderClause struct {
 }
 
 // Query is the structured analytics query accepted from clients.
-// From and To are absolute UTC timestamps resolved by the caller before
-// sending — the server never interprets relative time strings.
+//
+// Default time range: when from/to are omitted (zero time.Time), the
+// analytics query defaults to the last 30 days (from = now - 30d, to = now)
+// after calling Validate(). Calling code should always call Validate() first.
 type Query struct {
 	From         time.Time      `json:"from"`
 	To           time.Time      `json:"to"`
@@ -475,4 +477,19 @@ type Query struct {
 	GroupBy      []GroupByField `json:"group_by"`
 	OrderBy      []OrderClause  `json:"order_by"`
 	Limit        int            `json:"limit"`
+}
+
+// Validate applies default time range values (last 30 days) when both from
+// and to are zero, and validates that from is not after to.
+// The caller (HandleAnalyticsSpans) must call this before passing the query
+// to Compile().
+func (q *Query) Validate() error {
+	if q.From.IsZero() && q.To.IsZero() {
+		q.From = time.Now().Add(-30 * 24 * time.Hour)
+		q.To = time.Now()
+	}
+	if !q.From.IsZero() && !q.To.IsZero() && q.From.After(q.To) {
+		return fmt.Errorf("analytics: from must not be after to (got from=%v, to=%v)", q.From, q.To)
+	}
+	return nil
 }

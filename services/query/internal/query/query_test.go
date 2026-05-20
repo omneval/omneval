@@ -570,13 +570,14 @@ func TestNextCursor_PageBoundary(t *testing.T) {
 	}
 }
 
-func TestSQL_NoTimeRange_ReturnsAllTime(t *testing.T) {
+func TestSQL_NoTimeRange_DefaultsTo30Days(t *testing.T) {
 	// When from/to are omitted (zero time.Time), the query should
-	// NOT append a time range filter — it should return all spans.
+	// default to the last 30 days — not return all time.
 	req := SpanQueryRequest{
 		Limit: 50,
 	}
 
+	now := time.Now()
 	q, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
 	if err != nil {
 		t.Fatalf("NewSpanQuery error: %v", err)
@@ -587,20 +588,57 @@ func TestSQL_NoTimeRange_ReturnsAllTime(t *testing.T) {
 		t.Fatalf("SQL error: %v", err)
 	}
 
-	// Should NOT contain time range filters.
-	if strings.Contains(sql, "start_time >= ?") {
-		t.Error("expected no start_time >= filter when from is zero")
+	// Should contain time range filters (defaults to last 30 days).
+	if !strings.Contains(sql, "start_time >= ?") {
+		t.Error("expected start_time >= filter with default 30-day from")
 	}
-	if strings.Contains(sql, "start_time <= ?") {
-		t.Error("expected no start_time <= filter when to is zero")
+	if !strings.Contains(sql, "start_time <= ?") {
+		t.Error("expected start_time <= filter with default now as to")
 	}
 
-	// Should still have project_id and limit args.
-	if len(args) < 2 {
-		t.Errorf("expected at least 2 args (project_id + limit), got %d", len(args))
+	// Should have project_id + from + to + limit = 4 args.
+	if len(args) < 4 {
+		t.Errorf("expected at least 4 args (project_id + from + to + limit), got %d", len(args))
 	}
+
+	// Verify the default time range is approximately last 30 days.
+	if len(args) >= 2 {
+		from, ok := args[1].(time.Time)
+		if !ok {
+			t.Fatalf("arg[1] expected time.Time, got %T", args[1])
+		}
+		to := args[2].(time.Time)
+
+		expectedFrom := now.Add(-30 * 24 * time.Hour)
+		// Allow 2-second drift due to test execution time.
+		if from.Sub(expectedFrom).Abs() > 2*time.Second {
+			t.Errorf("default from: got %v, want ~%v", from, expectedFrom)
+		}
+		// to should be approximately now (within 2 seconds).
+		if to.Sub(now).Abs() > 2*time.Second {
+			t.Errorf("default to: got %v, want ~%v", to, now)
+		}
+	}
+
 	if args[0] != "proj-abc" {
 		t.Errorf("first arg should be project ID, got %v", args[0])
+	}
+}
+
+func TestNewSpanQuery_FromAfterTo_ReturnsError(t *testing.T) {
+	// When from is after to, return a 400 error.
+	req := SpanQueryRequest{
+		From:  time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+		To:    time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Limit: 50,
+	}
+
+	_, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
+	if err == nil {
+		t.Fatal("expected error when from > to")
+	}
+	if !strings.Contains(err.Error(), "from must not be after to") {
+		t.Errorf("error message should mention 'from must not be after to', got: %v", err)
 	}
 }
 

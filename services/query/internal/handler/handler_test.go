@@ -287,6 +287,201 @@ func TestHandleSpansQuery_WithDatabase(t *testing.T) {
 	}
 }
 
+func TestHandleSpansQuery_NoTimeRange_DefaultsTo30Days(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omneval-handler-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	// Insert a span within the last 30 days.
+	now := time.Now()
+	recentSpan := now.Add(-7 * 24 * time.Hour) // 7 days ago
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, project_id, model, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
+		"span-recent", "trace-recent", "test-proj", "gpt-4",
+		recentSpan, recentSpan.Add(10*time.Second)); err != nil {
+		t.Fatalf("insert recent span: %v", err)
+	}
+
+	// Insert a span older than 30 days — should NOT be returned.
+	oldSpan := now.Add(-60 * 24 * time.Hour)
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, project_id, model, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
+		"span-old", "trace-old", "test-proj", "gpt-3.5",
+		oldSpan, oldSpan.Add(10*time.Second)); err != nil {
+		t.Fatalf("insert old span: %v", err)
+	}
+
+	h := &SpanHandler{
+		DB:           db,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	// Request with no time range — should default to last 30 days.
+	body := strings.NewReader(`{"limit": 50}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
+	w := httptest.NewRecorder()
+
+	h.HandleSpansQuery(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Spans []map[string]any `json:"spans"`
+		Limit int              `json:"limit"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// Should only return the recent span (within 30 days).
+	if len(resp.Spans) != 1 {
+		t.Errorf("spans count: got %d, want 1 (only recent span within 30 days)", len(resp.Spans))
+	}
+
+	// The returned span should be the recent one.
+	if len(resp.Spans) > 0 {
+		if spanID, ok := resp.Spans[0]["span_id"].(string); !ok || spanID != "span-recent" {
+			t.Errorf("expected span-recent, got %v", resp.Spans[0]["span_id"])
+		}
+	}
+
+	if resp.Limit != 50 {
+		t.Errorf("limit: got %d, want 50", resp.Limit)
+	}
+}
+
+func TestHandleAnalyticsSpans_NoTimeRange_DefaultsTo30Days(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omneval-analytics-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	// Insert a span within the last 30 days.
+	now := time.Now()
+	recentSpan := now.Add(-7 * 24 * time.Hour)
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, project_id, model, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
+		"span-recent", "trace-recent", "test-proj", "gpt-4",
+		recentSpan, recentSpan.Add(10*time.Second)); err != nil {
+		t.Fatalf("insert recent span: %v", err)
+	}
+
+	// Insert a span older than 30 days — should NOT be returned.
+	oldSpan := now.Add(-60 * 24 * time.Hour)
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, project_id, model, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
+		"span-old", "trace-old", "test-proj", "gpt-3.5",
+		oldSpan, oldSpan.Add(10*time.Second)); err != nil {
+		t.Fatalf("insert old span: %v", err)
+	}
+
+	h := &SpanHandler{
+		DB:           db,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	// Request with no time range — should default to last 30 days.
+	body := strings.NewReader(`{
+		"group_by": [{"field": "model"}],
+		"aggregations": [{"function": "count", "field": "*", "alias": "count"}]
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", body)
+	w := httptest.NewRecorder()
+
+	h.HandleAnalyticsSpans(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// Should only return gpt-4 (the recent span within 30 days).
+	if len(resp.Rows) != 1 {
+		t.Errorf("rows count: got %d, want 1", len(resp.Rows))
+	}
+	if len(resp.Rows) > 0 {
+		if model, ok := resp.Rows[0]["model"].(string); !ok || model != "gpt-4" {
+			t.Errorf("expected model=gpt-4, got %v", resp.Rows[0]["model"])
+		}
+	}
+}
+
+func TestHandleAnalyticsSpans_FromAfterTo_Returns400(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omneval-analytics-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	h := &SpanHandler{
+		DB:           db,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	body := strings.NewReader(`{
+		"from": "2025-06-01T00:00:00Z",
+		"to": "2025-01-01T00:00:00Z",
+		"aggregations": [{"function": "count", "field": "*", "alias": "count"}]
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", body)
+	w := httptest.NewRecorder()
+
+	h.HandleAnalyticsSpans(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if !strings.Contains(resp["error"], "from must not be after to") {
+		t.Errorf("error should mention 'from must not be after to', got: %q", resp["error"])
+	}
+}
+
 // serveTraceDetail is a test helper that routes a request through ServeMux
 // so that path parameters are properly resolved.
 func serveTraceDetail(h *SpanHandler, method, url string, body io.Reader) *httptest.ResponseRecorder {

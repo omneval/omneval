@@ -705,3 +705,89 @@ func TestCompile_GroupByOrderByGroupByFieldNoTrunc(t *testing.T) {
 		t.Errorf("expected ORDER BY model DESC in SQL:\n%s", sql)
 	}
 }
+
+func TestQueryValidate_Defaults30DayRange(t *testing.T) {
+	q := Query{
+		Aggregations: []Aggregation{{Function: AggCount, Field: "*"}},
+		GroupBy:      []GroupByField{},
+	}
+
+	err := q.Validate()
+	if err != nil {
+		t.Fatalf("Validate error: %v", err)
+	}
+
+	// Should have applied default time range.
+	if q.From.IsZero() {
+		t.Error("from should not be zero after Validate")
+	}
+	if q.To.IsZero() {
+		t.Error("to should not be zero after Validate")
+	}
+
+	now := time.Now()
+	expectedFrom := now.Add(-30 * 24 * time.Hour)
+	if q.From.Sub(expectedFrom).Abs() > 2*time.Second {
+		t.Errorf("default from: got %v, want ~%v", q.From, expectedFrom)
+	}
+	if q.To.Sub(now).Abs() > 2*time.Second {
+		t.Errorf("default to: got %v, want ~%v", q.To, now)
+	}
+}
+
+func TestQueryValidate_FromAfterTo_ReturnsError(t *testing.T) {
+	q := Query{
+		From: time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	err := q.Validate()
+	if err == nil {
+		t.Fatal("expected error when from > to")
+	}
+	if !strings.Contains(err.Error(), "from must not be after to") {
+		t.Errorf("error should mention 'from must not be after to', got: %v", err)
+	}
+}
+
+func TestQueryValidate_ValidExplicitRange(t *testing.T) {
+	q := Query{
+		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2025, 12, 31, 23, 59, 59, 0, time.UTC),
+	}
+
+	err := q.Validate()
+	if err != nil {
+		t.Fatalf("Validate error: %v", err)
+	}
+
+	// Explicit range should be preserved.
+	if !q.From.Equal(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("from should be preserved, got %v", q.From)
+	}
+	if !q.To.Equal(time.Date(2025, 12, 31, 23, 59, 59, 0, time.UTC)) {
+		t.Errorf("to should be preserved, got %v", q.To)
+	}
+}
+
+func TestQueryValidate_FromSetToZero_AppendsDefaultTo(t *testing.T) {
+	// When from is set but to is zero, Validate should not change either.
+	// The defaults only apply when BOTH are zero.
+	q := Query{
+		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Time{},
+	}
+
+	err := q.Validate()
+	if err != nil {
+		t.Fatalf("Validate error: %v", err)
+	}
+
+	// from should be preserved, to should remain zero.
+	if !q.From.Equal(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("from should be preserved, got %v", q.From)
+	}
+	if !q.To.IsZero() {
+		t.Errorf("to should remain zero when only from is set, got %v", q.To)
+	}
+}

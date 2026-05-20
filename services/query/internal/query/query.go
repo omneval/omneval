@@ -164,11 +164,30 @@ type SpanQueryFilter struct {
 
 // NewSpanQuery creates a SpanQuery from a SpanQueryRequest.
 // The projectID is always injected — it is never read from client input.
+//
+// Default time range: when from/to are omitted (zero time.Time), the query
+// defaults to the last 30 days (from = now - 30d, to = now).
+// Time range validation: if from is explicitly set after to, an error is
+// returned so the caller can respond with 400.
 func NewSpanQuery(projectID string, req SpanQueryRequest, s3Store storage.ObjectStore, snapshotDB string) (*SpanQuery, error) {
+	from := req.From
+	to := req.To
+
+	// Apply default time range when both bounds are omitted.
+	if from.IsZero() && to.IsZero() {
+		from = time.Now().Add(-30 * 24 * time.Hour)
+		to = time.Now()
+	}
+
+	// Validate that from is not after to.
+	if !from.IsZero() && !to.IsZero() && from.After(to) {
+		return nil, fmt.Errorf("query: from must not be after to (got from=%v, to=%v)", from, to)
+	}
+
 	q := &SpanQuery{
 		projectID:  projectID,
-		from:       req.From,
-		to:         req.To,
+		from:       from,
+		to:         to,
 		filters:    make([]SpanQueryFilter, len(req.Filters)),
 		limit:      DefaultLimit,
 		s3Store:    s3Store,
