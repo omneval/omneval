@@ -60,19 +60,19 @@ type PreviewEvalRulesRequest struct {
 
 // PreviewSpan is a lightweight span summary returned by the preview endpoint.
 type PreviewSpan struct {
-	SpanID      string    `json:"span_id"`
-	TraceID     string    `json:"trace_id"`
-	Name        string    `json:"name"`
-	Kind        string    `json:"kind"`
-	Model       string    `json:"model"`
-	StartTime   time.Time `json:"start_time"`
-	CostUSD     float64   `json:"cost_usd"`
+	SpanID    string    `json:"span_id"`
+	TraceID   string    `json:"trace_id"`
+	Name      string    `json:"name"`
+	Kind      string    `json:"kind"`
+	Model     string    `json:"model"`
+	StartTime time.Time `json:"start_time"`
+	CostUSD   float64   `json:"cost_usd"`
 }
 
 // PreviewEvalRulesResponse is returned by POST /api/v1/eval-rules/preview.
 type PreviewEvalRulesResponse struct {
-	Spans          []*PreviewSpan `json:"spans"`
-	MatchCount24h  int64          `json:"match_count_24h"`
+	Spans         []*PreviewSpan `json:"spans"`
+	MatchCount24h int64          `json:"match_count_24h"`
 }
 
 // ---- HTTP Handlers ----

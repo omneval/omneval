@@ -25,11 +25,11 @@ type Request struct {
 
 // Response is the JSON body returned by POST /api/v1/playground/run.
 type Response struct {
-	Output       string  `json:"output"`
-	Model        string  `json:"model"`
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	DurationMs   int64   `json:"duration_ms"`
+	Output       string `json:"output"`
+	Model        string `json:"model"`
+	InputTokens  int    `json:"input_tokens"`
+	OutputTokens int    `json:"output_tokens"`
+	DurationMs   int64  `json:"duration_ms"`
 }
 
 // LLMClient is the interface for calling an OpenAI-compatible chat completions endpoint.

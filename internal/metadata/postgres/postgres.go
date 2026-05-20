@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/metadata"
-	_ "github.com/jackc/pgx/v5/stdlib"
 	"golang.org/x/crypto/bcrypt"
 )
 

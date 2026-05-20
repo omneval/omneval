@@ -659,9 +659,9 @@ func TestHandleGetRunStatus(t *testing.T) {
 	store.CreateDataset(context.Background(), ds)
 
 	run := &domain.DatasetRun{
-		RunID:  uuid.New().String(),
+		RunID:     uuid.New().String(),
 		DatasetID: ds.DatasetID,
-		Status: domain.DatasetRunStatusRunning,
+		Status:    domain.DatasetRunStatusRunning,
 	}
 	store.CreateDatasetRun(context.Background(), run)
 

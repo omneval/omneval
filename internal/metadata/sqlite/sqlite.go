@@ -16,8 +16,8 @@ import (
 
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/metadata"
-	_ "modernc.org/sqlite"
 	"golang.org/x/crypto/bcrypt"
+	_ "modernc.org/sqlite"
 )
 
 //go:embed migrations/*.sql

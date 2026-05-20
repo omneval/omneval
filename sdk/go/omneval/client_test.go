@@ -24,9 +24,9 @@ func TestClient_GetPrompt_Label(t *testing.T) {
 			label = "production"
 		}
 		pv := domain.PromptVersion{
-			Name:      "greeting",
-			Version:   1,
-			Template:  "Hello, {{.Name}}!",
+			Name:     "greeting",
+			Version:  1,
+			Template: "Hello, {{.Name}}!",
 			ModelConfig: domain.PromptModelConfig{
 				Model:       "gpt-4",
 				Temperature: 0.7,

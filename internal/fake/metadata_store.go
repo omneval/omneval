@@ -15,53 +15,53 @@ import (
 // FakeMetadataStore is an in-memory implementation of metadata.Store suitable
 // for unit tests. It tracks operations and can be inspected by test code.
 type FakeMetadataStore struct {
-	mu             sync.RWMutex
-	organizations  map[string]*domain.Organization
-	projects       map[string]*domain.Project
-	users          map[string]*domain.User
-	emailsToIDs    map[string]string // email -> user_id
-	tokensToIDs    map[string]string // reset token -> user_id
-	sessions       map[string]*domain.Session
-	apiKeys        map[string]*domain.APIKey
-	hashedKeys     map[string]*domain.APIKey
-	promptVersions map[string]*domain.PromptVersion // key: projectID:name:version
-	promptLabels   map[string]*domain.PromptLabel   // key: projectID:name:label
-	evalRules      map[string]*domain.EvalRule
-	datasets         map[string]*domain.Dataset
-	datasetItems     map[string]*domain.DatasetItem
-	datasetRuns      map[string]*domain.DatasetRun
-	datasetRunItems  map[string]*domain.DatasetRunItem
+	mu              sync.RWMutex
+	organizations   map[string]*domain.Organization
+	projects        map[string]*domain.Project
+	users           map[string]*domain.User
+	emailsToIDs     map[string]string // email -> user_id
+	tokensToIDs     map[string]string // reset token -> user_id
+	sessions        map[string]*domain.Session
+	apiKeys         map[string]*domain.APIKey
+	hashedKeys      map[string]*domain.APIKey
+	promptVersions  map[string]*domain.PromptVersion // key: projectID:name:version
+	promptLabels    map[string]*domain.PromptLabel   // key: projectID:name:label
+	evalRules       map[string]*domain.EvalRule
+	datasets        map[string]*domain.Dataset
+	datasetItems    map[string]*domain.DatasetItem
+	datasetRuns     map[string]*domain.DatasetRun
+	datasetRunItems map[string]*domain.DatasetRunItem
 
 	// Counters for testing
-	CreateUserCalls      int
-	UpdatePasswordCalls  int
-	CountUsersCalls      int
-	CreateSessionCalls   int
-	DeleteSessionCalls   int
+	CreateUserCalls     int
+	UpdatePasswordCalls int
+	CountUsersCalls     int
+	CreateSessionCalls  int
+	DeleteSessionCalls  int
 }
 
 func NewFakeMetadataStore() *FakeMetadataStore {
 	return &FakeMetadataStore{
-		organizations:  make(map[string]*domain.Organization),
-		projects:       make(map[string]*domain.Project),
-		users:          make(map[string]*domain.User),
-		emailsToIDs:    make(map[string]string),
-		tokensToIDs:    make(map[string]string),
-		sessions:       make(map[string]*domain.Session),
-		apiKeys:        make(map[string]*domain.APIKey),
-		hashedKeys:     make(map[string]*domain.APIKey),
-		promptVersions: make(map[string]*domain.PromptVersion),
-		promptLabels:   make(map[string]*domain.PromptLabel),
-		evalRules:      make(map[string]*domain.EvalRule),
-		datasets:         make(map[string]*domain.Dataset),
-		datasetItems:     make(map[string]*domain.DatasetItem),
-		datasetRuns:      make(map[string]*domain.DatasetRun),
-		datasetRunItems:  make(map[string]*domain.DatasetRunItem),
+		organizations:   make(map[string]*domain.Organization),
+		projects:        make(map[string]*domain.Project),
+		users:           make(map[string]*domain.User),
+		emailsToIDs:     make(map[string]string),
+		tokensToIDs:     make(map[string]string),
+		sessions:        make(map[string]*domain.Session),
+		apiKeys:         make(map[string]*domain.APIKey),
+		hashedKeys:      make(map[string]*domain.APIKey),
+		promptVersions:  make(map[string]*domain.PromptVersion),
+		promptLabels:    make(map[string]*domain.PromptLabel),
+		evalRules:       make(map[string]*domain.EvalRule),
+		datasets:        make(map[string]*domain.Dataset),
+		datasetItems:    make(map[string]*domain.DatasetItem),
+		datasetRuns:     make(map[string]*domain.DatasetRun),
+		datasetRunItems: make(map[string]*domain.DatasetRunItem),
 	}
 }
 
-func (f *FakeMetadataStore) Close() error                                         { return nil }
-func (f *FakeMetadataStore) Migrate(ctx context.Context) error                   { return nil }
+func (f *FakeMetadataStore) Close() error                      { return nil }
+func (f *FakeMetadataStore) Migrate(ctx context.Context) error { return nil }
 
 func (f *FakeMetadataStore) CreateOrganization(ctx context.Context, o *domain.Organization) error {
 	f.mu.Lock()

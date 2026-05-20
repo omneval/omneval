@@ -9,11 +9,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/omneval/omneval/internal/config"
 	redisqueue "github.com/omneval/omneval/internal/queue/redis"
 	"github.com/omneval/omneval/services/eval/internal/judge"
 	"github.com/omneval/omneval/services/eval/internal/worker"
+	"github.com/redis/go-redis/v9"
 )
 
 const workerShutdownTimeout = 120 * time.Second

@@ -13,17 +13,17 @@ import (
 // Config is the top-level configuration structure populated by Viper from
 // omneval.yaml and environment variable overrides.
 type Config struct {
-	LogLevel  string           `mapstructure:"log_level"`
-	Database  DatabaseConfig   `mapstructure:"database"`
-	Redis     RedisConfig      `mapstructure:"redis"`
-	Storage   StorageConfig    `mapstructure:"storage"`
-	Auth      AuthConfig       `mapstructure:"auth"`
-	Ingest    IngestConfig     `mapstructure:"ingest"`
-	Writer    WriterConfig     `mapstructure:"writer"`
-	Query     QueryConfig      `mapstructure:"query"`
-	Eval      EvalConfig       `mapstructure:"eval"`
-	Pricing   PricingConfig    `mapstructure:"pricing"`
-	Metrics   MetricsConfig    `mapstructure:"metrics"`
+	LogLevel string         `mapstructure:"log_level"`
+	Database DatabaseConfig `mapstructure:"database"`
+	Redis    RedisConfig    `mapstructure:"redis"`
+	Storage  StorageConfig  `mapstructure:"storage"`
+	Auth     AuthConfig     `mapstructure:"auth"`
+	Ingest   IngestConfig   `mapstructure:"ingest"`
+	Writer   WriterConfig   `mapstructure:"writer"`
+	Query    QueryConfig    `mapstructure:"query"`
+	Eval     EvalConfig     `mapstructure:"eval"`
+	Pricing  PricingConfig  `mapstructure:"pricing"`
+	Metrics  MetricsConfig  `mapstructure:"metrics"`
 }
 
 type DatabaseConfig struct {
@@ -59,7 +59,7 @@ type AuthConfig struct {
 }
 
 type IngestConfig struct {
-	Addr             string   `mapstructure:"addr"`
+	Addr string `mapstructure:"addr"`
 	// LogSystemPrompt controls whether the system prompt is included as the
 	// first element of a span's Input array. Defaults to true.
 	// Override via OMNEVAL_INGEST_LOG_SYSTEM_PROMPT=false.
@@ -93,9 +93,9 @@ type LeaderElectionConfig struct {
 }
 
 type QueryConfig struct {
-	Addr          string `mapstructure:"addr"`
-	DuckDBPath    string `mapstructure:"duckdb_path"`
-	SyncInterval  string `mapstructure:"sync_interval"` // default "30s"
+	Addr         string `mapstructure:"addr"`
+	DuckDBPath   string `mapstructure:"duckdb_path"`
+	SyncInterval string `mapstructure:"sync_interval"` // default "30s"
 	// PlaygroundLLMBaseURL is an OpenAI-compatible base URL for the playground LLM.
 	// Works with OpenAI, LiteLLM proxy, Ollama, or any compatible endpoint.
 	PlaygroundLLMBaseURL string `mapstructure:"playground_llm_base_url"`
@@ -114,8 +114,8 @@ type EvalConfig struct {
 	// Works with OpenAI, LiteLLM proxy, Ollama, or any compatible endpoint.
 	LLMBaseURL string `mapstructure:"llm_base_url"`
 	// LLMModel is the model name for judge LLM calls.
-	LLMModel string `mapstructure:"llm_model"`
-	LLMAPIKey  string `mapstructure:"llm_api_key"`
+	LLMModel  string `mapstructure:"llm_model"`
+	LLMAPIKey string `mapstructure:"llm_api_key"`
 	// JudgeTimeout is the maximum duration for a judge LLM call.
 	JudgeTimeout time.Duration `mapstructure:"judge_timeout"`
 	// RetryCount is the number of retries for failed judge calls.
@@ -212,48 +212,48 @@ func Load(path string) (*Config, error) {
 	// Apply OMNEVAL_* environment variable overrides directly.
 	// Viper's AutomaticEnv does not reliably propagate env vars into nested
 	// struct fields via Unmarshal — os.Getenv is the only guaranteed path.
-	envString(&cfg.LogLevel,         "OMNEVAL_LOG_LEVEL")
-	envString(&cfg.Database.Driver,  "OMNEVAL_DATABASE_DRIVER")
-	envString(&cfg.Database.DSN,     "OMNEVAL_DATABASE_DSN")
-	envString(&cfg.Redis.Addr,       "OMNEVAL_REDIS_ADDR")
-	envString(&cfg.Redis.Password,   "OMNEVAL_REDIS_PASSWORD")
-	envInt(&cfg.Redis.DB,            "OMNEVAL_REDIS_DB")
+	envString(&cfg.LogLevel, "OMNEVAL_LOG_LEVEL")
+	envString(&cfg.Database.Driver, "OMNEVAL_DATABASE_DRIVER")
+	envString(&cfg.Database.DSN, "OMNEVAL_DATABASE_DSN")
+	envString(&cfg.Redis.Addr, "OMNEVAL_REDIS_ADDR")
+	envString(&cfg.Redis.Password, "OMNEVAL_REDIS_PASSWORD")
+	envInt(&cfg.Redis.DB, "OMNEVAL_REDIS_DB")
 	envString(&cfg.Storage.Endpoint, "OMNEVAL_STORAGE_ENDPOINT")
-	envString(&cfg.Storage.Bucket,   "OMNEVAL_STORAGE_BUCKET")
-	envString(&cfg.Storage.Region,   "OMNEVAL_STORAGE_REGION")
-	envString(&cfg.Storage.AccessKey,"OMNEVAL_STORAGE_ACCESS_KEY")
-	envString(&cfg.Storage.SecretKey,"OMNEVAL_STORAGE_SECRET_KEY")
-	envString(&cfg.Auth.SessionTTL,  "OMNEVAL_AUTH_SESSION_TTL")
-	envBool(&cfg.Auth.SecureCookie,  "OMNEVAL_AUTH_SECURE_COOKIE")
-	envString(&cfg.Auth.AdminEmail,  "OMNEVAL_AUTH_ADMIN_EMAIL")
-	envString(&cfg.Auth.AdminPassword,"OMNEVAL_AUTH_ADMIN_PASSWORD")
-	envString(&cfg.Ingest.Addr,      "OMNEVAL_INGEST_ADDR")
+	envString(&cfg.Storage.Bucket, "OMNEVAL_STORAGE_BUCKET")
+	envString(&cfg.Storage.Region, "OMNEVAL_STORAGE_REGION")
+	envString(&cfg.Storage.AccessKey, "OMNEVAL_STORAGE_ACCESS_KEY")
+	envString(&cfg.Storage.SecretKey, "OMNEVAL_STORAGE_SECRET_KEY")
+	envString(&cfg.Auth.SessionTTL, "OMNEVAL_AUTH_SESSION_TTL")
+	envBool(&cfg.Auth.SecureCookie, "OMNEVAL_AUTH_SECURE_COOKIE")
+	envString(&cfg.Auth.AdminEmail, "OMNEVAL_AUTH_ADMIN_EMAIL")
+	envString(&cfg.Auth.AdminPassword, "OMNEVAL_AUTH_ADMIN_PASSWORD")
+	envString(&cfg.Ingest.Addr, "OMNEVAL_INGEST_ADDR")
 	envBool(&cfg.Ingest.LogSystemPrompt, "OMNEVAL_INGEST_LOG_SYSTEM_PROMPT")
 	if v := os.Getenv("OMNEVAL_INGEST_CORS_ALLOWED_ORIGINS"); v != "" {
 		cfg.Ingest.CORSAllowedOrigins = strings.Split(v, ",")
 	}
-	envString(&cfg.Writer.Addr,                 "OMNEVAL_WRITER_ADDR")
-	envString(&cfg.Writer.DuckDBPath,           "OMNEVAL_WRITER_DUCKDB_PATH")
-	envString(&cfg.Writer.SyncInterval,         "OMNEVAL_WRITER_SYNC_INTERVAL")
-	envString(&cfg.Writer.FlushInterval,        "OMNEVAL_WRITER_FLUSH_INTERVAL")
-	envInt(&cfg.Writer.FlushAgeDays,            "OMNEVAL_WRITER_FLUSH_AGE_DAYS")
-	envBool(&cfg.Writer.LeaderElection.Enabled,       "OMNEVAL_WRITER_LEADER_ELECTION_ENABLED")
-	envInt(&cfg.Writer.LeaderElection.LockTTL,         "OMNEVAL_WRITER_LEADER_ELECTION_LOCK_TTL")
+	envString(&cfg.Writer.Addr, "OMNEVAL_WRITER_ADDR")
+	envString(&cfg.Writer.DuckDBPath, "OMNEVAL_WRITER_DUCKDB_PATH")
+	envString(&cfg.Writer.SyncInterval, "OMNEVAL_WRITER_SYNC_INTERVAL")
+	envString(&cfg.Writer.FlushInterval, "OMNEVAL_WRITER_FLUSH_INTERVAL")
+	envInt(&cfg.Writer.FlushAgeDays, "OMNEVAL_WRITER_FLUSH_AGE_DAYS")
+	envBool(&cfg.Writer.LeaderElection.Enabled, "OMNEVAL_WRITER_LEADER_ELECTION_ENABLED")
+	envInt(&cfg.Writer.LeaderElection.LockTTL, "OMNEVAL_WRITER_LEADER_ELECTION_LOCK_TTL")
 	envBool(&cfg.Writer.LeaderElection.FencingEnabled, "OMNEVAL_WRITER_LEADER_ELECTION_FENCING_ENABLED")
-	envString(&cfg.Query.Addr,              "OMNEVAL_QUERY_ADDR")
-	envString(&cfg.Query.DuckDBPath,        "OMNEVAL_QUERY_DUCKDB_PATH")
-	envString(&cfg.Query.SyncInterval,      "OMNEVAL_QUERY_SYNC_INTERVAL")
+	envString(&cfg.Query.Addr, "OMNEVAL_QUERY_ADDR")
+	envString(&cfg.Query.DuckDBPath, "OMNEVAL_QUERY_DUCKDB_PATH")
+	envString(&cfg.Query.SyncInterval, "OMNEVAL_QUERY_SYNC_INTERVAL")
 	envString(&cfg.Query.PlaygroundLLMBaseURL, "OMNEVAL_QUERY_PLAYGROUND_LLM_BASE_URL")
-	envString(&cfg.Query.PlaygroundLLMAPIKey,  "OMNEVAL_QUERY_PLAYGROUND_LLM_API_KEY")
+	envString(&cfg.Query.PlaygroundLLMAPIKey, "OMNEVAL_QUERY_PLAYGROUND_LLM_API_KEY")
 	envString(&cfg.Query.JudgeLLMBaseURL, "OMNEVAL_QUERY_JUDGE_LLM_BASE_URL")
-	envString(&cfg.Query.JudgeLLMAPIKey,  "OMNEVAL_QUERY_JUDGE_LLM_API_KEY")
-	envString(&cfg.Eval.Addr,           "OMNEVAL_EVAL_ADDR")
-	envInt(&cfg.Eval.Concurrency,       "OMNEVAL_EVAL_CONCURRENCY")
-	envString(&cfg.Eval.LLMBaseURL,     "OMNEVAL_EVAL_LLM_BASE_URL")
-	envString(&cfg.Eval.LLMModel,       "OMNEVAL_EVAL_LLM_MODEL")
-	envString(&cfg.Eval.LLMAPIKey,      "OMNEVAL_EVAL_LLM_API_KEY")
-	envInt(&cfg.Eval.RetryCount,        "OMNEVAL_EVAL_RETRY_COUNT")
-	envString(&cfg.Metrics.Addr,        "OMNEVAL_METRICS_ADDR")
+	envString(&cfg.Query.JudgeLLMAPIKey, "OMNEVAL_QUERY_JUDGE_LLM_API_KEY")
+	envString(&cfg.Eval.Addr, "OMNEVAL_EVAL_ADDR")
+	envInt(&cfg.Eval.Concurrency, "OMNEVAL_EVAL_CONCURRENCY")
+	envString(&cfg.Eval.LLMBaseURL, "OMNEVAL_EVAL_LLM_BASE_URL")
+	envString(&cfg.Eval.LLMModel, "OMNEVAL_EVAL_LLM_MODEL")
+	envString(&cfg.Eval.LLMAPIKey, "OMNEVAL_EVAL_LLM_API_KEY")
+	envInt(&cfg.Eval.RetryCount, "OMNEVAL_EVAL_RETRY_COUNT")
+	envString(&cfg.Metrics.Addr, "OMNEVAL_METRICS_ADDR")
 	envBool(&cfg.Metrics.DisableProjectLabels, "OMNEVAL_METRICS_DISABLE_PROJECT_LABELS")
 
 	return &cfg, nil

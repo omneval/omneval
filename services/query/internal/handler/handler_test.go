@@ -1443,7 +1443,7 @@ func TestHandleAnalyticsSpans_ProjectIDOverride(t *testing.T) {
 	h := &SpanHandler{
 		DB: db,
 		SessionStore: &FakeSessionStore{
-			projectID:   "proj-a",
+			projectID:    "proj-a",
 			userProjects: userProjects,
 		},
 	}
@@ -1529,7 +1529,7 @@ func TestHandleAnalyticsSpans_ProjectIDForbidden(t *testing.T) {
 
 // FakeSessionStore is a test fake implementing SessionStore.
 type FakeSessionStore struct {
-	projectID   string
+	projectID    string
 	userProjects []*domain.Project
 }
 

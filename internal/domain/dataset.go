@@ -19,10 +19,10 @@ type DatasetItem struct {
 }
 
 const (
-	DatasetRunStatusPending    = "pending"
-	DatasetRunStatusRunning    = "running"
-	DatasetRunStatusComplete   = "complete"
-	DatasetRunStatusError      = "error"
+	DatasetRunStatusPending  = "pending"
+	DatasetRunStatusRunning  = "running"
+	DatasetRunStatusComplete = "complete"
+	DatasetRunStatusError    = "error"
 )
 
 // DatasetRun represents a dataset evaluation run.
@@ -37,10 +37,10 @@ type DatasetRun struct {
 
 // DatasetRunItem represents a single scored item within a dataset run.
 type DatasetRunItem struct {
-	RunItemID  string
-	RunID      string
-	ItemID     string
-	Score      float64
-	Reasoning  string
-	CreatedAt  time.Time
+	RunItemID string
+	RunID     string
+	ItemID    string
+	Score     float64
+	Reasoning string
+	CreatedAt time.Time
 }

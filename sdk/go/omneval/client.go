@@ -37,11 +37,11 @@ type cacheEntry struct {
 // NewClient creates a Client targeting the given Query API base URL.
 func NewClient(baseURL, apiKey string) *Client {
 	return &Client{
-		baseURL:        baseURL,
-		apiKey:         apiKey,
-		http:           &http.Client{Timeout: 10 * time.Second},
-		labelCache:     make(map[string]*cacheEntry),
-		versionCache:   make(map[string]string),
+		baseURL:      baseURL,
+		apiKey:       apiKey,
+		http:         &http.Client{Timeout: 10 * time.Second},
+		labelCache:   make(map[string]*cacheEntry),
+		versionCache: make(map[string]string),
 	}
 }
 
@@ -113,11 +113,11 @@ func (c *Client) WriteScore(spanID, evalName string, value float64, reasoning st
 	traceID := generateTraceID()
 
 	req := domain.ScoreRequest{
-		SpanID:     spanID,
-		TraceID:    traceID,
-		EvalName:   evalName,
-		Value:      value,
-		Reasoning:  reasoning,
+		SpanID:    spanID,
+		TraceID:   traceID,
+		EvalName:  evalName,
+		Value:     value,
+		Reasoning: reasoning,
 	}
 
 	url := c.baseURL + "/api/v1/scores"

@@ -10,8 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/redis/go-redis/v9"
 	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/handlers"
@@ -22,6 +20,8 @@ import (
 	redisqueue "github.com/omneval/omneval/internal/queue/redis"
 	"github.com/omneval/omneval/services/ingest/internal/handler"
 	"github.com/omneval/omneval/services/ingest/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 )
 
 // levelFromString maps a string to an slog.Level, defaulting to info.

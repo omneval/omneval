@@ -197,5 +197,3 @@ func RequireAdmin(store metadata.Store, secure bool, sessionTTL time.Duration, a
 		})
 	}
 }
-
-

@@ -646,7 +646,7 @@ func TestSQL_FromZeroToSet(t *testing.T) {
 	// When only 'to' is set, apply only an upper bound.
 	to := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
 	req := SpanQueryRequest{
-		To:   to,
+		To:    to,
 		Limit: 50,
 	}
 

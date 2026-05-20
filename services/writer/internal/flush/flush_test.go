@@ -18,12 +18,12 @@ import (
 
 // mockStore implements storage.ObjectStore for testing.
 type mockStore struct {
-	mu       sync.Mutex
-	puts     map[string][]byte // key -> data
-	gets     []string
-	deletes  []string
-	failPut  bool
-	failGet  bool
+	mu      sync.Mutex
+	puts    map[string][]byte // key -> data
+	gets    []string
+	deletes []string
+	failPut bool
+	failGet bool
 }
 
 func newMockStore() *mockStore {
@@ -109,7 +109,7 @@ func TestFlush_AgedPartitionsWrittenToS3(t *testing.T) {
 
 	// Insert spans: some aged (3 days ago), some recent (1 day ago).
 	baseTime := time.Now().UTC()
-	agedTime := baseTime.Add(-72 * time.Hour)  // 3 days ago
+	agedTime := baseTime.Add(-72 * time.Hour)   // 3 days ago
 	recentTime := baseTime.Add(-24 * time.Hour) // 1 day ago
 
 	// Aged span for proj-1.
@@ -524,5 +524,3 @@ func createTestTables(db *sql.DB) error {
 	`)
 	return err
 }
-
-

@@ -11,20 +11,20 @@ import (
 	"testing"
 	"time"
 
-	redisgo "github.com/redis/go-redis/v9"
-	rediscontainer "github.com/testcontainers/testcontainers-go/modules/redis"
 	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
-	"github.com/omneval/omneval/internal/handlers"
 	"github.com/omneval/omneval/internal/duckdb"
+	"github.com/omneval/omneval/internal/handlers"
 	qredis "github.com/omneval/omneval/internal/queue/redis"
 	"github.com/omneval/omneval/services/writer/internal/pipeline"
-	"google.golang.org/protobuf/proto"
+	redisgo "github.com/redis/go-redis/v9"
+	rediscontainer "github.com/testcontainers/testcontainers-go/modules/redis"
 	coltracev1 "go.opentelemetry.io/proto/otlp/collector/trace/v1"
-	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
 	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
 	resourcev1 "go.opentelemetry.io/proto/otlp/resource/v1"
 	statusv1 "go.opentelemetry.io/proto/otlp/trace/v1"
+	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // TestOTLP_EndToEndProto verifies the full pipeline:

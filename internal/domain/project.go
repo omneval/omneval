@@ -16,13 +16,13 @@ type Project struct {
 }
 
 type User struct {
-	UserID               string
-	OrgID                string
-	Email                string
-	PasswordHash         string
-	CreatedAt            time.Time
-	PasswordResetToken   string
-	ResetTokenExpiry     time.Time
+	UserID             string
+	OrgID              string
+	Email              string
+	PasswordHash       string
+	CreatedAt          time.Time
+	PasswordResetToken string
+	ResetTokenExpiry   time.Time
 }
 
 type Session struct {
@@ -37,7 +37,7 @@ type APIKeyKind string
 
 const (
 	APIKeyKindProject APIKeyKind = "project" // oev_proj_ prefix
-	APIKeyKindService APIKeyKind = "service"  // oev_svc_ prefix
+	APIKeyKindService APIKeyKind = "service" // oev_svc_ prefix
 )
 
 type APIKey struct {

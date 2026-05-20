@@ -1302,7 +1302,7 @@ func TestHandler_ResetPassword_ValidToken(t *testing.T) {
 
 	// Step 2: Use the reset token to set a new password
 	resetPayload, _ := json.Marshal(map[string]string{
-		"token":   inviteBody.PasswordResetToken,
+		"token":        inviteBody.PasswordResetToken,
 		"new_password": "new-password",
 	})
 	resetReq, _ := http.NewRequest("POST", ts.URL+"/api/v1/users/reset-password", bytes.NewReader(resetPayload))
@@ -1335,7 +1335,7 @@ func TestHandler_ResetPassword_ValidToken(t *testing.T) {
 
 	// Step 4: Verify the token is now consumed (single use)
 	resetPayload2, _ := json.Marshal(map[string]string{
-		"token":   inviteBody.PasswordResetToken,
+		"token":        inviteBody.PasswordResetToken,
 		"new_password": "another-password",
 	})
 	resetReq2, _ := http.NewRequest("POST", ts.URL+"/api/v1/users/reset-password", bytes.NewReader(resetPayload2))

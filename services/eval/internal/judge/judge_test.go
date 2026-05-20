@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/domain"
 )
 
 func TestEvaluate_Success(t *testing.T) {
@@ -33,10 +33,10 @@ func TestEvaluate_Success(t *testing.T) {
 	j := New(cfg)
 
 	job := &domain.EvalJob{
-		JobID:    "job-1",
-		RuleID:   "test-rule",
-		SpanID:   "span-1",
-		TraceID:  "trace-1",
+		JobID:     "job-1",
+		RuleID:    "test-rule",
+		SpanID:    "span-1",
+		TraceID:   "trace-1",
 		ProjectID: "proj-1",
 	}
 

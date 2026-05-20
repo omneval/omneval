@@ -232,16 +232,16 @@ func MatchesFilterAttributeRegex(span *Span, af AttributeRegexFilter) bool {
 
 // EvalRule defines when and how to run LLM-as-a-Judge evaluations.
 type EvalRule struct {
-	RuleID        string       `json:"rule_id"`
-	ProjectID     string       `json:"project_id"`
-	Name          string       `json:"name"`
-	JudgeModel    string       `json:"judge_model"`
-	PromptName    string       `json:"prompt_name"`
-	PromptVersion int64        `json:"prompt_version"`
-	Filter        EvalFilter   `json:"filter"`
-	SampleRate    float64      `json:"sample_rate"` // 0.0–1.0; 1.0 = score every matching span
-	Enabled       bool         `json:"enabled"`
-	CreatedAt     time.Time    `json:"created_at"`
+	RuleID        string     `json:"rule_id"`
+	ProjectID     string     `json:"project_id"`
+	Name          string     `json:"name"`
+	JudgeModel    string     `json:"judge_model"`
+	PromptName    string     `json:"prompt_name"`
+	PromptVersion int64      `json:"prompt_version"`
+	Filter        EvalFilter `json:"filter"`
+	SampleRate    float64    `json:"sample_rate"` // 0.0–1.0; 1.0 = score every matching span
+	Enabled       bool       `json:"enabled"`
+	CreatedAt     time.Time  `json:"created_at"`
 }
 
 // EvalJob is a unit of work placed on the eval Redis queue.

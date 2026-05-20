@@ -35,9 +35,9 @@ type InviteRequest struct {
 
 // InviteResponse is returned by POST /api/v1/users/invite.
 type InviteResponse struct {
-	UserID               string `json:"user_id"`
-	Email                string `json:"email"`
-	PasswordResetToken   string `json:"password_reset_token"`
+	UserID             string `json:"user_id"`
+	Email              string `json:"email"`
+	PasswordResetToken string `json:"password_reset_token"`
 }
 
 // PasswordChangeRequest is the body accepted by PUT /api/v1/users/me/password.
@@ -75,16 +75,16 @@ type GenerateAPIKeyResponse struct {
 	ProjectID   string            `json:"project_id"`
 	Kind        domain.APIKeyKind `json:"kind"`
 	ServiceName string            `json:"service_name,omitempty"`
-	RawKey      string            `json:"raw_key"`      // shown only once
+	RawKey      string            `json:"raw_key"` // shown only once
 	CreatedAt   time.Time         `json:"created_at"`
 }
 
 // MeResponse is returned by GET /api/v1/me.
 // It contains the current user's identity and their organization's projects.
 type MeResponse struct {
-	UserID     string     `json:"user_id"`
-	Email      string     `json:"email"`
-	Projects   []ProjectInfo `json:"projects"`
+	UserID   string        `json:"user_id"`
+	Email    string        `json:"email"`
+	Projects []ProjectInfo `json:"projects"`
 }
 
 // ProjectInfo is a minimal project representation for the /me endpoint.
@@ -472,15 +472,23 @@ func (h *Handler) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// /api/v1/projects/{id}/api-keys/{keyId}
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/projects/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
+	projectID, ok := parseProjectID(r.URL.Path)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid project ID"})
 		return
 	}
-	projectID := parts[0]
-	keyID := parts[2]
+
+	// Extract key ID from path: /api/v1/projects/{id}/api-keys/{keyId}
+	expectedPrefix := "/api/v1/projects/" + projectID + "/api-keys/"
+	if !strings.HasPrefix(r.URL.Path, expectedPrefix) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid key ID"})
+		return
+	}
+	keyID := r.URL.Path[len(expectedPrefix):]
+	if keyID == "" || strings.Contains(keyID, "/") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid key ID"})
+		return
+	}
 
 	// Verify the key belongs to this project.
 	keys, err := h.store.ListAPIKeys(r.Context(), projectID)
@@ -540,12 +548,12 @@ func (h *Handler) Invite(w http.ResponseWriter, r *http.Request) {
 	resetExpiry := time.Now().Add(24 * time.Hour)
 
 	user := &domain.User{
-		UserID:               xid.New().String(),
-		OrgID:                req.OrgID,
-		Email:                req.Email,
-		PasswordHash:         "", // no initial password; user sets it via reset token
-		PasswordResetToken:   resetToken,
-		ResetTokenExpiry:     resetExpiry,
+		UserID:             xid.New().String(),
+		OrgID:              req.OrgID,
+		Email:              req.Email,
+		PasswordHash:       "", // no initial password; user sets it via reset token
+		PasswordResetToken: resetToken,
+		ResetTokenExpiry:   resetExpiry,
 	}
 
 	if err := h.store.CreateUser(r.Context(), user); err != nil {
@@ -554,9 +562,9 @@ func (h *Handler) Invite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, InviteResponse{
-		UserID:               user.UserID,
-		Email:                user.Email,
-		PasswordResetToken:   resetToken,
+		UserID:             user.UserID,
+		Email:              user.Email,
+		PasswordResetToken: resetToken,
 	})
 }
 

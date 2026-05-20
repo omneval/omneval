@@ -86,10 +86,10 @@ type datasetItemResponse struct {
 
 // ListDatasetItemsResponse is returned by GET /api/v1/datasets/:id/items.
 type ListDatasetItemsResponse struct {
-	Items      []datasetItemResponse `json:"items"`
-	Next       string                `json:"next,omitempty"`
-	Limit      int                   `json:"limit"`
-	PageCount  int                   `json:"page_count"`
+	Items     []datasetItemResponse `json:"items"`
+	Next      string                `json:"next,omitempty"`
+	Limit     int                   `json:"limit"`
+	PageCount int                   `json:"page_count"`
 }
 
 // ---- HTTP Handlers ----
@@ -356,10 +356,10 @@ func (h *DatasetHandler) HandleListItems(w http.ResponseWriter, r *http.Request)
 	}
 
 	resp := ListDatasetItemsResponse{
-		Items:      make([]datasetItemResponse, 0, len(items)),
-		Next:       nextCursor,
-		Limit:      limit,
-		PageCount:  len(items),
+		Items:     make([]datasetItemResponse, 0, len(items)),
+		Next:      nextCursor,
+		Limit:     limit,
+		PageCount: len(items),
 	}
 	for _, item := range items {
 		resp.Items = append(resp.Items, datasetItemResponse{

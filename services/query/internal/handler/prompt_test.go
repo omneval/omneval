@@ -194,14 +194,24 @@ func (m *FakePromptStore) CreateDatasetRun(ctx context.Context, r *domain.Datase
 func (m *FakePromptStore) GetDatasetRun(ctx context.Context, id string) (*domain.DatasetRun, error) {
 	return nil, metadata.ErrNotFound
 }
-func (m *FakePromptStore) UpdateDatasetRun(ctx context.Context, r *domain.DatasetRun) error       { return nil }
-func (m *FakePromptStore) ListDatasetRuns(ctx context.Context, datasetID string) ([]*domain.DatasetRun, error) { return nil, nil }
-func (m *FakePromptStore) CreateDatasetRunItem(ctx context.Context, i *domain.DatasetRunItem) error { return nil }
+func (m *FakePromptStore) UpdateDatasetRun(ctx context.Context, r *domain.DatasetRun) error {
+	return nil
+}
+func (m *FakePromptStore) ListDatasetRuns(ctx context.Context, datasetID string) ([]*domain.DatasetRun, error) {
+	return nil, nil
+}
+func (m *FakePromptStore) CreateDatasetRunItem(ctx context.Context, i *domain.DatasetRunItem) error {
+	return nil
+}
 func (m *FakePromptStore) GetDatasetRunItem(ctx context.Context, id string) (*domain.DatasetRunItem, error) {
 	return nil, metadata.ErrNotFound
 }
-func (m *FakePromptStore) UpdateDatasetRunItem(ctx context.Context, i *domain.DatasetRunItem) error { return nil }
-func (m *FakePromptStore) ListDatasetRunItems(ctx context.Context, runID string) ([]*domain.DatasetRunItem, error) { return nil, nil }
+func (m *FakePromptStore) UpdateDatasetRunItem(ctx context.Context, i *domain.DatasetRunItem) error {
+	return nil
+}
+func (m *FakePromptStore) ListDatasetRunItems(ctx context.Context, runID string) ([]*domain.DatasetRunItem, error) {
+	return nil, nil
+}
 func (m *FakePromptStore) Migrate(ctx context.Context) error { return nil }
 func (m *FakePromptStore) Close() error                      { return nil }
 
@@ -1086,8 +1096,8 @@ func TestPromptHandler_GetPrompt_DefaultToLatestVersion(t *testing.T) {
 	}
 
 	var resp struct {
-		Name    string `json:"name"`
-		Version int64  `json:"version"`
+		Name     string `json:"name"`
+		Version  int64  `json:"version"`
 		Template string `json:"template"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
@@ -1388,9 +1398,9 @@ func TestPromptHandler_ListPromptVersions_ProjectID(t *testing.T) {
 	}
 
 	var resp struct {
-		Name     string            `json:"name"`
+		Name     string                  `json:"name"`
 		Versions []*domain.PromptVersion `json:"versions"`
-		Count    int              `json:"count"`
+		Count    int                     `json:"count"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)

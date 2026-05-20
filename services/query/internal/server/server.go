@@ -17,7 +17,6 @@ import (
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/minio/minio-go/v7"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/metadata"
 	metadatapg "github.com/omneval/omneval/internal/metadata/postgres"
@@ -29,6 +28,7 @@ import (
 	"github.com/omneval/omneval/services/query/internal/handler"
 	"github.com/omneval/omneval/services/query/internal/metrics"
 	"github.com/omneval/omneval/services/query/internal/playground"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 //go:embed ui/dist

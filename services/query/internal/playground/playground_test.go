@@ -335,53 +335,103 @@ func (m *fakePromptStore) SetPromptLabel(ctx context.Context, label *domain.Prom
 }
 
 // Metadata.Store interface stubs (not used by playground tests)
-func (m *fakePromptStore) CreateOrganization(ctx context.Context, o *domain.Organization) error       { return nil }
-func (m *fakePromptStore) GetOrganization(ctx context.Context, id string) (*domain.Organization, error) { return nil, metadata.ErrNotFound }
-func (m *fakePromptStore) CreateProject(ctx context.Context, p *domain.Project) error                   { return nil }
-func (m *fakePromptStore) GetProject(ctx context.Context, id string) (*domain.Project, error)           { return nil, metadata.ErrNotFound }
-func (m *fakePromptStore) ListProjects(ctx context.Context, orgID string) ([]*domain.Project, error)    { return nil, nil }
-func (m *fakePromptStore) CreateUser(ctx context.Context, u *domain.User) error                         { return nil }
-func (m *fakePromptStore) GetUserByEmail(ctx context.Context, email string) (*domain.User, error)       { return nil, metadata.ErrNotFound }
-func (m *fakePromptStore) GetUserByID(ctx context.Context, userID string) (*domain.User, error)         { return nil, metadata.ErrNotFound }
-func (m *fakePromptStore) CountUsers(ctx context.Context) (int, error)                                  { return 0, nil }
-func (m *fakePromptStore) UpdateUserPassword(ctx context.Context, userID, passwordHash string) error    { return nil }
-func (m *fakePromptStore) UpdateUserResetToken(ctx context.Context, userID, token string, expiry time.Time) error { return nil }
-func (m *fakePromptStore) GetUserByResetToken(ctx context.Context, token string) (*domain.User, error)    { return nil, metadata.ErrNotFound }
-func (m *fakePromptStore) CheckPassword(hashed, plaintext string) error                                 { return nil }
-func (m *fakePromptStore) ListUsers(ctx context.Context, orgID string) ([]*domain.User, error)          { return nil, nil }
-func (m *fakePromptStore) CreateSession(ctx context.Context, s *domain.Session) error                   { return nil }
-func (m *fakePromptStore) GetSession(ctx context.Context, id string) (*domain.Session, error)           { return nil, metadata.ErrNotFound }
-func (m *fakePromptStore) DeleteSession(ctx context.Context, id string) error                           { return nil }
-func (m *fakePromptStore) CreateAPIKey(ctx context.Context, k *domain.APIKey) error                     { return nil }
-func (m *fakePromptStore) GetAPIKeyByHash(ctx context.Context, hash string) (*domain.APIKey, error)     { return nil, metadata.ErrNotFound }
-func (m *fakePromptStore) RevokeAPIKey(ctx context.Context, keyID string) error                         { return nil }
-func (m *fakePromptStore) ListAPIKeys(ctx context.Context, projectID string) ([]*domain.APIKey, error)  { return nil, nil }
-func (m *fakePromptStore) CreateEvalRule(ctx context.Context, r *domain.EvalRule) error                 { return nil }
-func (m *fakePromptStore) GetEvalRule(ctx context.Context, id string) (*domain.EvalRule, error)         { return nil, metadata.ErrNotFound }
-func (m *fakePromptStore) ListEvalRules(ctx context.Context, projectID string) ([]*domain.EvalRule, error) { return nil, nil }
-func (m *fakePromptStore) UpdateEvalRule(ctx context.Context, r *domain.EvalRule) error                 { return nil }
-func (m *fakePromptStore) DeleteEvalRule(ctx context.Context, ruleID string) error                      { return nil }
-func (m *fakePromptStore) CreateDataset(ctx context.Context, d *domain.Dataset) error                   { return nil }
-func (m *fakePromptStore) ListDatasets(ctx context.Context, projectID string) ([]*domain.Dataset, error) { return nil, nil }
-func (m *fakePromptStore) GetDataset(ctx context.Context, id string) (*domain.Dataset, error)           { return nil, metadata.ErrNotFound }
-func (m *fakePromptStore) DeleteDataset(ctx context.Context, datasetID string) error                    { return nil }
-func (m *fakePromptStore) CreateDatasetItem(ctx context.Context, i *domain.DatasetItem) error           { return nil }
-func (m *fakePromptStore) ListDatasetItems(ctx context.Context, datasetID string) ([]*domain.DatasetItem, error) { return nil, nil }
+func (m *fakePromptStore) CreateOrganization(ctx context.Context, o *domain.Organization) error {
+	return nil
+}
+func (m *fakePromptStore) GetOrganization(ctx context.Context, id string) (*domain.Organization, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *fakePromptStore) CreateProject(ctx context.Context, p *domain.Project) error { return nil }
+func (m *fakePromptStore) GetProject(ctx context.Context, id string) (*domain.Project, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *fakePromptStore) ListProjects(ctx context.Context, orgID string) ([]*domain.Project, error) {
+	return nil, nil
+}
+func (m *fakePromptStore) CreateUser(ctx context.Context, u *domain.User) error { return nil }
+func (m *fakePromptStore) GetUserByEmail(ctx context.Context, email string) (*domain.User, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *fakePromptStore) GetUserByID(ctx context.Context, userID string) (*domain.User, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *fakePromptStore) CountUsers(ctx context.Context) (int, error) { return 0, nil }
+func (m *fakePromptStore) UpdateUserPassword(ctx context.Context, userID, passwordHash string) error {
+	return nil
+}
+func (m *fakePromptStore) UpdateUserResetToken(ctx context.Context, userID, token string, expiry time.Time) error {
+	return nil
+}
+func (m *fakePromptStore) GetUserByResetToken(ctx context.Context, token string) (*domain.User, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *fakePromptStore) CheckPassword(hashed, plaintext string) error { return nil }
+func (m *fakePromptStore) ListUsers(ctx context.Context, orgID string) ([]*domain.User, error) {
+	return nil, nil
+}
+func (m *fakePromptStore) CreateSession(ctx context.Context, s *domain.Session) error { return nil }
+func (m *fakePromptStore) GetSession(ctx context.Context, id string) (*domain.Session, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *fakePromptStore) DeleteSession(ctx context.Context, id string) error       { return nil }
+func (m *fakePromptStore) CreateAPIKey(ctx context.Context, k *domain.APIKey) error { return nil }
+func (m *fakePromptStore) GetAPIKeyByHash(ctx context.Context, hash string) (*domain.APIKey, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *fakePromptStore) RevokeAPIKey(ctx context.Context, keyID string) error { return nil }
+func (m *fakePromptStore) ListAPIKeys(ctx context.Context, projectID string) ([]*domain.APIKey, error) {
+	return nil, nil
+}
+func (m *fakePromptStore) CreateEvalRule(ctx context.Context, r *domain.EvalRule) error { return nil }
+func (m *fakePromptStore) GetEvalRule(ctx context.Context, id string) (*domain.EvalRule, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *fakePromptStore) ListEvalRules(ctx context.Context, projectID string) ([]*domain.EvalRule, error) {
+	return nil, nil
+}
+func (m *fakePromptStore) UpdateEvalRule(ctx context.Context, r *domain.EvalRule) error { return nil }
+func (m *fakePromptStore) DeleteEvalRule(ctx context.Context, ruleID string) error      { return nil }
+func (m *fakePromptStore) CreateDataset(ctx context.Context, d *domain.Dataset) error   { return nil }
+func (m *fakePromptStore) ListDatasets(ctx context.Context, projectID string) ([]*domain.Dataset, error) {
+	return nil, nil
+}
+func (m *fakePromptStore) GetDataset(ctx context.Context, id string) (*domain.Dataset, error) {
+	return nil, metadata.ErrNotFound
+}
+func (m *fakePromptStore) DeleteDataset(ctx context.Context, datasetID string) error { return nil }
+func (m *fakePromptStore) CreateDatasetItem(ctx context.Context, i *domain.DatasetItem) error {
+	return nil
+}
+func (m *fakePromptStore) ListDatasetItems(ctx context.Context, datasetID string) ([]*domain.DatasetItem, error) {
+	return nil, nil
+}
 func (m *fakePromptStore) ListDatasetItemsPaginated(ctx context.Context, datasetID, cursor string, limit int) ([]*domain.DatasetItem, string, error) {
 	return nil, "", nil
 }
-func (m *fakePromptStore) CreateDatasetRun(ctx context.Context, r *domain.DatasetRun) error { return nil }
+func (m *fakePromptStore) CreateDatasetRun(ctx context.Context, r *domain.DatasetRun) error {
+	return nil
+}
 func (m *fakePromptStore) GetDatasetRun(ctx context.Context, id string) (*domain.DatasetRun, error) {
 	return nil, metadata.ErrNotFound
 }
-func (m *fakePromptStore) UpdateDatasetRun(ctx context.Context, r *domain.DatasetRun) error       { return nil }
-func (m *fakePromptStore) ListDatasetRuns(ctx context.Context, datasetID string) ([]*domain.DatasetRun, error) { return nil, nil }
-func (m *fakePromptStore) CreateDatasetRunItem(ctx context.Context, i *domain.DatasetRunItem) error { return nil }
+func (m *fakePromptStore) UpdateDatasetRun(ctx context.Context, r *domain.DatasetRun) error {
+	return nil
+}
+func (m *fakePromptStore) ListDatasetRuns(ctx context.Context, datasetID string) ([]*domain.DatasetRun, error) {
+	return nil, nil
+}
+func (m *fakePromptStore) CreateDatasetRunItem(ctx context.Context, i *domain.DatasetRunItem) error {
+	return nil
+}
 func (m *fakePromptStore) GetDatasetRunItem(ctx context.Context, id string) (*domain.DatasetRunItem, error) {
 	return nil, metadata.ErrNotFound
 }
-func (m *fakePromptStore) UpdateDatasetRunItem(ctx context.Context, i *domain.DatasetRunItem) error { return nil }
-func (m *fakePromptStore) ListDatasetRunItems(ctx context.Context, runID string) ([]*domain.DatasetRunItem, error) { return nil, nil }
+func (m *fakePromptStore) UpdateDatasetRunItem(ctx context.Context, i *domain.DatasetRunItem) error {
+	return nil
+}
+func (m *fakePromptStore) ListDatasetRunItems(ctx context.Context, runID string) ([]*domain.DatasetRunItem, error) {
+	return nil, nil
+}
 func (m *fakePromptStore) Migrate(ctx context.Context) error { return nil }
 func (m *fakePromptStore) Close() error                      { return nil }
 

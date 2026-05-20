@@ -144,11 +144,11 @@ func TestTranslate_InputOutputFromGenAIPrompt(t *testing.T) {
 		{
 			Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
 			Spans: []*Span{{
-				SpanID:     "0123456789abcdef",
-				TraceID:    "0123456789abcdef0123456789abcdef",
-				Name:       "llm-call",
-				StartTime:  time.Now(),
-				EndTime:    time.Now(),
+				SpanID:    "0123456789abcdef",
+				TraceID:   "0123456789abcdef0123456789abcdef",
+				Name:      "llm-call",
+				StartTime: time.Now(),
+				EndTime:   time.Now(),
 				Attributes: map[string]any{
 					"gen_ai.prompt.0.role":    "user",
 					"gen_ai.prompt.0.content": "Hello world",
@@ -188,11 +188,11 @@ func TestTranslate_OutputFromGenAICompletion(t *testing.T) {
 		{
 			Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
 			Spans: []*Span{{
-				SpanID:     "0123456789abcdef",
-				TraceID:    "0123456789abcdef0123456789abcdef",
-				Name:       "llm-call",
-				StartTime:  time.Now(),
-				EndTime:    time.Now(),
+				SpanID:    "0123456789abcdef",
+				TraceID:   "0123456789abcdef0123456789abcdef",
+				Name:      "llm-call",
+				StartTime: time.Now(),
+				EndTime:   time.Now(),
 				Attributes: map[string]any{
 					"gen_ai.completion.0.role":    "assistant",
 					"gen_ai.completion.0.content": "Response text",
@@ -356,16 +356,16 @@ func TestTranslate_AttributesOverflow(t *testing.T) {
 		{
 			Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
 			Spans: []*Span{{
-				SpanID:     "0123456789abcdef",
-				TraceID:    "0123456789abcdef0123456789abcdef",
-				Name:       "test",
-				StartTime:  time.Now(),
-				EndTime:    time.Now(),
+				SpanID:    "0123456789abcdef",
+				TraceID:   "0123456789abcdef0123456789abcdef",
+				Name:      "test",
+				StartTime: time.Now(),
+				EndTime:   time.Now(),
 				Attributes: map[string]any{
-					"gen_ai.request.model": "gpt-4",
+					"gen_ai.request.model":      "gpt-4",
 					"gen_ai.usage.input_tokens": 100,
-					"http.url": "https://example.com",
-					"custom.attr": "value",
+					"http.url":                  "https://example.com",
+					"custom.attr":               "value",
 				},
 			}},
 		},

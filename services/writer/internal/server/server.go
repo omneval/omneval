@@ -14,8 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	redisgo "github.com/redis/go-redis/v9"
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/duckdb"
 	"github.com/omneval/omneval/internal/leader"
@@ -31,6 +29,8 @@ import (
 	"github.com/omneval/omneval/services/writer/internal/metrics"
 	"github.com/omneval/omneval/services/writer/internal/pipeline"
 	syncpkg "github.com/omneval/omneval/services/writer/internal/sync"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	redisgo "github.com/redis/go-redis/v9"
 )
 
 // Run starts the Writer Service: drains the Redis ingest queue, writes to
