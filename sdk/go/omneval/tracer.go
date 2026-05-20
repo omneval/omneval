@@ -92,8 +92,8 @@ func StartSpan(ctx context.Context, name string) context.Context {
 		return ctx
 	}
 
-	_, span := t.Start(ctx, name)
-	return ctxWithSpan(ctx, span)
+	newCtx, span := t.Start(ctx, name)
+	return ctxWithSpan(newCtx, span)
 }
 
 // EndSpan ends the span carried in ctx. Must be called with the context

@@ -1,6 +1,8 @@
 package omneval
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"io"
 	"net/http"
@@ -8,6 +10,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	ptrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // TestConfigure_WiresExporter verifies Configure sets up the global OTLP
@@ -97,6 +103,95 @@ func TestContextPropagation(t *testing.T) {
 
 	if receivedSpans.Load() < 1 {
 		t.Errorf("expected at least 1 span exported, got %d", receivedSpans.Load())
+	}
+}
+
+// TestContextPropagation_ParentID verifies that the child span's parent ID
+// matches the parent span's ID, confirming correct OTel context propagation.
+func TestContextPropagation_ParentID(t *testing.T) {
+	var receivedRequests []fakeOTLPRequest
+	var mu sync.Mutex
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return
+		}
+		if len(body) == 0 {
+			return
+		}
+		mu.Lock()
+		receivedRequests = append(receivedRequests, fakeOTLPRequest{Body: body})
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	Configure(ts.URL+"/v1/traces", "oev_proj_test")
+
+	parentCtx := StartSpan(context.Background(), "parent.operation")
+	SetModel(parentCtx, "gpt-4")
+
+	childCtx := StartSpan(parentCtx, "child.operation")
+	SetModel(childCtx, "gpt-3.5-turbo")
+
+	EndSpan(childCtx)
+	EndSpan(parentCtx)
+	Shutdown()
+
+	mu.Lock()
+	reqs := receivedRequests
+	mu.Unlock()
+
+	if len(reqs) == 0 {
+		t.Fatal("no OTLP requests received")
+	}
+
+	// Decode the OTLP trace data and verify parent-child span linking.
+	// The OTLP HTTP exporter uses gzip compression by default.
+	// Collect all spans across all requests (each span may be exported separately).
+	var spans []*tracev1.Span
+	for _, req := range reqs {
+		decompressed, err := decompressOTLPBody(req.Body)
+		if err != nil {
+			t.Fatalf("failed to decompress OTLP request: %v", err)
+		}
+		var exportReq ptrace.ExportTraceServiceRequest
+		if err := proto.Unmarshal(decompressed, &exportReq); err != nil {
+			t.Fatalf("failed to unmarshal OTLP request: %v", err)
+		}
+		for _, rs := range exportReq.ResourceSpans {
+			for _, ss := range rs.ScopeSpans {
+				spans = append(spans, ss.Spans...)
+			}
+		}
+	}
+
+	if len(spans) != 2 {
+		t.Fatalf("expected 2 spans, got %d", len(spans))
+	}
+
+	// Find parent and child spans by name.
+	var parentSpan, childSpan *tracev1.Span
+	for _, sp := range spans {
+		switch sp.Name {
+		case "parent.operation":
+			parentSpan = sp
+		case "child.operation":
+			childSpan = sp
+		}
+	}
+
+	if parentSpan == nil {
+		t.Fatal("missing parent span")
+	}
+	if childSpan == nil {
+		t.Fatal("missing child span")
+	}
+
+	// The child's ParentSpanId must match the parent's SpanId.
+	if string(childSpan.ParentSpanId) != string(parentSpan.SpanId) {
+		t.Errorf("child span parent_id mismatch: got %x, want %x", childSpan.ParentSpanId, parentSpan.SpanId)
 	}
 }
 
@@ -242,6 +337,17 @@ func TestNestedSpans(t *testing.T) {
 	if ts.RequestCount() < 1 {
 		t.Error("expected at least one export request")
 	}
+}
+
+// decompressOTLPBody decompresses gzip-compressed OTLP protobuf data.
+// The OTLP HTTP exporter uses gzip compression by default.
+func decompressOTLPBody(body []byte) ([]byte, error) {
+	r, err := gzip.NewReader(bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	return io.ReadAll(r)
 }
 
 // ---- Fake HTTP server for integration-like tests ----
