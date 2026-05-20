@@ -313,6 +313,91 @@ func TestClient_GetPromptVersion_BaseURL(t *testing.T) {
 	}
 }
 
+// TestClient_WriteScore_APIKeyHeader verifies WriteScore sends the X-API-Key header.
+func TestClient_WriteScore_APIKeyHeader(t *testing.T) {
+	var receivedAPIKey string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAPIKey = r.Header.Get("X-API-Key")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{"score_id": "score-123"})
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "oev_proj_test")
+	_ = client.WriteScore("span-abc", "helpfulness", 0.8, "Great answer")
+
+	if receivedAPIKey != "oev_proj_test" {
+		t.Errorf("X-API-Key header: got %q, want %q", receivedAPIKey, "oev_proj_test")
+	}
+}
+
+// TestClient_GetPrompt_APIKeyHeader verifies GetPrompt sends the X-API-Key header.
+func TestClient_GetPrompt_APIKeyHeader(t *testing.T) {
+	var receivedAPIKey string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAPIKey = r.Header.Get("X-API-Key")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(domain.PromptVersion{
+			Name:     "test",
+			Version:  1,
+			Template: "test",
+		})
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "oev_proj_test")
+	_, _ = client.GetPrompt("test", "production")
+
+	if receivedAPIKey != "oev_proj_test" {
+		t.Errorf("X-API-Key header: got %q, want %q", receivedAPIKey, "oev_proj_test")
+	}
+}
+
+// TestClient_GetPromptVersion_APIKeyHeader verifies GetPromptVersion sends the X-API-Key header.
+func TestClient_GetPromptVersion_APIKeyHeader(t *testing.T) {
+	var receivedAPIKey string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAPIKey = r.Header.Get("X-API-Key")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(domain.PromptVersion{
+			Name:     "test",
+			Version:  3,
+			Template: "version 3",
+		})
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "oev_proj_test")
+	_, _ = client.GetPromptVersion("test", 3)
+
+	if receivedAPIKey != "oev_proj_test" {
+		t.Errorf("X-API-Key header: got %q, want %q", receivedAPIKey, "oev_proj_test")
+	}
+}
+
+// TestClient_NoAPIKeyOmitsHeader verifies an empty API key results in no X-API-Key header.
+func TestClient_NoAPIKeyOmitsHeader(t *testing.T) {
+	var receivedAPIKey string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAPIKey = r.Header.Get("X-API-Key")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(domain.PromptVersion{
+			Name:     "test",
+			Version:  1,
+			Template: "test",
+		})
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "")
+	_, _ = client.GetPrompt("test", "production")
+
+	if receivedAPIKey != "" {
+		t.Errorf("X-API-Key header should be empty when no API key provided: got %q", receivedAPIKey)
+	}
+}
+
 // TestClient_SlowResponse verifies the client handles slightly slow responses
 // without error (the 10-second timeout is generous enough for this 100ms delay).
 func TestClient_SlowResponse(t *testing.T) {

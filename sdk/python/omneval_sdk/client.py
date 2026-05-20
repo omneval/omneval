@@ -41,7 +41,10 @@ class OmnevalClient:
         project_id: Optional[str] = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
         self._http = requests.Session()
+        if api_key:
+            self._http.headers["X-API-Key"] = api_key
         self._label_cache: dict[str, _CacheEntry] = {}
         self._version_cache: dict[str, str] = {}
         self._label_lock = threading.Lock()

@@ -17,6 +17,7 @@ import (
 // no TTL (immutable); label lookups use a 30-second TTL.
 type Client struct {
 	baseURL string
+	apiKey  string
 	http    *http.Client
 
 	// Label cache: key = name + "|" + label, value = cacheEntry.
@@ -35,9 +36,9 @@ type cacheEntry struct {
 
 // NewClient creates a Client targeting the given Query API base URL.
 func NewClient(baseURL, apiKey string) *Client {
-	_ = apiKey // apiKey parameter reserved for future use (e.g., API key header).
 	return &Client{
 		baseURL:        baseURL,
+		apiKey:         apiKey,
 		http:           &http.Client{Timeout: 10 * time.Second},
 		labelCache:     make(map[string]*cacheEntry),
 		versionCache:   make(map[string]string),
@@ -125,7 +126,15 @@ func (c *Client) WriteScore(spanID, evalName string, value float64, reasoning st
 		return fmt.Errorf("marshal score: %w", err)
 	}
 
-	resp, err := c.http.Post(url, "application/json", bytes.NewReader(body))
+	httpReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("write score: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		httpReq.Header.Set("X-API-Key", c.apiKey)
+	}
+	resp, err := c.http.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("write score: %w", err)
 	}
@@ -152,7 +161,14 @@ func (c *Client) getPromptFromServer(name string, label string, version ...int64
 		url = fmt.Sprintf("%s/api/v1/prompts/%s?label=%s", c.baseURL, name, label)
 	}
 
-	resp, err := c.http.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get prompt: %w", err)
+	}
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
+	}
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("get prompt: %w", err)
 	}

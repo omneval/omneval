@@ -232,6 +232,110 @@ class TestWriteScore:
         assert client._project_id == "override-id"
 
 
+class TestAPIKeyHeaders:
+    """Tests for X-API-Key header on API requests (issue #5)."""
+
+    @responses.activate
+    def test_write_score_includes_api_key_header(self):
+        """write_score sends X-API-Key header when api_key is configured."""
+        captured_headers = None
+
+        def capture_request(request):
+            nonlocal captured_headers
+            captured_headers = dict(request.headers)
+            return (201, {}, json.dumps({"score_id": "score-123"}))
+
+        responses.add_callback(
+            responses.POST,
+            "http://localhost:8080/api/v1/scores",
+            callback=capture_request,
+        )
+
+        client = OmnevalClient("http://localhost:8080", "oev_proj_test")
+        client.write_score("span-abc", "helpfulness", 0.8, "Great answer")
+
+        assert captured_headers is not None
+        assert captured_headers.get("X-API-Key") == "oev_proj_test"
+
+    @responses.activate
+    def test_get_prompt_includes_api_key_header(self):
+        """get_prompt sends X-API-Key header when api_key is configured."""
+        captured_headers = None
+
+        def capture_request(request):
+            nonlocal captured_headers
+            captured_headers = dict(request.headers)
+            return (
+                200,
+                {},
+                json.dumps({"name": "test", "version": 1, "template": "test", "model_config": {}}),
+            )
+
+        responses.add_callback(
+            responses.GET,
+            "http://localhost:8080/api/v1/prompts/test",
+            callback=capture_request,
+        )
+
+        client = OmnevalClient("http://localhost:8080", "oev_proj_test")
+        client.get_prompt("test", "production")
+
+        assert captured_headers is not None
+        assert captured_headers.get("X-API-Key") == "oev_proj_test"
+
+    @responses.activate
+    def test_get_prompt_version_includes_api_key_header(self):
+        """get_prompt_version sends X-API-Key header when api_key is configured."""
+        captured_headers = None
+
+        def capture_request(request):
+            nonlocal captured_headers
+            captured_headers = dict(request.headers)
+            return (
+                200,
+                {},
+                json.dumps({"name": "test", "version": 2, "template": "v2", "model_config": {}}),
+            )
+
+        responses.add_callback(
+            responses.GET,
+            "http://localhost:8080/api/v1/prompts/test",
+            callback=capture_request,
+        )
+
+        client = OmnevalClient("http://localhost:8080", "oev_proj_test")
+        client.get_prompt_version("test", 2)
+
+        assert captured_headers is not None
+        assert captured_headers.get("X-API-Key") == "oev_proj_test"
+
+    @responses.activate
+    def test_no_api_key_omits_header(self):
+        """No X-API-Key header is sent when api_key is empty."""
+        captured_headers = None
+
+        def capture_request(request):
+            nonlocal captured_headers
+            captured_headers = dict(request.headers)
+            return (
+                200,
+                {},
+                json.dumps({"name": "test", "version": 1, "template": "test", "model_config": {}}),
+            )
+
+        responses.add_callback(
+            responses.GET,
+            "http://localhost:8080/api/v1/prompts/test",
+            callback=capture_request,
+        )
+
+        client = OmnevalClient("http://localhost:8080")  # no api_key
+        client.get_prompt("test", "production")
+
+        assert captured_headers is not None
+        assert "X-API-Key" not in captured_headers
+
+
 class TestGetPromptVersion:
     """Tests for OmnevalClient.get_prompt_version."""
 
