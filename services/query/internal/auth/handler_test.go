@@ -633,11 +633,11 @@ func TestHandler_AdminBootstrap_CreatesAdmin(t *testing.T) {
 	}
 }
 
-func TestHandler_AdminBootstrap_NoOpWhenUsersExist(t *testing.T) {
+func TestHandler_AdminBootstrap_CreatesAdminWhenOtherUsersExist(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	h := auth.NewHandler(store, false, 1*time.Hour, "admin@example.com", "admin-password")
 
-	// Create a user first
+	// Create a different user first (simulates a prior installation or migration)
 	_ = store.CreateUser(nil, &domain.User{
 		UserID:       "existing-user",
 		OrgID:        "org-1",
@@ -645,13 +645,61 @@ func TestHandler_AdminBootstrap_NoOpWhenUsersExist(t *testing.T) {
 		PasswordHash: "password",
 	})
 
-	// Bootstrap should be a no-op
+	// Bootstrap should still create the admin (configured email is absent)
+	created, err := h.BootstrapAdmin(context.Background())
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	if !created {
+		t.Error("expected admin to be created even when other users exist")
+	}
+
+	count, err := store.CountUsers(context.Background())
+	if err != nil {
+		t.Fatalf("count users: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected 2 users, got %d", count)
+	}
+
+	// Verify admin exists with correct password
+	admin, err := store.GetUserByEmail(context.Background(), "admin@example.com")
+	if err != nil {
+		t.Fatalf("get admin: %v", err)
+	}
+	if err := store.CheckPassword(admin.PasswordHash, "admin-password"); err != nil {
+		t.Fatalf("admin password should match")
+	}
+
+	// Verify existing user is unaffected
+	existing, err := store.GetUserByEmail(context.Background(), "existing@example.com")
+	if err != nil {
+		t.Fatalf("get existing user: %v", err)
+	}
+	if existing.UserID != "existing-user" {
+		t.Errorf("existing user ID: got %q, want %q", existing.UserID, "existing-user")
+	}
+}
+
+func TestHandler_AdminBootstrap_NoOpWhenAdminEmailExists(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	h := auth.NewHandler(store, false, 1*time.Hour, "admin@example.com", "admin-password")
+
+	// Create the admin user with the same email
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "admin-existing",
+		OrgID:        "org-1",
+		Email:        "admin@example.com",
+		PasswordHash: "other-password",
+	})
+
+	// Bootstrap should be a no-op because the configured admin email already exists
 	created, err := h.BootstrapAdmin(context.Background())
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	if created {
-		t.Error("expected bootstrap to be a no-op when users exist")
+		t.Error("expected bootstrap to be a no-op when admin email already exists")
 	}
 
 	count, err := store.CountUsers(context.Background())

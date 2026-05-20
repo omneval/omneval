@@ -175,19 +175,21 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/projects/{id}/api-keys/{keyId}", h.HandleRevokeAPIKey)
 }
 
-// BootstrapAdmin creates the initial admin user if no users exist and
-// admin credentials are configured. Returns true if a user was created.
+// BootstrapAdmin creates the initial admin user if admin credentials are
+// configured and the configured email does not already exist.
+// Returns true if a user was created.
 func (h *Handler) BootstrapAdmin(ctx context.Context) (bool, error) {
 	if h.adminEmail == "" || h.adminPassword == "" {
 		return false, nil
 	}
 
-	count, err := h.store.CountUsers(ctx)
-	if err != nil {
-		return false, fmt.Errorf("auth: count users for bootstrap: %w", err)
+	// Check whether the configured admin email already exists.
+	_, err := h.store.GetUserByEmail(ctx, h.adminEmail)
+	if err == nil {
+		return false, nil // admin already exists — skip silently
 	}
-	if count > 0 {
-		return false, nil
+	if !errors.Is(err, metadata.ErrNotFound) {
+		return false, fmt.Errorf("auth: check admin email: %w", err)
 	}
 
 	// Ensure the default org exists before creating the user (FK constraint).
@@ -204,7 +206,7 @@ func (h *Handler) BootstrapAdmin(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("auth: get default org: %w", err)
 	}
 
-	// Create the first admin user
+	// Create the admin user
 	user := &domain.User{
 		UserID:       xid.New().String(),
 		OrgID:        "default",
