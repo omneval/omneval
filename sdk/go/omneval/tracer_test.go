@@ -64,8 +64,7 @@ func TestConfigure_WiresExporter(t *testing.T) {
 // TestConfigure_BadEndpointRejectsConfig verifies Configure returns an error
 // when the endpoint URL is malformed.
 func TestConfigure_BadEndpointRejectsConfig(t *testing.T) {
-	shutdownGlobal()
-	defer shutdownGlobal()
+	defer Shutdown()
 
 	err := Configure("://bad-url", "key")
 	if err == nil {
@@ -264,8 +263,9 @@ func TestSetInput_StringInput(t *testing.T) {
 	}
 }
 
-// TestStartSpan_NameRequired verifies StartSpan works with a valid name.
-func TestStartSpan_NameRequired(t *testing.T) {
+// TestStartSpan_EmptyNameIsSafe verifies StartSpan handles an empty name
+// without panicking.
+func TestStartSpan_EmptyNameIsSafe(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -284,6 +284,7 @@ func TestStartSpan_NameRequired(t *testing.T) {
 // TestConfigure_WithAPIKey verifies the SDK configures without error with an API key.
 func TestConfigure_WithAPIKey(t *testing.T) {
 	ts := newFakeOTLPServer()
+	defer ts.Close()
 
 	err := Configure(ts.URL()+"/v1/traces", "oev_proj_mykey")
 	if err != nil {
@@ -302,6 +303,7 @@ func TestConfigure_WithAPIKey(t *testing.T) {
 // TestMultipleSpansInSequence verifies multiple spans can be started and ended.
 func TestMultipleSpansInSequence(t *testing.T) {
 	ts := newFakeOTLPServer()
+	defer ts.Close()
 
 	Configure(ts.URL()+"/v1/traces", "oev_proj_test")
 
@@ -318,9 +320,11 @@ func TestMultipleSpansInSequence(t *testing.T) {
 	}
 }
 
-// TestNestedSpans verifies nested span context propagation.
+// TestNestedSpans verifies nested span context propagation with multiple
+// children and grandchild spans.
 func TestNestedSpans(t *testing.T) {
 	ts := newFakeOTLPServer()
+	defer ts.Close()
 
 	Configure(ts.URL()+"/v1/traces", "oev_proj_test")
 
@@ -393,9 +397,4 @@ func (f *fakeOTLPServer) RequestCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.requests)
-}
-
-// shutdownGlobal resets the global tracer provider for test isolation.
-func shutdownGlobal() {
-	Shutdown()
 }
