@@ -479,13 +479,19 @@ type Query struct {
 	Limit        int            `json:"limit"`
 }
 
+// defaultTimeRange is the time range applied when from and to are omitted
+// from an analytics query. The default is the last 30 days.
+const defaultTimeRange = 30 * 24 * time.Hour
+
 // Validate applies default time range values (last 30 days) when both from
 // and to are zero, and validates that from is not after to.
-// The caller (HandleAnalyticsSpans) must call this before passing the query
-// to Compile().
+//
+// This method has a side effect: it mutates the Query struct by setting
+// From and To to default values when both are zero. The caller must always
+// call Validate() before passing the query to Compile().
 func (q *Query) Validate() error {
 	if q.From.IsZero() && q.To.IsZero() {
-		q.From = time.Now().Add(-30 * 24 * time.Hour)
+		q.From = time.Now().Add(-defaultTimeRange)
 		q.To = time.Now()
 	}
 	if !q.From.IsZero() && !q.To.IsZero() && q.From.After(q.To) {

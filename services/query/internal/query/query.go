@@ -175,7 +175,7 @@ func NewSpanQuery(projectID string, req SpanQueryRequest, s3Store storage.Object
 
 	// Apply default time range when both bounds are omitted.
 	if from.IsZero() && to.IsZero() {
-		from = time.Now().Add(-30 * 24 * time.Hour)
+		from = time.Now().Add(-defaultTimeRange)
 		to = time.Now()
 	}
 
@@ -225,6 +225,10 @@ const (
 	// and the Query API's cold Parquet reads. Must match config.Storage.Bucket.
 	omnevalBucket = "omneval"
 )
+
+// defaultTimeRange is the time range applied when from and to are omitted
+// from a span query request. The default is the last 30 days.
+const defaultTimeRange = 30 * 24 * time.Hour
 
 // SpanQuery builds a parameterized SQL query for POST /api/v1/spans/query.
 // It handles hot+cold UNION with keyset cursor pagination and

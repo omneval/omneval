@@ -609,7 +609,7 @@ func TestSQL_NoTimeRange_DefaultsTo30Days(t *testing.T) {
 		}
 		to := args[2].(time.Time)
 
-		expectedFrom := now.Add(-30 * 24 * time.Hour)
+		expectedFrom := now.Add(-defaultTimeRange)
 		// Allow 2-second drift due to test execution time.
 		if from.Sub(expectedFrom).Abs() > 2*time.Second {
 			t.Errorf("default from: got %v, want ~%v", from, expectedFrom)

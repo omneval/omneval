@@ -726,7 +726,7 @@ func TestQueryValidate_Defaults30DayRange(t *testing.T) {
 	}
 
 	now := time.Now()
-	expectedFrom := now.Add(-30 * 24 * time.Hour)
+	expectedFrom := now.Add(-defaultTimeRange)
 	if q.From.Sub(expectedFrom).Abs() > 2*time.Second {
 		t.Errorf("default from: got %v, want ~%v", q.From, expectedFrom)
 	}
@@ -770,9 +770,9 @@ func TestQueryValidate_ValidExplicitRange(t *testing.T) {
 	}
 }
 
-func TestQueryValidate_FromSetToZero_AppendsDefaultTo(t *testing.T) {
-	// When from is set but to is zero, Validate should not change either.
-	// The defaults only apply when BOTH are zero.
+func TestQueryValidate_FromSetToZero_PreservesSingleBound(t *testing.T) {
+	// When only 'from' is set and 'to' is zero, Validate should not modify
+	// either value. Defaults only apply when BOTH are zero.
 	q := Query{
 		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 		To:   time.Time{},
