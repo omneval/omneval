@@ -2,16 +2,21 @@ package server
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/minio/minio-go/v7"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/fake"
+	"github.com/omneval/omneval/internal/storage"
 	"github.com/omneval/omneval/services/query/internal/auth"
 	"github.com/omneval/omneval/services/query/internal/handler"
 	"github.com/omneval/omneval/services/query/internal/playground"
@@ -452,6 +457,110 @@ func TestDatasetRunsRoute_NoLLMConfig(t *testing.T) {
 	var body map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("body is not valid JSON: %v\nraw: %s", err, resp.Body)
+	}
+}
+
+// fakeNotFoundStore implements storage.ObjectStore that returns NoSuchKey
+// errors for Get and Stat, simulating a bucket with no snapshot yet.
+type fakeNotFoundStore struct{}
+
+func (f *fakeNotFoundStore) Put(_ context.Context, key string, r io.Reader) error {
+	return nil
+}
+
+func (f *fakeNotFoundStore) Get(_ context.Context, key string) (io.ReadCloser, error) {
+	return nil, minio.ToErrorResponse(minio.ErrorResponse{
+		Code:       minio.NoSuchKey,
+		Message:    "The specified key does not exist.",
+		StatusCode: 404,
+	})
+}
+
+func (f *fakeNotFoundStore) Delete(_ context.Context, key string) error {
+	return nil
+}
+
+func (f *fakeNotFoundStore) ListPrefix(_ context.Context, prefix string) ([]string, error) {
+	return nil, nil
+}
+
+func (f *fakeNotFoundStore) Stat(_ context.Context, key string) (*storage.ObjectStat, error) {
+	return nil, minio.ToErrorResponse(minio.ErrorResponse{
+		Code:       minio.NoSuchKey,
+		Message:    "The specified key does not exist.",
+		StatusCode: 404,
+	})
+}
+
+func TestDownloadSnapshot_NoSnapshotExists_CreatesEmptyDB(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/snapshot.duckdb"
+
+	// Simulate S3 returning NoSuchKey (no snapshot yet).
+	notFoundStore := &fakeNotFoundStore{}
+
+	// downloadSnapshot should NOT return an error — it should create an empty DB.
+	err := downloadSnapshot(context.Background(), notFoundStore, dbPath)
+	if err != nil {
+		t.Fatalf("downloadSnapshot with missing snapshot returned error: %v", err)
+	}
+
+	// Verify the DB file exists.
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		t.Fatal("expected DuckDB file to be created at", dbPath)
+	}
+
+	// Verify the DB has the required schema (spans table).
+	db, err := sql.Open("duckdb", dbPath+"?access_mode=read_write")
+	if err != nil {
+		t.Fatalf("open DuckDB: %v", err)
+	}
+	defer db.Close()
+
+	// The spans table should exist but be empty.
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM spans").Scan(&count)
+	if err != nil {
+		t.Fatalf("query spans table: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("spans table should be empty, got %d", count)
+	}
+}
+
+func TestPollAndDownload_NoSnapshotExists_LogsWarning_NoError(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/snapshot.db"
+
+	notFoundStore := &fakeNotFoundStore{}
+
+	// pollAndDownload should NOT return an error when the snapshot doesn't exist yet.
+	err := pollAndDownload(context.Background(), notFoundStore, dbPath, nil)
+	if err != nil {
+		t.Fatalf("pollAndDownload with missing snapshot returned error: %v", err)
+	}
+
+	// The DB should have been created (empty).
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		t.Fatal("expected DuckDB file to be created")
+	}
+}
+
+func TestPollAndDownload_NoSnapshotExists_ReturnsNoError(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/snapshot.db"
+
+	notFoundStore := &fakeNotFoundStore{}
+
+	err := pollAndDownload(context.Background(), notFoundStore, dbPath, nil)
+	if err != nil {
+		t.Fatalf("pollAndDownload returned error: %v", err)
 	}
 }
 
