@@ -145,9 +145,10 @@ var validOps = map[FilterOp]struct{}{
 //
 // The following operators are supported:
 //
-//	eq, neq, gt, gte, lt, lte, in
+//	eq, neq, gt, gte, lt, lte, in, contains
 //
 // For "in" operator, value must be a JSON array of values.
+// For "contains" operator, value is a substring matched via SQL LIKE '%value%'.
 // For "bookmarked" field, value must be a boolean (true/false).
 // All other fields accept the operator's natural value type (string, number, etc.).
 type SpanQueryRequest struct {

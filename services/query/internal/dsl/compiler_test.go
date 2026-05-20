@@ -981,6 +981,30 @@ func TestCompile_GroupByTimeBucketWithOrderBy(t *testing.T) {
 	}
 }
 
+// --- time_bucket rejection for filters and aggregations (issue #15) ---
+
+func TestCompile_TimeBucketAsFilterRejected(t *testing.T) {
+	q := makeQuery(withFilter(Filter{Field: "time_bucket", Op: OpEq, Value: "1h"}))
+	_, _, err := Compile("proj", q)
+	if err == nil {
+		t.Fatal("expected error when using time_bucket as a filter field")
+	}
+	if !strings.Contains(err.Error(), "time_bucket is only valid as a group-by field") {
+		t.Errorf("error should mention time_bucket group-by restriction, got: %v", err)
+	}
+}
+
+func TestCompile_TimeBucketAsAggregationFieldRejected(t *testing.T) {
+	q := makeQuery(withAgg(AggCount, "time_bucket", "count"))
+	_, _, err := Compile("proj", q)
+	if err == nil {
+		t.Fatal("expected error when using time_bucket as an aggregation field")
+	}
+	if !strings.Contains(err.Error(), "time_bucket is only valid as a group-by field") {
+		t.Errorf("error should mention time_bucket group-by restriction, got: %v", err)
+	}
+}
+
 // --- JSON deserialization (issue #15) ---
 
 func TestCompile_TimeBucketDeserialization(t *testing.T) {
