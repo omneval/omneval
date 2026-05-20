@@ -192,3 +192,38 @@ class TestTraceDecorator:
             assert len(spans) >= 1
             # Check the span status is set to ERROR.
             assert spans[0].status.status_code.name == "ERROR"
+
+
+class TestSpanHelperNoneSafe:
+    """Tests that span helper functions handle None spans gracefully (issue #3)."""
+
+    def test_set_input_none_span(self):
+        """set_input(None, ...) should not raise an exception."""
+        from omneval_sdk.trace import set_input
+
+        set_input(None, "test input")  # Should not raise
+
+    def test_set_output_none_span(self):
+        """set_output(None, ...) should not raise an exception."""
+        from omneval_sdk.trace import set_output
+
+        set_output(None, "test output")  # Should not raise
+
+    def test_set_model_none_span(self):
+        """set_model(None, ...) should not raise an exception."""
+        from omneval_sdk.trace import set_model
+
+        set_model(None, "gpt-4")  # Should not raise
+
+    def test_set_tokens_none_span(self):
+        """set_tokens(None, ...) should not raise an exception."""
+        from omneval_sdk.trace import set_tokens
+
+        set_tokens(None, 10, 20)  # Should not raise
+
+    def test_get_active_span_returns_none_when_not_configured(self):
+        """get_active_span() returns None when no span is set."""
+        from omneval_sdk.trace import get_active_span
+
+        # Without configure(), _current_span should be None.
+        assert get_active_span() is None

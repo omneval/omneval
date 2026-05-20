@@ -68,23 +68,43 @@ def trace(fn: F) -> F:
     return wrapper  # type: ignore[return-value]
 
 
-def set_input(span: Span, input_value: str) -> None:
-    """Attach input data to the span as the 'omneval.input' attribute."""
+def set_input(span: Span | None, input_value: str) -> None:
+    """Attach input data to the span as the 'omneval.input' attribute.
+
+    Silently returns if span is None (e.g. SDK not configured).
+    """
+    if span is None:
+        return
     span.set_attribute("omneval.input", input_value)
 
 
-def set_output(span: Span, output_value: str) -> None:
-    """Attach output data to the span as the 'omneval.output' attribute."""
+def set_output(span: Span | None, output_value: str) -> None:
+    """Attach output data to the span as the 'omneval.output' attribute.
+
+    Silently returns if span is None (e.g. SDK not configured).
+    """
+    if span is None:
+        return
     span.set_attribute("omneval.output", output_value)
 
 
-def set_model(span: Span, model: str) -> None:
-    """Attach model name to the span as the 'gen_ai.request.model' attribute."""
+def set_model(span: Span | None, model: str) -> None:
+    """Attach model name to the span as the 'gen_ai.request.model' attribute.
+
+    Silently returns if span is None (e.g. SDK not configured).
+    """
+    if span is None:
+        return
     span.set_attribute("gen_ai.request.model", model)
 
 
-def set_tokens(span: Span, input_tokens: int, output_tokens: int) -> None:
-    """Attach token counts to the span as 'gen_ai.usage.input_tokens' and 'gen_ai.usage.output_tokens'."""
+def set_tokens(span: Span | None, input_tokens: int, output_tokens: int) -> None:
+    """Attach token counts to the span as 'gen_ai.usage.input_tokens' and 'gen_ai.usage.output_tokens'.
+
+    Silently returns if span is None (e.g. SDK not configured).
+    """
+    if span is None:
+        return
     span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
     span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
 
