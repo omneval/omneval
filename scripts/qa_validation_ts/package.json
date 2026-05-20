@@ -1,0 +1,12 @@
+{
+  "name": "omneval-ts-qa",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "qa": "tsx qa_validation.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.5"
+  }
+}
