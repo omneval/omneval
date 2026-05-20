@@ -1527,6 +1527,228 @@ func TestHandleAnalyticsSpans_ProjectIDForbidden(t *testing.T) {
 	}
 }
 
+// ── Issue #15: contains filter and time_bucket group-by ──────────
+
+func TestHandleSpansQuery_ContainsFilter(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omneval-spans-query-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	// Insert a span whose name contains "qa-".
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, project_id, name, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
+		"span-qa-001", "trace-abc", "test-proj", "qa-test-span", baseTime, baseTime.Add(10*time.Second)); err != nil {
+		t.Fatalf("insert qa span: %v", err)
+	}
+	// Insert a span whose name does NOT contain "qa-".
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, project_id, name, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
+		"span-prod-001", "trace-def", "test-proj", "prod-span", baseTime.Add(11*time.Second), baseTime.Add(21*time.Second)); err != nil {
+		t.Fatalf("insert prod span: %v", err)
+	}
+
+	h := &SpanHandler{
+		DB:           db,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	body := strings.NewReader(`{
+		"from": "2025-01-01T00:00:00Z",
+		"to": "2025-01-02T00:00:00Z",
+		"filters": [{"field": "name", "op": "contains", "value": "qa-"}],
+		"limit": 50
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
+	w := httptest.NewRecorder()
+
+	h.HandleSpansQuery(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Spans []map[string]any `json:"spans"`
+		Limit int              `json:"limit"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if len(resp.Spans) != 1 {
+		t.Errorf("spans count: got %d, want 1 (only qa- span)", len(resp.Spans))
+	}
+	if len(resp.Spans) > 0 {
+		name := resp.Spans[0]["name"]
+		if !strings.Contains(fmt.Sprint(name), "qa-") {
+			t.Errorf("expected name containing 'qa-', got %v", name)
+		}
+	}
+	if resp.Limit != 50 {
+		t.Errorf("limit: got %d, want 50", resp.Limit)
+	}
+}
+
+func TestHandleAnalyticsSpans_TimeBucketHour(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omneval-analytics-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	// Insert 3 spans in the same hour bucket.
+	for i := 0; i < 3; i++ {
+		if _, err := db.ExecContext(context.Background(),
+			`INSERT INTO spans (span_id, trace_id, project_id, model, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
+			fmt.Sprintf("span-%d", i), fmt.Sprintf("trace-%d", i), "test-proj", "gpt-4",
+			baseTime.Add(time.Duration(i)*5*time.Minute), baseTime.Add(time.Duration(i)*5*time.Minute).Add(time.Minute)); err != nil {
+			t.Fatalf("insert span %d: %v", i, err)
+		}
+	}
+	// Insert 2 spans in the next hour bucket.
+	for i := 0; i < 2; i++ {
+		nextHour := baseTime.Add(1 * time.Hour)
+		if _, err := db.ExecContext(context.Background(),
+			`INSERT INTO spans (span_id, trace_id, project_id, model, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
+			fmt.Sprintf("span-next-%d", i), fmt.Sprintf("trace-next-%d", i), "test-proj", "claude-3",
+			nextHour.Add(time.Duration(i)*5*time.Minute), nextHour.Add(time.Duration(i)*5*time.Minute).Add(time.Minute)); err != nil {
+			t.Fatalf("insert next-hour span %d: %v", i, err)
+		}
+	}
+
+	h := &SpanHandler{
+		DB:           db,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	body := strings.NewReader(`{
+		"from": "2025-01-01T00:00:00Z",
+		"to": "2025-01-02T00:00:00Z",
+		"group_by": [{"field": "time_bucket", "interval": "1h"}],
+		"aggregations": [{"function": "count", "field": "*", "alias": "count"}]
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", body)
+	w := httptest.NewRecorder()
+
+	h.HandleAnalyticsSpans(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// Should have exactly 2 rows (2 hour buckets).
+	if len(resp.Rows) != 2 {
+		t.Errorf("rows count: got %d, want 2", len(resp.Rows))
+	}
+
+	// Verify counts: one bucket has 3, the other has 2.
+	counts := make(map[string]int)
+	for _, row := range resp.Rows {
+		// start_time is a string timestamp.
+		ts, _ := row["start_time"].(string)
+		// count could be string or int64 depending on DuckDB's JSON handling.
+		var count int
+		switch v := row["count"].(type) {
+		case float64:
+			count = int(v)
+		case int64:
+			count = int(v)
+		case string:
+			fmt.Sscanf(v, "%d", &count)
+		}
+		counts[ts] = count
+	}
+	// Verify we have exactly 3 in one bucket and 2 in another.
+	found3, found2 := false, false
+	for _, c := range counts {
+		if c == 3 {
+			found3 = true
+		}
+		if c == 2 {
+			found2 = true
+		}
+	}
+	if !found3 || !found2 {
+		t.Errorf("expected bucket counts with 3 and 2, got: %v", counts)
+	}
+}
+
+func TestHandleAnalyticsSpans_TimeBucketInvalidInterval(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omneval-analytics-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	h := &SpanHandler{
+		DB:           db,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	body := strings.NewReader(`{
+		"from": "2025-01-01T00:00:00Z",
+		"to": "2025-01-02T00:00:00Z",
+		"group_by": [{"field": "time_bucket", "interval": "1y"}],
+		"aggregations": [{"function": "count", "field": "*", "alias": "count"}]
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", body)
+	w := httptest.NewRecorder()
+
+	h.HandleAnalyticsSpans(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v (raw: %q)", err, w.Body.String())
+	}
+	if !strings.Contains(resp["error"], "time_bucket") {
+		t.Errorf("error should mention time_bucket, got: %q", resp["error"])
+	}
+}
+
 // FakeSessionStore is a test fake implementing SessionStore.
 type FakeSessionStore struct {
 	projectID    string

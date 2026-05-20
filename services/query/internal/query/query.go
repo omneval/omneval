@@ -16,13 +16,14 @@ import (
 type FilterOp string
 
 const (
-	OpEq  FilterOp = "eq"
-	OpNeq FilterOp = "neq"
-	OpGt  FilterOp = "gt"
-	OpGte FilterOp = "gte"
-	OpLt  FilterOp = "lt"
-	OpLte FilterOp = "lte"
-	OpIn  FilterOp = "in"
+	OpEq       FilterOp = "eq"
+	OpNeq      FilterOp = "neq"
+	OpGt       FilterOp = "gt"
+	OpGte      FilterOp = "gte"
+	OpLt       FilterOp = "lt"
+	OpLte      FilterOp = "lte"
+	OpIn       FilterOp = "in"
+	OpContains FilterOp = "contains"
 )
 
 // ValidSpanQueryFilters returns the list of accepted filter fields for
@@ -92,11 +93,14 @@ var allSpanFields = map[spanField]struct{}{
 	fieldModel: {}, fieldStartTime: {}, fieldEndTime: {},
 	fieldInputTokens: {}, fieldOutputTokens: {}, fieldCostUSD: {},
 	fieldPromptName: {}, fieldStatusCode: {},
+	// input and output are JSON columns — allowed for contains (LIKE) filters.
+	"input":  {},
+	"output": {},
 }
 
 // validOps is the set of allowed comparison operators.
 var validOps = map[FilterOp]struct{}{
-	OpEq: {}, OpNeq: {}, OpGt: {}, OpGte: {}, OpLt: {}, OpLte: {}, OpIn: {},
+	OpEq: {}, OpNeq: {}, OpGt: {}, OpGte: {}, OpLt: {}, OpLte: {}, OpIn: {}, OpContains: {},
 }
 
 // SpanQueryRequest is the JSON body accepted by POST /api/v1/spans/query.
@@ -444,6 +448,12 @@ func compileFilter(f SpanQueryFilter) (sql string, args []any, err error) {
 			args = append(args, slice[i])
 		}
 		return fmt.Sprintf("%s IN (%s)", field, strings.Join(placeholders, ", ")), args, nil
+	}
+
+	// Contains operator: LIKE '%value%'
+	if op == OpContains {
+		args = append(args, "%"+fmt.Sprint(f.Value)+"%")
+		return fmt.Sprintf("%s LIKE ?", field), args, nil
 	}
 
 	// All other operators use a single placeholder.

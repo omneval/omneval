@@ -642,11 +642,11 @@ func withLimit(n int) func(*Query) {
 // TestCompile_GroupByTruncOrderByRawField verifies that when the group-by
 // field uses a truncation unit (e.g. "hour"), an order-by clause referencing
 // the raw field name ("start_time" instead of the truncated expression)
-// is correctly resolved to the truncated expression.
+// is correctly resolved to the alias.
 //
 // This is the "Traces over Time" pattern: group by start_time truncated to
 // hour, ordered by start_time. The outer query projects the truncated
-// expression, so ORDER BY must also use the truncated expression.
+// expression with an alias, so ORDER BY references the alias.
 func TestCompile_GroupByTruncOrderByRawField(t *testing.T) {
 	q := makeQuery(
 		withAgg(AggCount, "*", "count"),
@@ -658,12 +658,10 @@ func TestCompile_GroupByTruncOrderByRawField(t *testing.T) {
 		t.Fatalf("Compile error: %v", err)
 	}
 
-	// The outer ORDER BY must reference the truncated expression, not the
-	// raw field. The outer SELECT aliases the group-by expression directly
-	// (no explicit alias), so the column name in the outer query is the
-	// full expression.
-	if !strings.Contains(sql, "date_trunc('hour', start_time) ASC") {
-		t.Errorf("expected ORDER BY date_trunc('hour', start_time) ASC in SQL:\n%s", sql)
+	// The outer ORDER BY references the alias "start_time" (which is the
+	// date_trunc expression projected from the inner query).
+	if !strings.Contains(sql, "start_time ASC") {
+		t.Errorf("expected ORDER BY start_time ASC in SQL:\n%s", sql)
 	}
 }
 
@@ -789,5 +787,243 @@ func TestQueryValidate_FromSetToZero_PreservesSingleBound(t *testing.T) {
 	}
 	if !q.To.IsZero() {
 		t.Errorf("to should remain zero when only from is set, got %v", q.To)
+	}
+}
+
+// --- contains filter operator (issue #15) ---
+
+func TestCompile_FilterContains(t *testing.T) {
+	q := makeQuery(withFilter(Filter{Field: "name", Op: OpContains, Value: "qa-"}))
+	sql, args, err := Compile("proj", q)
+	if err != nil {
+		t.Fatalf("Compile error: %v", err)
+	}
+	if !strings.Contains(sql, "name LIKE ?") {
+		t.Errorf("expected name LIKE ? in SQL, got:\n%s", sql)
+	}
+	if len(args) == 0 {
+		t.Fatal("expected args for contains filter")
+	}
+	// Value should use wildcard pattern — it's the last arg (after project_id + 2 time args).
+	found := false
+	for _, a := range args {
+		if s, ok := a.(string); ok && s == "%qa-%" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("contains value should be wildcarded in args: got %v", args)
+	}
+}
+
+func TestCompile_FilterContainsOnInput(t *testing.T) {
+	q := makeQuery(withFilter(Filter{Field: "input", Op: OpContains, Value: "error"}))
+	sql, _, err := Compile("proj", q)
+	if err != nil {
+		t.Fatalf("Compile error: %v", err)
+	}
+	if !strings.Contains(sql, "input LIKE ?") {
+		t.Errorf("expected input LIKE ? in SQL, got:\n%s", sql)
+	}
+}
+
+func TestCompile_FilterContainsOnOutput(t *testing.T) {
+	q := makeQuery(withFilter(Filter{Field: "output", Op: OpContains, Value: "fail"}))
+	sql, _, err := Compile("proj", q)
+	if err != nil {
+		t.Fatalf("Compile error: %v", err)
+	}
+	if !strings.Contains(sql, "output LIKE ?") {
+		t.Errorf("expected output LIKE ? in SQL, got:\n%s", sql)
+	}
+}
+
+func TestCompile_FilterContainsOnModel(t *testing.T) {
+	q := makeQuery(withFilter(Filter{Field: "model", Op: OpContains, Value: "gpt"}))
+	sql, _, err := Compile("proj", q)
+	if err != nil {
+		t.Fatalf("Compile error: %v", err)
+	}
+	if !strings.Contains(sql, "model LIKE ?") {
+		t.Errorf("expected model LIKE ? in SQL, got:\n%s", sql)
+	}
+}
+
+func TestCompile_FilterContainsEmptyValue(t *testing.T) {
+	// Empty string should still work — matches everything with LIKE '%%'
+	q := makeQuery(withFilter(Filter{Field: "name", Op: OpContains, Value: ""}))
+	sql, args, err := Compile("proj", q)
+	if err != nil {
+		t.Fatalf("Compile error: %v", err)
+	}
+	if !strings.Contains(sql, "name LIKE ?") {
+		t.Errorf("expected name LIKE ? in SQL, got:\n%s", sql)
+	}
+	// Empty string becomes '%%' which matches everything.
+	found := false
+	for _, a := range args {
+		if s, ok := a.(string); ok && s == "%%" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("contains empty value should be %% in args: got %v", args)
+	}
+}
+
+// --- time_bucket group-by (issue #15) ---
+
+func TestCompile_GroupByTimeBucketHour(t *testing.T) {
+	q := makeQuery(
+		withAgg(AggCount, "*", "count"),
+		withGroupByTimeBucket("1h"),
+	)
+	sql, _, err := Compile("proj", q)
+	if err != nil {
+		t.Fatalf("Compile error: %v", err)
+	}
+	// Should use date_trunc('hour', start_time).
+	if !strings.Contains(sql, "date_trunc('hour', start_time)") {
+		t.Errorf("expected date_trunc('hour', start_time) in SQL, got:\n%s", sql)
+	}
+}
+
+func TestCompile_GroupByTimeBucketDay(t *testing.T) {
+	q := makeQuery(
+		withAgg(AggCount, "*", "count"),
+		withGroupByTimeBucket("1d"),
+	)
+	sql, _, err := Compile("proj", q)
+	if err != nil {
+		t.Fatalf("Compile error: %v", err)
+	}
+	if !strings.Contains(sql, "date_trunc('day', start_time)") {
+		t.Errorf("expected date_trunc('day', start_time) in SQL, got:\n%s", sql)
+	}
+}
+
+func TestCompile_GroupByTimeBucket5Min(t *testing.T) {
+	q := makeQuery(
+		withAgg(AggCount, "*", "count"),
+		withGroupByTimeBucket("5m"),
+	)
+	sql, _, err := Compile("proj", q)
+	if err != nil {
+		t.Fatalf("Compile error: %v", err)
+	}
+	if !strings.Contains(sql, "date_trunc('minute', start_time)") {
+		t.Errorf("expected date_trunc('minute', start_time) in SQL, got:\n%s", sql)
+	}
+}
+
+func TestCompile_GroupByTimeBucket1Min(t *testing.T) {
+	q := makeQuery(
+		withAgg(AggCount, "*", "count"),
+		withGroupByTimeBucket("1m"),
+	)
+	sql, _, err := Compile("proj", q)
+	if err != nil {
+		t.Fatalf("Compile error: %v", err)
+	}
+	if !strings.Contains(sql, "date_trunc('minute', start_time)") {
+		t.Errorf("expected date_trunc('minute', start_time) in SQL, got:\n%s", sql)
+	}
+}
+
+func TestCompile_GroupByTimeBucketInvalidInterval(t *testing.T) {
+	q := makeQuery(
+		withAgg(AggCount, "*", "count"),
+		withGroupByTimeBucket("1y"),
+	)
+	_, _, err := Compile("proj", q)
+	if err == nil {
+		t.Fatal("expected error for invalid time_bucket interval")
+	}
+	if !strings.Contains(err.Error(), "time_bucket") {
+		t.Errorf("error should mention time_bucket, got: %v", err)
+	}
+}
+
+func TestCompile_GroupByTimeBucketSum(t *testing.T) {
+	q := makeQuery(
+		withAgg(AggSum, "cost_usd", "total_cost"),
+		withGroupByTimeBucket("1h"),
+	)
+	sql, _, err := Compile("proj", q)
+	if err != nil {
+		t.Fatalf("Compile error: %v", err)
+	}
+	if !strings.Contains(sql, "SUM(cost_usd)") {
+		t.Error("expected SUM(cost_usd) in SQL")
+	}
+	if !strings.Contains(sql, "date_trunc('hour', start_time)") {
+		t.Error("expected date_trunc('hour', start_time) in SQL")
+	}
+}
+
+func TestCompile_GroupByTimeBucketWithOrderBy(t *testing.T) {
+	q := makeQuery(
+		withAgg(AggCount, "*", "count"),
+		withGroupByTimeBucket("1h"),
+		withOrderBy("start_time", false),
+	)
+	sql, _, err := Compile("proj", q)
+	if err != nil {
+		t.Fatalf("Compile error: %v", err)
+	}
+	// Order by should resolve time_bucket -> alias "start_time".
+	// The inner query has date_trunc('hour', start_time) AS start_time,
+	// and the outer ORDER BY references the alias directly.
+	if !strings.Contains(sql, "start_time ASC") {
+		t.Errorf("expected ORDER BY start_time ASC in SQL, got:\n%s", sql)
+	}
+}
+
+// --- JSON deserialization (issue #15) ---
+
+func TestCompile_TimeBucketDeserialization(t *testing.T) {
+	jsonStr := `{"group_by":[{"field":"time_bucket","interval":"1h"}],"aggregations":[{"function":"count","field":"*","alias":"count"}]}`
+	var req Query
+	if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+	if len(req.GroupBy) != 1 {
+		t.Fatalf("expected 1 group-by, got %d", len(req.GroupBy))
+	}
+	if req.GroupBy[0].Field != "time_bucket" {
+		t.Errorf("field: got %q, want %q", req.GroupBy[0].Field, "time_bucket")
+	}
+	if req.GroupBy[0].Interval != "1h" {
+		t.Errorf("interval: got %q, want %q", req.GroupBy[0].Interval, "1h")
+	}
+}
+
+func TestCompile_ContainsDeserialization(t *testing.T) {
+	jsonStr := `{"filters":[{"field":"name","op":"contains","value":"foo"}]}`
+	var req Query
+	if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+	if len(req.Filters) != 1 {
+		t.Fatalf("expected 1 filter, got %d", len(req.Filters))
+	}
+	if req.Filters[0].Field != "name" {
+		t.Errorf("field: got %q, want %q", req.Filters[0].Field, "name")
+	}
+	if req.Filters[0].Op != OpContains {
+		t.Errorf("op: got %q, want %q", req.Filters[0].Op, OpContains)
+	}
+	if req.Filters[0].Value != "foo" {
+		t.Errorf("value: got %v, want %q", req.Filters[0].Value, "foo")
+	}
+}
+
+// --- Helper for time_bucket group-by ---
+
+func withGroupByTimeBucket(interval string) func(*Query) {
+	return func(q *Query) {
+		q.GroupBy = append(q.GroupBy, GroupByField{Field: "time_bucket", Interval: interval})
 	}
 }

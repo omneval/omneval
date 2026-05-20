@@ -843,3 +843,149 @@ func TestNextCursor_SameStartTimeDifferentSpanID(t *testing.T) {
 		t.Errorf("cursor span_id: got %q, want %q", decoded.SpanID, "bbb")
 	}
 }
+
+// --- contains filter operator (issue #15) ---
+
+func TestNewSpanQuery_ContainsOpAccepted(t *testing.T) {
+	req := SpanQueryRequest{
+		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Filters: []SpanQueryFilter{
+			{Field: "name", Op: "contains", Value: "qa-"},
+		},
+	}
+
+	_, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery should accept contains op: %v", err)
+	}
+}
+
+func TestSQL_FilterContainsName(t *testing.T) {
+	req := SpanQueryRequest{
+		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Filters: []SpanQueryFilter{
+			{Field: "name", Op: "contains", Value: "error"},
+		},
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, args, err := q.SQL()
+	if err != nil {
+		t.Fatalf("SQL error: %v", err)
+	}
+
+	if !strings.Contains(sql, "name LIKE ?") {
+		t.Errorf("expected 'name LIKE ?' in SQL, got:\n%s", sql)
+	}
+
+	// Value should be wildcarded.
+	if len(args) > 0 {
+		expectedVal := "%error%"
+		if args[len(args)-2] != expectedVal {
+			t.Errorf("contains value should be %q, got %q", expectedVal, args[len(args)-2])
+		}
+	}
+}
+
+func TestSQL_FilterContainsOnModel(t *testing.T) {
+	req := SpanQueryRequest{
+		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Filters: []SpanQueryFilter{
+			{Field: "model", Op: "contains", Value: "gpt"},
+		},
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, _, err := q.SQL()
+	if err != nil {
+		t.Fatalf("SQL error: %v", err)
+	}
+
+	if !strings.Contains(sql, "model LIKE ?") {
+		t.Errorf("expected 'model LIKE ?' in SQL, got:\n%s", sql)
+	}
+}
+
+func TestSQL_FilterContainsOnInput(t *testing.T) {
+	req := SpanQueryRequest{
+		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Filters: []SpanQueryFilter{
+			{Field: "input", Op: "contains", Value: "user prompt"},
+		},
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, _, err := q.SQL()
+	if err != nil {
+		t.Fatalf("SQL error: %v", err)
+	}
+
+	if !strings.Contains(sql, "input LIKE ?") {
+		t.Errorf("expected 'input LIKE ?' in SQL, got:\n%s", sql)
+	}
+}
+
+func TestSQL_FilterContainsOnOutput(t *testing.T) {
+	req := SpanQueryRequest{
+		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Filters: []SpanQueryFilter{
+			{Field: "output", Op: "contains", Value: "response"},
+		},
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, _, err := q.SQL()
+	if err != nil {
+		t.Fatalf("SQL error: %v", err)
+	}
+
+	if !strings.Contains(sql, "output LIKE ?") {
+		t.Errorf("expected 'output LIKE ?' in SQL, got:\n%s", sql)
+	}
+}
+
+func TestSQL_FilterContainsEmptyString(t *testing.T) {
+	// Empty string should still work — matches everything with LIKE '%%'
+	req := SpanQueryRequest{
+		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Filters: []SpanQueryFilter{
+			{Field: "name", Op: "contains", Value: ""},
+		},
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, _, err := q.SQL()
+	if err != nil {
+		t.Fatalf("SQL error: %v", err)
+	}
+
+	if !strings.Contains(sql, "name LIKE ?") {
+		t.Errorf("expected 'name LIKE ?' in SQL, got:\n%s", sql)
+	}
+}

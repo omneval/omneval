@@ -26,18 +26,19 @@ var validTruncUnits = map[TruncUnit]struct{}{
 type FilterOp string
 
 const (
-	OpEq  FilterOp = "eq"
-	OpNeq FilterOp = "neq"
-	OpGt  FilterOp = "gt"
-	OpGte FilterOp = "gte"
-	OpLt  FilterOp = "lt"
-	OpLte FilterOp = "lte"
-	OpIn  FilterOp = "in"
+	OpEq       FilterOp = "eq"
+	OpNeq      FilterOp = "neq"
+	OpGt       FilterOp = "gt"
+	OpGte      FilterOp = "gte"
+	OpLt       FilterOp = "lt"
+	OpLte      FilterOp = "lte"
+	OpIn       FilterOp = "in"
+	OpContains FilterOp = "contains"
 )
 
 // validFilterOps is the allowlist of valid comparison operators.
 var validFilterOps = map[FilterOp]struct{}{
-	OpEq: {}, OpNeq: {}, OpGt: {}, OpGte: {}, OpLt: {}, OpLte: {}, OpIn: {},
+	OpEq: {}, OpNeq: {}, OpGt: {}, OpGte: {}, OpLt: {}, OpLte: {}, OpIn: {}, OpContains: {},
 }
 
 // AggFunc is an allowlisted aggregation function.
@@ -87,15 +88,38 @@ var spanColumns = map[string]struct{}{
 	"status_message": {},
 	// duration_ms is a virtual field — not a real column, but allowed.
 	"duration_ms": {},
+	// input and output are JSON columns — allowed for contains (LIKE) filters.
+	"input":  {},
+	"output": {},
+	// time_bucket is a virtual group-by field — not a real column, but allowed
+	// for time-series aggregation queries.
+	"time_bucket": {},
 }
 
 // durationMsVirtualField is the canonical virtual field name.
 const durationMsVirtualField = "duration_ms"
 
+// timeBucketVirtualField is the canonical name for the time_bucket group-by field.
+const timeBucketVirtualField = "time_bucket"
+
+// validTimeBucketIntervals maps interval strings to DuckDB date_trunc units.
+var validTimeBucketIntervals = map[string]string{
+	"1m":  "minute",
+	"5m":  "minute",
+	"1h":  "hour",
+	"1d":  "day",
+}
+
 // isDurationMs checks whether a field name refers to the duration_ms virtual
 // field.
 func isDurationMs(field string) bool {
 	return field == durationMsVirtualField
+}
+
+// isTimeBucket checks whether a field name refers to the time_bucket virtual
+// group-by field.
+func isTimeBucket(field string) bool {
+	return field == timeBucketVirtualField
 }
 
 // durationMsExpr returns the DuckDB SQL expression for the duration_ms virtual
@@ -179,18 +203,42 @@ func filterExprForField(field string) (string, error) {
 }
 
 // aliasFor extracts the column alias from a select clause. If the clause
-// contains " AS <alias>", returns the alias; otherwise returns the full
-// clause verbatim.
+// contains " AS <alias>", returns the alias; otherwise derives a safe
+// identifier from the expression for use in column lists.
 func aliasFor(clause string) string {
 	if idx := strings.Index(clause, " AS "); idx >= 0 {
 		return clause[idx+4:]
 	}
+	// No explicit alias — derive one from the expression.
+	// For function calls like "date_trunc('hour', start_time)", extract
+	// the last argument (the inner column) as a safe alias.
+	if parens := strings.LastIndex(clause, "("); parens >= 0 {
+		args := strings.TrimSpace(clause[parens+1:])
+		if strings.HasSuffix(args, ")") {
+			args = strings.TrimSuffix(args, ")")
+		}
+		// Take the last argument as the alias.
+		if comma := strings.LastIndex(args, ","); comma >= 0 {
+			return strings.TrimSpace(args[comma+1:])
+		}
+	}
+	// For plain column references or simple expressions, return as-is.
 	return clause
 }
 
 // groupByFieldExpr returns the SQL expression for a group-by field, applying
 // date_trunc when a truncation unit is specified.
-func groupByFieldExpr(field string, trunc TruncUnit) string {
+// When field is "time_bucket" with a valid interval, it resolves to the
+// appropriate date_trunc unit (e.g. "1h" → date_trunc('hour', start_time)).
+func groupByFieldExpr(field string, trunc TruncUnit, interval string) string {
+	// time_bucket virtual field with interval.
+	if isTimeBucket(field) && interval != "" {
+		unit, ok := validTimeBucketIntervals[interval]
+		if !ok {
+			return "" // Invalid interval — caller handles the error.
+		}
+		return fmt.Sprintf("date_trunc('%s', start_time)", unit)
+	}
 	if trunc != "" {
 		return fmt.Sprintf("date_trunc('%s', %s)", trunc, field)
 	}
@@ -199,12 +247,19 @@ func groupByFieldExpr(field string, trunc TruncUnit) string {
 
 // resolveOrderByField returns the SQL expression for an order-by field.
 // When the field name matches a group-by field (with or without truncation),
-// it returns the group-by expression so the outer query references an
-// existing projected column. Otherwise it returns the field name verbatim.
+// it returns the alias (not the full expression) so the outer query
+// references the already-projected column. This is essential for time_bucket
+// where re-computing date_trunc on the outer alias would fail.
 func resolveOrderByField(field string, groupBy []GroupByField) string {
 	for _, gb := range groupBy {
 		if gb.Field == field {
-			return groupByFieldExpr(gb.Field, gb.Truncate)
+			// Return the alias name, not the expression.
+			return aliasFor(groupByFieldExpr(gb.Field, gb.Truncate, gb.Interval))
+		}
+		// time_bucket group-by: ordering by "start_time" should resolve to
+		// the alias "start_time" (not date_trunc(...)).
+		if isTimeBucket(gb.Field) && field == "start_time" {
+			return "start_time"
 		}
 	}
 	return field
@@ -234,10 +289,27 @@ func Compile(projectID string, q Query) (sql string, args []any, err error) {
 		if _, ok := spanColumns[gb.Field]; !ok {
 			return "", nil, fmt.Errorf("dsl: unknown group-by field %q", gb.Field)
 		}
-		if _, ok := validTruncUnits[gb.Truncate]; !ok && gb.Truncate != "" {
-			return "", nil, fmt.Errorf("dsl: unknown truncation unit %q", gb.Truncate)
+		if isTimeBucket(gb.Field) {
+			// time_bucket requires a valid interval.
+			if gb.Interval == "" {
+				return "", nil, fmt.Errorf("dsl: time_bucket group-by requires an interval (e.g. 1m, 5m, 1h, 1d)")
+			}
+			if _, ok := validTimeBucketIntervals[gb.Interval]; !ok {
+				return "", nil, fmt.Errorf("dsl: unknown time_bucket interval %q; accepted intervals: 1m, 5m, 1h, 1d", gb.Interval)
+			}
+			expr := groupByFieldExpr(gb.Field, "", gb.Interval)
+			if expr == "" {
+				return "", nil, fmt.Errorf("dsl: invalid time_bucket interval %q", gb.Interval)
+			}
+			// Give it an explicit alias so the outer query can reference it.
+			selectClauses = append(selectClauses, fmt.Sprintf("%s AS %s", expr, aliasFor(expr)))
+		} else {
+			if _, ok := validTruncUnits[gb.Truncate]; !ok && gb.Truncate != "" {
+				return "", nil, fmt.Errorf("dsl: unknown truncation unit %q", gb.Truncate)
+			}
+			expr := groupByFieldExpr(gb.Field, gb.Truncate, gb.Interval)
+			selectClauses = append(selectClauses, fmt.Sprintf("%s AS %s", expr, aliasFor(expr)))
 		}
-		selectClauses = append(selectClauses, groupByFieldExpr(gb.Field, gb.Truncate))
 	}
 
 	// Default: SELECT COUNT(*) if no aggregations and no group-by.
@@ -282,7 +354,6 @@ func Compile(projectID string, q Query) (sql string, args []any, err error) {
 			return "", nil, fmt.Errorf("dsl: filter value must not be nil")
 		}
 
-		opSymbol := filterOpSQL[f.Op]
 		if f.Op == OpIn {
 			// IN operator: value must be a slice.
 			slice, ok := f.Value.([]any)
@@ -299,7 +370,12 @@ func Compile(projectID string, q Query) (sql string, args []any, err error) {
 				}
 				whereClauses = append(whereClauses, fmt.Sprintf("%s IN (%s)", expr, strings.Join(placeholders, ", ")))
 			}
+		} else if f.Op == OpContains {
+			// Contains operator: LIKE '%value%' with parameterized value.
+			whereClauses = append(whereClauses, fmt.Sprintf("%s LIKE ?", expr))
+			args = append(args, "%"+fmt.Sprint(f.Value)+"%")
 		} else {
+			opSymbol := filterOpSQL[f.Op]
 			whereClauses = append(whereClauses, fmt.Sprintf("%s %s ?", expr, opSymbol))
 			args = append(args, f.Value)
 		}
@@ -315,7 +391,7 @@ func Compile(projectID string, q Query) (sql string, args []any, err error) {
 	if len(q.GroupBy) > 0 {
 		groupParts := make([]string, len(q.GroupBy))
 		for i, gb := range q.GroupBy {
-			groupParts[i] = groupByFieldExpr(gb.Field, gb.Truncate)
+			groupParts[i] = groupByFieldExpr(gb.Field, gb.Truncate, gb.Interval)
 		}
 		groupSQL = "\n  GROUP BY " + strings.Join(groupParts, ", ")
 	}
@@ -367,7 +443,8 @@ func Compile(projectID string, q Query) (sql string, args []any, err error) {
 		outerSQL += "\n  ORDER BY " + strings.Join(orderParts, ", ")
 	} else if len(q.GroupBy) > 0 {
 		// Default ordering for grouped queries: order by first group-by expression.
-		outerSQL += "\n  ORDER BY " + groupByFieldExpr(q.GroupBy[0].Field, q.GroupBy[0].Truncate) + " ASC"
+		// Use the alias name so it references the already-projected column.
+		outerSQL += "\n  ORDER BY " + aliasFor(groupByFieldExpr(q.GroupBy[0].Field, q.GroupBy[0].Truncate, q.GroupBy[0].Interval)) + " ASC"
 	}
 	outerSQL += limitClause
 
@@ -419,9 +496,12 @@ type Filter struct {
 
 // GroupByField is a structured group-by clause. If Truncate is set the
 // compiler emits date_trunc(Truncate, Field) rather than the bare column.
+// When Field is "time_bucket", Interval specifies the bucket size
+// (e.g. "1m", "5m", "1h", "1d").
 type GroupByField struct {
 	Field    string    `json:"field"`
 	Truncate TruncUnit `json:"truncate,omitempty"`
+	Interval string    `json:"interval,omitempty"`
 }
 
 // Aggregation specifies a metric to compute. duration_ms is a virtual field
