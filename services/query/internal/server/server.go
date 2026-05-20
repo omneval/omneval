@@ -16,6 +16,7 @@ import (
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
+	"github.com/minio/minio-go/v7"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/metadata"
@@ -156,10 +157,12 @@ func Run() error {
 		if err := downloadSnapshot(context.Background(), s3Store, dbPath); err != nil {
 			return fmt.Errorf("query: download snapshot: %w", err)
 		}
-		slog.Info("query: snapshot downloaded from S3", "path", dbPath)
 		// Try to get the last modified time from S3.
 		if stat, err := s3Store.Stat(context.Background(), s3.SnapshotKey()); err == nil && stat != nil {
+			slog.Info("query: snapshot downloaded from S3", "path", dbPath, "last_modified", stat.LastModified)
 			snapshotLastModified = stat.LastModified
+		} else {
+			slog.Info("query: starting with empty database, snapshot not yet available in S3")
 		}
 	} else {
 		slog.Info("query: no S3 configured, skipping snapshot download")
@@ -437,7 +440,20 @@ func Run() error {
 	return nil
 }
 
+// isS3NotFound checks whether the error indicates that the S3 object
+// does not exist (NoSuchKey or NoSuchBucket). Used to distinguish
+// "not ready yet" from genuine failures.
+func isS3NotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	resp := minio.ToErrorResponse(err)
+	return resp.Code == minio.NoSuchKey || resp.Code == minio.NoSuchBucket
+}
+
 // downloadSnapshot downloads the DuckDB snapshot from S3 to the local path.
+// If the snapshot does not exist yet (NoSuchKey), it creates an empty
+// DuckDB file with the required schema instead of failing.
 func downloadSnapshot(ctx context.Context, store storage.ObjectStore, dbPath string) error {
 	// Ensure parent directory exists.
 	dir := filepath.Dir(dbPath)
@@ -451,6 +467,11 @@ func downloadSnapshot(ctx context.Context, store storage.ObjectStore, dbPath str
 	snapshotKey := s3.SnapshotKey()
 	reader, err := store.Get(ctx, snapshotKey)
 	if err != nil {
+		// If the snapshot doesn't exist yet, create an empty DB.
+		if isS3NotFound(err) {
+			slog.Warn("query: no snapshot found in S3, starting with empty database")
+			return createEmptyDB(dbPath)
+		}
 		return fmt.Errorf("snapshot: get %s: %w", snapshotKey, err)
 	}
 	defer reader.Close()
@@ -485,12 +506,25 @@ func downloadSnapshot(ctx context.Context, store storage.ObjectStore, dbPath str
 // It compares the S3 object's LastModified against the previously stored value
 // to avoid the stale-mod-time problem where the local file's filesystem timestamp
 // reflects the download time rather than the S3 object's LastModified.
+// If the snapshot does not exist yet (NoSuchKey), it logs a warning and returns nil.
 func pollAndDownload(ctx context.Context, store storage.ObjectStore, dbPath string, lastModified *time.Time) error {
 	snapshotKey := s3.SnapshotKey()
 
 	// Stat the S3 object to check for changes.
 	info, err := store.Stat(ctx, snapshotKey)
 	if err != nil {
+		// Snapshot doesn't exist yet — log a warning but don't fail.
+		// The writer will produce one within ~30 seconds.
+		if isS3NotFound(err) {
+			slog.Warn("query: snapshot not yet available in S3, waiting for writer", "key", snapshotKey)
+			// Ensure we have at least an empty DB.
+			if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {
+				if createErr := createEmptyDB(dbPath); createErr != nil {
+					slog.Warn("query: failed to create empty DB as fallback", "err", createErr)
+				}
+			}
+			return nil
+		}
 		return fmt.Errorf("snapshot: stat %s: %w", snapshotKey, err)
 	}
 
@@ -513,6 +547,69 @@ func pollAndDownload(ctx context.Context, store storage.ObjectStore, dbPath stri
 
 	// Update the last modified time.
 	*lastModified = info.LastModified
+
+	return nil
+}
+
+// createEmptyDB creates a new DuckDB file with the Omneval schema.
+// Used when the S3 snapshot does not exist yet (first boot).
+func createEmptyDB(path string) error {
+	db, err := sql.Open("duckdb", path+"?access_mode=read_write")
+	if err != nil {
+		return fmt.Errorf("duckdb: create empty db: %w", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS spans (
+			span_id        VARCHAR      NOT NULL,
+			trace_id       VARCHAR      NOT NULL,
+			parent_id      VARCHAR,
+			project_id     VARCHAR      NOT NULL,
+			service_name   VARCHAR,
+			name           VARCHAR,
+			kind           VARCHAR,
+			start_time     TIMESTAMPTZ  NOT NULL,
+			end_time       TIMESTAMPTZ,
+			model          VARCHAR,
+			input          JSON,
+			output         JSON,
+			input_tokens   BIGINT,
+			output_tokens  BIGINT,
+			cost_usd       DOUBLE,
+			prompt_name    VARCHAR,
+			prompt_version BIGINT,
+			status_code    VARCHAR,
+			status_message VARCHAR,
+			attributes     JSON,
+			PRIMARY KEY (trace_id, span_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_spans_project_time
+			ON spans (project_id, start_time);
+
+		CREATE TABLE IF NOT EXISTS bookmarks (
+			trace_id       VARCHAR      NOT NULL,
+			project_id     VARCHAR      NOT NULL,
+			created_at     TIMESTAMPTZ  NOT NULL,
+			PRIMARY KEY (trace_id, project_id)
+		);
+
+		CREATE TABLE IF NOT EXISTS scores (
+			score_id       VARCHAR      NOT NULL PRIMARY KEY,
+			span_id        VARCHAR      NOT NULL,
+			trace_id       VARCHAR      NOT NULL,
+			project_id     VARCHAR      NOT NULL,
+			eval_name      VARCHAR,
+			value          DOUBLE,
+			reasoning      VARCHAR,
+			judge_model    VARCHAR,
+			prompt_name    VARCHAR,
+			prompt_version BIGINT,
+			created_at     TIMESTAMPTZ  NOT NULL
+		);
+	`); err != nil {
+		return fmt.Errorf("duckdb: create schema: %w", err)
+	}
 
 	return nil
 }
