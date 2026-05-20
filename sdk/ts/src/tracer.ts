@@ -86,7 +86,14 @@ export class ManualTracer {
       return;
     }
 
-    const spans: OmnevalSpan[] = this.pending.map((s) => ({
+    // Only export spans that have been explicitly ended (end_time is set).
+    // This prevents premature export of active parent spans when children end.
+    const endedSpans = this.pending.filter((s) => s.end_time !== undefined);
+    if (endedSpans.length === 0) {
+      return;
+    }
+
+    const spans: OmnevalSpan[] = endedSpans.map((s) => ({
       span_id: s.span_id,
       trace_id: s.trace_id,
       parent_id: s.parent_id,
@@ -101,13 +108,15 @@ export class ManualTracer {
       prompt_version: s.prompt_version,
       attributes: s.attributes,
       start_time: s.start_time,
-      end_time: s.end_time ?? Date.now(),
+      end_time: s.end_time,
     }));
 
     const success = await this.exporter.export(spans);
 
     if (success) {
-      this.pending = [];
+      // Only remove the ended (exported) spans — keep pending ones alive.
+      const endedIds = new Set(endedSpans.map((s) => s.span_id));
+      this.pending = this.pending.filter((s) => !endedIds.has(s.span_id));
     }
   }
 

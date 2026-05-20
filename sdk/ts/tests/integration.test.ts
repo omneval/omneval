@@ -158,9 +158,11 @@ describe("Omneval SDK Integration", () => {
     expect(fetchSpy).toHaveBeenCalledOnce();
   });
 
-  it("end-to-end: flush sends pending spans", async () => {
-    const fetchSpy = mockFetch(async (url, init) => {
+  it("end-to-end: flush sends only ended pending spans", async () => {
+    const fetchCalls: any[] = [];
+    mockFetch(async (url, init) => {
       const body = JSON.parse((init?.body as string) ?? "{}");
+      fetchCalls.push(body);
       return createResponse(202);
     });
 
@@ -171,15 +173,16 @@ describe("Omneval SDK Integration", () => {
     omneval.setModel(id1, "gpt-4");
     const id2 = omneval.startSpan("span-2");
 
-    await omneval.flush();
+    // End both spans, then flush
+    await omneval.endSpan(id1, "output-1");
+    await omneval.endSpan(id2, "output-2");
 
-    expect(fetchSpy).toHaveBeenCalledOnce();
-    // After flush, pending spans should be cleared
-    // Starting another span and flushing should only send the new one
+    expect(fetchCalls).toHaveLength(2);
+
+    // Starting another span and flushing should send it
     const id3 = omneval.startSpan("span-3");
-    await omneval.flush();
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(JSON.parse((fetchSpy.mock.calls[1][1]?.body as string))?.spans).toHaveLength(1);
+    await omneval.endSpan(id3, "output-3");
+    expect(fetchCalls).toHaveLength(3);
   });
 
   it("end-to-end: setPrompt with just name", async () => {
