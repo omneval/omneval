@@ -10,6 +10,9 @@
       "Bash(uv run *)",
       "mcp__porkbun__domains_check_availability",
       "Bash(Start-Sleep -Seconds 15)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\altoz\\Projects\\website"
     ]
   }
 }

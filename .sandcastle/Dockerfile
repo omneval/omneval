@@ -27,6 +27,13 @@ RUN curl -fsSL "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release
 # Install Helm 3
 RUN curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
+# Install uv (Python package manager for SDK testing/linting)
+COPY --from=ghcr.io/astral-sh/uv:python3.12-trixie /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:python3.12-trixie /uvx /usr/local/bin/uvx
+
+# Install TypeScript globally so `tsc` is available for SDK type-checking
+RUN npm install -g typescript
+
 # Rename the base image's "node" user (UID 1000) to "agent".
 # This keeps UID 1000 so that --userns=keep-id (Podman) and
 # --user 1000:1000 (Docker) map to the correct home directory owner.
@@ -36,6 +43,9 @@ RUN usermod -d /home/agent -m -l agent node
 RUN npm install -g @mariozechner/pi-coding-agent
 
 USER agent
+
+# Pre-install Python 3.12 via uv so SDK tests don't need a network fetch at runtime
+RUN uv python install 3.12
 
 # Install helm-unittest plugin (baked in so agents don't need network at test time)
 RUN helm plugin install https://github.com/helm-unittest/helm-unittest.git
