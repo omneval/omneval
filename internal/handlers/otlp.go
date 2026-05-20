@@ -35,7 +35,8 @@ type Validator interface {
 }
 
 // OTLPHandler handles POST /v1/traces for OTLP-encoded traces.
-// Accepts Content-Type: application/x-protobuf or application/json.
+// Accepts Content-Type: application/x-protobuf or application/json,
+// with optional gzip compression via Content-Encoding: gzip.
 type OTLPHandler struct {
 	queue     SpanQueue
 	validator Validator
@@ -77,9 +78,10 @@ func (h *OTLPHandler) handleOTLPTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decompress gzip-encoded bodies (OTLP spec allows gzip compression).
-	// Go SDK uses otlptracehttp.WithCompression(otlptracehttp.GzipCompression).
-	bodyBytes, err = decompressIfNeeded(r.Header.Get("Content-Encoding"), bodyBytes)
+	// Decompress gzip-encoded bodies — OTLP spec allows gzip compression
+	// and the Go SDK uses otlptracehttp.GzipCompression by default.
+	contentEncoding := r.Header.Get("Content-Encoding")
+	bodyBytes, err = decompressIfNeeded(contentEncoding, bodyBytes)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("decompress body: %v", err), http.StatusBadRequest)
 		return
@@ -147,7 +149,6 @@ func decompressIfNeeded(contentEncoding string, data []byte) ([]byte, error) {
 		return data, nil
 	}
 	if !strings.EqualFold(contentEncoding, "gzip") {
-		// Only support gzip — ignore other encodings (e.g., br, deflate).
 		return data, nil
 	}
 

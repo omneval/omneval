@@ -263,7 +263,7 @@ func TestOTLPHandler_LogsEnqueueFailure(t *testing.T) {
 	slog.SetDefault(logger)
 	defer slog.SetDefault(orig)
 
-	q := &failingQueue{}
+	q := &failingIngestQueue{}
 	v := &fakeValidator{}
 	h := handlers.NewOTLPHandler(q, v)
 	ts := httptest.NewServer(h.Router())
@@ -294,11 +294,24 @@ func TestOTLPHandler_LogsEnqueueFailure(t *testing.T) {
 	}
 }
 
-// failingQueue always returns an error for enqueue operations.
-type failingQueue struct{}
+// failingIngestQueue always returns an error for enqueue operations.
+type failingIngestQueue struct{}
 
-func (f *failingQueue) Enqueue(_ context.Context, _ []*domain.Span) error {
+func (f *failingIngestQueue) Enqueue(_ context.Context, _ []*domain.Span) error {
 	return fmt.Errorf("queue full")
+}
+
+// compressGzip compresses data with gzip and returns it in a bytes.Buffer.
+func compressGzip(t *testing.T, data []byte) *bytes.Buffer {
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	if _, err := gw.Write(data); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+	return &buf
 }
 
 // --- Gzip Decompression Tests ---
@@ -316,17 +329,7 @@ func TestOTLPHandler_AcceptsGzipCompressedProtobuf(t *testing.T) {
 		t.Fatalf("marshal OTLP request: %v", err)
 	}
 
-	// Compress with gzip
-	var buf bytes.Buffer
-	gw := gzip.NewWriter(&buf)
-	if _, err := gw.Write(body); err != nil {
-		t.Fatalf("gzip write: %v", err)
-	}
-	if err := gw.Close(); err != nil {
-		t.Fatalf("gzip close: %v", err)
-	}
-
-	rq, _ := http.NewRequest("POST", ts.URL+"/v1/traces", &buf)
+	rq, _ := http.NewRequest("POST", ts.URL+"/v1/traces", compressGzip(t, body))
 	rq.Header.Set("X-API-Key", "valid_project_key")
 	rq.Header.Set("Content-Type", "application/x-protobuf")
 	rq.Header.Set("Content-Encoding", "gzip")
@@ -360,17 +363,7 @@ func TestOTLPHandler_GzipCompressedJSON(t *testing.T) {
 		t.Fatalf("protojson marshal: %v", err)
 	}
 
-	// Compress with gzip
-	var gz bytes.Buffer
-	gw := gzip.NewWriter(&gz)
-	if _, err := gw.Write(jsonBytes); err != nil {
-		t.Fatalf("gzip write: %v", err)
-	}
-	if err := gw.Close(); err != nil {
-		t.Fatalf("gzip close: %v", err)
-	}
-
-	rq, _ := http.NewRequest("POST", ts.URL+"/v1/traces", &gz)
+	rq, _ := http.NewRequest("POST", ts.URL+"/v1/traces", compressGzip(t, jsonBytes))
 	rq.Header.Set("X-API-Key", "valid_project_key")
 	rq.Header.Set("Content-Type", "application/json")
 	rq.Header.Set("Content-Encoding", "gzip")
