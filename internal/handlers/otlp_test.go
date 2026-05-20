@@ -2,8 +2,10 @@ package handlers_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +18,7 @@ import (
 	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/handlers"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -296,6 +299,120 @@ type failingQueue struct{}
 
 func (f *failingQueue) Enqueue(_ context.Context, _ []*domain.Span) error {
 	return fmt.Errorf("queue full")
+}
+
+// --- Gzip Decompression Tests ---
+
+func TestOTLPHandler_AcceptsGzipCompressedProtobuf(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	req := buildMinimalOTLPRequest()
+	body, err := proto.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal OTLP request: %v", err)
+	}
+
+	// Compress with gzip
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	if _, err := gw.Write(body); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+
+	rq, _ := http.NewRequest("POST", ts.URL+"/v1/traces", &buf)
+	rq.Header.Set("X-API-Key", "valid_project_key")
+	rq.Header.Set("Content-Type", "application/x-protobuf")
+	rq.Header.Set("Content-Encoding", "gzip")
+
+	resp, err := http.DefaultClient.Do(rq)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status: got %d, want %d, body: %s", resp.StatusCode, http.StatusAccepted, string(bodyBytes))
+	}
+	if len(q.batches) != 1 || len(q.batches[0]) != 1 {
+		t.Errorf("expected 1 batch with 1 span, got %d batches", len(q.batches))
+	}
+}
+
+func TestOTLPHandler_GzipCompressedJSON(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	// Build a minimal OTLP request and serialize to JSON
+	req := buildMinimalOTLPRequest()
+	jsonBytes, err := protojson.Marshal(req)
+	if err != nil {
+		t.Fatalf("protojson marshal: %v", err)
+	}
+
+	// Compress with gzip
+	var gz bytes.Buffer
+	gw := gzip.NewWriter(&gz)
+	if _, err := gw.Write(jsonBytes); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+
+	rq, _ := http.NewRequest("POST", ts.URL+"/v1/traces", &gz)
+	rq.Header.Set("X-API-Key", "valid_project_key")
+	rq.Header.Set("Content-Type", "application/json")
+	rq.Header.Set("Content-Encoding", "gzip")
+
+	resp, err := http.DefaultClient.Do(rq)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status: got %d, want %d, body: %s", resp.StatusCode, http.StatusAccepted, string(bodyBytes))
+	}
+	if len(q.batches) != 1 {
+		t.Errorf("expected 1 batch, got %d", len(q.batches))
+	}
+}
+
+func TestOTLPHandler_GzipInvalidData_Returns400(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	// Send random data with gzip content-encoding
+	data := []byte("not-gzip-data")
+	rq, _ := http.NewRequest("POST", ts.URL+"/v1/traces", bytes.NewReader(data))
+	rq.Header.Set("X-API-Key", "valid_project_key")
+	rq.Header.Set("Content-Type", "application/x-protobuf")
+	rq.Header.Set("Content-Encoding", "gzip")
+
+	resp, err := http.DefaultClient.Do(rq)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
 }
 
 // buildMinimalOTLPRequest creates an OTLP request with a gen_ai model attribute

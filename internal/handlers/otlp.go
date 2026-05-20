@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	coltracev1 "go.opentelemetry.io/proto/otlp/collector/trace/v1"
@@ -74,6 +77,14 @@ func (h *OTLPHandler) handleOTLPTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Decompress gzip-encoded bodies (OTLP spec allows gzip compression).
+	// Go SDK uses otlptracehttp.WithCompression(otlptracehttp.GzipCompression).
+	bodyBytes, err = decompressIfNeeded(r.Header.Get("Content-Encoding"), bodyBytes)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("decompress body: %v", err), http.StatusBadRequest)
+		return
+	}
+
 	contentType := r.Header.Get("Content-Type")
 	var req *coltracev1.ExportTraceServiceRequest
 	switch contentType {
@@ -126,6 +137,31 @@ func RemoteHost(remoteAddr string) string {
 		return host
 	}
 	return remoteAddr
+}
+
+// decompressIfNeeded checks the Content-Encoding header and decompresses
+// gzip-encoded bodies. It returns the original bytes unchanged if no
+// Content-Encoding header is set or if it is not gzip.
+func decompressIfNeeded(contentEncoding string, data []byte) ([]byte, error) {
+	if contentEncoding == "" {
+		return data, nil
+	}
+	if !strings.EqualFold(contentEncoding, "gzip") {
+		// Only support gzip — ignore other encodings (e.g., br, deflate).
+		return data, nil
+	}
+
+	gr, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create gzip reader: %w", err)
+	}
+	defer gr.Close()
+
+	decompressed, err := io.ReadAll(gr)
+	if err != nil {
+		return nil, fmt.Errorf("read gzip body: %w", err)
+	}
+	return decompressed, nil
 }
 
 func convertToResourceSpans(req *coltracev1.ExportTraceServiceRequest) []otlp.ResourceSpans {
