@@ -162,7 +162,7 @@ func Run() error {
 			slog.Info("query: snapshot downloaded from S3", "path", dbPath, "last_modified", stat.LastModified)
 			snapshotLastModified = stat.LastModified
 		} else {
-			slog.Info("query: starting with empty database, snapshot not yet available in S3")
+			slog.Info("query: snapshot not yet available in S3")
 		}
 	} else {
 		slog.Info("query: no S3 configured, skipping snapshot download")
@@ -648,7 +648,7 @@ func openMetadataStore(cfg *config.Config) (metadata.Store, error) {
 		slog.Info("query: opening SQLite metadata store", "path", dsn)
 		store, err := sqlite.New(dsn)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("query: open sqlite metadata store: %w", err)
 		}
 		if err := store.Migrate(context.Background()); err != nil {
 			store.Close()

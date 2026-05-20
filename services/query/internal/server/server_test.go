@@ -550,44 +550,18 @@ func TestPollAndDownload_NoSnapshotExists_LogsWarning_NoError(t *testing.T) {
 	}
 }
 
-func TestPollAndDownload_SnapshotAppears_LaterDownloadsIt(t *testing.T) {
+func TestPollAndDownload_NoSnapshotExists_ReturnsNoError(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
 	dbPath := tmpDir + "/snapshot.db"
 
-	// Start with a store that has no snapshot.
 	notFoundStore := &fakeNotFoundStore{}
 
-	// First poll — no error, creates empty DB.
 	err := pollAndDownload(context.Background(), notFoundStore, dbPath, nil)
 	if err != nil {
-		t.Fatalf("first poll: %v", err)
+		t.Fatalf("pollAndDownload returned error: %v", err)
 	}
-
-	// Verify empty DB created.
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		t.Fatal("expected DuckDB file to be created after first poll")
-	}
-
-	// Now simulate a snapshot appearing in S3 by writing a valid DuckDB file.
-	db, err := sql.Open("duckdb", dbPath+"?access_mode=read_write")
-	if err != nil {
-		t.Fatalf("open DB: %v", err)
-	}
-	// Create a test table to prove it's a real DB.
-	_, err = db.Exec("CREATE TABLE test_table (id INT)")
-	if err != nil {
-		t.Fatalf("create test table: %v", err)
-	}
-	db.Close()
-
-	// Write the file as the "snapshot" that the fake store would return.
-	// We can't easily mock a Get that changes, but we verified the
-	// first poll creates an empty DB — the real fix is that NoSuchKey
-	// no longer crashes. The poll flow will re-download when Stat
-	// returns a valid object.
-	_ = notFoundStore
 }
 
 func TestSessionMiddleware_IsApplied(t *testing.T) {
