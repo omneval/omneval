@@ -6,7 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -777,12 +777,11 @@ func TestEvalRuleHandler_HandlePreview_EmptyFilter(t *testing.T) {
 
 func TestEvalRuleHandler_HandlePreview_MatchingSpans(t *testing.T) {
 	// Create a DuckDB with test spans.
-	db, err := duckdb.Open("test_preview_match.db")
+	db, err := duckdb.Open(filepath.Join(t.TempDir(), "preview.db"))
 	if err != nil {
 		t.Fatalf("open duckdb: %v", err)
 	}
 	defer db.Close()
-	defer os.Remove("test_preview_match.db")
 
 	// Insert test spans.
 	now := time.Now().UTC()
@@ -847,12 +846,11 @@ func TestEvalRuleHandler_HandlePreview_MatchingSpans(t *testing.T) {
 }
 
 func TestEvalRuleHandler_HandlePreview_NoMatches(t *testing.T) {
-	db, err := duckdb.Open("test_preview_no_match.db")
+	db, err := duckdb.Open(filepath.Join(t.TempDir(), "preview.db"))
 	if err != nil {
 		t.Fatalf("open duckdb: %v", err)
 	}
 	defer db.Close()
-	defer os.Remove("test_preview_no_match.db")
 
 	// Insert a non-matching span.
 	_, err = db.ExecContext(context.Background(), `
@@ -897,12 +895,11 @@ func TestEvalRuleHandler_HandlePreview_NoMatches(t *testing.T) {
 }
 
 func TestEvalRuleHandler_HandlePreview_MatchCount24h(t *testing.T) {
-	db, err := duckdb.Open("test_preview_count.db")
+	db, err := duckdb.Open(filepath.Join(t.TempDir(), "preview.db"))
 	if err != nil {
 		t.Fatalf("open duckdb: %v", err)
 	}
 	defer db.Close()
-	defer os.Remove("test_preview_count.db")
 
 	now := time.Now().UTC()
 	past1h := now.Add(-30 * time.Minute)
