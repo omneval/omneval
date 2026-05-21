@@ -428,6 +428,11 @@ func Run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Start the dedicated Prometheus metrics server on cfg.Metrics.Addr (:9090).
+	if err := StartMetricsServer(ctx, cfg.Metrics.Addr); err != nil {
+		return fmt.Errorf("query: start metrics server: %w", err)
+	}
+
 	go func() {
 		slog.Info("query: listening", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
