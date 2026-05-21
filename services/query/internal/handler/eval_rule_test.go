@@ -148,11 +148,15 @@ func TestEvalRuleHandler_CreateEvalRule_MissingName(t *testing.T) {
 	}
 }
 
+// TestEvalRuleHandler_CreateEvalRule_MissingJudgeModel verifies that omitting
+// judge_model defaults to the handler's DefaultJudgeModel instead of returning 400.
+// This is the RED test for issue #26.
 func TestEvalRuleHandler_CreateEvalRule_MissingJudgeModel(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		Store:        store,
-		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+		Store:             store,
+		SessionStore:      &FakeSessionStore{projectID: "test-proj"},
+		DefaultJudgeModel: "gpt-4o-mini",
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
@@ -161,8 +165,92 @@ func TestEvalRuleHandler_CreateEvalRule_MissingJudgeModel(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.HandleCreate(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	if w.Code != http.StatusCreated {
+		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp domain.EvalRule
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.JudgeModel == "" {
+		t.Error("judge_model: expected non-empty default, got empty string")
+	}
+	if resp.JudgeModel != "gpt-4o-mini" {
+		t.Errorf("judge_model: got %q, want %q", resp.JudgeModel, "gpt-4o-mini")
+	}
+}
+
+// TestEvalRuleHandler_CreateEvalRule_MissingJudgeModel_GlobalFallback verifies that
+// when DefaultJudgeModel is also empty, a hardcoded fallback (gpt-4o-mini) is used.
+func TestEvalRuleHandler_CreateEvalRule_MissingJudgeModel_GlobalFallback(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &EvalRuleHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+		// DefaultJudgeModel intentionally left empty — hardcoded fallback should apply.
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
+		"name": "my-eval"
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreate(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp domain.EvalRule
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.JudgeModel == "" {
+		t.Error("judge_model: expected non-empty fallback, got empty string")
+	}
+}
+
+// TestEvalRuleHandler_ListEvalRules_EmptyListReturnsArray verifies that GET
+// /api/v1/eval-rules returns {"rules":[]} (not {"rules":null}) when no rules exist.
+// This is the RED test for issue #25.
+func TestEvalRuleHandler_ListEvalRules_EmptyListReturnsArray(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &EvalRuleHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "empty-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/eval-rules", nil)
+	w := httptest.NewRecorder()
+	handler.HandleList(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	// Decode into a map to distinguish between null and [] at the JSON level.
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(w.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+
+	rulesRaw, ok := raw["rules"]
+	if !ok {
+		t.Fatal("response missing 'rules' key")
+	}
+
+	// "null" means the slice was nil — must be "[]" instead.
+	if string(rulesRaw) == "null" {
+		t.Errorf("rules: got JSON null, want [] (empty array)")
+	}
+
+	// Verify it decodes to an empty slice (not nil).
+	var rules []domain.EvalRule
+	if err := json.Unmarshal(rulesRaw, &rules); err != nil {
+		t.Fatalf("unmarshal rules: %v", err)
+	}
+	if len(rules) != 0 {
+		t.Errorf("rules count: got %d, want 0", len(rules))
 	}
 }
 

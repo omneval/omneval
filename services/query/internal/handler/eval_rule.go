@@ -32,6 +32,9 @@ type EvalRuleHandler struct {
 	DB           DBHandle
 	Store        metadata.Store
 	SessionStore SessionStore
+	// DefaultJudgeModel is the model used when the request omits judge_model.
+	// Wired from cfg.Eval.LLMModel at startup. Falls back to "gpt-4o-mini" when empty.
+	DefaultJudgeModel string
 }
 
 // ---- Request / Response Types ----
@@ -101,8 +104,11 @@ func (h *EvalRuleHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.JudgeModel == "" {
-		http.Error(w, "judge_model is required", http.StatusBadRequest)
-		return
+		if h.DefaultJudgeModel != "" {
+			req.JudgeModel = h.DefaultJudgeModel
+		} else {
+			req.JudgeModel = "gpt-4o-mini"
+		}
 	}
 
 	// Validate the full recursive filter structure.
@@ -164,6 +170,10 @@ func (h *EvalRuleHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
+	}
+
+	if rules == nil {
+		rules = []*domain.EvalRule{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -218,9 +218,10 @@ func Run() error {
 	var evalRuleHandler *handler.EvalRuleHandler
 	if store != nil {
 		evalRuleHandler = &handler.EvalRuleHandler{
-			DB:           sdb,
-			Store:        store,
-			SessionStore: h,
+			DB:                sdb,
+			Store:             store,
+			SessionStore:      h,
+			DefaultJudgeModel: cfg.Eval.LLMModel,
 		}
 	}
 
