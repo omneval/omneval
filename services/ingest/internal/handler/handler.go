@@ -135,6 +135,12 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reject empty batches
+	if len(req.Spans) == 0 {
+		http.Error(w, "spans array must not be empty", http.StatusBadRequest)
+		return
+	}
+
 	// Validate and normalize each span
 	domainSpans := make([]*domain.Span, 0, len(req.Spans))
 	for _, ns := range req.Spans {
@@ -168,30 +174,32 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *NativeHandler) validateAndTransform(ns *NativeSpan, vk *auth.ValidatedKey) error {
-	// Validate span_id: exactly 8 hex bytes = 16 hex chars
-	if ns.SpanID != "" {
-		if len(ns.SpanID) != 16 {
-			return fmt.Errorf("span_id must be a 16-character lowercase hex string (0-9, a-f), got %d characters", len(ns.SpanID))
-		}
-		if ns.SpanID != strings.ToLower(ns.SpanID) {
-			return fmt.Errorf("span_id must be a 16-character lowercase hex string (0-9, a-f)")
-		}
-		if _, err := hex.DecodeString(ns.SpanID); err != nil {
-			return fmt.Errorf("span_id must be a 16-character lowercase hex string (0-9, a-f)")
-		}
+	// Validate span_id: required, exactly 8 hex bytes = 16 hex chars
+	if ns.SpanID == "" {
+		return fmt.Errorf("span_id is required")
+	}
+	if len(ns.SpanID) != 16 {
+		return fmt.Errorf("span_id must be a 16-character lowercase hex string (0-9, a-f), got %d characters", len(ns.SpanID))
+	}
+	if ns.SpanID != strings.ToLower(ns.SpanID) {
+		return fmt.Errorf("span_id must be a 16-character lowercase hex string (0-9, a-f)")
+	}
+	if _, err := hex.DecodeString(ns.SpanID); err != nil {
+		return fmt.Errorf("span_id must be a 16-character lowercase hex string (0-9, a-f)")
 	}
 
-	// Validate trace_id: exactly 16 hex bytes = 32 hex chars
-	if ns.TraceID != "" {
-		if len(ns.TraceID) != 32 {
-			return fmt.Errorf("trace_id must be a 32-character lowercase hex string (0-9, a-f), got %d characters", len(ns.TraceID))
-		}
-		if ns.TraceID != strings.ToLower(ns.TraceID) {
-			return fmt.Errorf("trace_id must be a 32-character lowercase hex string (0-9, a-f)")
-		}
-		if _, err := hex.DecodeString(ns.TraceID); err != nil {
-			return fmt.Errorf("trace_id must be a 32-character lowercase hex string (0-9, a-f)")
-		}
+	// Validate trace_id: required, exactly 16 hex bytes = 32 hex chars
+	if ns.TraceID == "" {
+		return fmt.Errorf("trace_id is required")
+	}
+	if len(ns.TraceID) != 32 {
+		return fmt.Errorf("trace_id must be a 32-character lowercase hex string (0-9, a-f), got %d characters", len(ns.TraceID))
+	}
+	if ns.TraceID != strings.ToLower(ns.TraceID) {
+		return fmt.Errorf("trace_id must be a 32-character lowercase hex string (0-9, a-f)")
+	}
+	if _, err := hex.DecodeString(ns.TraceID); err != nil {
+		return fmt.Errorf("trace_id must be a 32-character lowercase hex string (0-9, a-f)")
 	}
 
 	// Validate kind
