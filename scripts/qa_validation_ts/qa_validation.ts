@@ -17,7 +17,7 @@ import { generateSpanId, generateTraceId } from "../../sdk/ts/src/id";
 
 // ──────────────────────────────── Config ────────────────────────────────
 
-const API_KEY = "oev_proj_7qzCMbDUEsVvNE6PLKZzwD12zLN5F4uscMm2754r1z4M";
+const API_KEY = "oev_proj_3Xrupmyx4vQZxGFAMSrACBfeqcYsmxTACnFuFhdqZ7U3";
 const INGEST_URL = "http://localhost:8000";
 const QUERY_URL = "http://localhost:8002";
 const ADMIN_EMAIL = "admin@omneval.com";

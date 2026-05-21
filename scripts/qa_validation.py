@@ -33,8 +33,8 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf_8")
 # ============================================================
 # Configuration
 # ============================================================
-API_KEY = "oev_proj_7qzCMbDUEsVvNE6PLKZzwD12zLN5F4uscMm2754r1z4M"
-PROJECT_ID = "d87digc09ves73bka1kg"
+API_KEY = "oev_proj_3Xrupmyx4vQZxGFAMSrACBfeqcYsmxTACnFuFhdqZ7U3"
+PROJECT_ID = "d87p1riv072c739868ug"
 INGEST_URL = "http://localhost:8000"
 QUERY_URL = "http://localhost:8002"
 ADMIN_EMAIL = "admin@omneval.com"

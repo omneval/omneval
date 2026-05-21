@@ -576,7 +576,7 @@ describe("SettingsPage", () => {
 
   it("closes the dialog on Close button", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
-      (input, init) => {
+      (_input, init) => {
         const method = (init?.method ?? "GET").toUpperCase();
         if (method === "POST") {
           return Promise.resolve({

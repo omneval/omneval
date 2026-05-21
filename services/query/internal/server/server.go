@@ -503,6 +503,12 @@ func downloadSnapshot(ctx context.Context, store storage.ObjectStore, dbPath str
 	if _, err := f.ReadFrom(reader); err != nil {
 		f.Close()
 		os.Remove(tmpPath)
+		// minio.GetObject is lazy: the actual GET fires on first Read, so
+		// NoSuchKey surfaces here rather than at store.Get().
+		if isS3NotFound(err) {
+			slog.Warn("query: no snapshot found in S3, starting with empty database")
+			return createEmptyDB(dbPath)
+		}
 		return fmt.Errorf("snapshot: write temp file: %w", err)
 	}
 	if err := f.Close(); err != nil {
