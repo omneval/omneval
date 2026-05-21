@@ -501,7 +501,7 @@ func TestNativeHandler_PostSpans_503WhenQueueFails(t *testing.T) {
 	}
 }
 
-func TestNativeHandler_EmptySpansArray(t *testing.T) {
+func TestNativeHandler_RejectsEmptySpansArray(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
 	h := handler.NewNativeHandler(q, v, nil, nil)
@@ -519,11 +519,65 @@ func TestNativeHandler_EmptySpansArray(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusAccepted {
-		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
-	if len(q.batches) != 1 {
-		t.Fatalf("batches enqueued: got %d, want 1", len(q.batches))
+	if len(q.batches) != 0 {
+		t.Errorf("batches enqueued: got %d, want 0 (empty batch should not be enqueued)", len(q.batches))
+	}
+}
+
+func TestNativeHandler_RejectsMissingSpanID(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handler.NewNativeHandler(q, v, nil, nil)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	// Span with no span_id field at all
+	payload := []byte(`{"spans": [{"trace_id": "0123456789abcdef0123456789abcdef", "name": "test-span"}]}`)
+
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
+	req.Header.Set("X-API-Key", "valid_project_key")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	if len(q.batches) != 0 {
+		t.Errorf("batches enqueued: got %d, want 0 (span missing span_id should not be enqueued)", len(q.batches))
+	}
+}
+
+func TestNativeHandler_RejectsMissingTraceID(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handler.NewNativeHandler(q, v, nil, nil)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	// Span with no trace_id field at all
+	payload := []byte(`{"spans": [{"span_id": "0123456789abcdef", "name": "test-span"}]}`)
+
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
+	req.Header.Set("X-API-Key", "valid_project_key")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	if len(q.batches) != 0 {
+		t.Errorf("batches enqueued: got %d, want 0 (span missing trace_id should not be enqueued)", len(q.batches))
 	}
 }
 
