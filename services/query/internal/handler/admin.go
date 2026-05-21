@@ -4,9 +4,24 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/services/query/internal/auth"
 )
+
+// adminAPIKeyInfo is the JSON shape returned by the admin API keys list endpoint.
+// It extends the per-project APIKeyInfo shape with a project_id field so admins
+// can see which project each key belongs to.
+type adminAPIKeyInfo struct {
+	KeyID       string            `json:"key_id"`
+	ProjectID   string            `json:"project_id"`
+	Kind        domain.APIKeyKind `json:"kind"`
+	ServiceName string            `json:"service_name,omitempty"`
+	CreatedAt   time.Time         `json:"created_at"`
+	RevokedAt   *time.Time        `json:"revoked_at,omitempty"`
+}
 
 // AdminHandler handles admin-only API endpoints:
 // - GET  /api/v1/admin/api-keys       — list all API keys across all projects
@@ -16,11 +31,12 @@ import (
 // - DEL  /api/v1/admin/traces/:projId — delete all traces for a project
 type AdminHandler struct {
 	DB           DBHandle
+	Store        metadata.Store
 	SessionStore SessionStore
 }
 
 // HandleAdminAPIKeysList handles GET /api/v1/admin/api-keys.
-// Returns all API keys across all projects.
+// Returns all API keys across all projects by querying the metadata store.
 func (h *AdminHandler) HandleAdminAPIKeysList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -38,12 +54,30 @@ func (h *AdminHandler) HandleAdminAPIKeysList(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	var allKeys []map[string]any
+	var allKeys []adminAPIKeyInfo
 	for _, p := range projects {
-		keys := fetchProjectAPIKeys(h.DB, p.ProjectID)
-		allKeys = append(allKeys, keys...)
+		keys, err := h.Store.ListAPIKeys(r.Context(), p.ProjectID)
+		if err != nil {
+			continue // skip projects that fail rather than aborting the whole response
+		}
+		for _, k := range keys {
+			entry := adminAPIKeyInfo{
+				KeyID:       k.KeyID,
+				ProjectID:   k.ProjectID,
+				Kind:        k.Kind,
+				ServiceName: k.ServiceName,
+				CreatedAt:   k.CreatedAt,
+				RevokedAt:   k.RevokedAt,
+			}
+			allKeys = append(allKeys, entry)
+		}
 	}
 
+	if allKeys == nil {
+		allKeys = []adminAPIKeyInfo{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(allKeys)
 }
 
@@ -66,21 +100,12 @@ func (h *AdminHandler) HandleAdminAPIKeyDelete(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	projects, err := h.SessionStore.ListProjects(r)
-	if err != nil {
-		writeJSONError(w, "failed to list projects", http.StatusInternalServerError)
-		return
-	}
-
-	revoked := false
-	for _, p := range projects {
-		if err := revokeKey(h.DB, p.ProjectID, keyID); err == nil {
-			revoked = true
+	if err := h.Store.RevokeAPIKey(r.Context(), keyID); err != nil {
+		if err == metadata.ErrNotFound {
+			writeJSONError(w, "key not found", http.StatusNotFound)
+			return
 		}
-	}
-
-	if !revoked {
-		writeJSONError(w, "key not found", http.StatusNotFound)
+		writeJSONError(w, "failed to revoke key", http.StatusInternalServerError)
 		return
 	}
 
@@ -174,15 +199,16 @@ func (h *AdminHandler) HandleAdminProjectsDelete(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Revoke all API keys for this project.
-	_, err = h.DB.Exec(
-		`UPDATE api_keys SET revoked_at = CURRENT_TIMESTAMP
-		 WHERE project_id = ? AND revoked_at IS NULL`,
-		projectID,
-	)
+	// Revoke all API keys for this project via the metadata store.
+	keys, err := h.Store.ListAPIKeys(r.Context(), projectID)
 	if err != nil {
-		writeJSONError(w, "failed to revoke keys", http.StatusInternalServerError)
+		writeJSONError(w, "failed to list keys for revocation", http.StatusInternalServerError)
 		return
+	}
+	for _, k := range keys {
+		if k.RevokedAt == nil {
+			_ = h.Store.RevokeAPIKey(r.Context(), k.KeyID) // best-effort; log errors are not fatal
+		}
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -198,48 +224,3 @@ func (h *AdminHandler) RegisterAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/admin/projects/", h.HandleAdminProjectsDelete)
 }
 
-// fetchProjectAPIKeys queries the api_keys table for a given project.
-func fetchProjectAPIKeys(db DBHandle, projectID string) []map[string]any {
-	rows, err := db.Query(`
-		SELECT key_id, kind, service_name, created_at, revoked_at
-		FROM api_keys
-		WHERE project_id = ?
-		ORDER BY created_at DESC
-	`, projectID)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-
-	var keys []map[string]any
-	for rows.Next() {
-		var keyID, kind, createdAt string
-		var serviceName, revokedAt *string
-		if err := rows.Scan(&keyID, &kind, &serviceName, &createdAt, &revokedAt); err != nil {
-			continue
-		}
-		key := map[string]any{
-			"key_id":     keyID,
-			"kind":       kind,
-			"created_at": createdAt,
-		}
-		if serviceName != nil {
-			key["service_name"] = *serviceName
-		}
-		if revokedAt != nil {
-			key["revoked_at"] = *revokedAt
-		}
-		keys = append(keys, key)
-	}
-	return keys
-}
-
-// revokeKey marks an API key as revoked in a specific project.
-func revokeKey(db DBHandle, projectID, keyID string) error {
-	_, err := db.Exec(
-		`UPDATE api_keys SET revoked_at = CURRENT_TIMESTAMP
-		 WHERE project_id = ? AND key_id = ? AND revoked_at IS NULL`,
-		projectID, keyID,
-	)
-	return err
-}
