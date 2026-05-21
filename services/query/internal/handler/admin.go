@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -16,7 +15,7 @@ import (
 // - GET  /api/v1/admin/traces/:projId/count — count traces for a project
 // - DEL  /api/v1/admin/traces/:projId — delete all traces for a project
 type AdminHandler struct {
-	DB           *sql.DB
+	DB           DBHandle
 	SessionStore SessionStore
 }
 
@@ -200,7 +199,7 @@ func (h *AdminHandler) RegisterAdminRoutes(mux *http.ServeMux) {
 }
 
 // fetchProjectAPIKeys queries the api_keys table for a given project.
-func fetchProjectAPIKeys(db *sql.DB, projectID string) []map[string]any {
+func fetchProjectAPIKeys(db DBHandle, projectID string) []map[string]any {
 	rows, err := db.Query(`
 		SELECT key_id, kind, service_name, created_at, revoked_at
 		FROM api_keys
@@ -236,7 +235,7 @@ func fetchProjectAPIKeys(db *sql.DB, projectID string) []map[string]any {
 }
 
 // revokeKey marks an API key as revoked in a specific project.
-func revokeKey(db *sql.DB, projectID, keyID string) error {
+func revokeKey(db DBHandle, projectID, keyID string) error {
 	_, err := db.Exec(
 		`UPDATE api_keys SET revoked_at = CURRENT_TIMESTAMP
 		 WHERE project_id = ? AND key_id = ? AND revoked_at IS NULL`,

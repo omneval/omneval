@@ -21,7 +21,7 @@ import (
 // GET /api/v1/traces/:traceId (single-trace waterfall detail),
 // and GET /api/v1/projects (project list for the UI project switcher).
 type SpanHandler struct {
-	DB           *sql.DB
+	DB           DBHandle
 	SessionStore SessionStore
 	Metrics      *metrics.QueryMetrics
 }
@@ -474,7 +474,7 @@ type AnalyticsResponse struct {
 
 // buildTraceTree groups spans by trace_id and links parent-child relationships.
 // It sets Span.Children for proper waterfall rendering.
-func buildTraceTree(spans []*domain.Span, db *sql.DB, traceID, projectID string) domain.Trace {
+func buildTraceTree(spans []*domain.Span, db DBHandle, traceID, projectID string) domain.Trace {
 	if len(spans) == 0 {
 		return domain.Trace{}
 	}
@@ -519,7 +519,7 @@ func buildTraceTree(spans []*domain.Span, db *sql.DB, traceID, projectID string)
 }
 
 // withScores loads scores for the given spans and attaches them inline.
-func withScores(db *sql.DB, spans []*domain.Span, traceID, projectID string) []*domain.Span {
+func withScores(db DBHandle, spans []*domain.Span, traceID, projectID string) []*domain.Span {
 	rows, err := db.QueryContext(context.Background(),
 		`SELECT span_id, eval_name, value, reasoning, judge_model,
 		        prompt_name, prompt_version, created_at
@@ -580,11 +580,11 @@ func writeJSONError(w http.ResponseWriter, message string, status int) {
 // ScoreHandler handles POST /api/v1/scores — the public-facing endpoint
 // that allows manual score writes from the UI or API consumers.
 type ScoreHandler struct {
-	DB *sql.DB
+	DB DBHandle
 }
 
 // NewScoreHandler creates a new ScoreHandler.
-func NewScoreHandler(db *sql.DB) http.Handler {
+func NewScoreHandler(db DBHandle) http.Handler {
 	h := &ScoreHandler{DB: db}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/scores", h.HandleScores)

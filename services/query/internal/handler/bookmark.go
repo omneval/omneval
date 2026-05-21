@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,7 +11,7 @@ import (
 // BookmarkHandler handles POST /api/v1/traces/{traceId}/bookmark.
 // It toggles bookmark state by inserting or deleting from the bookmarks table.
 type BookmarkHandler struct {
-	DB           *sql.DB
+	DB           DBHandle
 	SessionStore SessionStore
 }
 

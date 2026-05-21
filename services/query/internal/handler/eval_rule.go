@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -30,7 +29,7 @@ func extractProjectID(SessionStore SessionStore, r *http.Request) (string, bool)
 //	DELETE /api/v1/eval-rules/:id      — delete an eval rule by ID
 //	POST   /api/v1/eval-rules/preview  — preview matching spans for a filter
 type EvalRuleHandler struct {
-	DB           *sql.DB
+	DB           DBHandle
 	Store        metadata.Store
 	SessionStore SessionStore
 }

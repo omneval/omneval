@@ -168,14 +168,13 @@ func Run() error {
 		slog.Info("query: no S3 configured, skipping snapshot download")
 	}
 
-	// Open the snapshot database read-write (for score writes from eval workers).
-	// The Writer Service syncs snapshots to S3, so score writes here are
-	// eventually included in the snapshot.
-	db, err := openSnapshotDBRW(dbPath)
+	// Open the snapshot database via SwappableDB so that pollAndDownload can
+	// atomically reopen the connection each time S3 delivers a new snapshot.
+	sdb, err := NewSwappableDB(dbPath)
 	if err != nil {
 		return fmt.Errorf("query: open snapshot: %w", err)
 	}
-	defer db.Close()
+	defer sdb.Close()
 
 	// Bootstrap admin user if no users exist
 	h := auth.NewHandler(store, cfg.Auth.SecureCookie, sessionTTL, cfg.Auth.AdminEmail, cfg.Auth.AdminPassword)
@@ -193,13 +192,13 @@ func Run() error {
 
 	// Create handlers.
 	spanHandler := &handler.SpanHandler{
-		DB:           db,
+		DB:           sdb,
 		SessionStore: h,
 	}
 
 	// Bookmark handler (toggle trace bookmarks).
 	bookmarkHandler := &handler.BookmarkHandler{
-		DB:           db,
+		DB:           sdb,
 		SessionStore: h,
 	}
 
@@ -219,7 +218,7 @@ func Run() error {
 	var evalRuleHandler *handler.EvalRuleHandler
 	if store != nil {
 		evalRuleHandler = &handler.EvalRuleHandler{
-			DB:           db,
+			DB:           sdb,
 			Store:        store,
 			SessionStore: h,
 		}
@@ -227,7 +226,7 @@ func Run() error {
 
 	// Admin handler (requires DB and session store).
 	adminHandler := &handler.AdminHandler{
-		DB:           db,
+		DB:           sdb,
 		SessionStore: h,
 	}
 
@@ -331,7 +330,7 @@ func Run() error {
 	}
 
 	// Score write endpoint (for eval worker score write-back, no auth required).
-	mux.HandleFunc("POST /api/v1/scores", handler.NewScoreHandler(db).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/scores", handler.NewScoreHandler(sdb).ServeHTTP)
 
 	// Prometheus metrics.
 	mux.HandleFunc("GET /metrics", promhttp.Handler().ServeHTTP)
@@ -370,8 +369,15 @@ func Run() error {
 			for {
 				select {
 				case <-ticker.C:
-					if err := pollAndDownload(ctx, s3Store, dbPath, &snapshotLastModified); err != nil {
+					downloaded, err := pollAndDownload(ctx, s3Store, dbPath, &snapshotLastModified)
+					if err != nil {
 						slog.Warn("query: snapshot poll/download failed", "err", err)
+					} else if downloaded {
+						if err := sdb.Swap(); err != nil {
+							slog.Warn("query: snapshot swap failed", "err", err)
+						} else {
+							slog.Info("query: snapshot swapped — new data now visible")
+						}
 					}
 					// Update snapshot age metric.
 					if !snapshotLastModified.IsZero() {
@@ -380,8 +386,12 @@ func Run() error {
 					}
 				case <-ctx.Done():
 					// Trigger one final sync before exit.
-					if err := pollAndDownload(ctx, s3Store, dbPath, &snapshotLastModified); err != nil {
+					if downloaded, err := pollAndDownload(ctx, s3Store, dbPath, &snapshotLastModified); err != nil {
 						slog.Warn("query: final sync failed", "err", err)
+					} else if downloaded {
+						if err := sdb.Swap(); err != nil {
+							slog.Warn("query: snapshot swap on shutdown failed", "err", err)
+						}
 					}
 					return
 				}
@@ -507,7 +517,9 @@ func downloadSnapshot(ctx context.Context, store storage.ObjectStore, dbPath str
 // to avoid the stale-mod-time problem where the local file's filesystem timestamp
 // reflects the download time rather than the S3 object's LastModified.
 // If the snapshot does not exist yet (NoSuchKey), it logs a warning and returns nil.
-func pollAndDownload(ctx context.Context, store storage.ObjectStore, dbPath string, lastModified *time.Time) error {
+// It returns (true, nil) when a new snapshot was downloaded, (false, nil) when
+// unchanged or unavailable, and (false, err) on unexpected errors.
+func pollAndDownload(ctx context.Context, store storage.ObjectStore, dbPath string, lastModified *time.Time) (bool, error) {
 	snapshotKey := s3.SnapshotKey()
 
 	// Stat the S3 object to check for changes.
@@ -523,9 +535,9 @@ func pollAndDownload(ctx context.Context, store storage.ObjectStore, dbPath stri
 					slog.Warn("query: failed to create empty DB as fallback", "err", createErr)
 				}
 			}
-			return nil
+			return false, nil
 		}
-		return fmt.Errorf("snapshot: stat %s: %w", snapshotKey, err)
+		return false, fmt.Errorf("snapshot: stat %s: %w", snapshotKey, err)
 	}
 
 	// Skip download if the S3 object hasn't changed since our last known version.
@@ -533,7 +545,7 @@ func pollAndDownload(ctx context.Context, store storage.ObjectStore, dbPath stri
 		if info.LastModified.Equal(*lastModified) {
 			slog.Debug("query: snapshot unchanged, skipping download",
 				"last_modified", info.LastModified)
-			return nil
+			return false, nil
 		}
 	}
 
@@ -542,13 +554,13 @@ func pollAndDownload(ctx context.Context, store storage.ObjectStore, dbPath stri
 		"etag", info.ETag,
 		"last_modified", info.LastModified)
 	if err := downloadSnapshot(ctx, store, dbPath); err != nil {
-		return err
+		return false, err
 	}
 
 	// Update the last modified time.
 	*lastModified = info.LastModified
 
-	return nil
+	return true, nil
 }
 
 // createEmptyDB creates a new DuckDB file with the Omneval schema.

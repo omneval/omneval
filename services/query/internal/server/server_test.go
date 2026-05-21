@@ -539,7 +539,7 @@ func TestPollAndDownload_NoSnapshotExists_LogsWarning_NoError(t *testing.T) {
 	notFoundStore := &fakeNotFoundStore{}
 
 	// pollAndDownload should NOT return an error when the snapshot doesn't exist yet.
-	err := pollAndDownload(context.Background(), notFoundStore, dbPath, nil)
+	_, err := pollAndDownload(context.Background(), notFoundStore, dbPath, nil)
 	if err != nil {
 		t.Fatalf("pollAndDownload with missing snapshot returned error: %v", err)
 	}
@@ -558,7 +558,7 @@ func TestPollAndDownload_NoSnapshotExists_ReturnsNoError(t *testing.T) {
 
 	notFoundStore := &fakeNotFoundStore{}
 
-	err := pollAndDownload(context.Background(), notFoundStore, dbPath, nil)
+	_, err := pollAndDownload(context.Background(), notFoundStore, dbPath, nil)
 	if err != nil {
 		t.Fatalf("pollAndDownload returned error: %v", err)
 	}
