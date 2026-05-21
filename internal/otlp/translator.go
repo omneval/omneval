@@ -81,6 +81,14 @@ func translateSpan(projectID string, resource Resource, span Span, opts Options)
 	if outputTokens == -1 {
 		outputTokens = extractAttributeInt64(span.Attributes, "completion_tokens")
 	}
+	// Normalise the -1 sentinel (attribute absent after all fallbacks) to 0
+	// so that downstream consumers never see a negative token count.
+	if inputTokens < 0 {
+		inputTokens = 0
+	}
+	if outputTokens < 0 {
+		outputTokens = 0
+	}
 
 	// Build Input from gen_ai.prompt.N.
 	input := buildMessageArray(span.Attributes, "gen_ai.prompt")

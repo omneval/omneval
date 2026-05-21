@@ -156,6 +156,29 @@ describe("truncate", () => {
   });
 });
 
+// ── totalTokens ────────────────────────────────────────────────────
+
+import { totalTokens } from "@/utils/formatters";
+
+describe("totalTokens", () => {
+  it("sums positive input and output tokens", () => {
+    expect(totalTokens({ input_tokens: 100, output_tokens: 200 })).toBe(300);
+  });
+
+  it("returns 0 when both token counts are 0", () => {
+    expect(totalTokens({ input_tokens: 0, output_tokens: 0 })).toBe(0);
+  });
+
+  it("clamps -1 sentinel values to 0 so the total is never negative", () => {
+    expect(totalTokens({ input_tokens: -1, output_tokens: -1 })).toBe(0);
+  });
+
+  it("clamps only the negative field, keeps positive field intact", () => {
+    expect(totalTokens({ input_tokens: -1, output_tokens: 50 })).toBe(50);
+    expect(totalTokens({ input_tokens: 100, output_tokens: -1 })).toBe(100);
+  });
+});
+
 // ── formatDuration ─────────────────────────────────────────────────
 
 describe("formatDuration", () => {

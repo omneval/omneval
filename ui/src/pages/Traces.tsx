@@ -554,15 +554,18 @@ function TableCellRenderer({
           {formatDuration(span.start_time, span.end_time)}
         </span>
       );
-    case "tokens":
+    case "tokens": {
+      const inputDisplay = Math.max(0, span.input_tokens);
+      const outputDisplay = Math.max(0, span.output_tokens);
       return (
         <span key={col.key} className="text-omneval-text-muted">
           {totalTokens(span).toLocaleString()}
           <span className="text-omneval-text-muted opacity-60 text-xs ml-1">
-            ({span.input_tokens}+{span.output_tokens})
+            ({inputDisplay}+{outputDisplay})
           </span>
         </span>
       );
+    }
     case "cost":
       return (
         <span

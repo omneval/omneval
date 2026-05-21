@@ -220,7 +220,11 @@ interface HasTokenCounts {
 
 /**
  * Compute the total token count (input + output) from a span-like object.
+ * Sentinel values of -1 (used when tokens are not reported) are clamped to 0
+ * so the total is never negative.
  */
 export function totalTokens(span: HasTokenCounts): number {
-  return span.input_tokens + span.output_tokens;
+  const input = Math.max(0, span.input_tokens);
+  const output = Math.max(0, span.output_tokens);
+  return input + output;
 }

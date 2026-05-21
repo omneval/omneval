@@ -836,6 +836,71 @@ describe("span rendering", () => {
   });
 });
 
+// ── Sentinel token/cost display tests ────────────────────────────
+
+describe("sentinel token and cost display", () => {
+  it("shows 0 total tokens (not -2) when span has -1 sentinel token values", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: [
+            {
+              ...mockSpans[0],
+              input_tokens: -1,
+              output_tokens: -1,
+              cost_usd: 0,
+            },
+          ],
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // Total token display must be "0", never "-2"
+    expect(screen.getByText("0")).toBeInTheDocument();
+    expect(screen.queryByText("-2")).not.toBeInTheDocument();
+  });
+
+  it("does not show -1+-1 breakdown when span has -1 sentinel token values", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: [
+            {
+              ...mockSpans[0],
+              input_tokens: -1,
+              output_tokens: -1,
+              cost_usd: 0,
+            },
+          ],
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // The "(X+Y)" breakdown must not show negative numbers
+    const tokenBreakdown = document.body.textContent ?? "";
+    expect(tokenBreakdown).not.toContain("-1+-1");
+    expect(tokenBreakdown).not.toContain("(-1+");
+    // It should show (0+0)
+    expect(tokenBreakdown).toContain("(0+0)");
+  });
+});
+
 // ── Auto-refresh tests ───────────────────────────────────────────
 
 describe("auto-refresh", () => {

@@ -419,6 +419,43 @@ func TestTranslate_ParentSpan(t *testing.T) {
 	}
 }
 
+// TestTranslate_NoTokenAttributes verifies that when a span carries no token
+// attributes (e.g. a @trace-decorated span without set_tokens()), the
+// translated domain.Span has InputTokens == 0 and OutputTokens == 0 rather
+// than -1 (the internal sentinel value used by extractAttributeInt64).
+func TestTranslate_NoTokenAttributes(t *testing.T) {
+	rss := []ResourceSpans{
+		{
+			Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+			Spans: []*Span{{
+				SpanID:     "aabbccdd11223344",
+				TraceID:    "aabbccdd112233440011223344556677",
+				Name:       "no-token-span",
+				StartTime:  time.Now(),
+				EndTime:    time.Now(),
+				Attributes: map[string]any{
+					// Deliberately no gen_ai.usage.input_tokens / output_tokens
+					// or prompt_tokens / completion_tokens.
+				},
+			}},
+		},
+	}
+
+	spans, err := Translate("proj-1", rss, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+	if spans[0].InputTokens != 0 {
+		t.Errorf("input_tokens: got %d, want 0 (sentinel -1 must be normalised to 0)", spans[0].InputTokens)
+	}
+	if spans[0].OutputTokens != 0 {
+		t.Errorf("output_tokens: got %d, want 0 (sentinel -1 must be normalised to 0)", spans[0].OutputTokens)
+	}
+}
+
 func TestTranslate_MultipleResourceSpans(t *testing.T) {
 	rss := []ResourceSpans{
 		{
