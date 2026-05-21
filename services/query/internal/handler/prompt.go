@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	internalauth "github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/metadata"
 )
@@ -28,6 +29,13 @@ type PromptHandler struct {
 	Store        metadata.Store
 	Cache        *PromptCache
 	SessionStore SessionStore
+	// Validator is optional. When set, GET prompt endpoints accept
+	// X-API-Key authentication in addition to session cookies.
+	// The middleware (RequireSessionOrAPIKey) injects the validated
+	// project ID into the request context; this field is kept for
+	// documentation/wiring purposes only — the handler itself reads
+	// from context via extractProjectID.
+	Validator internalauth.Validator
 }
 
 // HandleCreatePrompt handles POST /api/v1/prompts.
@@ -176,6 +184,13 @@ func (h *PromptHandler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) 
 	versionQuery := r.URL.Query().Get("version")
 	labelQuery := r.URL.Query().Get("label")
 
+	// Resolve project_id from session first, fall back to ?project_id= query
+	// param (kept for backwards-compat with tests that omit a SessionStore).
+	projectID, _ := extractProjectID(h.SessionStore, r)
+	if projectID == "" {
+		projectID = r.URL.Query().Get("project_id")
+	}
+
 	var pv *domain.PromptVersion
 	var getErr error
 
@@ -186,11 +201,10 @@ func (h *PromptHandler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "invalid version", http.StatusBadRequest)
 			return
 		}
-		pv, getErr = h.Cache.GetVersion(r.Context(), r.URL.Query().Get("project_id"), name, v)
+		pv, getErr = h.Cache.GetVersion(r.Context(), projectID, name, v)
 	} else if labelQuery != "" {
-		pv, getErr = h.Cache.GetLabel(r.Context(), r.URL.Query().Get("project_id"), name, labelQuery)
+		pv, getErr = h.Cache.GetLabel(r.Context(), projectID, name, labelQuery)
 	} else {
-		projectID, _ := extractProjectID(h.SessionStore, r)
 		pv, getErr = h.getLatestVersion(r.Context(), name, projectID)
 	}
 
@@ -535,11 +549,7 @@ func (h *PromptHandler) HandleListPromptVersions(w http.ResponseWriter, r *http.
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"name":     name,
-		"versions": versionsToJSON(versions),
-		"count":    len(versions),
-	})
+	json.NewEncoder(w).Encode(versionsToJSON(versions))
 }
 
 // versionsToJSON converts []*domain.PromptVersion to []domain.PromptVersionJSON

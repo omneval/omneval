@@ -17,6 +17,7 @@ import (
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/minio/minio-go/v7"
+	internalauth "github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/metadata"
 	metadatapg "github.com/omneval/omneval/internal/metadata/postgres"
@@ -203,14 +204,19 @@ func Run() error {
 	}
 
 	// Prompt registry handler (requires metadata store).
+	// A CachingValidator is wired in so that SDK callers can authenticate
+	// GET prompt endpoints using X-API-Key in addition to session cookies.
 	var promptHandler *handler.PromptHandler
 	var promptCache *handler.PromptCache
+	var apiKeyValidator internalauth.Validator
 	if store != nil {
 		promptCache = handler.NewPromptCache(store)
+		apiKeyValidator = internalauth.NewCachingValidator(store)
 		promptHandler = &handler.PromptHandler{
 			Store:        store,
 			Cache:        promptCache,
 			SessionStore: h,
+			Validator:    apiKeyValidator,
 		}
 	}
 
@@ -341,6 +347,7 @@ func Run() error {
 	mux.HandleFunc("/", serveUI)
 
 	sessionMw := auth.RequireAuth(store, cfg.Auth.SecureCookie, sessionTTL)
+	promptGetMw := auth.RequireSessionOrAPIKey(store, apiKeyValidator, cfg.Auth.SecureCookie, sessionTTL, handler.APIKeyProjectIDKey)
 	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
@@ -350,7 +357,13 @@ func Run() error {
 			return
 		}
 
-		// Protected API routes require a valid session cookie.
+		// GET prompt endpoints accept X-API-Key (for SDKs) or session cookie.
+		if r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/prompts") {
+			promptGetMw(mux).ServeHTTP(w, r)
+			return
+		}
+
+		// All other protected API routes require a valid session cookie.
 		if strings.HasPrefix(path, "/api/v1/") {
 			sessionMw(mux).ServeHTTP(w, r)
 			return
