@@ -256,3 +256,5 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+internal/duckdb/test_*.db
