@@ -10,32 +10,32 @@ function renderWithToast(ui: React.ReactElement) {
 describe("EvalRulesPage", () => {
   const mockRules = [
     {
-      RuleID: "rule-1",
-      ProjectID: "proj-1",
-      Name: "Production LLM Eval",
-      JudgeModel: "gpt-4",
-      PromptName: "judge-v1",
-      PromptVersion: 1,
-      SampleRate: 1.0,
-      Enabled: true,
-      CreatedAt: "2026-05-13T10:00:00Z",
-      Filter: {
+      rule_id: "rule-1",
+      project_id: "proj-1",
+      name: "Production LLM Eval",
+      judge_model: "gpt-4",
+      prompt_name: "judge-v1",
+      prompt_version: 1,
+      sample_rate: 1.0,
+      enabled: true,
+      created_at: "2026-05-13T10:00:00Z",
+      filter: {
         kind: "llm",
         model: "gpt-4-turbo",
         service_name: "my-service",
       },
     },
     {
-      RuleID: "rule-2",
-      ProjectID: "proj-1",
-      Name: "Cost Monitoring",
-      JudgeModel: "claude-3",
-      PromptName: "cost-check",
-      PromptVersion: 2,
-      SampleRate: 0.5,
-      Enabled: false,
-      CreatedAt: "2026-05-12T08:00:00Z",
-      Filter: {
+      rule_id: "rule-2",
+      project_id: "proj-1",
+      name: "Cost Monitoring",
+      judge_model: "claude-3",
+      prompt_name: "cost-check",
+      prompt_version: 2,
+      sample_rate: 0.5,
+      enabled: false,
+      created_at: "2026-05-12T08:00:00Z",
+      filter: {
         min_cost_usd: 0.1,
       },
     },
@@ -197,16 +197,16 @@ describe("EvalRulesPage", () => {
   it("handles rules with null/undefined filter without crashing", async () => {
     const rulesWithNullFilter = [
       {
-        RuleID: "rule-1",
-        ProjectID: "proj-1",
-        Name: "Rule With Null Filter",
-        JudgeModel: "gpt-4",
-        PromptName: "judge-v1",
-        PromptVersion: 1,
-        SampleRate: 1.0,
-        Enabled: true,
-        CreatedAt: "2026-05-13T10:00:00Z",
-        Filter: null,
+        rule_id: "rule-1",
+        project_id: "proj-1",
+        name: "Rule With Null Filter",
+        judge_model: "gpt-4",
+        prompt_name: "judge-v1",
+        prompt_version: 1,
+        sample_rate: 1.0,
+        enabled: true,
+        created_at: "2026-05-13T10:00:00Z",
+        filter: null,
       },
     ];
 
@@ -223,15 +223,15 @@ describe("EvalRulesPage", () => {
   it("handles rules with missing filter field without crashing", async () => {
     const rulesWithMissingFilter = [
       {
-        RuleID: "rule-1",
-        ProjectID: "proj-1",
-        Name: "Rule Without Filter",
-        JudgeModel: "gpt-4",
-        PromptName: "judge-v1",
-        PromptVersion: 1,
-        SampleRate: 1.0,
-        Enabled: true,
-        CreatedAt: "2026-05-13T10:00:00Z",
+        rule_id: "rule-1",
+        project_id: "proj-1",
+        name: "Rule Without Filter",
+        judge_model: "gpt-4",
+        prompt_name: "judge-v1",
+        prompt_version: 1,
+        sample_rate: 1.0,
+        enabled: true,
+        created_at: "2026-05-13T10:00:00Z",
       },
     ];
 
@@ -278,16 +278,16 @@ describe("EvalRulesPage", () => {
     "handles $ruleName without showing NaN or blank model",
     async ({ sampleRate, judgeModel, ruleName, expectNaN, expectEmDash }) => {
       const rule: EvalRule = {
-        RuleID: "rule-1",
-        ProjectID: "proj-1",
-        Name: `Rule with ${ruleName}`,
-        JudgeModel: judgeModel,
-        PromptName: "judge-v1",
-        PromptVersion: 1,
-        SampleRate: sampleRate,
-        Enabled: true,
-        CreatedAt: "2026-05-13T10:00:00Z",
-        Filter: null,
+        rule_id: "rule-1",
+        project_id: "proj-1",
+        name: `Rule with ${ruleName}`,
+        judge_model: judgeModel,
+        prompt_name: "judge-v1",
+        prompt_version: 1,
+        sample_rate: sampleRate,
+        enabled: true,
+        created_at: "2026-05-13T10:00:00Z",
+        filter: null,
       };
 
       vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules([rule]));
@@ -308,4 +308,104 @@ describe("EvalRulesPage", () => {
       }
     }
   );
+
+  describe("wire format: API response uses snake_case field names", () => {
+    const snakeCaseRules = [
+      {
+        rule_id: "rule-snake-1",
+        project_id: "proj-1",
+        name: "My Production Eval",
+        judge_model: "gpt-4",
+        prompt_name: "judge-v1",
+        prompt_version: 1,
+        sample_rate: 0.75,
+        enabled: true,
+        created_at: "2026-05-13T10:00:00Z",
+        filter: { kind: "llm" },
+      },
+      {
+        rule_id: "rule-snake-2",
+        project_id: "proj-1",
+        name: "Cost Monitor",
+        judge_model: "claude-3",
+        prompt_name: "",
+        prompt_version: 1,
+        sample_rate: 0.5,
+        enabled: false,
+        created_at: "2026-05-12T08:00:00Z",
+        filter: null,
+      },
+    ];
+
+    it("displays rule name from API response (snake_case wire format)", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        { ok: true, json: () => Promise.resolve({ rules: snakeCaseRules }) } as Response
+      );
+
+      renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("My Production Eval")).toBeInTheDocument();
+      });
+      expect(screen.getByText("Cost Monitor")).toBeInTheDocument();
+    });
+
+    it("displays sample rate as percentage from API response (snake_case wire format)", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        { ok: true, json: () => Promise.resolve({ rules: snakeCaseRules }) } as Response
+      );
+
+      renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("My Production Eval")).toBeInTheDocument();
+      });
+      // 0.75 → "75%", 0.5 → "50%"
+      expect(screen.getByText("75%")).toBeInTheDocument();
+      expect(screen.getByText("50%")).toBeInTheDocument();
+    });
+
+    it("displays judge model from API response (snake_case wire format)", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        { ok: true, json: () => Promise.resolve({ rules: snakeCaseRules }) } as Response
+      );
+
+      renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("My Production Eval")).toBeInTheDocument();
+      });
+      expect(screen.getByText("gpt-4")).toBeInTheDocument();
+      expect(screen.getByText("claude-3")).toBeInTheDocument();
+    });
+
+    it("delete button targets the correct rule_id from API response", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        (input: RequestInfo | URL) => {
+          const url = typeof input === "string" ? input : input.toString();
+          if (url.includes("/api/v1/eval-rules/rule-snake-1")) {
+            return Promise.resolve({ ok: true, status: 204, text: async () => "" } as Response);
+          }
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ rules: snakeCaseRules }) } as Response);
+        }
+      );
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+
+      renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getAllByRole("button", { name: /delete/i })).toHaveLength(2);
+      });
+
+      const deleteButtons = screen.getAllByRole("button", { name: /delete/i });
+      fireEvent.click(deleteButtons[0]);
+
+      await waitFor(() => {
+        expect(fetch).toHaveBeenCalledWith(
+          expect.stringContaining("/api/v1/eval-rules/rule-snake-1"),
+          expect.objectContaining({ method: "DELETE" })
+        );
+      });
+    });
+  });
 });
