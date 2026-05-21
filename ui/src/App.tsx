@@ -38,6 +38,26 @@ const NAV_MAP: Record<string, Page> = {
   admin: "admin",
 } as const;
 
+// Reverse map: Page → URL path segment
+const PAGE_TO_PATH: Record<Page, string> = {
+  login: "",
+  dashboard: "",
+  traces: "traces",
+  "trace-detail": "traces",
+  prompts: "prompts",
+  datasets: "datasets",
+  "dataset-detail": "datasets",
+  settings: "settings",
+  "eval-rules": "eval-rules",
+  admin: "admin",
+};
+
+/** Derive the intended page from the current URL path. Falls back to "dashboard". */
+function pageFromPathname(pathname: string): Page {
+  const segment = pathname.replace(/^\//, "").split("/")[0];
+  return NAV_MAP[segment] ?? "dashboard";
+}
+
 interface Project {
   project_id: string;
   name: string;
@@ -87,7 +107,9 @@ export default function App() {
           // No projects on /me — fetch them via the normal projects endpoint.
           fetchProjects("fallback-session-id");
         }
-        setPage("dashboard");
+        // Navigate to the page that matches the current URL path on hard load,
+        // so that refreshing or deep-linking to /traces, /prompts, etc. works.
+        setPage(pageFromPathname(window.location.pathname));
       })
       .catch(() => {
         // No valid session — the page stays on login.
@@ -137,7 +159,14 @@ export default function App() {
 
   const handleNavigate = (id: string) => {
     const route = NAV_MAP[id];
-    if (route) setPage(route);
+    if (route) {
+      setPage(route);
+      // Keep the URL in sync so the back button works and hard-reloading
+      // the page returns to the same section.
+      const pathSegment = PAGE_TO_PATH[route];
+      const newPath = pathSegment ? "/" + pathSegment : "/";
+      window.history.pushState({}, "", newPath);
+    }
   };
 
   const handleNavigateToDataset = (datasetId: string) => {

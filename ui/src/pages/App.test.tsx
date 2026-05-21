@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import App from "@/App";
 
 // ── Mock the entire App component's fetch calls ───────────────────
@@ -113,5 +114,145 @@ describe("session persistence on page load", () => {
       },
       { timeout: 3000 }
     );
+  });
+});
+
+// ── URL-based routing tests ──────────────────────────────────────
+
+describe("URL-based page routing on hard load", () => {
+  const makeMeMock = () =>
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const urlStr = String(url);
+      if (urlStr === "/api/v1/me") {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              user_id: "user-1",
+              email: "alice@example.com",
+              projects: mockProjects,
+            }),
+        } as Response;
+      }
+      // Return empty arrays for list endpoints so pages render without errors
+      if (urlStr.startsWith("/api/v1/prompts")) {
+        return {
+          ok: true,
+          json: () => Promise.resolve([]),
+        } as Response;
+      }
+      return {
+        ok: false,
+        json: () => Promise.resolve({}),
+      } as Response;
+    });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    // Reset URL back to root after each test
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("hard-loading /traces shows Traces page, not Dashboard", async () => {
+    makeMeMock();
+    window.history.replaceState({}, "", "/traces");
+
+    render(<App />);
+
+    await waitFor(
+      () => {
+        // Traces page renders a "Filters" panel
+        expect(screen.getByText("Filters")).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+
+    // Dashboard heading must NOT be visible
+    expect(screen.queryByRole("heading", { name: "Dashboard" })).toBeNull();
+  });
+
+  it("hard-loading /prompts shows Prompts page, not Dashboard", async () => {
+    makeMeMock();
+    window.history.replaceState({}, "", "/prompts");
+
+    render(<App />);
+
+    await waitFor(
+      () => {
+        // Prompts page renders a "Prompt Registry" heading
+        expect(
+          screen.getByRole("heading", { name: /prompt registry/i })
+        ).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+
+    expect(screen.queryByRole("heading", { name: "Dashboard" })).toBeNull();
+  });
+
+  it("hard-loading / (root) shows Dashboard", async () => {
+    makeMeMock();
+    window.history.replaceState({}, "", "/");
+
+    render(<App />);
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getByRole("heading", { name: "Dashboard" })
+        ).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+  });
+});
+
+// ── URL sync on sidebar navigation ──────────────────────────────
+
+describe("URL sync on sidebar navigation", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const urlStr = String(url);
+      if (urlStr === "/api/v1/me") {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              user_id: "user-1",
+              email: "alice@example.com",
+              projects: mockProjects,
+            }),
+        } as Response;
+      }
+      return {
+        ok: false,
+        json: () => Promise.resolve({}),
+      } as Response;
+    });
+    window.history.replaceState({}, "", "/");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("clicking Traces nav item updates window.location.pathname to /traces", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    // Wait for authenticated layout
+    await waitFor(
+      () => {
+        expect(screen.getByText("Test Project")).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+
+    // Click the Traces sidebar button
+    const tracesLink = screen.getByRole("button", { name: /^traces$/i });
+    await user.click(tracesLink);
+
+    expect(window.location.pathname).toBe("/traces");
   });
 });
