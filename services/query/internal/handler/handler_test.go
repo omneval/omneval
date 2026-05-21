@@ -1828,3 +1828,105 @@ func TestHandleProjects_ReturnsSnakeCaseJSON(t *testing.T) {
 		t.Errorf("project_id: got %v, want %q", p["project_id"], "test-proj-123")
 	}
 }
+
+// ── Issue #28: Authenticated endpoints return 400 (not 401) when no project ─
+
+// TestHandleSpansQuery_AuthenticatedButNoProject verifies that an authenticated
+// user whose org has no projects receives 400 (not 401).
+func TestHandleSpansQuery_AuthenticatedButNoProject(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", strings.NewReader(`{}`))
+	// Inject a current user into context (simulates passing session middleware).
+	req = req.WithContext(context.WithValue(req.Context(), auth.CurrentUserKey, &auth.CurrentUser{UserID: "user-1"}))
+	w := httptest.NewRecorder()
+
+	h := &SpanHandler{
+		// FakeSessionStore with no projectID returns ("", false).
+		SessionStore: &FakeSessionStore{},
+	}
+
+	h.HandleSpansQuery(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d (authenticated user with no project should be 400, not 401)", w.Code, http.StatusBadRequest)
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v (raw: %q)", err, w.Body.String())
+	}
+	if !strings.Contains(resp["error"], "no project found") {
+		t.Errorf("error message should contain 'no project found', got: %q", resp["error"])
+	}
+}
+
+// TestHandleSpansQuery_UnauthenticatedStill401 verifies that a request with
+// no session at all (no CurrentUser in context) still gets 401.
+func TestHandleSpansQuery_UnauthenticatedStill401(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", strings.NewReader(`{}`))
+	// No user in context.
+	w := httptest.NewRecorder()
+
+	h := &SpanHandler{
+		SessionStore: &FakeSessionStore{},
+	}
+
+	h.HandleSpansQuery(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want %d (unauthenticated should be 401)", w.Code, http.StatusUnauthorized)
+	}
+}
+
+// TestHandleTraceDetail_AuthenticatedButNoProject verifies that an authenticated
+// user whose org has no projects receives 400 (not 401) from trace detail.
+func TestHandleTraceDetail_AuthenticatedButNoProject(t *testing.T) {
+	mux := http.NewServeMux()
+	h := &SpanHandler{
+		SessionStore: &FakeSessionStore{},
+	}
+	mux.HandleFunc("GET /api/v1/traces/{traceId}", h.HandleTraceDetail)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/traces/trace-abc", nil)
+	req = req.WithContext(context.WithValue(req.Context(), auth.CurrentUserKey, &auth.CurrentUser{UserID: "user-1"}))
+	w := httptest.NewRecorder()
+
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d (authenticated user with no project should be 400, not 401)", w.Code, http.StatusBadRequest)
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v (raw: %q)", err, w.Body.String())
+	}
+	if !strings.Contains(resp["error"], "no project found") {
+		t.Errorf("error message should contain 'no project found', got: %q", resp["error"])
+	}
+}
+
+// TestHandleAnalyticsSpans_AuthenticatedButNoProject verifies that an authenticated
+// user whose org has no projects receives 400 (not 401) from analytics spans.
+func TestHandleAnalyticsSpans_AuthenticatedButNoProject(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", strings.NewReader(`{}`))
+	req = req.WithContext(context.WithValue(req.Context(), auth.CurrentUserKey, &auth.CurrentUser{UserID: "user-1"}))
+	w := httptest.NewRecorder()
+
+	h := &SpanHandler{
+		SessionStore: &FakeSessionStore{},
+	}
+
+	h.HandleAnalyticsSpans(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d (authenticated user with no project should be 400, not 401)", w.Code, http.StatusBadRequest)
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v (raw: %q)", err, w.Body.String())
+	}
+	if !strings.Contains(resp["error"], "no project found") {
+		t.Errorf("error message should contain 'no project found', got: %q", resp["error"])
+	}
+}

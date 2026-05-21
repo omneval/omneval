@@ -1360,6 +1360,106 @@ func readBody(t *testing.T, resp *http.Response) string {
 
 // ── /me endpoint tests ───────────────────────────────────────────
 
+// ── Issue #21: Bootstrap creates default project and API key ─────
+
+func TestBootstrapAdmin_CreatesDefaultProject(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	h := auth.NewHandler(store, false, 1*time.Hour, "admin@example.com", "admin-password")
+
+	created, err := h.BootstrapAdmin(context.Background())
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	if !created {
+		t.Fatal("expected admin to be created")
+	}
+
+	// After bootstrap, the "default" org should have a "Default Project".
+	projects, err := store.ListProjects(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	if len(projects) != 1 {
+		t.Errorf("expected 1 default project, got %d", len(projects))
+	}
+	if len(projects) == 1 && projects[0].Name != "Default Project" {
+		t.Errorf("project name: got %q, want %q", projects[0].Name, "Default Project")
+	}
+}
+
+func TestBootstrapAdmin_CreatesAPIKeyForDefaultProject(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	h := auth.NewHandler(store, false, 1*time.Hour, "admin@example.com", "admin-password")
+
+	_, err := h.BootstrapAdmin(context.Background())
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+
+	// There must be exactly one project.
+	projects, err := store.ListProjects(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	if len(projects) == 0 {
+		t.Fatal("no default project found — cannot check API key")
+	}
+
+	// That project should have one API key.
+	keys, err := store.ListAPIKeys(context.Background(), projects[0].ProjectID)
+	if err != nil {
+		t.Fatalf("list api keys: %v", err)
+	}
+	if len(keys) != 1 {
+		t.Errorf("expected 1 API key for default project, got %d", len(keys))
+	}
+	if len(keys) == 1 {
+		if keys[0].Kind != domain.APIKeyKindProject {
+			t.Errorf("key kind: got %q, want %q", keys[0].Kind, domain.APIKeyKindProject)
+		}
+		if keys[0].HashedKey == "" {
+			t.Error("expected hashed key to be stored")
+		}
+	}
+}
+
+func TestBootstrapAdmin_Idempotent_NoDoubleProject(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	h := auth.NewHandler(store, false, 1*time.Hour, "admin@example.com", "admin-password")
+
+	// First bootstrap creates admin + project + key.
+	if _, err := h.BootstrapAdmin(context.Background()); err != nil {
+		t.Fatalf("first bootstrap: %v", err)
+	}
+
+	// Second bootstrap: admin already exists, so it is a no-op — no new project or key.
+	created, err := h.BootstrapAdmin(context.Background())
+	if err != nil {
+		t.Fatalf("second bootstrap: %v", err)
+	}
+	if created {
+		t.Error("second bootstrap should return false (admin already exists)")
+	}
+
+	projects, err := store.ListProjects(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	if len(projects) != 1 {
+		t.Errorf("expected exactly 1 project after 2 bootstraps, got %d", len(projects))
+	}
+
+	if len(projects) == 1 {
+		keys, err := store.ListAPIKeys(context.Background(), projects[0].ProjectID)
+		if err != nil {
+			t.Fatalf("list api keys: %v", err)
+		}
+		if len(keys) != 1 {
+			t.Errorf("expected exactly 1 API key after 2 bootstraps, got %d", len(keys))
+		}
+	}
+}
+
 func TestHandler_Me_Success(t *testing.T) {
 	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
 

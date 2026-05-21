@@ -101,6 +101,10 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 	// Extract project_id from the authenticated session.
 	projectID, ok := h.SessionStore.ProjectID(r)
 	if !ok || projectID == "" {
+		if auth.CurrentUserFromContext(r) != nil {
+			writeJSONError(w, "no project found — create a project first via POST /api/v1/projects", http.StatusBadRequest)
+			return
+		}
 		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -180,6 +184,10 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 	// Extract project_id from the authenticated session.
 	projectID, ok := h.SessionStore.ProjectID(r)
 	if !ok || projectID == "" {
+		if auth.CurrentUserFromContext(r) != nil {
+			writeJSONError(w, "no project found — create a project first via POST /api/v1/projects", http.StatusBadRequest)
+			return
+		}
 		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -378,6 +386,10 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 		var ok bool
 		projectID, ok = h.SessionStore.ProjectID(r)
 		if !ok || projectID == "" {
+			if auth.CurrentUserFromContext(r) != nil {
+				writeJSONError(w, "no project found — create a project first via POST /api/v1/projects", http.StatusBadRequest)
+				return
+			}
 			writeJSONError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

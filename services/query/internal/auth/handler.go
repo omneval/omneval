@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -216,6 +217,42 @@ func (h *Handler) BootstrapAdmin(ctx context.Context) (bool, error) {
 	}
 	if err := h.store.CreateUser(ctx, user); err != nil {
 		return false, fmt.Errorf("auth: create bootstrap admin: %w", err)
+	}
+
+	// Create a default project if the org has none.
+	projects, err := h.store.ListProjects(ctx, "default")
+	if err != nil {
+		return false, fmt.Errorf("auth: list projects for bootstrap: %w", err)
+	}
+	if len(projects) == 0 {
+		projectID := xid.New().String()
+		project := &domain.Project{
+			ProjectID: projectID,
+			OrgID:     "default",
+			Name:      "Default Project",
+			CreatedAt: time.Now().UTC(),
+		}
+		if err := h.store.CreateProject(ctx, project); err != nil {
+			return false, fmt.Errorf("auth: create default project: %w", err)
+		}
+
+		// Generate a project-scoped API key for the default project.
+		rawKey, hashedKey, err := auth.Generate(domain.APIKeyKindProject)
+		if err != nil {
+			return false, fmt.Errorf("auth: generate default api key: %w", err)
+		}
+		apiKey := &domain.APIKey{
+			KeyID:     xid.New().String(),
+			ProjectID: projectID,
+			Kind:      domain.APIKeyKindProject,
+			HashedKey: hashedKey,
+			CreatedAt: time.Now().UTC(),
+		}
+		if err := h.store.CreateAPIKey(ctx, apiKey); err != nil {
+			return false, fmt.Errorf("auth: store default api key: %w", err)
+		}
+
+		slog.Info("auth: default API key created", "raw_key", rawKey)
 	}
 
 	return true, nil
