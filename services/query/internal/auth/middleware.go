@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	internalauth "github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/metadata"
 )
 
@@ -84,6 +85,39 @@ func (m *SessionMiddleware) Handler(next http.Handler) http.Handler {
 func RequireAuth(store metadata.Store, secure bool, sessionTTL time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return NewSessionMiddleware(store, secure, sessionTTL).Handler(next)
+	}
+}
+
+// RequireSessionOrAPIKey wraps a handler that accepts either a valid session
+// cookie or an X-API-Key header. When an API key is present and valid, the
+// associated project ID is stored in the request context under apiKeyCtxKey
+// (callers supply the same key that handler.extractProjectID reads from).
+// If neither credential is valid, returns 401.
+func RequireSessionOrAPIKey(
+	store metadata.Store,
+	validator internalauth.Validator,
+	secure bool,
+	sessionTTL time.Duration,
+	apiKeyCtxKey any,
+) func(http.Handler) http.Handler {
+	sessionMw := NewSessionMiddleware(store, secure, sessionTTL)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Try API key first.
+			if rawKey := r.Header.Get("X-API-Key"); rawKey != "" && validator != nil {
+				vk, err := validator.Validate(r.Context(), rawKey)
+				if err == nil && vk.ProjectID != "" {
+					ctx := context.WithValue(r.Context(), apiKeyCtxKey, vk.ProjectID)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+				// Invalid API key — 401 immediately (don't fall back to session).
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid API key"})
+				return
+			}
+			// No API key header — require session cookie.
+			sessionMw.Handler(next).ServeHTTP(w, r)
+		})
 	}
 }
 

@@ -13,9 +13,26 @@ import (
 	"github.com/omneval/omneval/internal/metadata"
 )
 
+// APIKeyProjectIDContextKey is the type for the API-key project ID context key.
+type APIKeyProjectIDContextKey struct{}
+
+// APIKeyProjectIDKey is the context key under which middleware stores the
+// project ID derived from a validated X-API-Key header. Handlers call
+// extractProjectID which checks this before falling back to session auth.
+var APIKeyProjectIDKey APIKeyProjectIDContextKey
+
 // extractProjectID extracts the authenticated project ID from the request.
-// Returns an empty string and false when no session store is configured.
+// It checks (in order):
+//  1. API-key project injected into context by RequireSessionOrAPIKey middleware
+//  2. Session store (cookie-based auth)
+//
+// Returns an empty string and false when neither is available.
 func extractProjectID(SessionStore SessionStore, r *http.Request) (string, bool) {
+	// 1. Check API-key project from context (set by API-key middleware).
+	if pid, ok := r.Context().Value(APIKeyProjectIDKey).(string); ok && pid != "" {
+		return pid, true
+	}
+	// 2. Fall back to session-based auth.
 	if SessionStore == nil {
 		return "", false
 	}

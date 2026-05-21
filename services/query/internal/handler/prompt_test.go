@@ -1222,13 +1222,14 @@ func TestPromptHandler_ListPromptVersions_InferProjectID(t *testing.T) {
 		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 
-	var resp struct {
-		Count int `json:"count"`
+	// Response is now a bare array (issue #39).
+	var versions []domain.PromptVersionJSON
+	if err := json.NewDecoder(w.Body).Decode(&versions); err != nil {
+		t.Fatalf("decode bare array: %v\nbody: %s", err, w.Body.String())
 	}
-	json.NewDecoder(w.Body).Decode(&resp)
 
-	if resp.Count != 2 {
-		t.Errorf("count: got %d, want 2", resp.Count)
+	if len(versions) != 2 {
+		t.Errorf("count: got %d, want 2", len(versions))
 	}
 }
 
@@ -1397,27 +1398,24 @@ func TestPromptHandler_ListPromptVersions_ProjectID(t *testing.T) {
 		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 
-	var resp struct {
-		Name     string                  `json:"name"`
-		Versions []*domain.PromptVersion `json:"versions"`
-		Count    int                     `json:"count"`
-	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
+	// Response is now a bare array (issue #39).
+	var versions []domain.PromptVersionJSON
+	if err := json.NewDecoder(w.Body).Decode(&versions); err != nil {
+		t.Fatalf("decode bare array: %v\nbody: %s", err, w.Body.String())
 	}
 
-	if resp.Count != 1 {
-		t.Fatalf("count: got %d, want 1", resp.Count)
+	if len(versions) != 1 {
+		t.Fatalf("count: got %d, want 1", len(versions))
 	}
 
 	// ProjectID must be non-empty.
-	if resp.Versions[0].ProjectID == "" {
+	if versions[0].ProjectID == "" {
 		t.Errorf("version ProjectID is empty (should be 'test-proj-456')")
 	}
 
-	// CreatedAt must not be zero.
-	if resp.Versions[0].CreatedAt.IsZero() {
-		t.Errorf("version CreatedAt is zero")
+	// CreatedAt must not be zero value.
+	if versions[0].CreatedAt == "" || versions[0].CreatedAt == "0001-01-01T00:00:00Z" {
+		t.Errorf("version CreatedAt is zero or empty: %q", versions[0].CreatedAt)
 	}
 }
 
@@ -1564,18 +1562,17 @@ func TestPromptHandler_ListPromptVersions_ModelFieldsFlattened(t *testing.T) {
 		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 
-	var resp struct {
-		Versions []map[string]any `json:"versions"`
-	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
+	// Response is now a bare array (issue #39).
+	var versions []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&versions); err != nil {
+		t.Fatalf("decode bare array: %v\nbody: %s", err, w.Body.String())
 	}
 
-	if len(resp.Versions) == 0 {
+	if len(versions) == 0 {
 		t.Fatal("expected at least one version")
 	}
 
-	v := resp.Versions[0]
+	v := versions[0]
 	model := v["model"]
 	if model != "gpt-4" {
 		t.Errorf("version[0].model: got %v, want 'gpt-4'", model)
@@ -1634,5 +1631,217 @@ func TestPromptHandler_CreatePrompt_LabelOverwrite(t *testing.T) {
 	}
 	if pv.Version != 1 {
 		t.Errorf("production version: got %d, want 1", pv.Version)
+	}
+}
+
+// ---- Issue #33: project_id from session for ?version and ?label branches ----
+
+// TestPromptHandler_GetPrompt_VersionUsesSessionProjectID verifies that
+// GET /api/v1/prompts/:name?version=N resolves project_id from the session,
+// not from a ?project_id= query parameter (#33).
+func TestPromptHandler_GetPrompt_VersionUsesSessionProjectID(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	h := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "session-proj"},
+	}
+
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v1", ProjectID: "session-proj", Name: "greeting", Version: 1,
+		Template: "Hello from session!",
+	})
+
+	// No ?project_id= — project_id must come from the session.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting?version=1", nil)
+	w := httptest.NewRecorder()
+	h.HandleGetPrompt(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Version int64 `json:"version"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Version != 1 {
+		t.Errorf("version: got %d, want 1", resp.Version)
+	}
+}
+
+// TestPromptHandler_GetPrompt_LabelUsesSessionProjectID verifies that
+// GET /api/v1/prompts/:name?label=<label> resolves project_id from the session (#33).
+func TestPromptHandler_GetPrompt_LabelUsesSessionProjectID(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	h := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "session-proj"},
+	}
+
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v2", ProjectID: "session-proj", Name: "greeting", Version: 2,
+		Template: "Labelled greeting",
+	})
+	store.SetPromptLabel(context.Background(), &domain.PromptLabel{
+		ProjectID: "session-proj", Name: "greeting", Label: "production", Version: 2,
+	})
+
+	// No ?project_id= — project_id must come from the session.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting?label=production", nil)
+	w := httptest.NewRecorder()
+	h.HandleGetPrompt(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Version int64 `json:"version"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Version != 2 {
+		t.Errorf("version: got %d, want 2", resp.Version)
+	}
+}
+
+// ---- Issue #34: API key auth for GET prompt endpoints ----
+
+// TestPromptHandler_GetPrompt_APIKeyProjectID verifies that when an API key's
+// project ID is stored in the request context (injected by middleware), the
+// handler uses it to resolve the prompt even when no session is active (#34).
+func TestPromptHandler_GetPrompt_APIKeyProjectID(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	h := &PromptHandler{
+		Store: store,
+		Cache: cache,
+		// No SessionStore — simulates SDK call with API key only.
+	}
+
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v1", ProjectID: "apikey-proj", Name: "greeting", Version: 1,
+		Template: "API key greeting!",
+	})
+
+	// Inject the API-key project ID into context (what middleware would do).
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting", nil)
+	req = req.WithContext(context.WithValue(req.Context(), APIKeyProjectIDKey, "apikey-proj"))
+	w := httptest.NewRecorder()
+	h.HandleGetPrompt(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Version int64 `json:"version"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Version != 1 {
+		t.Errorf("version: got %d, want 1", resp.Version)
+	}
+}
+
+// TestPromptHandler_GetPrompt_VersionAPIKeyProjectID verifies that
+// ?version=N lookup also uses the API-key project from context (#34).
+func TestPromptHandler_GetPrompt_VersionAPIKeyProjectID(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	h := &PromptHandler{
+		Store: store,
+		Cache: cache,
+	}
+
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v3", ProjectID: "apikey-proj", Name: "system", Version: 3,
+		Template: "System v3",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/system?version=3", nil)
+	req = req.WithContext(context.WithValue(req.Context(), APIKeyProjectIDKey, "apikey-proj"))
+	w := httptest.NewRecorder()
+	h.HandleGetPrompt(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+}
+
+// TestPromptHandler_GetPrompt_LabelAPIKeyProjectID verifies that
+// ?label=<label> lookup also uses the API-key project from context (#34).
+func TestPromptHandler_GetPrompt_LabelAPIKeyProjectID(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	h := &PromptHandler{
+		Store: store,
+		Cache: cache,
+	}
+
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v1", ProjectID: "apikey-proj", Name: "system", Version: 1,
+		Template: "System v1",
+	})
+	store.SetPromptLabel(context.Background(), &domain.PromptLabel{
+		ProjectID: "apikey-proj", Name: "system", Label: "production", Version: 1,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/system?label=production", nil)
+	req = req.WithContext(context.WithValue(req.Context(), APIKeyProjectIDKey, "apikey-proj"))
+	w := httptest.NewRecorder()
+	h.HandleGetPrompt(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+}
+
+// ---- Issue #39: GET /api/v1/prompts/:name/versions returns bare array ----
+
+// TestPromptHandler_ListPromptVersions_ReturnsBareArray verifies that
+// GET /api/v1/prompts/:name/versions returns a bare JSON array, not a wrapped
+// object {name, versions, count} (#39).
+func TestPromptHandler_ListPromptVersions_ReturnsBareArray(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	h := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v1", ProjectID: "test-proj", Name: "greeting", Version: 1,
+		Template: "Hello!",
+	})
+	store.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v2", ProjectID: "test-proj", Name: "greeting", Version: 2,
+		Template: "Hi!",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting/versions", nil)
+	w := httptest.NewRecorder()
+	h.HandleListPromptVersions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	// Must decode as a bare array, not a wrapped object.
+	var result []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("response is not a bare JSON array: %v\nbody: %s", err, w.Body.String())
+	}
+	if len(result) != 2 {
+		t.Errorf("count: got %d, want 2", len(result))
 	}
 }
