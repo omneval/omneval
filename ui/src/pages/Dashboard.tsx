@@ -76,10 +76,6 @@ function presetToFromTo(preset: string | undefined): { from: string; to: string 
   };
 }
 
-function getDefaultFromTo(): { from: string; to: string } {
-  return presetToFromTo("7d");
-}
-
 // ── Card Wrapper ───────────────────────────────────────────────────
 
 function Card({ title, children, subtitle }: { title: string; children: React.ReactNode; subtitle?: string }) {
