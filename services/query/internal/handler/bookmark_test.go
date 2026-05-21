@@ -147,6 +147,53 @@ func TestBookmarkHandler_ToggleBookmark(t *testing.T) {
 	})
 }
 
+// TestBookmarkHandler_EmptyBodyToggles verifies that POST with no body
+// treats the endpoint as a pure toggle: first call bookmarks, second unbookmarks.
+func TestBookmarkHandler_EmptyBodyToggles(t *testing.T) {
+	mux, db := newBookmarkMux(t, "test-proj")
+
+	// Insert a test span.
+	if _, err := db.Exec(
+		`INSERT INTO spans (span_id, trace_id, project_id, name, kind, start_time) VALUES (?, ?, ?, ?, ?, ?)`,
+		"span-toggle", "trace-toggle", "test-proj", "test", "generation", "2024-01-01T00:00:00Z",
+	); err != nil {
+		t.Fatalf("insert span: %v", err)
+	}
+
+	// First POST with no body — should bookmark (insert).
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/traces/trace-toggle/bookmark", http.NoBody)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("first toggle status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM bookmarks WHERE trace_id = ? AND project_id = ?", "trace-toggle", "test-proj").Scan(&count); err != nil {
+		t.Fatalf("query bookmarks after first toggle: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("after first toggle bookmark count: got %d, want 1", count)
+	}
+
+	// Second POST with no body — should unbookmark (delete).
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/traces/trace-toggle/bookmark", http.NoBody)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("second toggle status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	if err := db.QueryRow("SELECT COUNT(*) FROM bookmarks WHERE trace_id = ? AND project_id = ?", "trace-toggle", "test-proj").Scan(&count); err != nil {
+		t.Fatalf("query bookmarks after second toggle: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("after second toggle bookmark count: got %d, want 0", count)
+	}
+}
+
 func TestBookmarkHandler_AuthRequired(t *testing.T) {
 	mux, _ := newBookmarkMux(t, "") // empty project ID
 

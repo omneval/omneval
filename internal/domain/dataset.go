@@ -3,19 +3,19 @@ package domain
 import "time"
 
 type Dataset struct {
-	DatasetID string
-	ProjectID string
-	Name      string
-	CreatedAt time.Time
+	DatasetID string    `json:"dataset_id"`
+	ProjectID string    `json:"project_id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type DatasetItem struct {
-	ItemID         string
-	DatasetID      string
-	SourceSpanID   string
-	Input          string
-	ExpectedOutput string
-	CreatedAt      time.Time
+	ItemID         string    `json:"item_id"`
+	DatasetID      string    `json:"dataset_id"`
+	SourceSpanID   string    `json:"source_span_id"`
+	Input          string    `json:"input"`
+	ExpectedOutput string    `json:"expected_output"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 const (

@@ -49,6 +49,51 @@ func TestDatasetHandler_CreateDataset(t *testing.T) {
 	}
 }
 
+// TestDatasetHandler_CreateDataset_SnakeCaseKeys verifies that
+// POST /api/v1/datasets returns snake_case JSON keys, not PascalCase.
+func TestDatasetHandler_CreateDataset_SnakeCaseKeys(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	h := &DatasetHandler{
+		Store:        store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/datasets", strings.NewReader(`{"name":"snake-test"}`))
+	w := httptest.NewRecorder()
+	h.HandleCreate(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var raw map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// snake_case keys must be present.
+	for _, key := range []string{"dataset_id", "project_id", "name", "created_at"} {
+		if _, ok := raw[key]; !ok {
+			t.Errorf("response missing snake_case key %q; got keys: %v", key, keysOf(raw))
+		}
+	}
+
+	// PascalCase keys must NOT be present.
+	for _, key := range []string{"DatasetID", "ProjectID", "Name", "CreatedAt"} {
+		if _, ok := raw[key]; ok {
+			t.Errorf("response should not contain PascalCase key %q", key)
+		}
+	}
+}
+
+func keysOf(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 func TestDatasetHandler_CreateDataset_MissingName(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
