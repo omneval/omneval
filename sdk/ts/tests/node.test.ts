@@ -119,7 +119,7 @@ describe("instrument() — OTel integration", () => {
     expect(capturedConfig.traceExporter).toBeDefined();
   });
 
-  it("sets Authorization: Bearer header when apiKey is provided", async () => {
+  it("sets X-API-Key header when apiKey is provided", async () => {
     const shutdown = instrument({
       baseUrl: "http://localhost:3000",
       apiKey: "oev_proj_abc123",
