@@ -168,5 +168,66 @@ describe("OmnevalClient", () => {
       const headers = (call[1] as RequestInit)?.headers as Record<string, string>;
       expect(headers["X-API-Key"]).toBe("oev_proj_test");
     });
+
+    it("includes project_id extracted from oev_proj_ api key in score payload", async () => {
+      const fetchSpy = mockFetch(async (_url, init) => {
+        const body = JSON.parse((init?.body as string) ?? "{}");
+        expect(body.project_id).toBe("myprojectsuffix");
+        return createResponse(201);
+      });
+
+      const client = new OmnevalClient({
+        baseUrl: "http://localhost:3000",
+        apiKey: "oev_proj_myprojectsuffix",
+      });
+      await client.writeScore("span-1", { name: "eval", value: 1.0 });
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+    });
+
+    it("includes project_id extracted from oev_svc_ api key in score payload", async () => {
+      const fetchSpy = mockFetch(async (_url, init) => {
+        const body = JSON.parse((init?.body as string) ?? "{}");
+        expect(body.project_id).toBe("myservicesuffix");
+        return createResponse(201);
+      });
+
+      const client = new OmnevalClient({
+        baseUrl: "http://localhost:3000",
+        apiKey: "oev_svc_myservicesuffix",
+      });
+      await client.writeScore("span-1", { name: "eval", value: 1.0 });
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+    });
+
+    it("uses full api key as project_id when key has no recognized prefix", async () => {
+      const fetchSpy = mockFetch(async (_url, init) => {
+        const body = JSON.parse((init?.body as string) ?? "{}");
+        expect(body.project_id).toBe("raw-key");
+        return createResponse(201);
+      });
+
+      const client = new OmnevalClient({
+        baseUrl: "http://localhost:3000",
+        apiKey: "raw-key",
+      });
+      await client.writeScore("span-1", { name: "eval", value: 1.0 });
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+    });
+
+    it("uses empty string as project_id when no api key configured", async () => {
+      const fetchSpy = mockFetch(async (_url, init) => {
+        const body = JSON.parse((init?.body as string) ?? "{}");
+        expect(body.project_id).toBe("");
+        return createResponse(201);
+      });
+
+      const client = new OmnevalClient({ baseUrl: "http://localhost:3000" });
+      await client.writeScore("span-1", { name: "eval", value: 1.0 });
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+    });
   });
 });

@@ -21,16 +21,16 @@ interface PreviewResult {
 }
 
 export interface EvalRule {
-  RuleID: string;
-  ProjectID: string;
-  Name: string;
-  JudgeModel: string | null;
-  PromptName: string;
-  PromptVersion: number;
-  SampleRate: number | null;
-  Enabled: boolean;
-  CreatedAt: string;
-  Filter: EvalFilter | null | undefined;
+  rule_id: string;
+  project_id: string;
+  name: string;
+  judge_model: string | null;
+  prompt_name: string;
+  prompt_version: number;
+  sample_rate: number | null;
+  enabled: boolean;
+  created_at: string;
+  filter: EvalFilter | null | undefined;
 }
 
 interface EvalFilter {
@@ -279,26 +279,26 @@ function RuleCard({ rule, onDelete }: { rule: EvalRule; onDelete: (ruleId: strin
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-omneval-text-pure truncate">
-              {rule.Name}
+              {rule.name}
             </span>
-            <StatusBadge enabled={rule.Enabled} />
+            <StatusBadge enabled={rule.enabled} />
           </div>
           <div className="flex items-center gap-4 mt-1 text-xs text-omneval-text-muted">
-            <span>Model: <span className="text-omneval-text-pure">{rule.JudgeModel || "—"}</span></span>
-            {rule.PromptName && (
-              <span>Prompt: <span className="text-omneval-text-pure">{rule.PromptName}{rule.PromptVersion > 1 ? ` v${rule.PromptVersion}` : ""}</span></span>
+            <span>Model: <span className="text-omneval-text-pure">{rule.judge_model || "—"}</span></span>
+            {rule.prompt_name && (
+              <span>Prompt: <span className="text-omneval-text-pure">{rule.prompt_name}{rule.prompt_version > 1 ? ` v${rule.prompt_version}` : ""}</span></span>
             )}
-            <span>Sample: <span className="text-omneval-text-pure">{sampleRatePercent(rule.SampleRate)}</span></span>
-            <span className="truncate">Filter: <span className="text-omneval-text-pure">{truncate(filterDisplayText(rule.Filter), 40)}</span></span>
+            <span>Sample: <span className="text-omneval-text-pure">{sampleRatePercent(rule.sample_rate)}</span></span>
+            <span className="truncate">Filter: <span className="text-omneval-text-pure">{truncate(filterDisplayText(rule.filter), 40)}</span></span>
           </div>
         </div>
 
         <span className="text-xs text-omneval-text-muted flex-shrink-0 hidden sm:block">
-          {formatTime(rule.CreatedAt)}
+          {formatTime(rule.created_at)}
         </span>
 
         <button
-          onClick={() => onDelete(rule.RuleID)}
+          onClick={() => onDelete(rule.rule_id)}
           className="p-1.5 rounded-md transition-colors flex-shrink-0"
           style={{ color: colors.accents.emberFlare }}
           onMouseEnter={(e) => {
@@ -308,7 +308,7 @@ function RuleCard({ rule, onDelete }: { rule: EvalRule; onDelete: (ruleId: strin
             e.currentTarget.style.backgroundColor = "transparent";
           }}
           title="Delete rule"
-          aria-label={`Delete rule: ${rule.Name}`}
+          aria-label={`Delete rule: ${rule.name}`}
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -473,7 +473,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
         return;
       }
       addToast("success", "Rule deleted");
-      setRules((prev) => prev.filter((r) => r.RuleID !== ruleId));
+      setRules((prev) => prev.filter((r) => r.rule_id !== ruleId));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
     }
@@ -823,7 +823,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
         <div className="space-y-2">
           {rules.map((rule) => (
             <RuleCard
-              key={rule.RuleID}
+              key={rule.rule_id}
               rule={rule}
               onDelete={handleDelete}
             />

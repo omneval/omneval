@@ -200,6 +200,11 @@ func Run() error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	// Start the dedicated Prometheus metrics server on cfg.Metrics.Addr (:9090).
+	if err := StartMetricsServer(ctx, cfg.Metrics.Addr); err != nil {
+		return fmt.Errorf("writer: start metrics server: %w", err)
+	}
+
 	// Build the full router: /metrics + /internal/v1/scores + probes.
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())

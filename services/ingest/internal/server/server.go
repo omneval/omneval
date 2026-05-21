@@ -124,6 +124,13 @@ func Run() error {
 		}
 	})
 
+	// Start the dedicated Prometheus metrics server on cfg.Metrics.Addr (:9090).
+	metricsCtx, metricsCancel := context.WithCancel(context.Background())
+	defer metricsCancel()
+	if err := StartMetricsServer(metricsCtx, cfg.Metrics.Addr); err != nil {
+		return fmt.Errorf("ingest: start metrics server: %w", err)
+	}
+
 	// Start server
 	addr := cfg.Ingest.Addr
 	srv := &http.Server{

@@ -287,4 +287,177 @@ describe("DashboardPage", () => {
       expect(diffHours).toBeLessThanOrEqual(168.5);
     });
   });
+
+  // ── Time range preset tests (issue #12) ──────────────────────────
+
+  it("sets from to ~1 hour ago when timeRange='1h'", async () => {
+    let capturedFrom = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (url === "/api/v1/analytics/spans" && options?.body) {
+        const body = JSON.parse(options.body as string);
+        capturedFrom = body.from;
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" timeRange="1h" />);
+
+    await waitFor(() => {
+      expect(capturedFrom).not.toBe("");
+    });
+
+    const now = new Date();
+    const fromD = new Date(capturedFrom);
+    const diffMinutes = (now.getTime() - fromD.getTime()) / (1000 * 60);
+    expect(diffMinutes).toBeGreaterThan(55);
+    expect(diffMinutes).toBeLessThanOrEqual(65);
+  });
+
+  it("sets from to ~24 hours ago when timeRange='1d'", async () => {
+    let capturedFrom = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (url === "/api/v1/analytics/spans" && options?.body) {
+        const body = JSON.parse(options.body as string);
+        capturedFrom = body.from;
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" timeRange="1d" />);
+
+    await waitFor(() => {
+      expect(capturedFrom).not.toBe("");
+    });
+
+    const now = new Date();
+    const fromD = new Date(capturedFrom);
+    const diffHours = (now.getTime() - fromD.getTime()) / (1000 * 60 * 60);
+    expect(diffHours).toBeGreaterThan(23);
+    expect(diffHours).toBeLessThanOrEqual(25);
+  });
+
+  it("sets from to ~7 days ago when timeRange='7d'", async () => {
+    let capturedFrom = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (url === "/api/v1/analytics/spans" && options?.body) {
+        const body = JSON.parse(options.body as string);
+        capturedFrom = body.from;
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" timeRange="7d" />);
+
+    await waitFor(() => {
+      expect(capturedFrom).not.toBe("");
+    });
+
+    const now = new Date();
+    const fromD = new Date(capturedFrom);
+    const diffDays = (now.getTime() - fromD.getTime()) / (1000 * 60 * 60 * 24);
+    expect(diffDays).toBeGreaterThan(6.9);
+    expect(diffDays).toBeLessThanOrEqual(7.1);
+  });
+
+  it("shows the preset label in subtitle when timeRange='1d'", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/analytics/spans") {
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" timeRange="1d" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Past 24 hours")).toBeInTheDocument();
+    });
+  });
+
+  it("shows 'Past 7 days' in subtitle when timeRange='7d'", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/analytics/spans") {
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" timeRange="7d" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Past 7 days")).toBeInTheDocument();
+    });
+  });
+
+  it("shows 'Past 1 hour' in subtitle when timeRange='1h'", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/analytics/spans") {
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" timeRange="1h" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Past 1 hour")).toBeInTheDocument();
+    });
+  });
+
+  it("shows 'Custom range' in subtitle when timeRange='custom'", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/analytics/spans") {
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" timeRange="custom" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Custom range")).toBeInTheDocument();
+    });
+  });
+
+  it("refreshes data and updates from/to when timeRange prop changes", async () => {
+    let lastCapturedFrom = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (url === "/api/v1/analytics/spans" && options?.body) {
+        const body = JSON.parse(options.body as string);
+        lastCapturedFrom = body.from;
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    const { rerender } = renderWithToast(
+      <DashboardPage activeProject="proj-1" timeRange="7d" />
+    );
+
+    await waitFor(() => {
+      expect(lastCapturedFrom).not.toBe("");
+    });
+
+    const sevenDayFrom = lastCapturedFrom;
+
+    // Switch to 1h preset
+    rerender(
+      <ToastProvider>
+        <DashboardPage activeProject="proj-1" timeRange="1h" />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(lastCapturedFrom).not.toBe(sevenDayFrom);
+    });
+
+    // The new from should be ~1 hour ago, not 7 days ago
+    const now = new Date();
+    const newFromD = new Date(lastCapturedFrom);
+    const diffHours = (now.getTime() - newFromD.getTime()) / (1000 * 60 * 60);
+    expect(diffHours).toBeLessThan(2);
+  });
 });

@@ -12,6 +12,7 @@ import (
 	"github.com/omneval/omneval/internal/config"
 	redisqueue "github.com/omneval/omneval/internal/queue/redis"
 	"github.com/omneval/omneval/services/eval/internal/judge"
+	"github.com/omneval/omneval/services/eval/internal/metrics"
 	"github.com/omneval/omneval/services/eval/internal/worker"
 	"github.com/redis/go-redis/v9"
 )
@@ -38,6 +39,18 @@ func Run() error {
 	})
 	if err := rdb.Ping(context.Background()).Err(); err != nil {
 		return fmt.Errorf("eval: redis ping: %w", err)
+	}
+
+	// Register Prometheus metrics.
+	if err := metrics.Register(cfg.Metrics.DisableProjectLabels); err != nil {
+		return fmt.Errorf("eval: register metrics: %w", err)
+	}
+
+	// Start the dedicated Prometheus metrics server on cfg.Metrics.Addr (:9090).
+	metricsCtx, metricsCancel := context.WithCancel(context.Background())
+	defer metricsCancel()
+	if err := StartMetricsServer(metricsCtx, cfg.Metrics.Addr); err != nil {
+		return fmt.Errorf("eval: start metrics server: %w", err)
 	}
 
 	// Create queue client.
