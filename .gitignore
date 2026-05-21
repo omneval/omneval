@@ -32,10 +32,11 @@ go.work.sum
 # .vscode/
 node_modules/
 go/go/
-eval
-ingest
-query
-writer
+# Built binaries (root-level only)
+/eval
+/ingest
+/query
+/writer
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
