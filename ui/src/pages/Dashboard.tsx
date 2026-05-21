@@ -626,7 +626,7 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
       // ── Traces by Name ──
       const tracesByNameReq: AnalyticsRequest = {
         ...body,
-        group_by: [{ field: "name" }],
+        group_by: [{ field: "model" }],
         order_by: [{ field: "count", desc: true }],
         aggregations: [
           { function: "count", field: "*", alias: "count" },
@@ -643,10 +643,10 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         ],
       };
 
-      // ── Token Usage: Cost by Type (grouped by kind) ──
+      // ── Token Usage: grouped by model ──
       const tokenUsageReq: AnalyticsRequest = {
         ...body,
-        group_by: [{ field: "kind" }],
+        group_by: [{ field: "model" }],
         order_by: [{ field: "total_cost", desc: true }],
         aggregations: [
           { function: "sum", field: "input_tokens", alias: "input_tokens" },
@@ -659,7 +659,7 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
       const modelCostsReq: AnalyticsRequest = {
         ...body,
         group_by: [{ field: "model" }],
-        order_by: [{ field: "cost_usd", desc: true }],
+        order_by: [{ field: "total_cost", desc: true }],
         aggregations: [
           { function: "sum", field: "input_tokens", alias: "input_tokens" },
           { function: "sum", field: "output_tokens", alias: "output_tokens" },
@@ -716,7 +716,7 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         if (data.rows) {
           setTracesByName(
             data.rows.map((row: Record<string, unknown>) => ({
-              name: (row.name as string) || "unknown",
+              name: (row.model as string) || "unknown",
               count: Number(row.count) || 0,
             })),
           );
@@ -740,7 +740,7 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         if (data.rows) {
           setTokenUsageData(
             data.rows.map((row: Record<string, unknown>) => ({
-              model: (row.kind as string) || "unknown",
+              model: (row.model as string) || "unknown",
               inputTokens: Number(row.input_tokens) || 0,
               outputTokens: Number(row.output_tokens) || 0,
               totalCost: Number(row.total_cost) || 0,

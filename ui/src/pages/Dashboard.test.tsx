@@ -72,8 +72,8 @@ describe("DashboardPage", () => {
       if (url === "/api/v1/analytics/spans") {
         return resolveAnalyticsResponse({
           rows: [
-            { name: "gpt-4", count: 150 },
-            { name: "claude-3", count: 80 },
+            { model: "gpt-4", count: 150 },
+            { model: "claude-3", count: 80 },
           ],
         });
       }
@@ -420,6 +420,108 @@ describe("DashboardPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Custom range")).toBeInTheDocument();
     });
+  });
+
+  // ── Issue #35: modelCostsReq order_by alias fix ──────────────────
+
+  it("#35: modelCostsReq uses order_by field 'total_cost' (alias), not raw 'cost_usd'", async () => {
+    const modelCostsBodies: AnalyticsRequest[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (url === "/api/v1/analytics/spans" && options?.body) {
+        const body = JSON.parse(options.body as string) as AnalyticsRequest;
+        // Collect requests that group by model (the modelCostsReq)
+        if (body.group_by?.some((g: { field: string }) => g.field === "model") &&
+            body.aggregations?.some((a: { alias: string }) => a.alias === "total_cost")) {
+          modelCostsBodies.push(body);
+        }
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    });
+
+    expect(modelCostsBodies.length).toBeGreaterThan(0);
+    for (const body of modelCostsBodies) {
+      const orderByFields = body.order_by.map((o: { field: string }) => o.field);
+      expect(orderByFields).not.toContain("cost_usd");
+      expect(orderByFields).toContain("total_cost");
+    }
+  });
+
+  // ── Issue #36: tracesByNameReq group_by model fix ─────────────────
+
+  it("#36: tracesByNameReq uses group_by field 'model', not 'name'", async () => {
+    const tracesByNameBodies: AnalyticsRequest[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (url === "/api/v1/analytics/spans" && options?.body) {
+        const body = JSON.parse(options.body as string) as AnalyticsRequest;
+        // Collect requests that are the traces-by-name/model request:
+        // they count(*) and order by 'count'
+        if (body.aggregations?.some((a: { alias: string }) => a.alias === "count") &&
+            body.order_by?.some((o: { field: string }) => o.field === "count")) {
+          tracesByNameBodies.push(body);
+        }
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    });
+
+    // There should be at least one request matching the traces-by-model pattern
+    const tracesByModelBodies = tracesByNameBodies.filter((b) =>
+      b.group_by?.some((g: { field: string }) => g.field === "model")
+    );
+    expect(tracesByModelBodies.length).toBeGreaterThan(0);
+
+    // None of the count-ordered requests should group by 'name'
+    for (const body of tracesByNameBodies) {
+      const groupByFields = body.group_by.map((g: { field: string }) => g.field);
+      expect(groupByFields).not.toContain("name");
+    }
+  });
+
+  // ── Issue #37: tokenUsageReq group_by model fix ───────────────────
+
+  it("#37: tokenUsageReq uses group_by field 'model', not 'kind'", async () => {
+    const tokenUsageBodies: AnalyticsRequest[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (url === "/api/v1/analytics/spans" && options?.body) {
+        const body = JSON.parse(options.body as string) as AnalyticsRequest;
+        // Token usage request: sums input_tokens and output_tokens
+        if (body.aggregations?.some((a: { alias: string }) => a.alias === "input_tokens") &&
+            body.aggregations?.some((a: { alias: string }) => a.alias === "output_tokens")) {
+          tokenUsageBodies.push(body);
+        }
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    });
+
+    expect(tokenUsageBodies.length).toBeGreaterThan(0);
+    for (const body of tokenUsageBodies) {
+      const groupByFields = body.group_by.map((g: { field: string }) => g.field);
+      expect(groupByFields).not.toContain("kind");
+      expect(groupByFields).toContain("model");
+    }
   });
 
   it("refreshes data and updates from/to when timeRange prop changes", async () => {
