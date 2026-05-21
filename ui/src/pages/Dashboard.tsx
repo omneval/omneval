@@ -25,9 +25,9 @@ import {
 
 interface DashboardPageProps {
   activeProject: string;
+  /** Preset key from the Header time-range selector (e.g. "1h", "1d", "7d", "30d", "custom"). */
+  timeRange?: string;
 }
-
-
 
 interface AnalyticsRequest {
   from: string;
@@ -42,15 +42,42 @@ interface AnalyticsRequest {
 
 const DASHBOARD_DATE_RANGE_DAYS = 7;
 
+/** Map from Header time-range preset values to human-readable labels. */
+const TIME_RANGE_LABELS: Record<string, string> = {
+  "1h": "Past 1 hour",
+  "6h": "Past 6 hours",
+  "1d": "Past 24 hours",
+  "7d": "Past 7 days",
+  "30d": "Past 30 days",
+  "custom": "Custom range",
+};
+
+/** Map from preset value to millisecond duration. */
+const TIME_RANGE_MS: Record<string, number> = {
+  "1h": 60 * 60 * 1000,
+  "6h": 6 * 60 * 60 * 1000,
+  "1d": 24 * 60 * 60 * 1000,
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
+};
+
 // ── Helpers ────────────────────────────────────────────────────────
 
-function getDefaultFromTo(): { from: string; to: string } {
+/** Compute from/to ISO strings for a given preset value. */
+function presetToFromTo(preset: string | undefined): { from: string; to: string } {
   const now = new Date();
-  const from = new Date(now.getTime() - DASHBOARD_DATE_RANGE_DAYS * 24 * 60 * 60 * 1000);
+  const durationMs = preset && TIME_RANGE_MS[preset]
+    ? TIME_RANGE_MS[preset]
+    : DASHBOARD_DATE_RANGE_DAYS * 24 * 60 * 60 * 1000;
+  const from = new Date(now.getTime() - durationMs);
   return {
     from: from.toISOString(),
     to: now.toISOString(),
   };
+}
+
+function getDefaultFromTo(): { from: string; to: string } {
+  return presetToFromTo("7d");
 }
 
 // ── Card Wrapper ───────────────────────────────────────────────────
@@ -562,12 +589,21 @@ function UserConsumptionChart({ data, loading }: { data: UserConsumptionData[]; 
 
 // ── Main Dashboard ─────────────────────────────────────────────────
 
-export default function DashboardPage({ activeProject }: DashboardPageProps) {
-  const defaultFromTo = getDefaultFromTo();
+export default function DashboardPage({ activeProject, timeRange }: DashboardPageProps) {
+  const defaultFromTo = presetToFromTo(timeRange);
   const [from, setFrom] = useState(defaultFromTo.from);
   const [to, setTo] = useState(defaultFromTo.to);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // When the timeRange preset changes (from the Header), recompute from/to.
+  useEffect(() => {
+    if (timeRange && timeRange !== "custom") {
+      const { from: newFrom, to: newTo } = presetToFromTo(timeRange);
+      setFrom(newFrom);
+      setTo(newTo);
+    }
+  }, [timeRange]);
 
   // Dashboard state
   const [tracesByName, setTracesByName] = useState<TracesByNameData[]>([]);
@@ -760,7 +796,11 @@ export default function DashboardPage({ activeProject }: DashboardPageProps) {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-omneval-text-pure">Dashboard</h1>
-          <p className="text-sm text-omneval-text-muted mt-1">{timeRangeLabel(from)}</p>
+          <p className="text-sm text-omneval-text-muted mt-1">
+            {timeRange && TIME_RANGE_LABELS[timeRange]
+              ? TIME_RANGE_LABELS[timeRange]
+              : timeRangeLabel(from)}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
