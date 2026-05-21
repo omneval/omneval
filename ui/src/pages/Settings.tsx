@@ -406,7 +406,7 @@ export default function SettingsPage({
       const res = await fetch(`/api/v1/projects/${activeProject}/api-keys`);
       if (res.ok) {
         const data = await res.json();
-        setApiKeys(data);
+        setApiKeys(Array.isArray(data) ? data : []);
       }
     } catch {
       // Silently ignore

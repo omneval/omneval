@@ -575,26 +575,24 @@ describe("SettingsPage", () => {
   });
 
   it("closes the dialog on Close button", async () => {
-    let callCount = 0;
-
     vi.spyOn(globalThis, "fetch").mockImplementation(
-      () => {
-        callCount++;
-        if (callCount === 1) {
-          return Promise.resolve(resolveKeys([]));
+      (input, init) => {
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "POST") {
+          return Promise.resolve({
+            ok: true,
+            status: 201,
+            json: () =>
+              Promise.resolve({
+                key_id: "key-123",
+                project_id: "proj-1",
+                kind: "project",
+                raw_key: "oev_proj_test123",
+                created_at: new Date().toISOString(),
+              }),
+          } as Response);
         }
-        return Promise.resolve({
-          ok: true,
-          status: 201,
-          json: () =>
-            Promise.resolve({
-              key_id: "key-123",
-              project_id: "proj-1",
-              kind: "project",
-              raw_key: "oev_proj_test123",
-              created_at: new Date().toISOString(),
-            }),
-        } as Response);
+        return Promise.resolve(resolveKeys([]));
       }
     );
 
