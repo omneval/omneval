@@ -177,7 +177,7 @@ export default function App() {
               />
             )}
             {page === "dashboard" && (
-              <DashboardPage activeProject={activeProject} />
+              <DashboardPage activeProject={activeProject} timeRange={timeRange} />
             )}
             {page === "traces" && (
               <TracesPage
