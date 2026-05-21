@@ -615,6 +615,7 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
     setError(null);
     try {
       const body = {
+        project_id: activeProject,
         from,
         to,
         filters: [],
@@ -780,7 +781,7 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
     } finally {
       setLoading(false);
     }
-  }, [from, to]);
+  }, [activeProject, from, to]);
 
   useEffect(() => {
     fetchData();
