@@ -57,14 +57,36 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 		Temperature float64 `json:"temperature"`
 		MaxTokens   int     `json:"max_tokens"`
 		Label       string  `json:"label"` // optional: assign a label at creation time
+		ModelConfig *struct {
+			Model       string  `json:"model"`
+			Temperature float64 `json:"temperature"`
+			MaxTokens   int     `json:"max_tokens"`
+		} `json:"model_config"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	if req.Name == "" || req.Version <= 0 {
-		http.Error(w, "name and version are required", http.StatusBadRequest)
+	if req.Name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
 		return
+	}
+
+	// Auto-increment version when not provided.
+	if req.Version <= 0 {
+		versions, listErr := h.Store.ListPromptVersions(r.Context(), projectID, req.Name)
+		if listErr != nil {
+			slog.Error("query: list prompt versions for auto-increment", "project_id", projectID, "name", req.Name, "err", listErr)
+			http.Error(w, "store error", http.StatusInternalServerError)
+			return
+		}
+		var maxVersion int64
+		for _, v := range versions {
+			if v.Version > maxVersion {
+				maxVersion = v.Version
+			}
+		}
+		req.Version = maxVersion + 1
 	}
 
 	// Check if version already exists (idempotency).
@@ -78,18 +100,26 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Resolve model config: nested model_config takes precedence over flat fields.
+	modelCfg := domain.PromptModelConfig{
+		Model:       req.Model,
+		Temperature: req.Temperature,
+		MaxTokens:   req.MaxTokens,
+	}
+	if req.ModelConfig != nil {
+		modelCfg.Model = req.ModelConfig.Model
+		modelCfg.Temperature = req.ModelConfig.Temperature
+		modelCfg.MaxTokens = req.ModelConfig.MaxTokens
+	}
+
 	pv := &domain.PromptVersion{
-		VersionID: uuid.New().String(),
-		ProjectID: projectID,
-		Name:      req.Name,
-		Version:   req.Version,
-		Template:  req.Template,
-		ModelConfig: domain.PromptModelConfig{
-			Model:       req.Model,
-			Temperature: req.Temperature,
-			MaxTokens:   req.MaxTokens,
-		},
-		CreatedAt: time.Now().UTC(),
+		VersionID:   uuid.New().String(),
+		ProjectID:   projectID,
+		Name:        req.Name,
+		Version:     req.Version,
+		Template:    req.Template,
+		ModelConfig: modelCfg,
+		CreatedAt:   time.Now().UTC(),
 	}
 
 	if err := h.Store.CreatePromptVersion(r.Context(), pv); err != nil {

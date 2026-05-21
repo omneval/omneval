@@ -1636,3 +1636,124 @@ func TestPromptHandler_CreatePrompt_LabelOverwrite(t *testing.T) {
 		t.Errorf("production version: got %d, want 1", pv.Version)
 	}
 }
+
+// TestPromptHandler_CreatePrompt_AutoIncrementVersion verifies that when no
+// version field is provided (or version == 0), the handler auto-increments:
+// first POST → version 1, second POST → version 2.
+// Regression test for issue #24.
+func TestPromptHandler_CreatePrompt_AutoIncrementVersion(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	// First POST — no version field.
+	req1 := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(`{
+		"name": "test-prompt",
+		"template": "hello {{name}}"
+	}`))
+	w1 := httptest.NewRecorder()
+	handler.HandleCreatePrompt(w1, req1)
+
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("first create: status %d, want 201\nbody: %s", w1.Code, w1.Body.String())
+	}
+
+	var resp1 map[string]any
+	if err := json.NewDecoder(w1.Body).Decode(&resp1); err != nil {
+		t.Fatalf("decode first response: %v", err)
+	}
+	v1, ok := resp1["version"].(float64)
+	if !ok {
+		t.Fatalf("version not a number in first response\nbody: %s", w1.Body.String())
+	}
+	if v1 != 1 {
+		t.Errorf("first auto-increment version: got %v, want 1", v1)
+	}
+
+	// Second POST — same name, no version field → should be version 2.
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(`{
+		"name": "test-prompt",
+		"template": "hello {{name}} v2"
+	}`))
+	w2 := httptest.NewRecorder()
+	handler.HandleCreatePrompt(w2, req2)
+
+	if w2.Code != http.StatusCreated {
+		t.Fatalf("second create: status %d, want 201\nbody: %s", w2.Code, w2.Body.String())
+	}
+
+	var resp2 map[string]any
+	if err := json.NewDecoder(w2.Body).Decode(&resp2); err != nil {
+		t.Fatalf("decode second response: %v", err)
+	}
+	v2, ok := resp2["version"].(float64)
+	if !ok {
+		t.Fatalf("version not a number in second response\nbody: %s", w2.Body.String())
+	}
+	if v2 != 2 {
+		t.Errorf("second auto-increment version: got %v, want 2", v2)
+	}
+}
+
+// TestPromptHandler_CreatePrompt_NestedModelConfig verifies that POST
+// /api/v1/prompts accepts a nested model_config object (as sent by SDKs)
+// and maps its fields into the top-level model, temperature, max_tokens.
+// Regression test for issue #24.
+func TestPromptHandler_CreatePrompt_NestedModelConfig(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		Store:        store,
+		Cache:        cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(`{
+		"name": "p2",
+		"template": "t",
+		"model_config": {
+			"model": "gpt-4o",
+			"temperature": 0.7,
+			"max_tokens": 512
+		}
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreatePrompt(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want 201\nbody: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	model, ok := resp["model"].(string)
+	if !ok {
+		t.Fatalf("top-level 'model' missing or not a string\nbody: %s", w.Body.String())
+	}
+	if model != "gpt-4o" {
+		t.Errorf("model: got %q, want %q", model, "gpt-4o")
+	}
+
+	temp, ok := resp["temperature"].(float64)
+	if !ok {
+		t.Fatalf("top-level 'temperature' missing or not a number\nbody: %s", w.Body.String())
+	}
+	if temp != 0.7 {
+		t.Errorf("temperature: got %v, want 0.7", temp)
+	}
+
+	maxTok, ok := resp["max_tokens"].(float64)
+	if !ok {
+		t.Fatalf("top-level 'max_tokens' missing or not a number\nbody: %s", w.Body.String())
+	}
+	if maxTok != 512 {
+		t.Errorf("max_tokens: got %v, want 512", maxTok)
+	}
+}
