@@ -224,9 +224,10 @@ func Run() error {
 		}
 	}
 
-	// Admin handler (requires DB and session store).
+	// Admin handler (requires DB, metadata store, and session store).
 	adminHandler := &handler.AdminHandler{
 		DB:           sdb,
+		Store:        store,
 		SessionStore: h,
 	}
 
