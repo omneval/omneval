@@ -276,11 +276,16 @@ async function main() {
   let sessionCookie: string | null = null;
 
   try {
-    const loginResp = await post(`${QUERY_URL}/login`, { email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
-    if (loginResp.status === 200) {
-      // Node fetch doesn't auto-manage cookies - extract Set-Cookie manually
-      // For simplicity, use the session from the response body
-      sessionCookie = loginResp.body?.session_id ?? null;
+    // Node fetch doesn't auto-manage cookies — use raw fetch so we can read Set-Cookie.
+    const loginRaw = await fetch(`${QUERY_URL}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
+    });
+    if (loginRaw.status === 200) {
+      // Extract the omneval_session value from the Set-Cookie response header.
+      const setCookieHeader = loginRaw.headers.get("set-cookie");
+      sessionCookie = setCookieHeader?.match(/omneval_session=([^;]+)/)?.[1] ?? null;
 
       if (sessionCookie) {
         // Create a prompt
@@ -289,7 +294,7 @@ async function main() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Cookie": `session_id=${sessionCookie}`,
+            "Cookie": `omneval_session=${sessionCookie}`,
           },
           body: JSON.stringify({
             name: pname,
@@ -307,7 +312,7 @@ async function main() {
             method: "PUT",
             headers: {
               "Content-Type": "application/json",
-              "Cookie": `session_id=${sessionCookie}`,
+              "Cookie": `omneval_session=${sessionCookie}`,
             },
             body: JSON.stringify({ version: 1 }),
           });
