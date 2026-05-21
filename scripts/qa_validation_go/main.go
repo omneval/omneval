@@ -27,7 +27,7 @@ import (
 // ─────────────────────────────── Config ───────────────────────────────────
 
 const (
-	apiKey    = "oev_proj_HqP4ESPKqdcTPqsj1eGG4vD2THLPL3tge8b85NHsBTKv"
+	apiKey    = "oev_proj_7qzCMbDUEsVvNE6PLKZzwD12zLN5F4uscMm2754r1z4M"
 	ingestURL = "http://localhost:8000"
 	queryURL  = "http://localhost:8002"
 	adminUser = "admin@omneval.com"
