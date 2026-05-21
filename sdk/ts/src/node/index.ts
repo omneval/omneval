@@ -133,7 +133,7 @@ export type ShutdownFn = () => Promise<void>;
  * This function:
  * 1. Imports @opentelemetry/sdk-node and @opentelemetry/exporter-trace-otlp-http
  * 2. Creates a NodeSDK instance with an OTLP trace exporter
- * 3. Points the exporter at {baseUrl}/v1/traces with Bearer token auth
+ * 3. Points the exporter at {baseUrl}/v1/traces with X-API-Key auth
  * 4. Starts the SDK (which registers the global TracerProvider)
  * 5. Returns a shutdown function for graceful cleanup
  *

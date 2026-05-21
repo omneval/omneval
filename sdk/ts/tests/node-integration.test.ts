@@ -95,7 +95,7 @@ describe("@omneval/sdk/node — integration with OTel", () => {
     expect(capturedExporterConfig.url).toBe(`http://127.0.0.1:${serverPort}/v1/traces`);
   });
 
-  it("exports correct Authorization header format", async () => {
+  it("exports correct X-API-Key header format", async () => {
     let capturedExporterConfig: any = null;
     const mockExporter = vi.fn(function (config: any) {
       capturedExporterConfig = config;
@@ -118,9 +118,8 @@ describe("@omneval/sdk/node — integration with OTel", () => {
     });
 
     expect(capturedExporterConfig).not.toBeNull();
-    expect(capturedExporterConfig.headers?.Authorization).toBe(
-      `Bearer ${testApiKey}`
-    );
+    expect(capturedExporterConfig.headers?.["X-API-Key"]).toBe(testApiKey);
+    expect(capturedExporterConfig.headers?.Authorization).toBeUndefined();
   });
 
   it("works without apiKey (untrusted mode)", async () => {

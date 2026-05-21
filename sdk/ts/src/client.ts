@@ -3,9 +3,24 @@ import { generateTraceId } from "./id";
 
 const PROMPT_CACHE_TTL_MS = 30_000;
 
+/**
+ * Extract the project identifier from an API key.
+ * Mirrors Python SDK's _extract_project_id.
+ *   oev_proj_<suffix> → <suffix>
+ *   oev_svc_<suffix>  → <suffix>
+ *   anything else     → the key itself (or "" if undefined)
+ */
+function extractProjectId(apiKey?: string): string {
+  if (!apiKey) return "";
+  if (apiKey.startsWith("oev_proj_")) return apiKey.slice("oev_proj_".length);
+  if (apiKey.startsWith("oev_svc_")) return apiKey.slice("oev_svc_".length);
+  return apiKey;
+}
+
 export class OmnevalClient {
   private readonly baseUrl: string;
   private readonly apiKey?: string;
+  private readonly projectId: string;
 
   private readonly labelCache = new Map<
     string,
@@ -16,6 +31,7 @@ export class OmnevalClient {
   constructor(config: OmnevalConfig) {
     this.baseUrl = config.baseUrl;
     this.apiKey = config.apiKey;
+    this.projectId = extractProjectId(config.apiKey);
   }
 
   /**
@@ -86,6 +102,7 @@ export class OmnevalClient {
     const score = {
       span_id: spanId,
       trace_id: generateTraceId(),
+      project_id: this.projectId,
       eval_name: options.name,
       value: options.value,
       reasoning: options.reasoning,
