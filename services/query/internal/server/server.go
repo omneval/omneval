@@ -374,7 +374,7 @@ func Run() error {
 					if err != nil {
 						slog.Warn("query: snapshot poll/download failed", "err", err)
 					} else if downloaded {
-						if err := sdb.Swap(); err != nil {
+						if err := sdb.Swap(dbPath); err != nil {
 							slog.Warn("query: snapshot swap failed", "err", err)
 						} else {
 							slog.Info("query: snapshot swapped — new data now visible")
@@ -390,7 +390,7 @@ func Run() error {
 					if downloaded, err := pollAndDownload(ctx, s3Store, dbPath, &snapshotLastModified); err != nil {
 						slog.Warn("query: final sync failed", "err", err)
 					} else if downloaded {
-						if err := sdb.Swap(); err != nil {
+						if err := sdb.Swap(dbPath); err != nil {
 							slog.Warn("query: snapshot swap on shutdown failed", "err", err)
 						}
 					}
