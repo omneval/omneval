@@ -21,4 +21,8 @@ export type {
   PromptModelConfig,
   GetPromptOptions,
   WriteScoreOptions,
+  CreatePromptOptions,
+  PromptListItem,
+  EvalRule,
+  CreateEvalRuleOptions,
 } from "./types";

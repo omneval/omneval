@@ -46,12 +46,8 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Extract project_id from the authenticated session.
-	var projectID string
-	var ok bool
-	if h.SessionStore != nil {
-		projectID, ok = h.SessionStore.ProjectID(r)
-	}
+	// Extract project_id from API-key context or session.
+	projectID, ok := extractProjectID(h.SessionStore, r)
 	if !ok || projectID == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -359,10 +355,7 @@ func (h *PromptHandler) HandleSetLabel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate the version exists.
-	var projectID string
-	if h.SessionStore != nil {
-		projectID, _ = h.SessionStore.ProjectID(r)
-	}
+	projectID, _ := extractProjectID(h.SessionStore, r)
 	if projectID == "" {
 		projectID = r.URL.Query().Get("project_id")
 	}

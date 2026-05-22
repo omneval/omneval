@@ -70,3 +70,42 @@ export interface WriteScoreOptions {
   /** Optional reasoning for the score. */
   reasoning?: string;
 }
+
+/** Options for createPrompt(). */
+export interface CreatePromptOptions {
+  /** Nested model configuration. Takes precedence over flat fields. */
+  model_config?: PromptModelConfig;
+  /** Optional label to assign at creation time (e.g. "production"). */
+  label?: string;
+}
+
+/** A prompt list item returned by GET /api/v1/prompts. */
+export interface PromptListItem {
+  name: string;
+  latest_version: number;
+  labels: Record<string, number>;
+}
+
+/** An eval rule returned by the API. */
+export interface EvalRule {
+  rule_id: string;
+  project_id?: string;
+  name: string;
+  judge_model: string;
+  prompt_name: string;
+  prompt_version: number;
+  filter: Record<string, unknown>;
+  sample_rate: number;
+  enabled: boolean;
+  created_at?: string;
+}
+
+/** Options for createEvalRule(). */
+export interface CreateEvalRuleOptions {
+  /** Filter conditions for matching spans. */
+  filter?: Record<string, unknown>;
+  /** Judge model name (defaults to server default). */
+  judge_model?: string;
+  /** Fraction of matching spans to evaluate (0.0–1.0). Defaults to 1.0. */
+  sample_rate?: number;
+}

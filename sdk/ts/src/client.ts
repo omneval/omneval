@@ -1,4 +1,13 @@
-import { GetPromptOptions, OmnevalConfig, PromptVersion, WriteScoreOptions } from "./types";
+import {
+  CreateEvalRuleOptions,
+  CreatePromptOptions,
+  EvalRule,
+  GetPromptOptions,
+  OmnevalConfig,
+  PromptListItem,
+  PromptVersion,
+  WriteScoreOptions,
+} from "./types";
 import { generateTraceId } from "./id";
 
 const PROMPT_CACHE_TTL_MS = 30_000;
@@ -126,6 +135,165 @@ export class OmnevalClient {
       const body = await response.text();
       throw new Error(`write score: ${response.status}: ${body}`);
     }
+  }
+
+  /**
+   * Create a new prompt version.
+   * Returns the created prompt version data.
+   */
+  async createPrompt(
+    name: string,
+    template: string,
+    options?: CreatePromptOptions
+  ): Promise<PromptVersion> {
+    if (!name) {
+      throw new Error("name is required");
+    }
+    if (!template) {
+      throw new Error("template is required");
+    }
+
+    const payload: Record<string, unknown> = { name, template };
+    if (options?.model_config) {
+      payload.model_config = options.model_config;
+    }
+    if (options?.label) {
+      payload.label = options.label;
+    }
+
+    const url = `${this.baseUrl}/api/v1/prompts`;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.apiKey) {
+      headers["X-API-Key"] = this.apiKey;
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`create prompt: ${response.status}: ${body}`);
+    }
+
+    return (await response.json()) as PromptVersion;
+  }
+
+  /**
+   * List all prompts for the project.
+   * Returns an array of prompt summary items.
+   */
+  async listPrompts(): Promise<PromptListItem[]> {
+    const url = `${this.baseUrl}/api/v1/prompts`;
+    const headers: Record<string, string> = {};
+    if (this.apiKey) {
+      headers["X-API-Key"] = this.apiKey;
+    }
+
+    const response = await fetch(url, { headers });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`list prompts: ${response.status}: ${body}`);
+    }
+
+    return (await response.json()) as PromptListItem[];
+  }
+
+  /**
+   * Assign a label to a specific prompt version.
+   */
+  async setPromptLabel(name: string, label: string, version: number): Promise<void> {
+    if (!name) {
+      throw new Error("name is required");
+    }
+
+    const url = `${this.baseUrl}/api/v1/prompts/${name}/labels/${label}`;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.apiKey) {
+      headers["X-API-Key"] = this.apiKey;
+    }
+
+    const response = await fetch(url, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ version }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`set prompt label: ${response.status}: ${body}`);
+    }
+  }
+
+  /**
+   * List all eval rules for the project.
+   * Returns an array of EvalRule objects.
+   */
+  async listEvalRules(): Promise<EvalRule[]> {
+    const url = `${this.baseUrl}/api/v1/eval-rules`;
+    const headers: Record<string, string> = {};
+    if (this.apiKey) {
+      headers["X-API-Key"] = this.apiKey;
+    }
+
+    const response = await fetch(url, { headers });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`list eval rules: ${response.status}: ${body}`);
+    }
+
+    const data = (await response.json()) as { rules: EvalRule[] };
+    return data.rules ?? [];
+  }
+
+  /**
+   * Create an eval rule.
+   * Returns the created eval rule data.
+   */
+  async createEvalRule(
+    name: string,
+    promptName: string,
+    options?: CreateEvalRuleOptions
+  ): Promise<EvalRule> {
+    if (!name) {
+      throw new Error("name is required");
+    }
+    if (!promptName) {
+      throw new Error("prompt_name is required");
+    }
+
+    const payload: Record<string, unknown> = {
+      name,
+      prompt_name: promptName,
+      filter: options?.filter ?? {},
+      sample_rate: options?.sample_rate ?? 1.0,
+    };
+    if (options?.judge_model) {
+      payload.judge_model = options.judge_model;
+    }
+
+    const url = `${this.baseUrl}/api/v1/eval-rules`;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.apiKey) {
+      headers["X-API-Key"] = this.apiKey;
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`create eval rule: ${response.status}: ${body}`);
+    }
+
+    return (await response.json()) as EvalRule;
   }
 
   // ---- Private helpers ----

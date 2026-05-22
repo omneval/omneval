@@ -213,6 +213,142 @@ class OmnevalClient:
             "model_config": data.get("model_config", data.get("modelConfig", {})),
         }
 
+    def create_prompt(
+        self,
+        name: str,
+        template: str,
+        model_config: Optional[dict[str, Any]] = None,
+        label: str = "",
+    ) -> dict[str, Any]:
+        """Create a new prompt version.
+
+        Args:
+            name: Prompt name.
+            template: Prompt template string.
+            model_config: Optional model configuration dict with keys like
+                          'model', 'temperature', 'max_tokens'.
+            label: Optional label to assign at creation time (e.g. "production").
+
+        Returns:
+            Dict containing the created prompt version data.
+
+        Raises:
+            ValueError: If name or template is empty.
+            requests.HTTPError: If the server returns an error status.
+        """
+        if not name:
+            raise ValueError("name is required")
+        if not template:
+            raise ValueError("template is required")
+
+        payload: dict[str, Any] = {"name": name, "template": template}
+        if model_config:
+            payload["model_config"] = model_config
+        if label:
+            payload["label"] = label
+
+        url = f"{self._base_url}/api/v1/prompts"
+        resp = self._http.post(url, json=payload, timeout=10.0)
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "name": data.get("name", name),
+            "version": data.get("version", 0),
+            "template": data.get("template", template),
+            "model_config": data.get("model_config", {}),
+        }
+
+    def list_prompts(self) -> list[dict[str, Any]]:
+        """List all prompts for the project.
+
+        Returns:
+            List of dicts with 'name', 'latest_version', and 'labels'.
+
+        Raises:
+            requests.HTTPError: If the server returns an error status.
+        """
+        url = f"{self._base_url}/api/v1/prompts"
+        resp = self._http.get(url, timeout=10.0)
+        resp.raise_for_status()
+        return resp.json()
+
+    def set_prompt_label(self, name: str, label: str, version: int) -> None:
+        """Assign a label to a specific prompt version.
+
+        Args:
+            name: Prompt name.
+            label: Label to assign (e.g. "production", "staging").
+            version: Version number to assign the label to.
+
+        Raises:
+            ValueError: If name is empty.
+            requests.HTTPError: If the server returns an error status.
+        """
+        if not name:
+            raise ValueError("name is required")
+
+        url = f"{self._base_url}/api/v1/prompts/{name}/labels/{label}"
+        resp = self._http.put(url, json={"version": version}, timeout=10.0)
+        resp.raise_for_status()
+
+    def list_eval_rules(self) -> list[dict[str, Any]]:
+        """List all eval rules for the project.
+
+        Returns:
+            List of eval rule dicts.
+
+        Raises:
+            requests.HTTPError: If the server returns an error status.
+        """
+        url = f"{self._base_url}/api/v1/eval-rules"
+        resp = self._http.get(url, timeout=10.0)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("rules", [])
+
+    def create_eval_rule(
+        self,
+        name: str,
+        prompt_name: str,
+        filter: Optional[dict[str, Any]] = None,
+        judge_model: str = "",
+        sample_rate: float = 1.0,
+    ) -> dict[str, Any]:
+        """Create an eval rule.
+
+        Args:
+            name: Rule name.
+            prompt_name: Name of the prompt to use as judge prompt.
+            filter: Optional filter dict to match spans.
+            judge_model: Optional judge model name (defaults to server default).
+            sample_rate: Fraction of matching spans to evaluate (0.0–1.0).
+
+        Returns:
+            Dict containing the created eval rule data.
+
+        Raises:
+            ValueError: If name or prompt_name is empty.
+            requests.HTTPError: If the server returns an error status.
+        """
+        if not name:
+            raise ValueError("name is required")
+        if not prompt_name:
+            raise ValueError("prompt_name is required")
+
+        payload: dict[str, Any] = {
+            "name": name,
+            "prompt_name": prompt_name,
+            "filter": filter or {},
+            "sample_rate": sample_rate,
+        }
+        if judge_model:
+            payload["judge_model"] = judge_model
+
+        url = f"{self._base_url}/api/v1/eval-rules"
+        resp = self._http.post(url, json=payload, timeout=10.0)
+        resp.raise_for_status()
+        return resp.json()
+
     def close(self) -> None:
         """Close the underlying HTTP client."""
         self._http.close()

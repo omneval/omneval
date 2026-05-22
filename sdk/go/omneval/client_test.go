@@ -398,6 +398,283 @@ func TestClient_NoAPIKeyOmitsHeader(t *testing.T) {
 	}
 }
 
+// TestClient_CreatePrompt verifies CreatePrompt posts to /api/v1/prompts.
+func TestClient_CreatePrompt(t *testing.T) {
+	var receivedBody map[string]interface{}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&receivedBody); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		pv := domain.PromptVersionJSON{
+			Name:     "greeting",
+			Version:  1,
+			Template: "Hello, {{.Name}}!",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(pv)
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "oev_proj_test")
+	result, err := client.CreatePrompt("greeting", "Hello, {{.Name}}!", nil)
+	if err != nil {
+		t.Fatalf("CreatePrompt: %v", err)
+	}
+
+	if receivedBody["name"] != "greeting" {
+		t.Errorf("name: got %v, want %q", receivedBody["name"], "greeting")
+	}
+	if receivedBody["template"] != "Hello, {{.Name}}!" {
+		t.Errorf("template: got %v, want %q", receivedBody["template"], "Hello, {{.Name}}!")
+	}
+	if result.Name != "greeting" {
+		t.Errorf("result.Name: got %q, want %q", result.Name, "greeting")
+	}
+	if result.Version != 1 {
+		t.Errorf("result.Version: got %d, want 1", result.Version)
+	}
+}
+
+// TestClient_CreatePrompt_RequiresName verifies CreatePrompt fails for empty name.
+func TestClient_CreatePrompt_RequiresName(t *testing.T) {
+	client := NewClient("http://localhost:8080", "oev_proj_test")
+	_, err := client.CreatePrompt("", "template", nil)
+	if err == nil {
+		t.Error("expected error for empty name")
+	}
+}
+
+// TestClient_CreatePrompt_RequiresTemplate verifies CreatePrompt fails for empty template.
+func TestClient_CreatePrompt_RequiresTemplate(t *testing.T) {
+	client := NewClient("http://localhost:8080", "oev_proj_test")
+	_, err := client.CreatePrompt("my-prompt", "", nil)
+	if err == nil {
+		t.Error("expected error for empty template")
+	}
+}
+
+// TestClient_CreatePrompt_APIKeyHeader verifies CreatePrompt sends X-API-Key header.
+func TestClient_CreatePrompt_APIKeyHeader(t *testing.T) {
+	var receivedAPIKey string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAPIKey = r.Header.Get("X-API-Key")
+		pv := domain.PromptVersionJSON{Name: "test", Version: 1, Template: "t"}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(pv)
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "oev_proj_test")
+	_, _ = client.CreatePrompt("test", "template", nil)
+
+	if receivedAPIKey != "oev_proj_test" {
+		t.Errorf("X-API-Key header: got %q, want %q", receivedAPIKey, "oev_proj_test")
+	}
+}
+
+// TestClient_ListPrompts verifies ListPrompts returns prompt summaries.
+func TestClient_ListPrompts(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		items := []PromptListItem{
+			{Name: "greeting", LatestVersion: 2, Labels: map[string]int64{"production": 2}},
+			{Name: "eval", LatestVersion: 1, Labels: map[string]int64{}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(items)
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "oev_proj_test")
+	result, err := client.ListPrompts()
+	if err != nil {
+		t.Fatalf("ListPrompts: %v", err)
+	}
+	if len(result) != 2 {
+		t.Errorf("len: got %d, want 2", len(result))
+	}
+	if result[0].Name != "greeting" {
+		t.Errorf("result[0].Name: got %q, want %q", result[0].Name, "greeting")
+	}
+	if result[0].LatestVersion != 2 {
+		t.Errorf("result[0].LatestVersion: got %d, want 2", result[0].LatestVersion)
+	}
+}
+
+// TestClient_ListPrompts_Empty verifies ListPrompts handles empty response.
+func TestClient_ListPrompts_Empty(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]PromptListItem{})
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "oev_proj_test")
+	result, err := client.ListPrompts()
+	if err != nil {
+		t.Fatalf("ListPrompts: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected empty list, got %d items", len(result))
+	}
+}
+
+// TestClient_SetPromptLabel verifies SetPromptLabel sends PUT to the correct endpoint.
+func TestClient_SetPromptLabel(t *testing.T) {
+	var receivedBody map[string]interface{}
+	var receivedPath string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		if r.Method != http.MethodPut {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		json.NewDecoder(r.Body).Decode(&receivedBody)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"name": "greeting", "label": "production", "version": 2,
+		})
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "oev_proj_test")
+	err := client.SetPromptLabel("greeting", "production", 2)
+	if err != nil {
+		t.Fatalf("SetPromptLabel: %v", err)
+	}
+
+	want := "/api/v1/prompts/greeting/labels/production"
+	if receivedPath != want {
+		t.Errorf("path: got %q, want %q", receivedPath, want)
+	}
+	versionVal, _ := receivedBody["version"].(float64)
+	if int(versionVal) != 2 {
+		t.Errorf("version: got %v, want 2", receivedBody["version"])
+	}
+}
+
+// TestClient_SetPromptLabel_RequiresName verifies SetPromptLabel fails for empty name.
+func TestClient_SetPromptLabel_RequiresName(t *testing.T) {
+	client := NewClient("http://localhost:8080", "oev_proj_test")
+	err := client.SetPromptLabel("", "production", 1)
+	if err == nil {
+		t.Error("expected error for empty name")
+	}
+}
+
+// TestClient_ListEvalRules verifies ListEvalRules returns eval rules.
+func TestClient_ListEvalRules(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		resp := map[string]interface{}{
+			"rules": []map[string]interface{}{
+				{
+					"rule_id":        "rule-1",
+					"name":           "helpfulness",
+					"judge_model":    "gpt-4o-mini",
+					"prompt_name":    "eval-prompt",
+					"prompt_version": 1,
+					"sample_rate":    1.0,
+					"enabled":        true,
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "oev_proj_test")
+	result, err := client.ListEvalRules()
+	if err != nil {
+		t.Fatalf("ListEvalRules: %v", err)
+	}
+	if len(result) != 1 {
+		t.Errorf("len: got %d, want 1", len(result))
+	}
+	if result[0].Name != "helpfulness" {
+		t.Errorf("Name: got %q, want %q", result[0].Name, "helpfulness")
+	}
+	if result[0].RuleID != "rule-1" {
+		t.Errorf("RuleID: got %q, want %q", result[0].RuleID, "rule-1")
+	}
+}
+
+// TestClient_CreateEvalRule verifies CreateEvalRule posts to /api/v1/eval-rules.
+func TestClient_CreateEvalRule(t *testing.T) {
+	var receivedBody map[string]interface{}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		json.NewDecoder(r.Body).Decode(&receivedBody)
+		result := map[string]interface{}{
+			"rule_id":        "rule-123",
+			"name":           "helpfulness",
+			"judge_model":    "gpt-4o-mini",
+			"prompt_name":    "eval-prompt",
+			"prompt_version": 1,
+			"sample_rate":    1.0,
+			"enabled":        true,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(result)
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "oev_proj_test")
+	rule, err := client.CreateEvalRule("helpfulness", "eval-prompt", nil)
+	if err != nil {
+		t.Fatalf("CreateEvalRule: %v", err)
+	}
+
+	if receivedBody["name"] != "helpfulness" {
+		t.Errorf("name: got %v, want %q", receivedBody["name"], "helpfulness")
+	}
+	if receivedBody["prompt_name"] != "eval-prompt" {
+		t.Errorf("prompt_name: got %v, want %q", receivedBody["prompt_name"], "eval-prompt")
+	}
+	if rule.RuleID != "rule-123" {
+		t.Errorf("RuleID: got %q, want %q", rule.RuleID, "rule-123")
+	}
+}
+
+// TestClient_CreateEvalRule_RequiresName verifies CreateEvalRule fails for empty name.
+func TestClient_CreateEvalRule_RequiresName(t *testing.T) {
+	client := NewClient("http://localhost:8080", "oev_proj_test")
+	_, err := client.CreateEvalRule("", "eval-prompt", nil)
+	if err == nil {
+		t.Error("expected error for empty name")
+	}
+}
+
+// TestClient_CreateEvalRule_RequiresPromptName verifies CreateEvalRule fails for empty prompt_name.
+func TestClient_CreateEvalRule_RequiresPromptName(t *testing.T) {
+	client := NewClient("http://localhost:8080", "oev_proj_test")
+	_, err := client.CreateEvalRule("helpfulness", "", nil)
+	if err == nil {
+		t.Error("expected error for empty prompt_name")
+	}
+}
+
 // TestClient_SlowResponse verifies the client handles slightly slow responses
 // without error (the 10-second timeout is generous enough for this 100ms delay).
 func TestClient_SlowResponse(t *testing.T) {

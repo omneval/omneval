@@ -357,8 +357,8 @@ func Run() error {
 			return
 		}
 
-		// GET prompt endpoints accept X-API-Key (for SDKs) or session cookie.
-		if r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/prompts") {
+		// Prompt and eval-rule endpoints accept X-API-Key (for SDKs) or session cookie.
+		if strings.HasPrefix(path, "/api/v1/prompts") || strings.HasPrefix(path, "/api/v1/eval-rules") {
 			promptGetMw(mux).ServeHTTP(w, r)
 			return
 		}
