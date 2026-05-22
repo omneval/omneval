@@ -367,6 +367,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
     const hasConditions = Object.keys(filter).length > 0;
 
     if (!hasConditions) {
+      setShowPreview(true);
       setPreviewError("Add at least one filter condition to preview");
       return;
     }

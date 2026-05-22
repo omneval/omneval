@@ -130,7 +130,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
       const res = await fetch(`/api/v1/prompts/${name}/versions?project_id=${activeProject}`);
       if (!res.ok) return;
       const data = await res.json();
-      setVersionData((prev) => new Map(prev).set(name, data.versions || []));
+      setVersionData((prev) => new Map(prev).set(name, Array.isArray(data) ? data : (data.versions || [])));
     } catch {
       // silently fail
     }
