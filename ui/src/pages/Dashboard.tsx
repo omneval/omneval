@@ -37,6 +37,32 @@ export interface AnalyticsRequest {
   aggregations: { function: string; field: string; alias: string }[];
 }
 
+// ── Chart tick formatter ───────────────────────────────────────────
+
+/**
+ * Format a chart X-axis tick value for the "Traces over Time" chart.
+ *
+ * Presets that show sub-day resolution (1h, 6h, 1d) render as a time string
+ * ("09:00 AM"); multi-day presets (7d, 30d) render as a short date ("Jun 15").
+ *
+ * Exported for unit testing (issues #42 / #47).
+ */
+export function formatTraceTimeTick(val: number, presetKey: string): string {
+  const date = new Date(val);
+  const timePresets = new Set(["1h", "6h", "1d"]);
+  if (timePresets.has(presetKey)) {
+    return date.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 // ── Constants ──────────────────────────────────────────────────────
 
 const DASHBOARD_DATE_RANGE_DAYS = 7;
@@ -310,21 +336,7 @@ function TracesByTimeChart({ data, loading, from, to, timeRange }: TracesByTimeC
   }
   ticks.push(toMs);
 
-  const tickFormatter = (val: number) => {
-    const date = new Date(val);
-    if (diffMs < 24 * 60 * 60 * 1000) {
-      return date.toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      });
-    } else {
-      return date.toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-      });
-    }
-  };
+  const tickFormatter = (val: number) => formatTraceTimeTick(val, presetKey);
 
   return (
     <ResponsiveContainer width="100%" height={280}>

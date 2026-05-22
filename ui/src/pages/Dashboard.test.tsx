@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
-import DashboardPage, { AnalyticsRequest } from "./Dashboard";
+import DashboardPage, { AnalyticsRequest, formatTraceTimeTick } from "./Dashboard";
 import { ToastProvider } from "@/components/Toast";
 
 function renderWithToast(ui: React.ReactElement) {
@@ -561,5 +561,41 @@ describe("DashboardPage", () => {
     const newFromD = new Date(lastCapturedFrom);
     const diffHours = (now.getTime() - newFromD.getTime()) / (1000 * 60 * 60);
     expect(diffHours).toBeLessThan(2);
+  });
+});
+
+// ── formatTraceTimeTick (issues #42 / #47) ────────────────────────────
+
+describe("formatTraceTimeTick", () => {
+  const noonTs = new Date("2025-06-15T12:00:00Z").getTime();
+
+  it("1h preset: formats as time (HH:MM AM/PM)", () => {
+    const result = formatTraceTimeTick(noonTs, "1h");
+    expect(result).toMatch(/AM|PM/i);
+    expect(result).not.toMatch(/Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec/);
+  });
+
+  it("6h preset: formats as time (HH:MM AM/PM)", () => {
+    const result = formatTraceTimeTick(noonTs, "6h");
+    expect(result).toMatch(/AM|PM/i);
+    expect(result).not.toMatch(/Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec/);
+  });
+
+  it("1d preset: formats as time (HH:MM AM/PM), not a date — the boundary bug", () => {
+    const result = formatTraceTimeTick(noonTs, "1d");
+    expect(result).toMatch(/AM|PM/i);
+    expect(result).not.toMatch(/Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec/);
+  });
+
+  it("7d preset: formats as date (Mon DD), not a time", () => {
+    const result = formatTraceTimeTick(noonTs, "7d");
+    expect(result).toMatch(/Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec/);
+    expect(result).not.toMatch(/AM|PM/i);
+  });
+
+  it("30d preset: formats as date (Mon DD), not a time", () => {
+    const result = formatTraceTimeTick(noonTs, "30d");
+    expect(result).toMatch(/Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec/);
+    expect(result).not.toMatch(/AM|PM/i);
   });
 });

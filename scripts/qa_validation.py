@@ -1058,8 +1058,8 @@ if created_dataset_id:
         r = session.get(f"{QUERY_URL}/api/v1/datasets/{created_dataset_id}/items", timeout=10)
         if r.status_code == 200:
             items = r.json()
-            if isinstance(items, list):
-                report(f"Dataset: list items -> 200 ({len(items)} items)", PASS)
+            if isinstance(items, dict) and "items" in items:
+                report(f"Dataset: list items -> 200 ({len(items['items'])} items)", PASS)
             else:
                 report("Dataset: list items -> 200", FAIL, f"unexpected type: {type(items)}")
         else:
@@ -1070,8 +1070,8 @@ if created_dataset_id:
     # List datasets
     try:
         r = session.get(f"{QUERY_URL}/api/v1/datasets", timeout=10)
-        if r.status_code == 200 and isinstance(r.json(), list):
-            report(f"Dataset: list all -> 200 ({len(r.json())} datasets)", PASS)
+        if r.status_code == 200 and isinstance(r.json().get("datasets"), list):
+            report(f"Dataset: list all -> 200 ({len(r.json()['datasets'])} datasets)", PASS)
         else:
             report("Dataset: list all -> 200", FAIL, f"got {r.status_code}: {r.text[:100]}")
     except Exception as e:

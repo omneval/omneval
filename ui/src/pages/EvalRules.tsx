@@ -155,10 +155,10 @@ function filterDisplayText(filter: EvalFilter | null | undefined): string {
   if (filter.model) parts.push(`model=${filter.model}`);
   if (filter.service_name) parts.push(`service=${filter.service_name}`);
   if (filter.status_code) parts.push(`status=${filter.status_code}`);
-  if (filter.min_cost_usd !== undefined) parts.push(`min_cost=$${filter.min_cost_usd}`);
-  if (filter.max_cost_usd !== undefined) parts.push(`max_cost=$${filter.max_cost_usd}`);
-  if (filter.min_duration_ms !== undefined) parts.push(`min_dur=${filter.min_duration_ms}ms`);
-  if (filter.max_duration_ms !== undefined) parts.push(`max_dur=${filter.max_duration_ms}ms`);
+  if (filter.min_cost_usd != null) parts.push(`min_cost=$${filter.min_cost_usd}`);
+  if (filter.max_cost_usd != null) parts.push(`max_cost=$${filter.max_cost_usd}`);
+  if (filter.min_duration_ms != null) parts.push(`min_dur=${filter.min_duration_ms}ms`);
+  if (filter.max_duration_ms != null) parts.push(`max_dur=${filter.max_duration_ms}ms`);
   if (filter.attributes_match && filter.attributes_match.length > 0) {
     parts.push(`attrs=${filter.attributes_match.length}`);
   }

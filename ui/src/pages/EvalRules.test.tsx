@@ -309,6 +309,77 @@ describe("EvalRulesPage", () => {
     }
   );
 
+  describe("filter summary display", () => {
+    it("omits null cost and duration fields from filter summary", async () => {
+      const ruleWithNullCost = [
+        {
+          rule_id: "rule-null-cost",
+          project_id: "proj-1",
+          name: "Rule With Null Cost Fields",
+          judge_model: "gpt-4",
+          prompt_name: "judge-v1",
+          prompt_version: 1,
+          sample_rate: 1.0,
+          enabled: true,
+          created_at: "2026-05-13T10:00:00Z",
+          filter: {
+            model: "gpt-4o",
+            min_cost_usd: null,
+            max_cost_usd: null,
+            min_duration_ms: null,
+            max_duration_ms: null,
+          },
+        },
+      ];
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules(ruleWithNullCost));
+
+      renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Rule With Null Cost Fields")).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText(/\$null/)).not.toBeInTheDocument();
+      expect(screen.getByText(/model=gpt-4o/)).toBeInTheDocument();
+      expect(screen.queryByText(/min_cost/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/max_cost/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/min_dur/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/max_dur/)).not.toBeInTheDocument();
+    });
+
+    it("shows cost fields only when they have actual numeric values", async () => {
+      const ruleWithCost = [
+        {
+          rule_id: "rule-with-cost",
+          project_id: "proj-1",
+          name: "Rule With Cost",
+          judge_model: "gpt-4",
+          prompt_name: "",
+          prompt_version: 1,
+          sample_rate: 1.0,
+          enabled: true,
+          created_at: "2026-05-13T10:00:00Z",
+          filter: {
+            min_cost_usd: 0.1,
+            max_cost_usd: 5.0,
+          },
+        },
+      ];
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules(ruleWithCost));
+
+      renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Rule With Cost")).toBeInTheDocument();
+      });
+
+      expect(screen.getByText(/min_cost=\$0\.1/)).toBeInTheDocument();
+      expect(screen.getByText(/max_cost=\$5/)).toBeInTheDocument();
+    });
+  });
+
   describe("wire format: API response uses snake_case field names", () => {
     const snakeCaseRules = [
       {
