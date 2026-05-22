@@ -17,7 +17,6 @@ import { Skeleton } from "@/components/Skeleton";
 import { EmptyState, LoadingState } from "@/components/EmptyState";
 import {
   formatNumber,
-  formatTime,
   timeRangeLabel,
 } from "@/utils/formatters";
 
@@ -29,11 +28,11 @@ interface DashboardPageProps {
   timeRange?: string;
 }
 
-interface AnalyticsRequest {
+export interface AnalyticsRequest {
   from: string;
   to: string;
   filters: { field: string; op: string; value: unknown }[];
-  group_by: { field: string; truncate?: string }[];
+  group_by: { field: string; truncate?: string; interval?: string }[];
   order_by: { field: string; desc: boolean }[];
   aggregations: { function: string; field: string; alias: string }[];
 }
@@ -215,36 +214,40 @@ function TracesByNameChart({ data, loading }: { data: TracesByNameData[]; loadin
 // ── Chart: Traces by Time (Line Graph) ─────────────────────────────
 
 interface TimeSeriesData {
-  time: string;
+  time: number;
   count: number;
 }
 
-/** Extract the timestamp from a row returned by a grouped analytics query.
- *
- * The outer query projects the group-by expression directly as the column name.
- * For date_trunc('hour', start_time) the column name is the full expression.
- */
-function extractTime(row: Record<string, unknown>): string {
-  // Try known column names first.
+/** Extract the raw epoch timestamp in milliseconds from a row returned by a grouped analytics query. */
+function extractRawTime(row: Record<string, unknown>): number {
   for (const key of [
     "date_trunc('hour', start_time)",
     "date_trunc('hour',start_time)",
     "start_time",
   ]) {
-    if (row[key] !== undefined) {
-      return formatTime(row[key] as string);
+    if (row[key] !== undefined && row[key] !== null) {
+      const t = new Date(row[key] as string).getTime();
+      if (!isNaN(t)) return t;
     }
   }
-  // Fallback: scan values for an ISO-like date string.
   for (const [_key, value] of Object.entries(row)) {
     if (typeof value === "string" && value.includes("-")) {
-      return formatTime(value);
+      const t = new Date(value).getTime();
+      if (!isNaN(t)) return t;
     }
   }
-  return "";
+  return 0;
 }
 
-function TracesByTimeChart({ data, loading }: { data: TimeSeriesData[]; loading: boolean }) {
+interface TracesByTimeChartProps {
+  data: TimeSeriesData[];
+  loading: boolean;
+  from: string;
+  to: string;
+  timeRange?: string;
+}
+
+function TracesByTimeChart({ data, loading, from, to, timeRange }: TracesByTimeChartProps) {
   if (loading && data.length === 0) {
     return <LoadingState rows={1} rowHeight="8rem" />;
   }
@@ -260,19 +263,85 @@ function TracesByTimeChart({ data, loading }: { data: TimeSeriesData[]; loading:
     );
   }
 
+  const fromMs = new Date(from).getTime();
+  const toMs = new Date(to).getTime();
+  const diffMs = toMs - fromMs;
+
+  const presets = [
+    { key: "1h", ms: 60 * 60 * 1000 },
+    { key: "6h", ms: 6 * 60 * 60 * 1000 },
+    { key: "1d", ms: 24 * 60 * 60 * 1000 },
+    { key: "7d", ms: 7 * 24 * 60 * 60 * 1000 },
+    { key: "30d", ms: 30 * 24 * 60 * 60 * 1000 },
+  ];
+
+  let presetKey = timeRange;
+  if (!presetKey || presetKey === "custom" || !presets.some(p => p.key === presetKey)) {
+    let minDiff = Infinity;
+    let closestKey = "7d";
+    for (const p of presets) {
+      const d = Math.abs(diffMs - p.ms);
+      if (d < minDiff) {
+        minDiff = d;
+        closestKey = p.key;
+      }
+    }
+    presetKey = closestKey;
+  }
+
+  let intervalMs = 24 * 60 * 60 * 1000; // default 1 day
+  if (presetKey === "1h") {
+    intervalMs = 15 * 60 * 1000;
+  } else if (presetKey === "6h") {
+    intervalMs = 60 * 60 * 1000;
+  } else if (presetKey === "1d") {
+    intervalMs = 4 * 60 * 60 * 1000;
+  } else if (presetKey === "7d") {
+    intervalMs = 24 * 60 * 60 * 1000;
+  } else if (presetKey === "30d") {
+    intervalMs = 5 * 24 * 60 * 60 * 1000;
+  }
+
+  const ticks: number[] = [];
+  let current = fromMs;
+  while (current < toMs - intervalMs / 2) {
+    ticks.push(current);
+    current += intervalMs;
+  }
+  ticks.push(toMs);
+
+  const tickFormatter = (val: number) => {
+    const date = new Date(val);
+    if (diffMs < 24 * 60 * 60 * 1000) {
+      return date.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      });
+    } else {
+      return date.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      });
+    }
+  };
+
   return (
     <ResponsiveContainer width="100%" height={280}>
-      <LineChart data={data} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+      <LineChart data={data} margin={{ top: 5, right: 20, left: 10, bottom: 15 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
         <XAxis
+          type="number"
           dataKey="time"
+          domain={[fromMs, toMs]}
+          ticks={ticks}
+          tickFormatter={tickFormatter}
           tick={{ fill: colors.typography.ashGrey, fontSize: 11 }}
           axisLine={{ stroke: gridColor }}
           tickLine={false}
-          angle={-45}
-          textAnchor="end"
-          height={60}
-          interval="preserveStartEnd"
+          angle={0}
+          textAnchor="middle"
+          height={30}
         />
         <YAxis
           tick={{ fill: colors.typography.ashGrey, fontSize: 12 }}
@@ -282,6 +351,14 @@ function TracesByTimeChart({ data, loading }: { data: TimeSeriesData[]; loading:
         <Tooltip
           contentStyle={chartTooltipStyle}
           formatter={(value: number) => [formatNumber(value), "Traces"]}
+          labelFormatter={(val: number) =>
+            new Date(val).toLocaleString(undefined, {
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          }
         />
         <Line
           type="monotone"
@@ -634,9 +711,19 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
       };
 
       // ── Traces by Time ──
+      let tracesByTimeGroupBy: AnalyticsRequest["group_by"] = [{ field: "start_time", truncate: "hour" }];
+      const diffMs = new Date(to).getTime() - new Date(from).getTime();
+      if (diffMs <= 1.5 * 60 * 60 * 1000) {
+        tracesByTimeGroupBy = [{ field: "time_bucket", interval: "5m" }];
+      } else if (diffMs <= 25 * 60 * 60 * 1000) {
+        tracesByTimeGroupBy = [{ field: "time_bucket", interval: "1h" }];
+      } else {
+        tracesByTimeGroupBy = [{ field: "time_bucket", interval: "1d" }];
+      }
+
       const tracesByTimeReq: AnalyticsRequest = {
         ...body,
-        group_by: [{ field: "start_time", truncate: "hour" }],
+        group_by: tracesByTimeGroupBy,
         order_by: [{ field: "start_time", desc: false }],
         aggregations: [
           { function: "count", field: "*", alias: "count" },
@@ -727,10 +814,12 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         const data = await tracesByTimeResp.json();
         if (data.rows) {
           setTracesByTime(
-            data.rows.map((row: Record<string, unknown>) => ({
-              time: extractTime(row),
-              count: Number(row.count) || 0,
-            })),
+            data.rows
+              .map((row: Record<string, unknown>) => ({
+                time: extractRawTime(row),
+                count: Number(row.count) || 0,
+              }))
+              .filter((d: TimeSeriesData) => d.time > 0),
           );
         }
       }
@@ -877,7 +966,7 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
 
         {/* 4. Traces by Time (Line Graph) */}
         <Card title="Traces over Time" subtitle="count/hour">
-          <TracesByTimeChart data={tracesByTime} loading={loading} />
+          <TracesByTimeChart data={tracesByTime} loading={loading} from={from} to={to} timeRange={timeRange} />
         </Card>
 
         {/* 5. Model Usage (Tabbed) */}
