@@ -145,7 +145,15 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 	// Compute next cursor using the effective limit from the query.
 	// This handles the case where req.Limit was 0 (unset) and the
 	// query defaulted to DefaultLimit.
+	// The SQL fetches limit+1 rows; NextCursor determines whether more
+	// pages exist based on whether we got more than limit results.
 	next := query.NextCursor(spans, q.EffectiveLimit())
+
+	// Truncate to the requested page size — the extra row was only used to
+	// detect whether a next page exists and must not be returned to callers.
+	if len(spans) > q.EffectiveLimit() {
+		spans = spans[:q.EffectiveLimit()]
+	}
 
 	resp := query.SpanResponse{
 		Spans: spans,

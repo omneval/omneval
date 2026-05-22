@@ -353,6 +353,53 @@ func TestNextCursor_MoreSpansThanLimit(t *testing.T) {
 	}
 }
 
+func TestSQL_LimitArg_IsPlusOne(t *testing.T) {
+	// The SQL query must request limit+1 rows so we can distinguish
+	// "exactly limit results (last page)" from "limit results and more exist".
+	req := SpanQueryRequest{
+		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Limit: 10,
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	_, args, err := q.SQL()
+	if err != nil {
+		t.Fatalf("SQL error: %v", err)
+	}
+
+	// The last arg is the LIMIT value — it must be limit+1.
+	limitArg := args[len(args)-1].(int)
+	if limitArg != 11 {
+		t.Errorf("SQL LIMIT arg: got %d, want %d (limit+1)", limitArg, 11)
+	}
+}
+
+func TestNextCursor_ExactlyLimit_IsLastPage(t *testing.T) {
+	// When the DB returns exactly `limit` rows (not limit+1), there are no
+	// more results — next cursor must be empty.
+	// Under limit+1 semantics: DB fetches limit+1; if only limit come back,
+	// it's the last page.
+	limit := 10
+	spans := make([]*domain.Span, limit)
+	base := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	for i := range spans {
+		spans[i] = &domain.Span{
+			SpanID:    fmt.Sprintf("span-%03d", i),
+			StartTime: base.Add(time.Duration(i) * time.Second),
+		}
+	}
+
+	next := NextCursor(spans, limit)
+	if next != "" {
+		t.Errorf("expected empty next cursor when result count == limit (last page), got %q", next)
+	}
+}
+
 func TestNextCursor_FewerSpansThanLimit(t *testing.T) {
 	spans := []*domain.Span{
 		{SpanID: "span-001", StartTime: time.Now()},

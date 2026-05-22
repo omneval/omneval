@@ -107,16 +107,21 @@ func TestIntegration_QueryWithDuckDB(t *testing.T) {
 	}
 	rows.Close()
 
-	if len(page1Rows) != 10 {
-		t.Errorf("page 1: got %d rows, want 10", len(page1Rows))
+	// With limit+1 semantics: DB returns up to limit+1 rows so we can detect
+	// whether a next page exists. Page 1 has 25 spans in DB, limit=10 → 11 rows back.
+	if len(page1Rows) != 11 {
+		t.Errorf("page 1 (raw DB): got %d rows, want 11 (limit+1)", len(page1Rows))
 	}
 
-	// Compute next cursor from page 1.
+	// Compute next cursor from the limit+1 result; cursor is set because len > limit.
 	spans, _ := ScanRows(page1Rows)
 	next := NextCursor(spans, req.Limit)
 	if next == "" {
 		t.Fatal("expected non-empty next cursor on page 1")
 	}
+
+	// For overlap checks below, use only the page (truncated to limit).
+	page1Rows = page1Rows[:req.Limit]
 
 	// Query page 2 with cursor.
 	req2 := SpanQueryRequest{
@@ -156,8 +161,9 @@ func TestIntegration_QueryWithDuckDB(t *testing.T) {
 	}
 	rows2.Close()
 
-	if len(page2Rows) != 10 {
-		t.Errorf("page 2: got %d rows, want 10", len(page2Rows))
+	// Page 2: 25 - 10 = 15 remaining → DB returns 11 (limit+1).
+	if len(page2Rows) != 11 {
+		t.Errorf("page 2 (raw DB): got %d rows, want 11 (limit+1)", len(page2Rows))
 	}
 
 	// Compute next cursor from page 2.
@@ -166,6 +172,9 @@ func TestIntegration_QueryWithDuckDB(t *testing.T) {
 	if next2 == "" {
 		t.Fatal("expected non-empty next cursor on page 2")
 	}
+
+	// For overlap checks below, use only the page (truncated to limit).
+	page2Rows = page2Rows[:10]
 
 	// Verify no overlap between page 1 and page 2.
 	page1SpanIDs := make(map[string]bool, len(page1Rows))
@@ -218,9 +227,10 @@ func TestIntegration_QueryWithDuckDB(t *testing.T) {
 	}
 	rows3.Close()
 
-	// With 25 spans and 10 per page: page 3 should have 5 rows.
+	// With 25 spans and 10 per page: page 3 has 5 remaining rows — DB returns 5
+	// (less than limit+1=11), confirming it is the last page.
 	if len(page3Rows) != 5 {
-		t.Errorf("page 3: got %d rows, want 5", len(page3Rows))
+		t.Errorf("page 3 (raw DB): got %d rows, want 5", len(page3Rows))
 	}
 
 	// Verify no overlap between page 2 and page 3.
@@ -235,7 +245,7 @@ func TestIntegration_QueryWithDuckDB(t *testing.T) {
 		}
 	}
 
-	// Next cursor for page 3 should be empty (last page).
+	// Next cursor for page 3 should be empty (last page: len(spans3) <= limit).
 	spans3, _ := ScanRows(page3Rows)
 	next3 := NextCursor(spans3, 10)
 	if next3 != "" {

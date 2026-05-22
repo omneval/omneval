@@ -278,13 +278,15 @@ func (q *SpanQuery) SQL() (sql string, args []any, err error) {
 	outerSQL := q.outerSQL(unionSQL)
 
 	// Collect all args: hot side args + cursor args.
+	// Always fetch limit+1 rows so NextCursor can distinguish "exactly limit
+	// results (last page)" from "limit results with more remaining".
 	args = hotArgs
 	if q.cursor.StartTime.IsZero() && q.cursor.SpanID == "" {
-		// First page: pass limit as arg for the outer LIMIT.
-		args = append(args, q.limit)
+		// First page: pass limit+1 as arg for the outer LIMIT.
+		args = append(args, q.limit+1)
 	} else {
-		// Cursor page: pass (start_time, start_time, span_id, limit).
-		args = append(args, q.cursor.StartTime, q.cursor.StartTime, q.cursor.SpanID, q.limit)
+		// Cursor page: pass (start_time, start_time, span_id, limit+1).
+		args = append(args, q.cursor.StartTime, q.cursor.StartTime, q.cursor.SpanID, q.limit+1)
 	}
 
 	return outerSQL, args, nil
@@ -527,13 +529,17 @@ func validateFilter(f SpanQueryFilter) error {
 }
 
 // NextCursor extracts the next page cursor from a list of spans.
-// Returns an empty string if there are no more pages (fewer spans than limit).
-// The cursor encodes the last element of the *page* (at index min(len-1, limit-1)),
-// not the last element of the full input slice.
+// Returns an empty string if there are no more pages.
+//
+// Callers must pass the raw DB result (fetched with LIMIT limit+1). If the
+// result has more than limit items, there is at least one more page — return
+// a cursor encoding the last item of the current page (index limit-1). If
+// the result has limit or fewer items, it is the last page — return "".
 func NextCursor(spans []*domain.Span, limit int) string {
-	if len(spans) == 0 || len(spans) < limit {
+	if len(spans) == 0 || len(spans) <= limit {
 		return ""
 	}
+	// len(spans) > limit: there is a next page.
 	// The last element of this page is at index limit-1.
 	last := spans[limit-1]
 	if last.StartTime.IsZero() && last.SpanID == "" {
