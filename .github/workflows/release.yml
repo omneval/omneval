@@ -22,6 +22,9 @@ jobs:
           driver-opts: |
             network=host
 
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -29,7 +32,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -37,3 +40,12 @@ jobs:
           tags: ghcr.io/omneval/omneval:${{ github.ref_name }}
           cache-from: type=registry,ref=ghcr.io/omneval/omneval:cache
           cache-to: type=registry,ref=ghcr.io/omneval/omneval:cache,mode=max
+
+      - name: Package and push Helm chart
+        run: |
+          CHART_VERSION="${{ github.ref_name }}"
+          CHART_VERSION="${CHART_VERSION#v}"
+          helm package deploy/helm \
+            --version "${CHART_VERSION}" \
+            --app-version "${{ github.ref_name }}"
+          helm push "omneval-${CHART_VERSION}.tgz" oci://ghcr.io/omneval/charts
