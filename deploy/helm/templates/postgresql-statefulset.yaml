@@ -80,8 +80,11 @@ spec:
               value: {{ $auth.database | quote }}
             - name: PGDATA
               value: "/var/lib/postgresql/data/pgdata"
-          command:
-            - postgres
+          # Pass flags as args (not command) so the official postgres image
+          # entrypoint (docker-entrypoint.sh) still runs: it initializes the
+          # data dir and drops privileges from root to the postgres user. The
+          # postgres image refuses to run the server directly as root.
+          args:
             - -c
             - config_file=/etc/postgresql/postgresql.conf
           volumeMounts:

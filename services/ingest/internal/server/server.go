@@ -44,7 +44,11 @@ func levelFromString(s string) slog.Level {
 // - Stops accepting new connections on SIGTERM/SIGINT
 // - Waits up to 30s for in-flight HTTP requests to complete
 func Run() error {
-	cfg, err := config.Load("")
+	cfgPath := ""
+	if p := os.Getenv("OMNEVAL_CONFIG"); p != "" {
+		cfgPath = p
+	}
+	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}

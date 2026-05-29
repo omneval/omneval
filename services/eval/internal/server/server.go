@@ -26,7 +26,11 @@ const workerShutdownTimeout = 120 * time.Second
 // - Stops dequeuing new jobs on SIGTERM/SIGINT
 // - Finishes the current LLM call within the drain window
 func Run() error {
-	cfg, err := config.Load("")
+	cfgPath := ""
+	if p := os.Getenv("OMNEVAL_CONFIG"); p != "" {
+		cfgPath = p
+	}
+	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return fmt.Errorf("eval: load config: %w", err)
 	}
