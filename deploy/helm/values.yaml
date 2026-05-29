@@ -162,6 +162,14 @@ query:
   # Set both adminEmail and adminPassword to auto-create the first admin user.
   adminEmail: ""
   adminPassword: ""
+  # Source the bootstrap admin credentials from an existing Secret instead of
+  # the plaintext adminEmail/adminPassword values above. Useful when the Secret
+  # is managed externally (e.g. synced from a vault). When set, this takes
+  # precedence over adminEmail/adminPassword. emailKey/passwordKey select which
+  # keys in the Secret hold the admin email and password.
+  existingSecret: ""
+  emailKey: "admin-email"
+  passwordKey: "admin-password"
   resources:
     limits:
       cpu: 500m

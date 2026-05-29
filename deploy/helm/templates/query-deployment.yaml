@@ -81,14 +81,14 @@ spec:
             - name: OMNEVAL_AUTH_ADMIN_EMAIL
               valueFrom:
                 secretKeyRef:
-                  name: {{ $name }}-secret
-                  key: admin-email
+                  name: {{ .Values.query.existingSecret | default (printf "%s-secret" $name) }}
+                  key: {{ .Values.query.emailKey }}
                   optional: true
             - name: OMNEVAL_AUTH_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ $name }}-secret
-                  key: admin-password
+                  name: {{ .Values.query.existingSecret | default (printf "%s-secret" $name) }}
+                  key: {{ .Values.query.passwordKey }}
                   optional: true
             {{- if $redisPassword }}
             - name: OMNEVAL_REDIS_PASSWORD
