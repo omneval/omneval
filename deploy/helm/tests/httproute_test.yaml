@@ -1,0 +1,53 @@
+---
+suite: httproute
+templates:
+  - httproute.yaml
+tests:
+  - it: should not create HTTPRoute when disabled
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should create a query HTTPRoute when enabled
+    set:
+      httpRoute.enabled: true
+      httpRoute.query.host: "omneval.example.com"
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: HTTPRoute
+      - equal:
+          path: spec.hostnames[0]
+          value: "omneval.example.com"
+      - equal:
+          path: spec.rules[0].backendRefs[0].name
+          value: "RELEASE-NAME-query"
+      - equal:
+          path: spec.rules[0].backendRefs[0].port
+          value: 8002
+
+  - it: should create both query and ingest HTTPRoutes when both hosts set
+    set:
+      httpRoute.enabled: true
+      httpRoute.query.host: "omneval.example.com"
+      httpRoute.ingest.host: "ingest.example.com"
+    asserts:
+      - hasDocuments:
+          count: 2
+
+  - it: should render parentRefs onto the route
+    set:
+      httpRoute.enabled: true
+      httpRoute.query.host: "omneval.example.com"
+      httpRoute.parentRefs:
+        - name: traefik-gateway
+          namespace: traefik
+          sectionName: websecure
+    asserts:
+      - equal:
+          path: spec.parentRefs[0].name
+          value: traefik-gateway
+      - equal:
+          path: spec.parentRefs[0].sectionName
+          value: websecure

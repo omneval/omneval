@@ -110,6 +110,26 @@ Usage: {{ include "omneval.storageSecretKey" . }}
 {{- end -}}
 
 {{- /*
+omneval.storageBucket returns the S3 bucket name.
+
+When MinIO is enabled internally, the bundled bucket-creation Job provisions a
+bucket named "omneval", so that is used as the default unless storage.bucket is
+explicitly set. For external storage, storage.bucket or minio.external.bucket
+applies.
+
+Usage: {{ include "omneval.storageBucket" . }}
+*/ -}}
+{{- define "omneval.storageBucket" -}}
+{{- if .Values.storage.bucket -}}
+{{- .Values.storage.bucket -}}
+{{- else if .Values.minio.enabled -}}
+omneval
+{{- else if .Values.minio.external.bucket -}}
+{{- .Values.minio.external.bucket -}}
+{{- end }}
+{{- end -}}
+
+{{- /*
 omneval.postgresDsn returns the PostgreSQL DSN string.
 
 Usage: {{ include "omneval.postgresDsn" . }}

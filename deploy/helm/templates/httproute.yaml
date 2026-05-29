@@ -1,0 +1,77 @@
+{{- /*
+HTTPRoute — optional Gateway API routing for the Query API (UI) and Ingest API.
+
+Controlled by httpRoute.enabled. Use this instead of ingress.yaml when your
+cluster routes traffic through the Gateway API (e.g. Traefik, Cilium, or Istio
+gateways) rather than an Ingress controller. The query and ingest hosts are
+configured and routed independently — set one, the other, or both.
+
+TLS is expected to terminate at the Gateway listener referenced by parentRefs,
+so no per-route TLS configuration is needed here.
+*/ -}}
+{{- $name := .Release.Name -}}
+{{- if .Values.httpRoute.enabled }}
+{{- if .Values.httpRoute.query.host }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $name }}-query
+  labels:
+    app.kubernetes.io/name: omneval
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: query
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.httpRoute.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml .Values.httpRoute.parentRefs | nindent 4 }}
+  hostnames:
+    - {{ .Values.httpRoute.query.host | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ $name }}-query
+          port: 8002
+{{- end }}
+{{- if .Values.httpRoute.ingest.host }}
+{{- if .Values.httpRoute.query.host }}
+---
+{{- end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $name }}-ingest
+  labels:
+    app.kubernetes.io/name: omneval
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: ingest
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.httpRoute.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml .Values.httpRoute.parentRefs | nindent 4 }}
+  hostnames:
+    - {{ .Values.httpRoute.ingest.host | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ $name }}-ingest
+          port: 8000
+{{- end }}
+{{- end }}

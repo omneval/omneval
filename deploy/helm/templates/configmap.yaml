@@ -16,6 +16,7 @@ Infrastructure resolution:
 {{- $redisAddr := include "omneval.redisAddr" . -}}
 {{- $pgDsn := include "omneval.postgresDsn" . -}}
 {{- $storageEndpoint := include "omneval.storageEndpoint" . -}}
+{{- $storageBucket := include "omneval.storageBucket" . -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -40,7 +41,7 @@ data:
     {{- if $storageEndpoint }}
     storage:
       endpoint: {{ $storageEndpoint | quote }}
-      {{- with .Values.storage.bucket }}
+      {{- with $storageBucket }}
       bucket: {{ . | quote }}
       {{- end }}
       {{- with .Values.storage.region }}

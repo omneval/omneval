@@ -409,6 +409,30 @@ ingress:
     tls: []
 
 # ============================================================================
+# HTTPRoute (optional — Gateway API)
+#
+# Use this instead of `ingress` when your cluster routes traffic through the
+# Gateway API (e.g. Traefik, Cilium, or Istio gateways). TLS is expected to
+# terminate at the Gateway listener referenced by parentRefs, so no per-route
+# TLS is configured here. The query (UI) and ingest hosts are independent.
+# ============================================================================
+httpRoute:
+  enabled: false
+  # parentRefs point at the Gateway (and optionally a named listener/section).
+  parentRefs: []
+    # - name: traefik-gateway
+    #   namespace: traefik
+    #   sectionName: websecure
+  # Annotations applied to every generated HTTPRoute.
+  annotations: {}
+  # Query API (UI) route
+  query:
+    host: ""
+  # Ingest API route
+  ingest:
+    host: ""
+
+# ============================================================================
 # Metrics
 # ============================================================================
 metrics:
