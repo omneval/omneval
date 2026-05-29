@@ -95,7 +95,7 @@ spec:
             - name: OMNEVAL_STORAGE_REGION
               value: {{ . | quote }}
             {{- end }}
-            {{- if .Values.storage.endpoint }}
+            {{- if include "omneval.storageAccessKey" . }}
             - name: OMNEVAL_STORAGE_ACCESS_KEY
               valueFrom:
                 secretKeyRef:

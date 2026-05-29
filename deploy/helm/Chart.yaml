@@ -2,8 +2,8 @@ apiVersion: v2
 name: omneval
 description: A self-hostable LLM/Agent tracing platform with DuckDB as the OLAP backend
 type: application
-version: 0.0.6
-appVersion: "v0.0.6"
+version: 0.0.7
+appVersion: "v0.0.7"
 keywords:
   - tracing
   - observability
