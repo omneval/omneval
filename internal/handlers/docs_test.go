@@ -13,10 +13,10 @@ import (
 // - X-API-Key auth header and OTEL_EXPORTER_OTLP_HEADERS form
 // - Project inferred from API key (not supplied by client)
 // - Key creation (project vs service, prefixes, raw key shown once) and revocation
-// - Worked OTLP env-var example
+// - Working OTLP env-var example
 func TestDocsIngestionAuthAndProjectModel(t *testing.T) {
 	// Resolve docs/ingestion.md relative to repo root.
-	// The test is run from the internal module, so we go up one level.
+	// internal/handlers/ is two levels deep, so we go up twice.
 	docsPath := filepath.Join("..", "..", "docs", "ingestion.md")
 
 	data, err := os.ReadFile(docsPath)
@@ -54,7 +54,7 @@ func TestDocsIngestionAuthAndProjectModel(t *testing.T) {
 		{"raw key shown once", "once"},
 		{"key revocation", "revoke"},
 
-		// Acceptance criterion 5: worked OTLP env-var example
+		// Acceptance criterion 5: working OTLP env-var example
 		{"otlp endpoint env var", "OTEL_EXPORTER_OTLP_ENDPOINT"},
 		{"otlp protocol env var", "OTEL_EXPORTER_OTLP_PROTOCOL"},
 	}

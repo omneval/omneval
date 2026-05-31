@@ -178,15 +178,12 @@ OTEL_SERVICE_NAME=web-frontend
 
 The `service_name` from the validated key takes priority over any `OTEL_SERVICE_NAME` override when resolving span attribution.
 
-## Error Responses
+## Response Codes
 
 | Status | Condition |
 |--------|-----------|
-| `401 Unauthorized` | Missing or invalid API key |
+| `202 Accepted` | Successful ingest. The response body mirrors the request content type (for OTLP) or is empty (for native REST). |
 | `400 Bad Request` | Invalid payload, unsupported content type, or malformed span data |
+| `401 Unauthorized` | Missing or invalid API key |
 | `405 Method Not Allowed` | Non-POST request to ingest endpoints |
 | `503 Service Unavailable` | Redis enqueue failure |
-
-## Response Codes
-
-Successful ingest always returns `202 Accepted`. The response body mirrors the content type of the request (for OTLP) or is empty (for native REST).
