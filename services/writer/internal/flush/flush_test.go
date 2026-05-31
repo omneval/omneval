@@ -31,6 +31,14 @@ func newMockStore() *mockStore {
 }
 
 func (m *mockStore) Put(_ context.Context, key string, r io.Reader) error {
+	return m.put(key, r)
+}
+
+func (m *mockStore) PutSized(_ context.Context, key string, r io.Reader, _ int64) error {
+	return m.put(key, r)
+}
+
+func (m *mockStore) put(key string, r io.Reader) error {
 	if m.failPut {
 		return fmt.Errorf("simulated S3 failure")
 	}

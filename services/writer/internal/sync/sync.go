@@ -131,7 +131,7 @@ func (s *Syncer) doSync(ctx context.Context) {
 	}
 	defer f.Close()
 
-	if err := s.store.Put(ctx, s.snapshotKey, f); err != nil {
+	if err := s.store.PutSized(ctx, s.snapshotKey, f, info.Size()); err != nil {
 		slog.WarnContext(ctx, "writer: syncer: upload failed",
 			"key", s.snapshotKey,
 			"err", err,

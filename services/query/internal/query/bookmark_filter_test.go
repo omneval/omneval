@@ -139,6 +139,7 @@ var _ storage.ObjectStore = (*testS3Store)(nil)
 type testS3Store struct{}
 
 func (m *testS3Store) Put(_ context.Context, _ string, _ io.Reader) error       { return nil }
+func (m *testS3Store) PutSized(_ context.Context, _ string, _ io.Reader, _ int64) error { return nil }
 func (m *testS3Store) Get(_ context.Context, _ string) (io.ReadCloser, error)   { return nil, nil }
 func (m *testS3Store) Delete(_ context.Context, _ string) error                 { return nil }
 func (m *testS3Store) ListPrefix(_ context.Context, _ string) ([]string, error) { return nil, nil }

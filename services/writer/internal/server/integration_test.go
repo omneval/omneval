@@ -28,6 +28,14 @@ type integrationS3Store struct {
 }
 
 func (f *integrationS3Store) Put(_ context.Context, key string, r io.Reader) error {
+	return f.put(key, r)
+}
+
+func (f *integrationS3Store) PutSized(_ context.Context, key string, r io.Reader, _ int64) error {
+	return f.put(key, r)
+}
+
+func (f *integrationS3Store) put(key string, r io.Reader) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	data, err := io.ReadAll(r)

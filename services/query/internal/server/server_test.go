@@ -468,6 +468,10 @@ func (f *fakeNotFoundStore) Put(_ context.Context, key string, r io.Reader) erro
 	return nil
 }
 
+func (f *fakeNotFoundStore) PutSized(_ context.Context, key string, r io.Reader, size int64) error {
+	return nil
+}
+
 func (f *fakeNotFoundStore) Get(_ context.Context, key string) (io.ReadCloser, error) {
 	return nil, minio.ToErrorResponse(minio.ErrorResponse{
 		Code:       minio.NoSuchKey,

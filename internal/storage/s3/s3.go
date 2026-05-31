@@ -1,7 +1,6 @@
 package s3
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -64,19 +63,33 @@ func (s *Store) getBucket() string {
 }
 
 // Put uploads the reader's contents to the given key in the configured bucket.
+// Uses multipart upload (size -1) so the data is streamed without buffering
+// the entire body in memory.
 func (s *Store) Put(_ context.Context, key string, r io.Reader) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("s3: no client configured")
 	}
 
-	// Read the entire body to compute size for PutObject.
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		return fmt.Errorf("s3: read body: %w", err)
+	_, err := s.client.PutObject(context.Background(), s.getBucket(), key,
+		r, -1, minio.PutObjectOptions{
+			ContentType: "application/octet-stream",
+		})
+	if err != nil {
+		return fmt.Errorf("s3: put %s: %w", key, err)
+	}
+	return nil
+}
+
+// PutSized uploads the reader's contents to the given key with the known size.
+// The size is passed directly to PutObject, enabling a single-part upload
+// without buffering the entire body in memory.
+func (s *Store) PutSized(_ context.Context, key string, r io.Reader, size int64) error {
+	if s == nil || s.client == nil {
+		return fmt.Errorf("s3: no client configured")
 	}
 
 	_, err := s.client.PutObject(context.Background(), s.getBucket(), key,
-		&buf, int64(buf.Len()), minio.PutObjectOptions{
+		r, size, minio.PutObjectOptions{
 			ContentType: "application/octet-stream",
 		})
 	if err != nil {
