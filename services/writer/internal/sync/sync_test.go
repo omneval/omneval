@@ -30,6 +30,14 @@ type putCall struct {
 }
 
 func (m *mockStore) Put(_ context.Context, key string, r io.Reader) error {
+	return m.put(key, r)
+}
+
+func (m *mockStore) PutSized(_ context.Context, key string, r io.Reader, _ int64) error {
+	return m.put(key, r)
+}
+
+func (m *mockStore) put(key string, r io.Reader) error {
 	if m == nil {
 		return io.ErrUnexpectedEOF
 	}
@@ -224,6 +232,10 @@ func TestDoSync_UploadFailure(t *testing.T) {
 type failingStore struct{}
 
 func (f *failingStore) Put(_ context.Context, key string, r io.Reader) error {
+	return io.ErrUnexpectedEOF
+}
+
+func (f *failingStore) PutSized(_ context.Context, key string, r io.Reader, size int64) error {
 	return io.ErrUnexpectedEOF
 }
 

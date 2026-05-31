@@ -20,6 +20,14 @@ type fakeS3Store struct {
 }
 
 func (f *fakeS3Store) Put(_ context.Context, key string, r io.Reader) error {
+	return f.put(key, r)
+}
+
+func (f *fakeS3Store) PutSized(_ context.Context, key string, r io.Reader, _ int64) error {
+	return f.put(key, r)
+}
+
+func (f *fakeS3Store) put(key string, r io.Reader) error {
 	if f == nil {
 		return io.ErrUnexpectedEOF
 	}

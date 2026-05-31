@@ -266,7 +266,12 @@ func (f *Flusher) uploadToS3(ctx context.Context, s3Key string, localPath string
 	}
 	defer fh.Close()
 
-	if err := f.store.Put(ctx, s3Key, fh); err != nil {
+	info, err := fh.Stat()
+	if err != nil {
+		return fmt.Errorf("stat local file: %w", err)
+	}
+
+	if err := f.store.PutSized(ctx, s3Key, fh, info.Size()); err != nil {
 		return fmt.Errorf("put s3 %s: %w", s3Key, err)
 	}
 	return nil
