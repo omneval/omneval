@@ -32,6 +32,55 @@ type SessionStore interface {
 	ListProjects(r *http.Request) ([]*domain.Project, error)
 }
 
+// resolveProjectID determines the project_id a request should query.
+//
+// When explicitID is non-empty (the UI project switcher includes it in the
+// request body / query string), it is honored after verifying it belongs to
+// the authenticated user's org. When it is empty, we fall back to the
+// session-derived default, which returns the org's first project.
+//
+// All UI-facing read endpoints (span list, trace detail, analytics) share this
+// helper so the Traces page, Trace Detail, and Dashboard always resolve to the
+// same project. Previously the span list and trace detail used only the session
+// default while the Dashboard honored the body project_id, so selecting a
+// non-default project in the switcher showed data on the Dashboard but an empty
+// Traces page.
+//
+// On failure it writes the appropriate HTTP error and returns ok=false; callers
+// should return immediately.
+func (h *SpanHandler) resolveProjectID(w http.ResponseWriter, r *http.Request, explicitID string) (string, bool) {
+	if explicitID == "" {
+		projectID, ok := h.SessionStore.ProjectID(r)
+		if !ok || projectID == "" {
+			if auth.CurrentUserFromContext(r) != nil {
+				writeJSONError(w, "no project found — create a project first via POST /api/v1/projects", http.StatusBadRequest)
+			} else {
+				writeJSONError(w, "unauthorized", http.StatusUnauthorized)
+			}
+			return "", false
+		}
+		return projectID, true
+	}
+
+	// An explicit project_id must belong to the authenticated user's org.
+	if auth.CurrentUserFromContext(r) == nil {
+		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
+		return "", false
+	}
+	userProjects, err := h.SessionStore.ListProjects(r)
+	if err != nil {
+		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
+		return "", false
+	}
+	for _, p := range userProjects {
+		if p.ProjectID == explicitID {
+			return explicitID, true
+		}
+	}
+	writeJSONError(w, "project_id not found in user's organizations", http.StatusForbidden)
+	return "", false
+}
+
 // HandleSpansQuery handles POST /api/v1/spans/query.
 // It extracts project_id from the authenticated session, builds the SQL query
 // with keyset cursor pagination, executes the hot+cold UNION, and returns
@@ -98,18 +147,24 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Extract project_id from the authenticated session.
-	projectID, ok := h.SessionStore.ProjectID(r)
-	if !ok || projectID == "" {
-		if auth.CurrentUserFromContext(r) != nil {
-			writeJSONError(w, "no project found — create a project first via POST /api/v1/projects", http.StatusBadRequest)
+	// Resolve project_id: honor an explicit project_id in the body (the UI
+	// project switcher) after an org-membership check, else the session
+	// default. Mirrors the analytics endpoint so the Traces page and Dashboard
+	// always query the same project.
+	var bodyProjectID string
+	if rawPID, ok := rawBody["project_id"]; ok {
+		if err := json.Unmarshal(rawPID, &bodyProjectID); err != nil {
+			writeJSONError(w, "invalid 'project_id' field: expected string", http.StatusBadRequest)
 			return
 		}
-		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
+	}
+	projectID, ok := h.resolveProjectID(w, r, bodyProjectID)
+	if !ok {
 		return
 	}
 
-	// Build the query — projectID is injected from the session, never from client input.
+	// Build the query — projectID is validated server-side against the user's
+	// org; the raw client value is never trusted directly.
 	q, err := query.NewSpanQuery(projectID, req, nil, "")
 	if err != nil {
 		writeJSONError(w, "bad request: "+err.Error(), http.StatusBadRequest)
@@ -189,14 +244,10 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Extract project_id from the authenticated session.
-	projectID, ok := h.SessionStore.ProjectID(r)
-	if !ok || projectID == "" {
-		if auth.CurrentUserFromContext(r) != nil {
-			writeJSONError(w, "no project found — create a project first via POST /api/v1/projects", http.StatusBadRequest)
-			return
-		}
-		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
+	// Resolve project_id: honor an explicit ?project_id= (the UI project
+	// switcher) after an org-membership check, else the session default.
+	projectID, ok := h.resolveProjectID(w, r, r.URL.Query().Get("project_id"))
+	if !ok {
 		return
 	}
 
@@ -384,46 +435,13 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Determine project_id: prefer the one from the request body,
-	// fall back to the session-derived project. The session-derived
-	// value always returns the first project of the user's org, so
-	// the Dashboard can override it by including project_id in the
-	// request body.
-	projectID := req.ProjectID
-	if projectID == "" {
-		var ok bool
-		projectID, ok = h.SessionStore.ProjectID(r)
-		if !ok || projectID == "" {
-			if auth.CurrentUserFromContext(r) != nil {
-				writeJSONError(w, "no project found — create a project first via POST /api/v1/projects", http.StatusBadRequest)
-				return
-			}
-			writeJSONError(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-	} else {
-		// Validate that the requested project belongs to the user's org.
-		user := auth.CurrentUserFromContext(r)
-		if user == nil {
-			writeJSONError(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		userProjects, err := h.SessionStore.ListProjects(r)
-		if err != nil {
-			writeJSONError(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		var allowed bool
-		for _, p := range userProjects {
-			if p.ProjectID == projectID {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			writeJSONError(w, "project_id not found in user's organizations", http.StatusForbidden)
-			return
-		}
+	// Determine project_id: prefer the one from the request body (the UI
+	// project switcher), validated against the user's org; otherwise fall back
+	// to the session default. Shared with the span list / trace detail
+	// endpoints so all read paths resolve to the same project.
+	projectID, ok := h.resolveProjectID(w, r, req.ProjectID)
+	if !ok {
+		return
 	}
 
 	// Validate and apply default time range (last 30 days when omitted).

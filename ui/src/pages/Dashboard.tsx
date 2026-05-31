@@ -188,6 +188,40 @@ const UserGroupIcon = () => (
   </svg>
 );
 
+// ── Category Y-axis tick (ellipsizes long labels) ──────────────────
+
+/** Width of the category-axis gutter for horizontal bar charts. */
+const Y_AXIS_WIDTH = 150;
+/** Max characters before a category label is ellipsized to fit the gutter. */
+const Y_AXIS_LABEL_MAX = 22;
+
+interface TickProps {
+  x?: number;
+  y?: number;
+  payload?: { value?: string | number };
+}
+
+/**
+ * Category-axis tick that ellipsizes long labels so model names with a provider
+ * prefix (e.g. "openai/qwen3.6-27b-mtp") and service paths (e.g.
+ * "/usr/local/bin/agent-entrypoint.py") stay inside the axis gutter instead of
+ * overflowing off the card edge. The full value is exposed via an SVG <title>
+ * tooltip on hover.
+ */
+function TruncatedYTick({ x = 0, y = 0, payload }: TickProps) {
+  const full = String(payload?.value ?? "");
+  const label =
+    full.length > Y_AXIS_LABEL_MAX ? `${full.slice(0, Y_AXIS_LABEL_MAX - 1)}…` : full;
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <title>{full}</title>
+      <text x={-6} y={0} dy={4} textAnchor="end" fill={colors.typography.pureLight} fontSize={12}>
+        {label}
+      </text>
+    </g>
+  );
+}
+
 function TracesByNameChart({ data, loading }: { data: TracesByNameData[]; loading: boolean }) {
   if (loading && data.length === 0) {
     return <LoadingState rows={5} rowHeight="1.25rem" />;
@@ -207,7 +241,7 @@ function TracesByNameChart({ data, loading }: { data: TracesByNameData[]; loadin
 
   return (
     <ResponsiveContainer width="100%" height={280}>
-      <BarChart data={data} layout="vertical" margin={{ top: 5, right: 20, left: 60, bottom: 5 }}>
+      <BarChart data={data} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
         <XAxis
           type="number"
           tick={{ fill: colors.typography.ashGrey, fontSize: 12 }}
@@ -216,8 +250,8 @@ function TracesByNameChart({ data, loading }: { data: TracesByNameData[]; loadin
         <YAxis
           type="category"
           dataKey="name"
-          tick={{ fill: colors.typography.pureLight, fontSize: 12 }}
-          width={80}
+          tick={<TruncatedYTick />}
+          width={Y_AXIS_WIDTH}
         />
         <Tooltip
           contentStyle={chartTooltipStyle}
@@ -642,7 +676,7 @@ function UserConsumptionChart({ data, loading }: { data: UserConsumptionData[]; 
 
   return (
     <ResponsiveContainer width="100%" height={280}>
-      <BarChart data={data} layout="vertical" margin={{ top: 5, right: 20, left: 60, bottom: 5 }}>
+      <BarChart data={data} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
         <XAxis
           type="number"
           tick={{ fill: colors.typography.ashGrey, fontSize: 12 }}
@@ -651,8 +685,8 @@ function UserConsumptionChart({ data, loading }: { data: UserConsumptionData[]; 
         <YAxis
           type="category"
           dataKey="user"
-          tick={{ fill: colors.typography.pureLight, fontSize: 12 }}
-          width={80}
+          tick={<TruncatedYTick />}
+          width={Y_AXIS_WIDTH}
         />
         <Tooltip
           contentStyle={chartTooltipStyle}

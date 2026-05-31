@@ -99,7 +99,10 @@ export default function TraceDetailPage({
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetch(`/api/v1/traces/${traceId}`, { signal: controller.signal })
+    fetch(
+      `/api/v1/traces/${traceId}?project_id=${encodeURIComponent(activeProject)}`,
+      { signal: controller.signal },
+    )
       .then((res) => {
         if (!res.ok) {
           if (res.status === 404) {

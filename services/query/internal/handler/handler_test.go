@@ -1749,6 +1749,117 @@ func TestHandleAnalyticsSpans_TimeBucketInvalidInterval(t *testing.T) {
 	}
 }
 
+// TestHandleSpansQuery_ProjectIDOverride verifies the span list honors an
+// explicit project_id in the request body (the UI project switcher) rather than
+// always using the session default. This is the fix for the Traces page showing
+// "No traces" while the Dashboard showed data: the session default returns the
+// org's first project, but the switcher may select a different one.
+func TestHandleSpansQuery_ProjectIDOverride(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omneval-spans-override-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	db, err := sql.Open("duckdb", tmpDir+"/test.duckdb")
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, project_id, model, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
+		"span-a", "trace-a", "proj-a", "gpt-4", baseTime, baseTime.Add(10*time.Second)); err != nil {
+		t.Fatalf("insert span-a: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, project_id, model, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
+		"span-b", "trace-b", "proj-b", "claude-3", baseTime, baseTime.Add(5*time.Second)); err != nil {
+		t.Fatalf("insert span-b: %v", err)
+	}
+
+	// Session default is proj-a, but the request selects proj-b.
+	h := &SpanHandler{
+		DB: db,
+		SessionStore: &FakeSessionStore{
+			projectID:    "proj-a",
+			userProjects: []*domain.Project{{ProjectID: "proj-a"}, {ProjectID: "proj-b"}},
+		},
+	}
+
+	body := strings.NewReader(`{
+		"from": "2025-01-01T00:00:00Z",
+		"to": "2025-01-02T00:00:00Z",
+		"project_id": "proj-b",
+		"limit": 50
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
+	req = req.WithContext(context.WithValue(req.Context(), auth.CurrentUserKey, &auth.CurrentUser{UserID: "user-1"}))
+	w := httptest.NewRecorder()
+
+	h.HandleSpansQuery(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d. body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Spans []map[string]any `json:"spans"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Spans) != 1 {
+		t.Fatalf("spans: got %d, want 1 (only proj-b)", len(resp.Spans))
+	}
+	if got := resp.Spans[0]["span_id"]; got != "span-b" {
+		t.Errorf("span_id: got %v, want span-b (proj-b)", got)
+	}
+}
+
+// TestHandleSpansQuery_ProjectIDForbidden verifies a body project_id outside the
+// user's org is rejected with 403 rather than silently queried.
+func TestHandleSpansQuery_ProjectIDForbidden(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omneval-spans-forbidden-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	db, err := sql.Open("duckdb", tmpDir+"/test.duckdb")
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	h := &SpanHandler{
+		DB: db,
+		SessionStore: &FakeSessionStore{
+			projectID:    "proj-a",
+			userProjects: []*domain.Project{{ProjectID: "proj-a"}},
+		},
+	}
+
+	body := strings.NewReader(`{"project_id": "proj-unknown", "limit": 50}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
+	req = req.WithContext(context.WithValue(req.Context(), auth.CurrentUserKey, &auth.CurrentUser{UserID: "user-1"}))
+	w := httptest.NewRecorder()
+
+	h.HandleSpansQuery(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status: got %d, want %d. body: %s", w.Code, http.StatusForbidden, w.Body.String())
+	}
+}
+
 // FakeSessionStore is a test fake implementing SessionStore.
 type FakeSessionStore struct {
 	projectID    string
