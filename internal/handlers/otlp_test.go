@@ -442,9 +442,8 @@ func TestOTLPHandler_AcceptsBearerAuth(t *testing.T) {
 	}
 }
 
-func TestOTLPHandler_BearerAuthPrecedenceOverXAPIKey(t *testing.T) {
+func TestOTLPHandler_XAPIKeyPrecedenceOverBearerAuth(t *testing.T) {
 	q := &fakeIngestQueue{}
-	// Validator that tracks which key was used
 	trackedKey := ""
 	v := &trackingValidator{
 		validate: func(_ context.Context, rawKey string) (*auth.ValidatedKey, error) {
@@ -479,7 +478,6 @@ func TestOTLPHandler_BearerAuthPrecedenceOverXAPIKey(t *testing.T) {
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
 	}
-	// X-API-Key should take precedence
 	if trackedKey != "valid_project_key" {
 		t.Errorf("X-API-Key should take precedence: got key %q", trackedKey)
 	}
@@ -499,7 +497,7 @@ func TestOTLPHandler_RejectsMalformedAuthorization(t *testing.T) {
 	}
 
 	rq, _ := http.NewRequest("POST", ts.URL+"/v1/traces", bytes.NewReader(body))
-	rq.Header.Set("Authorization", "Basic YWJj") // Not Bearer
+	rq.Header.Set("Authorization", "Basic YWJj")
 	rq.Header.Set("Content-Type", "application/x-protobuf")
 
 	resp, err := http.DefaultClient.Do(rq)

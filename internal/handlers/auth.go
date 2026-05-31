@@ -10,12 +10,10 @@ import (
 // Authorization: Bearer <key>. Returns empty string for missing
 // or malformed headers.
 func ExtractAPIKey(r *http.Request) string {
-	// X-API-Key takes precedence
 	if key := r.Header.Get("X-API-Key"); key != "" {
 		return key
 	}
 
-	// Fall back to standard Authorization: Bearer <token>
 	auth := r.Header.Get("Authorization")
 	if auth == "" {
 		return ""

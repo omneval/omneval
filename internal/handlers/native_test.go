@@ -128,7 +128,6 @@ func TestNativeHandler_XAPIKeyPrecedence(t *testing.T) {
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
 	}
-	// X-API-Key should take precedence
 	if trackedKey != "valid_project_key" {
 		t.Errorf("X-API-Key should take precedence: got key %q", trackedKey)
 	}
@@ -221,7 +220,6 @@ func TestNativeHandler_ValidatesSpanFields(t *testing.T) {
 	ts := httptest.NewServer(h.Router())
 	defer ts.Close()
 
-	// Invalid span_id length
 	body := map[string]any{
 		"spans": []map[string]any{
 			{

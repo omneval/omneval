@@ -188,7 +188,7 @@ func newCORS(origins []string, handler http.Handler) http.Handler {
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Origin", corsOrigin(origins, r))
 			w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
