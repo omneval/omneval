@@ -408,8 +408,121 @@ func TestOTLPHandler_GzipInvalidData_Returns400(t *testing.T) {
 	}
 }
 
-// buildMinimalOTLPRequest creates an OTLP request with a gen_ai model attribute
-// so the translate function produces domain spans.
+// --- Bearer Auth Integration Tests ---
+
+func TestOTLPHandler_AcceptsBearerAuth(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	req := buildMinimalOTLPRequest()
+	body, err := proto.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal OTLP request: %v", err)
+	}
+
+	rq, _ := http.NewRequest("POST", ts.URL+"/v1/traces", bytes.NewReader(body))
+	rq.Header.Set("Authorization", "Bearer valid_project_key")
+	rq.Header.Set("Content-Type", "application/x-protobuf")
+
+	resp, err := http.DefaultClient.Do(rq)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status: got %d, want %d, body: %s", resp.StatusCode, http.StatusAccepted, string(bodyBytes))
+	}
+	if len(q.batches) != 1 || len(q.batches[0]) != 1 {
+		t.Errorf("expected 1 batch with 1 span, got %d batches", len(q.batches))
+	}
+}
+
+func TestOTLPHandler_BearerAuthPrecedenceOverXAPIKey(t *testing.T) {
+	q := &fakeIngestQueue{}
+	// Validator that tracks which key was used
+	trackedKey := ""
+	v := &trackingValidator{
+		validate: func(_ context.Context, rawKey string) (*auth.ValidatedKey, error) {
+			trackedKey = rawKey
+			if rawKey == "valid_project_key" {
+				return &auth.ValidatedKey{ProjectID: "proj-1"}, nil
+			}
+			return nil, fmt.Errorf("invalid API key")
+		},
+	}
+	h := handlers.NewOTLPHandler(q, v)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	req := buildMinimalOTLPRequest()
+	body, err := proto.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal OTLP request: %v", err)
+	}
+
+	rq, _ := http.NewRequest("POST", ts.URL+"/v1/traces", bytes.NewReader(body))
+	rq.Header.Set("X-API-Key", "valid_project_key")
+	rq.Header.Set("Authorization", "Bearer some_other_key")
+	rq.Header.Set("Content-Type", "application/x-protobuf")
+
+	resp, err := http.DefaultClient.Do(rq)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+	// X-API-Key should take precedence
+	if trackedKey != "valid_project_key" {
+		t.Errorf("X-API-Key should take precedence: got key %q", trackedKey)
+	}
+}
+
+func TestOTLPHandler_RejectsMalformedAuthorization(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	req := buildMinimalOTLPRequest()
+	body, err := proto.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal OTLP request: %v", err)
+	}
+
+	rq, _ := http.NewRequest("POST", ts.URL+"/v1/traces", bytes.NewReader(body))
+	rq.Header.Set("Authorization", "Basic YWJj") // Not Bearer
+	rq.Header.Set("Content-Type", "application/x-protobuf")
+
+	resp, err := http.DefaultClient.Do(rq)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want %d (malformed Authorization should be treated as no auth)", resp.StatusCode, http.StatusUnauthorized)
+	}
+}
+
+// trackingValidator is a test validator that records which key was validated.
+type trackingValidator struct {
+	validate func(ctx context.Context, rawKey string) (*auth.ValidatedKey, error)
+}
+
+func (v *trackingValidator) Validate(ctx context.Context, rawKey string) (*auth.ValidatedKey, error) {
+	return v.validate(ctx, rawKey)
+}
+
+// buildMinimalOTLPRequest creates an OTLP request with a single span.
 func buildMinimalOTLPRequest() *coltracev1.ExportTraceServiceRequest {
 	return &coltracev1.ExportTraceServiceRequest{
 		ResourceSpans: []*tracev1.ResourceSpans{

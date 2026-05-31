@@ -60,7 +60,7 @@ func (h *OTLPHandler) handleOTLPTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rawKey := r.Header.Get("X-API-Key")
+	rawKey := ExtractAPIKey(r)
 	if rawKey == "" {
 		http.Error(w, "missing API key", http.StatusUnauthorized)
 		return
