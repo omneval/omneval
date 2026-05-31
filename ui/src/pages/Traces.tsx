@@ -44,6 +44,7 @@ interface SpanQueryResponse {
 }
 
 interface SpanQueryRequest {
+  project_id: string;
   from: string;
   to: string;
   limit: number;
@@ -727,6 +728,7 @@ export default function TracesPage({
       setLoading(true);
       try {
         const body: SpanQueryRequest = {
+          project_id: activeProject,
           from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
           to: new Date().toISOString(),
           limit: pageSize,
@@ -739,8 +741,11 @@ export default function TracesPage({
         // before React has re-rendered with the new state).
         const currentQuery = searchQueryRef.current;
         if (currentQuery) {
+          // "contains" compiles server-side to LIKE '%value%'. The substring
+          // wrapping is applied by the query compiler, so the raw term is sent
+          // as-is. ("ilike" is not in the operator allowlist and 400s.)
           body.filters = [
-            { field: "name", op: "ilike", value: `%${currentQuery}%` },
+            { field: "name", op: "contains", value: currentQuery },
           ];
         }
 
@@ -776,7 +781,7 @@ export default function TracesPage({
         setLoading(false);
       }
     },
-    [pageSize, filterState, searchQueryRef, activeTab],
+    [activeProject, pageSize, filterState, searchQueryRef, activeTab],
   );
 
   useEffect(() => {

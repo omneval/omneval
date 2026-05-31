@@ -445,9 +445,9 @@ describe("search", () => {
       expect(fetchBodies.length).toBeGreaterThanOrEqual(1);
     });
 
-    // The initial body must NOT contain the name/ilike filter
+    // The initial body must NOT contain the name search filter
     // (searchQuery is "" so no filter should be added)
-    expect(fetchBodies[0]).not.toContain("ilike");
+    expect(fetchBodies[0]).not.toContain("contains");
   });
 
   it("sends search query in API request body when typing", async () => {
@@ -459,7 +459,7 @@ describe("search", () => {
       // Block all fetches until test signals them to resolve
       await new Promise<void>((resolve) => fetchResolve.push(resolve));
       let resultSpans = mockSpans;
-      if (body.includes("ilike") && body.includes("%llm%")) {
+      if (body.includes("contains") && body.includes("llm")) {
         resultSpans = mockSpans.filter((s) =>
           s.name.toLowerCase().includes("llm")
         );
@@ -493,7 +493,7 @@ describe("search", () => {
     });
 
     // Verify initial fetch has NO search filter
-    expect(fetchBodies[0].body).not.toContain("ilike");
+    expect(fetchBodies[0].body).not.toContain("contains");
 
     // Type search query
     const searchInput = screen.getByPlaceholderText("Search by ID/Name...");
@@ -510,12 +510,13 @@ describe("search", () => {
       { timeout: 3000 }
     );
 
-    // The FIRST fetch after typing (call #2) MUST include "%llm%" in the body.
-    // The onChange handler calls fetchSpans() synchronously after setSearchQuery().
-    // If fetchSpans uses a stale closure, searchQuery will be "" and the body
-    // will NOT have the "%llm%" filter — this is the bug (issue #91).
+    // The FIRST fetch after typing (call #2) MUST include the search term in
+    // the body. The onChange handler calls fetchSpans() synchronously after
+    // setSearchQuery(). If fetchSpans uses a stale closure, searchQuery will be
+    // "" and the body will NOT have the name filter — this is the bug (#91).
     const firstPostTypingCall = fetchBodies[1];
-    expect(firstPostTypingCall.body).toContain("%llm%");
+    expect(firstPostTypingCall.body).toContain("contains");
+    expect(firstPostTypingCall.body).toContain("llm");
   });
 
   it("shows 'No results found' when search has no matches", async () => {
@@ -571,7 +572,7 @@ describe("search", () => {
     // Wait for the filtered fetch
     await waitFor(
       () => {
-        expect(fetchBodies.some((b) => b.includes("ilike"))).toBe(true);
+        expect(fetchBodies.some((b) => b.includes("contains"))).toBe(true);
       },
       { timeout: 2000 }
     );
@@ -584,7 +585,7 @@ describe("search", () => {
     // Wait for a fetch that no longer includes the search filter
     await waitFor(
       () => {
-        expect(fetchBodies.some((b) => !b.includes("ilike"))).toBe(true);
+        expect(fetchBodies.some((b) => !b.includes("contains"))).toBe(true);
       },
       { timeout: 2000 }
     );
@@ -598,7 +599,7 @@ describe("search", () => {
       fetchBodies.push({ callNum: fetchBodies.length + 1, body });
       await new Promise<void>((resolve) => fetchResolve.push(resolve));
       let resultSpans = mockSpans;
-      if (body.includes("ilike") && body.includes("trace-a")) {
+      if (body.includes("contains") && body.includes("trace-a")) {
         resultSpans = mockSpans.filter((s) => s.trace_id.includes("trace-a"));
       }
       return {
@@ -636,15 +637,15 @@ describe("search", () => {
     // Wait for the search fetch
     await waitFor(
       () => {
-        expect(fetchBodies.some((b) => b.body.includes("ilike"))).toBe(true);
+        expect(fetchBodies.some((b) => b.body.includes("contains"))).toBe(true);
       },
       { timeout: 3000 }
     );
 
     // The search body must include the trace ID partial match
-    const searchCall = fetchBodies.find((b) => b.body.includes("ilike"));
+    const searchCall = fetchBodies.find((b) => b.body.includes("contains"));
     expect(searchCall).toBeDefined();
-    expect(searchCall?.body).toContain("%trace-a%");
+    expect(searchCall?.body).toContain("trace-a");
   });
 
   it("filters spans by search query", async () => {
