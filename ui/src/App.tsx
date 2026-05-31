@@ -94,27 +94,37 @@ export default function App() {
   }, []);
 
   // Restore active project from localStorage; falls back to first available
-  const resolveActiveProject = useCallback((projectId: string, availableProjects: Project[]) => {
-    if (availableProjects.length === 0) return "";
-    const stored = localStorage.getItem(ACTIVE_PROJECT_KEY);
-    // Use stored project if it still exists in available projects
-    if (stored && availableProjects.some((p) => p.project_id === stored)) {
-      return stored;
-    }
-    // Fall back to the provided project or first available
-    if (availableProjects.some((p) => p.project_id === projectId)) {
-      return projectId;
-    }
-    return availableProjects[0].project_id;
-  }, []);
+  const resolveActiveProject = useCallback(
+    (defaultProjectId: string, availableProjects: Project[]) => {
+      if (availableProjects.length === 0) return "";
+
+      let stored: string | null = null;
+      try {
+        stored = localStorage.getItem(ACTIVE_PROJECT_KEY);
+      } catch {
+        // localStorage may be unavailable in some environments
+      }
+
+      // Use stored project if it still exists in available projects
+      if (stored && availableProjects.some((p) => p.project_id === stored)) {
+        return stored;
+      }
+      // Fall back to the default project or first available
+      if (availableProjects.some((p) => p.project_id === defaultProjectId)) {
+        return defaultProjectId;
+      }
+      return availableProjects[0].project_id;
+    },
+    []
+  );
 
   // Detect an existing session on mount. We call GET /api/v1/me instead of
   // reading document.cookie because the omneval_session cookie is HttpOnly.
-  const initialSessionCheck = useRef(true);
+  const hasPerformedInitialSessionCheck = useRef(false);
 
   useEffect(() => {
-    if (!initialSessionCheck.current) return;
-    initialSessionCheck.current = false;
+    if (hasPerformedInitialSessionCheck.current) return;
+    hasPerformedInitialSessionCheck.current = true;
 
     fetch("/api/v1/me")
       .then((res) => {
