@@ -97,6 +97,7 @@ docker compose run --rm eval
 | [Architecture Decisions](docs/adr/) | Key design decisions and rationale |
 | [Context](CONTEXT.md) | Bounded context and domain terminology |
 | [CLAUDE](CLAUDE.md) | Development commands and architecture reference |
+| [Ingestion Guide](docs/ingestion.md) | Trace ingestion: auth headers, project model, OTLP setup |
 | [ROADMAP](ROADMAP.md) | Implementation progress and remaining work |
 
 ## Status
