@@ -207,6 +207,178 @@ describe("URL-based page routing on hard load", () => {
   });
 });
 
+// ── Issue #56: project setting persistence ──────────────────────
+
+describe("issue #56: project setting persists across page refresh", () => {
+  beforeEach(() => {
+    // Clear localStorage before each test
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("remembers the selected project after a page refresh", async () => {
+    const mockMultiProjects = [
+      { project_id: "proj-default", name: "Default Project" },
+      { project_id: "proj-omneval", name: "Omneval Project" },
+    ];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const urlStr = String(url);
+      if (urlStr === "/api/v1/me") {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              user_id: "user-1",
+              email: "alice@example.com",
+              projects: mockMultiProjects,
+            }),
+        } as Response;
+      }
+      return {
+        ok: false,
+        json: () => Promise.resolve({}),
+      } as Response;
+    });
+
+    window.history.replaceState({}, "", "/");
+
+    // First render: initial load — defaults to first project
+    const { unmount } = render(<App />);
+
+    await waitFor(
+      () => {
+        expect(screen.getByText("Default Project")).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+
+    // Simulate user selecting the second project via the dropdown
+    // The Header renders a dropdown button containing "Project:" label with the selected project name
+    const projectDropdownBtn = screen.getByRole("button", { name: /Project.*Default Project/i });
+    await userEvent.click(projectDropdownBtn);
+
+    // Click the "Omneval Project" option in the dropdown
+    const omnevalOption = screen.getByRole("button", { name: "Omneval Project" });
+    await userEvent.click(omnevalOption);
+
+    await waitFor(() => {
+      expect(screen.getByText("Omneval Project")).toBeInTheDocument();
+    });
+
+    // Verify localStorage was updated with the selected project
+    const storedProject = localStorage.getItem("omneval_active_project");
+    expect(storedProject).toBe("proj-omneval");
+
+    // Simulate page refresh: unmount and re-render (fresh state but same localStorage)
+    unmount();
+    render(<App />);
+
+    // After "refresh", the app should restore the saved project
+    await waitFor(
+      () => {
+        expect(screen.getByText("Omneval Project")).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+  });
+
+  it("falls back to first project when stored project is not in the user's projects", async () => {
+    // Store a project ID that won't be in the response
+    localStorage.setItem("omneval_active_project", "proj-gone");
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const urlStr = String(url);
+      if (urlStr === "/api/v1/me") {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              user_id: "user-1",
+              email: "alice@example.com",
+              projects: [
+                { project_id: "proj-current", name: "Current Project" },
+              ],
+            }),
+        } as Response;
+      }
+      return {
+        ok: false,
+        json: () => Promise.resolve({}),
+      } as Response;
+    });
+
+    window.history.replaceState({}, "", "/");
+
+    render(<App />);
+
+    await waitFor(
+      () => {
+        // Should fall back to the first available project
+        expect(screen.getByText("Current Project")).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+  });
+
+  it("clears stored project on logout", async () => {
+    const mockMultiProjects = [
+      { project_id: "proj-1", name: "Project One" },
+    ];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const urlStr = String(url);
+      if (urlStr === "/api/v1/me") {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              user_id: "user-1",
+              email: "alice@example.com",
+              projects: mockMultiProjects,
+            }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: () => Promise.resolve({}),
+      } as Response;
+    });
+
+    window.history.replaceState({}, "", "/");
+
+    render(<App />);
+
+    await waitFor(
+      () => {
+        expect(screen.getByText("Project One")).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+
+    // Pre-populate localStorage to simulate a saved selection
+    localStorage.setItem("omneval_active_project", "proj-1");
+
+    // Click logout
+    const logoutButton = screen.getByRole("button", { name: /logout/i });
+    await userEvent.click(logoutButton);
+
+    // Verify localStorage was cleared on logout
+    const storedProject = localStorage.getItem("omneval_active_project");
+    expect(storedProject).toBeNull();
+
+    // Verify login screen is shown
+    await waitFor(() => {
+      expect(screen.getByText("Sign in to")).toBeInTheDocument();
+    });
+  });
+});
+
 // ── URL sync on sidebar navigation ──────────────────────────────
 
 describe("URL sync on sidebar navigation", () => {
