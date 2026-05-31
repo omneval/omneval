@@ -73,6 +73,18 @@ interface MeResponse {
   projects: Array<{ project_id: string; name: string }>;
 }
 
+/**
+ * Resolve the initial active project from localStorage, falling back to the
+ * first project in the list when no valid persisted selection exists.
+ */
+function resolveInitialProject(projects: Project[]): string {
+  const persisted = localStorage.getItem(ACTIVE_PROJECT_KEY);
+  if (persisted && projects.some((p) => p.project_id === persisted)) {
+    return persisted;
+  }
+  return projects[0]?.project_id ?? "";
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>("login");
   const [projects, setProjects] = useState<Project[]>([]);
@@ -111,13 +123,7 @@ export default function App() {
             org_id: "",
           }));
           setProjects(projects);
-          // Restore previously selected project from localStorage, falling back to first
-          const persisted = localStorage.getItem(ACTIVE_PROJECT_KEY) ?? null;
-          const initialProject =
-            persisted && projects.some((p) => p.project_id === persisted)
-              ? persisted
-              : projects[0].project_id;
-          setActiveProjectState(initialProject);
+          setActiveProjectState(resolveInitialProject(projects));
         } else {
           // No projects on /me — fetch them via the normal projects endpoint.
           fetchProjects("fallback-session-id");
@@ -137,13 +143,7 @@ export default function App() {
       const data = await res.json();
       if (Array.isArray(data)) {
         setProjects(data);
-        // Restore persisted project selection, falling back to first
-        const persisted = localStorage.getItem(ACTIVE_PROJECT_KEY) ?? null;
-        const initialProject =
-          persisted && data.some((p: Project) => p.project_id === persisted)
-            ? persisted
-            : data[0]?.project_id ?? "";
-        setActiveProjectState(initialProject);
+        setActiveProjectState(resolveInitialProject(data));
       }
     }
   }, []);

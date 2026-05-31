@@ -3,8 +3,6 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "@/App";
 
-// ── Mock the entire App component's fetch calls ───────────────────
-
 const mockProjects = [
   { project_id: "proj-1", name: "Test Project" },
 ];
@@ -36,14 +34,11 @@ describe("session persistence on page load", () => {
     vi.restoreAllMocks();
   });
 
-  it("navigates to traces page when /api/v1/me returns a valid session", async () => {
+  it("navigates to authenticated page when /api/v1/me returns a valid session", async () => {
     render(<App />);
 
-    // After the /me call succeeds, the app should navigate to traces
-    // The traces page renders with the active project
     await waitFor(
       () => {
-        // The header should be visible (authenticated layout)
         expect(screen.getByText("Test Project")).toBeInTheDocument();
       },
       { timeout: 3000 }
@@ -67,7 +62,6 @@ describe("session persistence on page load", () => {
 
     render(<App />);
 
-    // The login page should be rendered (omneval login)
     await waitFor(() => {
       expect(screen.getByText("Sign in to")).toBeInTheDocument();
     });
@@ -100,8 +94,6 @@ describe("session persistence on page load", () => {
       expect(fetchCalls).toContain("/api/v1/me");
     });
 
-    // The app should NOT try to read document.cookie — there should be no
-    // calls to non-existent endpoints like /api/v1/session or similar
     expect(fetchCalls[0]).toBe("/api/v1/me");
   });
 
@@ -134,7 +126,6 @@ describe("URL-based page routing on hard load", () => {
             }),
         } as Response;
       }
-      // Return empty arrays for list endpoints so pages render without errors
       if (urlStr.startsWith("/api/v1/prompts")) {
         return {
           ok: true,
@@ -149,7 +140,6 @@ describe("URL-based page routing on hard load", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    // Reset URL back to root after each test
     window.history.replaceState({}, "", "/");
   });
 
@@ -161,13 +151,11 @@ describe("URL-based page routing on hard load", () => {
 
     await waitFor(
       () => {
-        // Traces page renders a "Filters" panel
         expect(screen.getByText("Filters")).toBeInTheDocument();
       },
       { timeout: 3000 }
     );
 
-    // Dashboard heading must NOT be visible
     expect(screen.queryByRole("heading", { name: "Dashboard" })).toBeNull();
   });
 
@@ -179,7 +167,6 @@ describe("URL-based page routing on hard load", () => {
 
     await waitFor(
       () => {
-        // Prompts page renders a "Prompt Registry" heading
         expect(
           screen.getByRole("heading", { name: /prompt registry/i })
         ).toBeInTheDocument();
@@ -211,7 +198,6 @@ describe("URL-based page routing on hard load", () => {
 
 describe("issue #56: project setting persists across page refresh", () => {
   beforeEach(() => {
-    // Clear localStorage before each test
     localStorage.clear();
   });
 
@@ -248,7 +234,6 @@ describe("issue #56: project setting persists across page refresh", () => {
 
     window.history.replaceState({}, "", "/");
 
-    // First render: initial load — defaults to first project
     const { unmount } = render(<App />);
 
     await waitFor(
@@ -258,12 +243,9 @@ describe("issue #56: project setting persists across page refresh", () => {
       { timeout: 3000 }
     );
 
-    // Simulate user selecting the second project via the dropdown
-    // The Header renders a dropdown button containing "Project:" label with the selected project name
     const projectDropdownBtn = screen.getByRole("button", { name: /Project.*Default Project/i });
     await userEvent.click(projectDropdownBtn);
 
-    // Click the "Omneval Project" option in the dropdown
     const omnevalOption = screen.getByRole("button", { name: "Omneval Project" });
     await userEvent.click(omnevalOption);
 
@@ -271,15 +253,12 @@ describe("issue #56: project setting persists across page refresh", () => {
       expect(screen.getByText("Omneval Project")).toBeInTheDocument();
     });
 
-    // Verify localStorage was updated with the selected project
     const storedProject = localStorage.getItem("omneval_active_project");
     expect(storedProject).toBe("proj-omneval");
 
-    // Simulate page refresh: unmount and re-render (fresh state but same localStorage)
     unmount();
     render(<App />);
 
-    // After "refresh", the app should restore the saved project
     await waitFor(
       () => {
         expect(screen.getByText("Omneval Project")).toBeInTheDocument();
@@ -289,7 +268,6 @@ describe("issue #56: project setting persists across page refresh", () => {
   });
 
   it("falls back to first project when stored project is not in the user's projects", async () => {
-    // Store a project ID that won't be in the response
     localStorage.setItem("omneval_active_project", "proj-gone");
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
@@ -319,7 +297,6 @@ describe("issue #56: project setting persists across page refresh", () => {
 
     await waitFor(
       () => {
-        // Should fall back to the first available project
         expect(screen.getByText("Current Project")).toBeInTheDocument();
       },
       { timeout: 3000 }
@@ -361,18 +338,14 @@ describe("issue #56: project setting persists across page refresh", () => {
       { timeout: 3000 }
     );
 
-    // Pre-populate localStorage to simulate a saved selection
     localStorage.setItem("omneval_active_project", "proj-1");
 
-    // Click logout
     const logoutButton = screen.getByRole("button", { name: /logout/i });
     await userEvent.click(logoutButton);
 
-    // Verify localStorage was cleared on logout
     const storedProject = localStorage.getItem("omneval_active_project");
     expect(storedProject).toBeNull();
 
-    // Verify login screen is shown
     await waitFor(() => {
       expect(screen.getByText("Sign in to")).toBeInTheDocument();
     });
@@ -413,7 +386,6 @@ describe("URL sync on sidebar navigation", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    // Wait for authenticated layout
     await waitFor(
       () => {
         expect(screen.getByText("Test Project")).toBeInTheDocument();
@@ -421,7 +393,6 @@ describe("URL sync on sidebar navigation", () => {
       { timeout: 3000 }
     );
 
-    // Click the Traces sidebar button
     const tracesLink = screen.getByRole("button", { name: /^traces$/i });
     await user.click(tracesLink);
 
