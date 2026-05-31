@@ -15,6 +15,9 @@ import { ToastProvider } from "./components/Toast";
 import { colors } from "./theme";
 import { ErrorBoundary } from "./components/ErrorBanner";
 
+/** localStorage key used to persist the user's active project selection. */
+const ACTIVE_PROJECT_KEY = "omneval_active_project";
+
 type Page =
   | "login"
   | "traces"
@@ -52,9 +55,6 @@ const PAGE_TO_PATH: Record<Page, string> = {
   admin: "admin",
 };
 
-/** localStorage key used to persist the user's active project selection. */
-const ACTIVE_PROJECT_KEY = "omneval_active_project";
-
 /** Derive the intended page from the current URL path. Falls back to "dashboard". */
 function pageFromPathname(pathname: string): Page {
   const segment = pathname.replace(/^\//, "").split("/")[0];
@@ -73,41 +73,58 @@ interface MeResponse {
   projects: Array<{ project_id: string; name: string }>;
 }
 
-/**
- * Resolve the initial active project from localStorage, falling back to the
- * first project in the list when no valid persisted selection exists.
- */
-function resolveInitialProject(projects: Project[]): string {
-  const persisted = localStorage.getItem(ACTIVE_PROJECT_KEY);
-  if (persisted && projects.some((p) => p.project_id === persisted)) {
-    return persisted;
-  }
-  return projects[0]?.project_id ?? "";
-}
-
 export default function App() {
   const [page, setPage] = useState<Page>("login");
   const [projects, setProjects] = useState<Project[]>([]);
-  const [activeProjectState, setActiveProjectState] = useState<string>("");
+  const [activeProject, setActiveProject] = useState<string>("");
   const [activeTraceId, setActiveTraceId] = useState<string>("");
   const [activeDatasetId, setActiveDatasetId] = useState<string>("");
+
   const [timeRange, setTimeRange] = useState("1d");
   const [environment, setEnvironment] = useState("default");
   const [showNewProject, setShowNewProject] = useState(false);
 
-  /** Wrapper that persists the active project to localStorage. */
-  const setActiveProject = useCallback((project: string) => {
-    localStorage.setItem(ACTIVE_PROJECT_KEY, project);
-    setActiveProjectState(project);
+  // Persist active project to localStorage whenever it changes
+  const persistActiveProject = useCallback((projectId: string) => {
+    try {
+      localStorage.setItem(ACTIVE_PROJECT_KEY, projectId);
+    } catch {
+      // localStorage may be unavailable in some environments
+    }
   }, []);
+
+  // Restore active project from localStorage; falls back to first available
+  const resolveActiveProject = useCallback(
+    (defaultProjectId: string, availableProjects: Project[]) => {
+      if (availableProjects.length === 0) return "";
+
+      let stored: string | null = null;
+      try {
+        stored = localStorage.getItem(ACTIVE_PROJECT_KEY);
+      } catch {
+        // localStorage may be unavailable in some environments
+      }
+
+      // Use stored project if it still exists in available projects
+      if (stored && availableProjects.some((p) => p.project_id === stored)) {
+        return stored;
+      }
+      // Fall back to the default project or first available
+      if (availableProjects.some((p) => p.project_id === defaultProjectId)) {
+        return defaultProjectId;
+      }
+      return availableProjects[0].project_id;
+    },
+    []
+  );
 
   // Detect an existing session on mount. We call GET /api/v1/me instead of
   // reading document.cookie because the omneval_session cookie is HttpOnly.
-  const initialSessionCheck = useRef(true);
+  const hasPerformedInitialSessionCheck = useRef(false);
 
   useEffect(() => {
-    if (!initialSessionCheck.current) return;
-    initialSessionCheck.current = false;
+    if (hasPerformedInitialSessionCheck.current) return;
+    hasPerformedInitialSessionCheck.current = true;
 
     fetch("/api/v1/me")
       .then((res) => {
@@ -123,7 +140,9 @@ export default function App() {
             org_id: "",
           }));
           setProjects(projects);
-          setActiveProjectState(resolveInitialProject(projects));
+          const resolved = resolveActiveProject(projects[0].project_id, projects);
+          setActiveProject(resolved);
+          persistActiveProject(resolved);
         } else {
           // No projects on /me — fetch them via the normal projects endpoint.
           fetchProjects("fallback-session-id");
@@ -143,7 +162,9 @@ export default function App() {
       const data = await res.json();
       if (Array.isArray(data)) {
         setProjects(data);
-        setActiveProjectState(resolveInitialProject(data));
+        const resolved = resolveActiveProject(data[0]?.project_id ?? "", data);
+        setActiveProject(resolved);
+        persistActiveProject(resolved);
       }
     }
   }, []);
@@ -164,9 +185,13 @@ export default function App() {
 
   const handleLogout = async () => {
     await fetch("/logout", { method: "POST" });
-    localStorage.removeItem(ACTIVE_PROJECT_KEY);
+    try {
+      localStorage.removeItem(ACTIVE_PROJECT_KEY);
+    } catch {
+      // localStorage may be unavailable
+    }
     setProjects([]);
-    setActiveProjectState("");
+    setActiveProject("");
     setTimeRange("1d");
     setEnvironment("default");
     setPage("login");
@@ -175,6 +200,7 @@ export default function App() {
   const handleNewProject = useCallback((project: Project) => {
     setProjects((prev) => [...prev, project]);
   }, []);
+
   const handleNewProjectTrigger = () => setShowNewProject(true);
 
   const handleNavigate = (id: string) => {
@@ -205,9 +231,12 @@ export default function App() {
       <div className="flex flex-col h-screen" style={{ background: colors.backgrounds.voidBlack }}>
       {/* Header */}
       <Header
-        activeProject={activeProjectState}
+        activeProject={activeProject}
         projects={projects}
-        onProjectChange={setActiveProject}
+        onProjectChange={(p) => {
+          setActiveProject(p);
+          persistActiveProject(p);
+        }}
         onNewProject={handleNewProjectTrigger}
         timeRange={timeRange}
         onTimeRangeChange={setTimeRange}
@@ -226,11 +255,11 @@ export default function App() {
               />
             )}
             {page === "dashboard" && (
-              <DashboardPage activeProject={activeProjectState} timeRange={timeRange} />
+              <DashboardPage activeProject={activeProject} timeRange={timeRange} />
             )}
             {page === "traces" && (
               <TracesPage
-                activeProject={activeProjectState}
+                activeProject={activeProject}
                 onNavigateToTrace={setActiveTraceId}
                 onNavigateToTraceDetail={() => setPage("trace-detail")}
               />
@@ -238,39 +267,39 @@ export default function App() {
             {page === "trace-detail" && (
               <TraceDetailPage
                 traceId={activeTraceId}
-                activeProject={activeProjectState}
+                activeProject={activeProject}
                 onBack={() => setPage("traces")}
               />
             )}
             {page === "prompts" && (
-              <PromptsPage activeProject={activeProjectState} />
+              <PromptsPage activeProject={activeProject} />
             )}
             {page === "datasets" && (
               <DatasetsPage
-                activeProject={activeProjectState}
+                activeProject={activeProject}
                 onNavigateToDetail={handleNavigateToDataset}
               />
             )}
             {page === "dataset-detail" && activeDatasetId && (
               <DatasetDetailPage
                 datasetId={activeDatasetId}
-                activeProject={activeProjectState}
+                activeProject={activeProject}
                 onBack={() => setPage("datasets")}
               />
             )}
             {page === "settings" && (
               <SettingsPage
-                activeProject={activeProjectState}
+                activeProject={activeProject}
               />
             )}
             {page === "eval-rules" && (
               <EvalRulesPage
-                activeProject={activeProjectState}
+                activeProject={activeProject}
               />
             )}
             {page === "admin" && (
               <AdminPage
-                activeProject={activeProjectState}
+                activeProject={activeProject}
               />
             )}
           </div>
