@@ -125,11 +125,11 @@ docker compose run --rm eval
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/v1/admin/api-keys` | GET | List all API keys |
-| `/api/v1/admin/api-keys/` | DELETE | Delete any API key |
-| `/api/v1/admin/traces/` | GET | Count traces |
-| `/api/v1/admin/traces/` | DELETE | Delete traces |
-| `/api/v1/admin/projects/` | DELETE | Delete project |
+| `/api/v1/admin/api-keys` | GET | List all API keys across all projects |
+| `/api/v1/admin/api-keys/:keyId` | DELETE | Revoke any API key |
+| `/api/v1/admin/traces/:projectId/count` | GET | Count traces for a project |
+| `/api/v1/admin/traces/:projectId` | DELETE | Delete all traces for a project |
+| `/api/v1/admin/projects/:projectId` | DELETE | Delete project and all associated data |
 
 ### Observability (All Services)
 
