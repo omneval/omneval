@@ -245,6 +245,9 @@ func TestUser_CreateAndGetByEmail(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
 	user := &domain.User{UserID: "user-1", OrgID: "org-1", Email: "alice@example.com", PasswordHash: "$2a$10$...", CreatedAt: now}
 	if err := s.CreateUser(ctx, user); err != nil {
 		t.Fatalf("create user: %v", err)
@@ -314,6 +317,12 @@ func TestSession_CreateAndGet(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateUser(ctx, &domain.User{UserID: "user-1", OrgID: "org-1", Email: "sess-test@example.com", PasswordHash: "password", CreatedAt: now}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
 	expiresAt := now.Add(24 * time.Hour)
 	session := &domain.Session{SessionID: "sess-1", UserID: "user-1", ExpiresAt: expiresAt, CreatedAt: now}
 	if err := s.CreateSession(ctx, session); err != nil {
@@ -460,6 +469,12 @@ func TestPrompt_CreateAndGet(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	pv := &domain.PromptVersion{
 		VersionID:   "pv-1",
 		ProjectID:   "proj-1",
@@ -488,6 +503,12 @@ func TestPrompt_GetByLabel(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	s.CreatePromptVersion(ctx, &domain.PromptVersion{
 		VersionID:   "pv-1",
 		ProjectID:   "proj-1",
@@ -526,6 +547,12 @@ func TestPrompt_ListVersions(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	for i := int64(1); i <= 3; i++ {
 		s.CreatePromptVersion(ctx, &domain.PromptVersion{
 			VersionID:   "pv-" + string(rune('0'+i)),
@@ -556,6 +583,12 @@ func TestPrompt_LabelUpsert(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	s.CreatePromptVersion(ctx, &domain.PromptVersion{
 		VersionID:   "pv-1",
 		ProjectID:   "proj-1",
@@ -602,6 +635,12 @@ func TestEvalRule_CreateAndGet(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	filter := domain.EvalFilter{Model: func() *string { s := "gpt-4"; return &s }()}
 	rule := &domain.EvalRule{
 		RuleID:        "rule-1",
@@ -637,6 +676,15 @@ func TestEvalRule_ListByProject(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-2", OrgID: "org-1", Name: "P2", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	s.CreateEvalRule(ctx, &domain.EvalRule{RuleID: "r1", ProjectID: "proj-1", Name: "rule-1", JudgeModel: "gpt-4", PromptName: "p", PromptVersion: 1, Enabled: true, CreatedAt: now})
 	s.CreateEvalRule(ctx, &domain.EvalRule{RuleID: "r2", ProjectID: "proj-1", Name: "rule-2", JudgeModel: "gpt-3.5", PromptName: "p", PromptVersion: 1, Enabled: false, CreatedAt: now})
 	s.CreateEvalRule(ctx, &domain.EvalRule{RuleID: "r3", ProjectID: "proj-2", Name: "rule-3", JudgeModel: "gpt-4", PromptName: "p", PromptVersion: 1, Enabled: true, CreatedAt: now})
@@ -656,6 +704,12 @@ func TestEvalRule_Update(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	s.CreateEvalRule(ctx, &domain.EvalRule{RuleID: "r1", ProjectID: "proj-1", Name: "original", JudgeModel: "gpt-3.5", PromptName: "p", PromptVersion: 1, Enabled: true, CreatedAt: now})
 
 	s.UpdateEvalRule(ctx, &domain.EvalRule{RuleID: "r1", ProjectID: "proj-1", Name: "updated", JudgeModel: "gpt-4", PromptName: "p", PromptVersion: 2, Enabled: false, CreatedAt: now})
@@ -677,6 +731,12 @@ func TestDataset_CreateAndGet(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	ds := &domain.Dataset{DatasetID: "ds-1", ProjectID: "proj-1", Name: "Eval Set", CreatedAt: now}
 	if err := s.CreateDataset(ctx, ds); err != nil {
 		t.Fatalf("create dataset: %v", err)
@@ -697,6 +757,12 @@ func TestDatasetItems_CreateAndList(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	s.CreateDataset(ctx, &domain.Dataset{DatasetID: "ds-1", ProjectID: "proj-1", Name: "Set", CreatedAt: now})
 
 	s.CreateDatasetItem(ctx, &domain.DatasetItem{ItemID: "item-1", DatasetID: "ds-1", Input: "hello", ExpectedOutput: "hi", CreatedAt: now})
@@ -720,6 +786,12 @@ func TestDatasetRun_CreateAndGet(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	s.CreateDataset(ctx, &domain.Dataset{DatasetID: "ds-1", ProjectID: "proj-1", Name: "Set", CreatedAt: now})
 
 	run := &domain.DatasetRun{RunID: "run-1", DatasetID: "ds-1", EvalRuleID: "rule-1", PromptVersion: 1, CreatedAt: now}
