@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -13,6 +14,14 @@ import (
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/storage"
 )
+
+// ObjectInfo holds metadata for a single object returned by ListObjectsOlderThan.
+type ObjectInfo struct {
+	Key          string
+	Bucket       string
+	LastModified time.Time
+	Size         int64
+}
 
 // Store is the S3-compatible implementation of storage.ObjectStore.
 // Configured via StorageConfig; works with AWS S3, GCS, Azure Blob, and MinIO.
@@ -180,6 +189,92 @@ func (s *Store) EnsureBucket(ctx context.Context) error {
 		}); err != nil {
 			return fmt.Errorf("s3: create bucket %s: %w", bucket, err)
 		}
+	}
+	return nil
+}
+
+// ListObjectsOlderThan lists all objects under the given prefix whose
+// LastModified is before the cutoff time.
+func (s *Store) ListObjectsOlderThan(_ context.Context, prefix string, cutoff time.Time) ([]ObjectInfo, error) {
+	if s == nil || s.client == nil {
+		return nil, fmt.Errorf("s3: no client configured")
+	}
+
+	var result []ObjectInfo
+	bucket := s.getBucket()
+	for object := range s.client.ListObjects(context.Background(), bucket, minio.ListObjectsOptions{
+		Recursive: true,
+		Prefix:    prefix,
+	}) {
+		if object.Err != nil {
+			return result, fmt.Errorf("s3: list %s: %w", prefix, object.Err)
+		}
+		if object.LastModified.Before(cutoff) {
+			result = append(result, ObjectInfo{
+				Key:          object.Key,
+				Bucket:       bucket,
+				LastModified: object.LastModified,
+				Size:         object.Size,
+			})
+		}
+	}
+	return result, nil
+}
+
+// CopyObject copies an object from the source key in the store's bucket to a
+// destination bucket and key. If storageClass is non-empty it is set via the
+// UserMetadata header on the destination.
+func (s *Store) CopyObject(_ context.Context, dstBucket, dstKey, srcKey, storageClass string) error {
+	if s == nil || s.client == nil {
+		return fmt.Errorf("s3: no client configured")
+	}
+
+	src := minio.CopySrcOptions{
+		Bucket: s.getBucket(),
+		Object: srcKey,
+	}
+	dstOpts := minio.CopyDestOptions{
+		Bucket: dstBucket,
+		Object: dstKey,
+	}
+	if storageClass != "" {
+		dstOpts.UserMetadata = map[string]string{
+			"X-Amz-Storage-Class": storageClass,
+		}
+		dstOpts.ReplaceMetadata = true
+	}
+
+	_, err := s.client.CopyObject(context.Background(), dstOpts, src)
+	if err != nil {
+		return fmt.Errorf("s3: copy %s → %s/%s: %w", srcKey, dstBucket, dstKey, err)
+	}
+	return nil
+}
+
+// DeleteObjectsBatch removes multiple objects from the given bucket in a
+// single API call. Returns nil when the key list is empty.
+func (s *Store) DeleteObjectsBatch(_ context.Context, bucket string, keys []string) error {
+	if s == nil || s.client == nil {
+		return fmt.Errorf("s3: no client configured")
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+
+	objCh := make(chan minio.ObjectInfo, len(keys))
+	for _, key := range keys {
+		objCh <- minio.ObjectInfo{Key: key}
+	}
+	close(objCh)
+
+	var errs []error
+	for err := range s.client.RemoveObjects(context.Background(), bucket, objCh, minio.RemoveObjectsOptions{}) {
+		if err.Err != nil {
+			errs = append(errs, fmt.Errorf("s3: delete %s: %w", err.ObjectName, err.Err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("s3: batch delete failed (%d errors): %v", len(errs), errs)
 	}
 	return nil
 }

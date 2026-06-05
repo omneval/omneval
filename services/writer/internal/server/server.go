@@ -28,6 +28,7 @@ import (
 	"github.com/omneval/omneval/services/writer/internal/handler"
 	"github.com/omneval/omneval/services/writer/internal/metrics"
 	"github.com/omneval/omneval/services/writer/internal/pipeline"
+	"github.com/omneval/omneval/services/writer/internal/retention"
 	syncpkg "github.com/omneval/omneval/services/writer/internal/sync"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	redisgo "github.com/redis/go-redis/v9"
@@ -171,6 +172,12 @@ func Run() error {
 	// Create flusher (aged partition flush to Parquet on S3).
 	flusher := flush.NewWithDB(s3store, db, cfg)
 
+	// Create retention worker (rotates/deletes aged S3 spans).
+	var retentionWorker *retention.Worker
+	if s3store != nil && cfg.Writer.Retention.Enabled {
+		retentionWorker = retention.New(s3store, &cfg.Writer.Retention)
+	}
+
 	// Create score handler (handles POST /internal/v1/scores).
 	scoreHandler := handler.New(db)
 
@@ -245,6 +252,16 @@ func Run() error {
 			slog.Error("writer: flusher error", "err", err)
 		}
 	}()
+
+	// Start retention worker (separate goroutine).
+	if retentionWorker != nil {
+		go func() {
+			slog.Info("writer: retention worker started")
+			if err := retentionWorker.RunLoop(ctx); err != nil && err != context.Canceled {
+				slog.Error("writer: retention worker error", "err", err)
+			}
+		}()
+	}
 
 	// Start pipeline (blocks until ctx is canceled).
 	slog.Info("writer: pipeline started")

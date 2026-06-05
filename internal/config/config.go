@@ -78,6 +78,57 @@ type WriterConfig struct {
 	// LeaderElection enables Redis-based leader election for multi-replica HA.
 	// When enabled, only the leader processes the ingest queue and writes to DuckDB.
 	LeaderElection LeaderElectionConfig `mapstructure:"leader_election"`
+	// Retention controls the S3 retention worker that rotates or deletes aged
+	// trace data on a configurable policy.
+	Retention RetentionConfig `mapstructure:"retention"`
+}
+
+// RetentionConfig holds settings for the S3 trace retention worker.
+type RetentionConfig struct {
+	// Enabled starts the retention ticker when true.
+	Enabled bool `mapstructure:"enabled"`
+	// Action is the retention strategy: "delete" or "move".
+	Action string `mapstructure:"action"`
+	// MaxAgeDays is the number of days after which objects are eligible for
+	// retention. Zero means no age limit.
+	MaxAgeDays int `mapstructure:"max_age_days"`
+	// IntervalMinutes is how often the worker scans for eligible objects.
+	IntervalMinutes int `mapstructure:"interval_minutes"`
+	// Destination is the target bucket for "move" actions.
+	Destination RetentionDestinationConfig `mapstructure:"destination"`
+}
+
+// RetentionDestinationConfig describes where aged objects should be moved.
+type RetentionDestinationConfig struct {
+	Bucket       string `mapstructure:"bucket"`
+	Prefix       string `mapstructure:"prefix"`
+	StorageClass string `mapstructure:"storage_class"`
+}
+
+// Validate checks that the retention config is consistent.
+// Disabled retention is always valid (no-op).
+func (rc RetentionConfig) Validate() error {
+	if !rc.Enabled {
+		return nil
+	}
+	if rc.MaxAgeDays < 0 {
+		return fmt.Errorf("retention.max_age_days must be >= 0, got %d", rc.MaxAgeDays)
+	}
+	if rc.IntervalMinutes <= 0 {
+		return fmt.Errorf("retention.interval_minutes must be > 0, got %d", rc.IntervalMinutes)
+	}
+	switch rc.Action {
+	case "delete":
+	case "move":
+		if rc.Destination.Bucket == "" {
+			return fmt.Errorf("retention.destination.bucket is required for move action")
+		}
+	default:
+		if rc.Action != "" {
+			return fmt.Errorf("retention.action must be 'delete' or 'move', got %q", rc.Action)
+		}
+	}
+	return nil
 }
 
 type LeaderElectionConfig struct {
@@ -179,6 +230,14 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("writer.leader_election.enabled", false)
 	v.SetDefault("writer.leader_election.lock_ttl", 15)
 	v.SetDefault("writer.leader_election.fencing_enabled", true)
+	// writer retention
+	v.SetDefault("writer.retention.enabled", false)
+	v.SetDefault("writer.retention.action", "")
+	v.SetDefault("writer.retention.max_age_days", 0)
+	v.SetDefault("writer.retention.interval_minutes", 60)
+	v.SetDefault("writer.retention.destination.bucket", "")
+	v.SetDefault("writer.retention.destination.prefix", "")
+	v.SetDefault("writer.retention.destination.storage_class", "")
 	// query
 	v.SetDefault("query.addr", ":8002")
 	v.SetDefault("query.duckdb_path", "")
@@ -240,6 +299,13 @@ func Load(path string) (*Config, error) {
 	envBool(&cfg.Writer.LeaderElection.Enabled, "OMNEVAL_WRITER_LEADER_ELECTION_ENABLED")
 	envInt(&cfg.Writer.LeaderElection.LockTTL, "OMNEVAL_WRITER_LEADER_ELECTION_LOCK_TTL")
 	envBool(&cfg.Writer.LeaderElection.FencingEnabled, "OMNEVAL_WRITER_LEADER_ELECTION_FENCING_ENABLED")
+	envBool(&cfg.Writer.Retention.Enabled, "OMNEVAL_WRITER_RETENTION_ENABLED")
+	envString(&cfg.Writer.Retention.Action, "OMNEVAL_WRITER_RETENTION_ACTION")
+	envInt(&cfg.Writer.Retention.MaxAgeDays, "OMNEVAL_WRITER_RETENTION_MAX_AGE_DAYS")
+	envInt(&cfg.Writer.Retention.IntervalMinutes, "OMNEVAL_WRITER_RETENTION_INTERVAL_MINUTES")
+	envString(&cfg.Writer.Retention.Destination.Bucket, "OMNEVAL_WRITER_RETENTION_DESTINATION_BUCKET")
+	envString(&cfg.Writer.Retention.Destination.Prefix, "OMNEVAL_WRITER_RETENTION_DESTINATION_PREFIX")
+	envString(&cfg.Writer.Retention.Destination.StorageClass, "OMNEVAL_WRITER_RETENTION_DESTINATION_STORAGE_CLASS")
 	envString(&cfg.Query.Addr, "OMNEVAL_QUERY_ADDR")
 	envString(&cfg.Query.DuckDBPath, "OMNEVAL_QUERY_DUCKDB_PATH")
 	envString(&cfg.Query.SyncInterval, "OMNEVAL_QUERY_SYNC_INTERVAL")
