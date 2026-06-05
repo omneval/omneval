@@ -36,6 +36,12 @@ func (s *fakeState) fakeSet(_ context.Context, _ string, value string, _ time.Du
 	return true, nil
 }
 
+func (s *fakeState) stealLock(value string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lock = value
+}
+
 func (s *fakeState) fakeDel(_ context.Context, keys ...string) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -307,7 +313,7 @@ func TestRenewLoop_StopsWhenLockLost(t *testing.T) {
 	}()
 
 	time.Sleep(500 * time.Millisecond)
-	fs.lock = "instance-2" // steal the lock
+	fs.stealLock("instance-2") // steal the lock
 
 	select {
 	case err := <-errCh:

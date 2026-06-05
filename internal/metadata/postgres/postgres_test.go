@@ -2,7 +2,12 @@ package postgres_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
+	"net/url"
+	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,28 +18,98 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// helper creates a Postgres container and a Store bound to it.
-// Container cleanup is registered via t.Cleanup so the caller only needs Close().
+var testDBSeq atomic.Int64
+
+// openTestStore creates a fresh Postgres database and returns a migrated Store.
+//
+// In CI, TEST_POSTGRES_ADMIN_DSN must point to a running Postgres instance (the
+// admin database, e.g. "postgres"). Each call creates an isolated test database
+// and drops it in t.Cleanup. Locally, testcontainers-go is used; if Docker is
+// unavailable the test is skipped.
 func openTestStore(ctx context.Context, t *testing.T) *postgres.Store {
 	t.Helper()
+
+	if adminDSN := os.Getenv("TEST_POSTGRES_ADMIN_DSN"); adminDSN != "" {
+		return openTestStoreCI(ctx, t, adminDSN)
+	}
+	return openTestStoreLocal(ctx, t)
+}
+
+// openTestStoreCI connects to the GitHub Actions postgres service.
+// Each call creates a unique database so tests run in isolation.
+func openTestStoreCI(ctx context.Context, t *testing.T, adminDSN string) *postgres.Store {
+	t.Helper()
+
+	n := testDBSeq.Add(1)
+	dbName := fmt.Sprintf("omneval_t%d", n)
+
+	adminDB, err := sql.Open("pgx", adminDSN)
+	if err != nil {
+		t.Fatalf("open admin db: %v", err)
+	}
+	if _, err := adminDB.ExecContext(ctx, "CREATE DATABASE "+dbName); err != nil {
+		adminDB.Close()
+		t.Fatalf("create test db %s: %v", dbName, err)
+	}
+	adminDB.Close()
+
+	u, err := url.Parse(adminDSN)
+	if err != nil {
+		t.Fatalf("parse admin DSN: %v", err)
+	}
+	u.Path = "/" + dbName
+	dsn := u.String()
+
+	t.Cleanup(func() {
+		// Terminate any lingering connections, then drop the isolated DB.
+		adb, err := sql.Open("pgx", adminDSN)
+		if err != nil {
+			t.Logf("cleanup: open admin db: %v", err)
+			return
+		}
+		defer adb.Close()
+		adb.ExecContext(ctx, fmt.Sprintf( //nolint:errcheck
+			"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '%s'", dbName,
+		))
+		adb.ExecContext(ctx, "DROP DATABASE IF EXISTS "+dbName) //nolint:errcheck
+	})
+
+	s, err := postgres.New(dsn)
+	if err != nil {
+		t.Fatalf("open test store: %v", err)
+	}
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return s
+}
+
+// openTestStoreLocal spins up a throwaway Postgres container via testcontainers-go.
+// Skips the test if Docker is unavailable or the container fails to accept connections.
+func openTestStoreLocal(ctx context.Context, t *testing.T) *postgres.Store {
+	t.Helper()
+
 	pc, err := testpg.RunContainer(ctx,
 		testpg.WithDatabase("omneval"),
 		testpg.WithUsername("postgres"),
 		testpg.WithPassword("postgres"),
 	)
 	if err != nil {
-		t.Fatalf("run postgres container: %v", err)
+		t.Skipf("postgres container unavailable (is Docker running?): %v", err)
+		return nil // unreachable; t.Skipf calls runtime.Goexit
 	}
-	t.Cleanup(func() { pc.Terminate(ctx) })
+	t.Cleanup(func() { pc.Terminate(ctx) }) //nolint:errcheck
 
 	dsn, err := pc.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
-		t.Fatalf("get dsn: %v", err)
+		t.Skipf("postgres container port unavailable: %v", err)
+		return nil
 	}
 
 	s, err := postgres.New(dsn)
 	if err != nil {
-		t.Fatalf("open test store: %v", err)
+		t.Skipf("postgres container did not become ready: %v", err)
+		return nil
 	}
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -170,6 +245,9 @@ func TestUser_CreateAndGetByEmail(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
 	user := &domain.User{UserID: "user-1", OrgID: "org-1", Email: "alice@example.com", PasswordHash: "$2a$10$...", CreatedAt: now}
 	if err := s.CreateUser(ctx, user); err != nil {
 		t.Fatalf("create user: %v", err)
@@ -239,6 +317,12 @@ func TestSession_CreateAndGet(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateUser(ctx, &domain.User{UserID: "user-1", OrgID: "org-1", Email: "sess-test@example.com", PasswordHash: "password", CreatedAt: now}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
 	expiresAt := now.Add(24 * time.Hour)
 	session := &domain.Session{SessionID: "sess-1", UserID: "user-1", ExpiresAt: expiresAt, CreatedAt: now}
 	if err := s.CreateSession(ctx, session); err != nil {
@@ -385,6 +469,12 @@ func TestPrompt_CreateAndGet(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	pv := &domain.PromptVersion{
 		VersionID:   "pv-1",
 		ProjectID:   "proj-1",
@@ -413,6 +503,12 @@ func TestPrompt_GetByLabel(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	s.CreatePromptVersion(ctx, &domain.PromptVersion{
 		VersionID:   "pv-1",
 		ProjectID:   "proj-1",
@@ -451,6 +547,12 @@ func TestPrompt_ListVersions(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	for i := int64(1); i <= 3; i++ {
 		s.CreatePromptVersion(ctx, &domain.PromptVersion{
 			VersionID:   "pv-" + string(rune('0'+i)),
@@ -481,6 +583,12 @@ func TestPrompt_LabelUpsert(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	s.CreatePromptVersion(ctx, &domain.PromptVersion{
 		VersionID:   "pv-1",
 		ProjectID:   "proj-1",
@@ -527,6 +635,12 @@ func TestEvalRule_CreateAndGet(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	filter := domain.EvalFilter{Model: func() *string { s := "gpt-4"; return &s }()}
 	rule := &domain.EvalRule{
 		RuleID:        "rule-1",
@@ -562,6 +676,15 @@ func TestEvalRule_ListByProject(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-2", OrgID: "org-1", Name: "P2", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	s.CreateEvalRule(ctx, &domain.EvalRule{RuleID: "r1", ProjectID: "proj-1", Name: "rule-1", JudgeModel: "gpt-4", PromptName: "p", PromptVersion: 1, Enabled: true, CreatedAt: now})
 	s.CreateEvalRule(ctx, &domain.EvalRule{RuleID: "r2", ProjectID: "proj-1", Name: "rule-2", JudgeModel: "gpt-3.5", PromptName: "p", PromptVersion: 1, Enabled: false, CreatedAt: now})
 	s.CreateEvalRule(ctx, &domain.EvalRule{RuleID: "r3", ProjectID: "proj-2", Name: "rule-3", JudgeModel: "gpt-4", PromptName: "p", PromptVersion: 1, Enabled: true, CreatedAt: now})
@@ -581,6 +704,12 @@ func TestEvalRule_Update(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	s.CreateEvalRule(ctx, &domain.EvalRule{RuleID: "r1", ProjectID: "proj-1", Name: "original", JudgeModel: "gpt-3.5", PromptName: "p", PromptVersion: 1, Enabled: true, CreatedAt: now})
 
 	s.UpdateEvalRule(ctx, &domain.EvalRule{RuleID: "r1", ProjectID: "proj-1", Name: "updated", JudgeModel: "gpt-4", PromptName: "p", PromptVersion: 2, Enabled: false, CreatedAt: now})
@@ -602,6 +731,12 @@ func TestDataset_CreateAndGet(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	ds := &domain.Dataset{DatasetID: "ds-1", ProjectID: "proj-1", Name: "Eval Set", CreatedAt: now}
 	if err := s.CreateDataset(ctx, ds); err != nil {
 		t.Fatalf("create dataset: %v", err)
@@ -622,6 +757,12 @@ func TestDatasetItems_CreateAndList(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	s.CreateDataset(ctx, &domain.Dataset{DatasetID: "ds-1", ProjectID: "proj-1", Name: "Set", CreatedAt: now})
 
 	s.CreateDatasetItem(ctx, &domain.DatasetItem{ItemID: "item-1", DatasetID: "ds-1", Input: "hello", ExpectedOutput: "hi", CreatedAt: now})
@@ -645,7 +786,24 @@ func TestDatasetRun_CreateAndGet(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now().UTC()
+	if err := s.CreateOrganization(ctx, &domain.Organization{OrgID: "org-1", Name: "Test Corp", CreatedAt: now}); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := s.CreateProject(ctx, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1", CreatedAt: now}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	s.CreateDataset(ctx, &domain.Dataset{DatasetID: "ds-1", ProjectID: "proj-1", Name: "Set", CreatedAt: now})
+	if err := s.CreateEvalRule(ctx, &domain.EvalRule{
+		RuleID:    "rule-1",
+		ProjectID: "proj-1",
+		Name:      "test rule",
+		JudgeModel: "gpt-4",
+		SampleRate: 1.0,
+		Enabled:   true,
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("create eval rule: %v", err)
+	}
 
 	run := &domain.DatasetRun{RunID: "run-1", DatasetID: "ds-1", EvalRuleID: "rule-1", PromptVersion: 1, CreatedAt: now}
 	if err := s.CreateDatasetRun(ctx, run); err != nil {

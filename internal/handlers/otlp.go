@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -21,6 +20,7 @@ import (
 	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/otlp"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -98,7 +98,8 @@ func (h *OTLPHandler) handleOTLPTraces(w http.ResponseWriter, r *http.Request) {
 		}
 	case "application/json":
 		req = new(coltracev1.ExportTraceServiceRequest)
-		if err := json.Unmarshal(bodyBytes, req); err != nil {
+		jsonOpts := protojson.UnmarshalOptions{DiscardUnknown: true}
+		if err := jsonOpts.Unmarshal(bodyBytes, req); err != nil {
 			http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
 			return
 		}

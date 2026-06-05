@@ -1,4 +1,5 @@
 """HTTP client for prompt fetch and manual score writes."""
+
 from __future__ import annotations
 
 import threading
@@ -13,6 +14,7 @@ import requests
 @dataclass
 class _CacheEntry:
     """A cache entry with an optional expiry time."""
+
     template: str
     version: int = 0
     model_config: dict[str, Any] = field(default_factory=dict)
@@ -55,9 +57,9 @@ class OmnevalClient:
     def _extract_project_id(api_key: str) -> str:
         """Extract the project_id suffix from an API key like oev_proj_<suffix>."""
         if api_key.startswith("oev_proj_"):
-            return api_key[len("oev_proj_"):]
+            return api_key[len("oev_proj_") :]
         if api_key.startswith("oev_svc_"):
-            return api_key[len("oev_svc_"):]
+            return api_key[len("oev_svc_") :]
         return api_key
 
     def get_prompt(self, name: str, label: str = "production") -> dict[str, Any]:
@@ -86,7 +88,11 @@ class OmnevalClient:
         with self._label_lock:
             entry = self._label_cache.get(cache_key)
 
-        if entry is not None and entry.expires_at is not None and now < entry.expires_at:
+        if (
+            entry is not None
+            and entry.expires_at is not None
+            and now < entry.expires_at
+        ):
             return {
                 "name": name,
                 "version": entry.version,

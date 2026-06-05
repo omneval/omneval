@@ -1,4 +1,5 @@
 """@omneval.trace decorator for instrumenting functions."""
+
 from __future__ import annotations
 
 import contextvars
@@ -16,7 +17,8 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 # Context variable for carrying the active span in nested calls.
 _current_span: contextvars.ContextVar[Optional[Span]] = contextvars.ContextVar(
-    "_current_span", default=None,
+    "_current_span",
+    default=None,
 )
 
 
@@ -33,6 +35,7 @@ def trace(fn: F) -> F:
         def my_function(arg1, arg2="default"):
             return f"{arg1}-{arg2}"
     """
+
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         provider = get_tracer_provider()

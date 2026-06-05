@@ -762,11 +762,16 @@ export default function TracesPage({
           body.filters.push(...builtFilters);
         }
 
-        const res = await fetch("/api/v1/spans/query", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
+        let res: Response;
+        try {
+          res = await fetch("/api/v1/spans/query", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+        } catch {
+          return;
+        }
 
         if (res.ok) {
           const data: SpanQueryResponse = await res.json();

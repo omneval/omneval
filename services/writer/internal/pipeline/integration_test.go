@@ -3,6 +3,7 @@ package pipeline_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -34,7 +35,9 @@ func TestOTLP_EndToEndProto(t *testing.T) {
 		t.Skip("Docker not available, skipping integration test")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	redisContainer, redisPort, err := startRedisContainer(ctx)
 	if err != nil {
 		t.Fatalf("start redis container: %v", err)
@@ -65,11 +68,7 @@ func TestOTLP_EndToEndProto(t *testing.T) {
 	ts := httptest.NewServer(router)
 	defer ts.Close()
 
-	pipelineErr := make(chan error, 1)
-	go func() {
-		pl := pipeline.New(ingestQ, db, nil, nil, nil, nil)
-		pipelineErr <- pl.Run(ctx)
-	}()
+	go pipeline.New(ingestQ, db, nil, nil, nil, nil).Run(ctx)
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -80,35 +79,13 @@ func TestOTLP_EndToEndProto(t *testing.T) {
 		t.Fatalf("marshal proto: %v", err)
 	}
 
-	resp, err := http.Post(ts.URL+"/v1/traces",
-		"application/x-protobuf", bytes.NewReader(bodyBytes))
-	if err != nil {
-		t.Fatalf("send request: %v", err)
-	}
+	resp := mustDo(t, newReq(t, "POST", ts.URL+"/v1/traces", "application/x-protobuf", bodyBytes))
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
 	}
 
-	select {
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for writer pipeline to process span")
-	case err := <-pipelineErr:
-		if err != nil {
-			t.Fatalf("pipeline error: %v", err)
-		}
-	}
-
-	// Verify span in DuckDB.
-	var count int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM spans WHERE project_id = $1", "proj-1").
-		Scan(&count); err != nil {
-		t.Fatalf("query count: %v", err)
-	}
-	if count != 1 {
-		t.Fatalf("span count: got %d, want 1", count)
-	}
+	pollForSpanCount(t, ctx, db, "proj-1", 1, 10*time.Second)
 
 	// Verify typed fields.
 	var spanModel, spanInput, spanOutput, spanServiceName, spanKind string
@@ -171,33 +148,13 @@ func TestOTLP_EndToEndProto(t *testing.T) {
 			"output_tokens": 20
 		}]
 	}`)
-	nativeResp, err := http.Post(ts.URL+"/api/v1/spans",
-		"application/json", bytes.NewReader(nativeBody))
-	if err != nil {
-		t.Fatalf("native request: %v", err)
-	}
+	nativeResp := mustDo(t, newReq(t, "POST", ts.URL+"/api/v1/spans", "application/json", nativeBody))
 	defer nativeResp.Body.Close()
-
 	if nativeResp.StatusCode != http.StatusAccepted {
 		t.Fatalf("native status: got %d, want %d", nativeResp.StatusCode, http.StatusAccepted)
 	}
 
-	select {
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for second span")
-	case err := <-pipelineErr:
-		if err != nil {
-			t.Fatalf("pipeline error: %v", err)
-		}
-	}
-
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM spans WHERE project_id = $1", "proj-1").
-		Scan(&count); err != nil {
-		t.Fatalf("query count: %v", err)
-	}
-	if count != 2 {
-		t.Fatalf("span count: got %d, want 2", count)
-	}
+	pollForSpanCount(t, ctx, db, "proj-1", 2, 10*time.Second)
 }
 
 // TestOTLP_EndToEndJSON verifies JSON OTLP produces the same result as proto.
@@ -206,7 +163,9 @@ func TestOTLP_EndToEndJSON(t *testing.T) {
 		t.Skip("Docker not available, skipping integration test")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	redisContainer, redisPort, err := startRedisContainer(ctx)
 	if err != nil {
 		t.Fatalf("start redis container: %v", err)
@@ -236,15 +195,14 @@ func TestOTLP_EndToEndJSON(t *testing.T) {
 	ts := httptest.NewServer(router)
 	defer ts.Close()
 
-	pipelineErr := make(chan error, 1)
-	go func() {
-		pl := pipeline.New(ingestQ, db, nil, nil, nil, nil)
-		pipelineErr <- pl.Run(ctx)
-	}()
+	go pipeline.New(ingestQ, db, nil, nil, nil, nil).Run(ctx)
 
 	time.Sleep(100 * time.Millisecond)
 
-	jsonBody := `{
+	// traceId/spanId must be base64-encoded (proto JSON format, not OTLP hex format).
+	// traceId = [0x01..0xef repeated] base64 = "ASNFZ4mrze8BI0VniavN7w=="
+	// spanId  = [0x01..0xef]          base64 = "ASNFZ4mrze8="
+	jsonBody := []byte(`{
 		"resourceSpans": [{
 			"resource": {
 				"attributes": [{
@@ -254,8 +212,8 @@ func TestOTLP_EndToEndJSON(t *testing.T) {
 			},
 			"scopeSpans": [{
 				"spans": [{
-					"traceId": "0123456789abcdef0123456789abcdef",
-					"spanId": "0123456789abcdef",
+					"traceId": "ASNFZ4mrze8BI0VniavN7w==",
+					"spanId": "ASNFZ4mrze8=",
 					"name": "json-llm-span",
 					"startTimeUnixNano": "1704067200000000000",
 					"endTimeUnixNano": "1704067201000000000",
@@ -269,26 +227,15 @@ func TestOTLP_EndToEndJSON(t *testing.T) {
 				}]
 			}]
 		}]
-	}`
+	}`)
 
-	resp, err := http.Post(ts.URL+"/v1/traces", "application/json", bytes.NewReader([]byte(jsonBody)))
-	if err != nil {
-		t.Fatalf("send request: %v", err)
-	}
+	resp := mustDo(t, newReq(t, "POST", ts.URL+"/v1/traces", "application/json", jsonBody))
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
 	}
 
-	select {
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for writer pipeline")
-	case err := <-pipelineErr:
-		if err != nil {
-			t.Fatalf("pipeline error: %v", err)
-		}
-	}
+	pollForSpanCount(t, ctx, db, "proj-2", 1, 10*time.Second)
 
 	var spanModel, spanServiceName string
 	var inputTokens, outputTokens int64
@@ -311,7 +258,9 @@ func TestOTLP_UnknownModelZeroCost(t *testing.T) {
 		t.Skip("Docker not available, skipping integration test")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	redisContainer, redisPort, err := startRedisContainer(ctx)
 	if err != nil {
 		t.Fatalf("start redis container: %v", err)
@@ -341,11 +290,7 @@ func TestOTLP_UnknownModelZeroCost(t *testing.T) {
 	ts := httptest.NewServer(router)
 	defer ts.Close()
 
-	pipelineErr := make(chan error, 1)
-	go func() {
-		pl := pipeline.New(ingestQ, db, nil, nil, nil, nil)
-		pipelineErr <- pl.Run(ctx)
-	}()
+	go pipeline.New(ingestQ, db, nil, nil, nil, nil).Run(ctx)
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -382,24 +327,13 @@ func TestOTLP_UnknownModelZeroCost(t *testing.T) {
 		t.Fatalf("marshal proto: %v", err)
 	}
 
-	resp, err := http.Post(ts.URL+"/v1/traces", "application/x-protobuf", bytes.NewReader(bodyBytes))
-	if err != nil {
-		t.Fatalf("send request: %v", err)
-	}
+	resp := mustDo(t, newReq(t, "POST", ts.URL+"/v1/traces", "application/x-protobuf", bodyBytes))
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
 	}
 
-	select {
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for writer pipeline")
-	case err := <-pipelineErr:
-		if err != nil {
-			t.Fatalf("pipeline error: %v", err)
-		}
-	}
+	pollForSpanCount(t, ctx, db, "proj-5", 1, 10*time.Second)
 
 	var costUSD float64
 	if err := db.QueryRowContext(ctx,
@@ -418,7 +352,9 @@ func TestOTLP_NativeHandlerStillWorks(t *testing.T) {
 		t.Skip("Docker not available, skipping integration test")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	redisContainer, redisPort, err := startRedisContainer(ctx)
 	if err != nil {
 		t.Fatalf("start redis container: %v", err)
@@ -443,11 +379,7 @@ func TestOTLP_NativeHandlerStillWorks(t *testing.T) {
 	ts := httptest.NewServer(nativeH.Router())
 	defer ts.Close()
 
-	pipelineErr := make(chan error, 1)
-	go func() {
-		pl := pipeline.New(ingestQ, db, nil, nil, nil, nil)
-		pipelineErr <- pl.Run(ctx)
-	}()
+	go pipeline.New(ingestQ, db, nil, nil, nil, nil).Run(ctx)
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -462,33 +394,13 @@ func TestOTLP_NativeHandlerStillWorks(t *testing.T) {
 		}]
 	}`)
 
-	resp, err := http.Post(ts.URL+"/api/v1/spans", "application/json", bytes.NewReader(nativeBody))
-	if err != nil {
-		t.Fatalf("send request: %v", err)
-	}
+	resp := mustDo(t, newReq(t, "POST", ts.URL+"/api/v1/spans", "application/json", nativeBody))
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
 	}
 
-	select {
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for writer pipeline")
-	case err := <-pipelineErr:
-		if err != nil {
-			t.Fatalf("pipeline error: %v", err)
-		}
-	}
-
-	var count int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM spans WHERE project_id = $1", "proj-native").
-		Scan(&count); err != nil {
-		t.Fatalf("query count: %v", err)
-	}
-	if count != 1 {
-		t.Fatalf("span count: got %d, want 1", count)
-	}
+	pollForSpanCount(t, ctx, db, "proj-native", 1, 10*time.Second)
 
 	var spanModel string
 	if err := db.QueryRowContext(ctx,
@@ -514,6 +426,47 @@ func startRedisContainer(ctx context.Context) (*rediscontainer.RedisContainer, s
 	}
 
 	return container, fmt.Sprintf("localhost:%s", mappedPort.Port()), nil
+}
+
+// newReq builds an HTTP request with the test API key header.
+func newReq(t *testing.T, method, url, contentType string, body []byte) *http.Request {
+	t.Helper()
+	r, err := http.NewRequest(method, url, bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	r.Header.Set("Content-Type", contentType)
+	r.Header.Set("X-API-Key", "test-key")
+	return r
+}
+
+// mustDo executes the request and fatals on error.
+func mustDo(t *testing.T, r *http.Request) *http.Response {
+	t.Helper()
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	return resp
+}
+
+// pollForSpanCount polls DuckDB until the span count reaches want, or times out.
+func pollForSpanCount(t *testing.T, ctx context.Context, db *sql.DB, projectID string, want int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		var count int
+		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM spans WHERE project_id = $1", projectID).Scan(&count); err != nil {
+			t.Fatalf("poll span count: %v", err)
+		}
+		if count >= want {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	var count int
+	db.QueryRowContext(ctx, "SELECT COUNT(*) FROM spans WHERE project_id = $1", projectID).Scan(&count)
+	t.Fatalf("timeout waiting for %d spans in project %s, got %d", want, projectID, count)
 }
 
 type fakeValidator struct {

@@ -1,4 +1,5 @@
 """OTLP HTTP exporter configuration for Omneval."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -57,6 +58,8 @@ def __make_resource():
     """Create an OpenTelemetry resource for the Omneval SDK."""
     from opentelemetry.sdk.resources import Resource
 
-    return Resource.create({
-        ResourceAttributes.SERVICE_NAME: "omneval-sdk",
-    })
+    return Resource.create(
+        {
+            ResourceAttributes.SERVICE_NAME: "omneval-sdk",
+        }
+    )

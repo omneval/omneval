@@ -1,6 +1,6 @@
 """Tests for OmnevalClient."""
+
 import json
-import time
 
 import requests
 import responses
@@ -73,7 +73,14 @@ class TestGetPrompt:
             return (
                 200,
                 {},
-                json.dumps({"name": "test", "version": 1, "template": "test", "model_config": {}}),
+                json.dumps(
+                    {
+                        "name": "test",
+                        "version": 1,
+                        "template": "test",
+                        "model_config": {},
+                    }
+                ),
             )
 
         responses.add_callback(
@@ -268,7 +275,14 @@ class TestAPIKeyHeaders:
             return (
                 200,
                 {},
-                json.dumps({"name": "test", "version": 1, "template": "test", "model_config": {}}),
+                json.dumps(
+                    {
+                        "name": "test",
+                        "version": 1,
+                        "template": "test",
+                        "model_config": {},
+                    }
+                ),
             )
 
         responses.add_callback(
@@ -294,7 +308,9 @@ class TestAPIKeyHeaders:
             return (
                 200,
                 {},
-                json.dumps({"name": "test", "version": 2, "template": "v2", "model_config": {}}),
+                json.dumps(
+                    {"name": "test", "version": 2, "template": "v2", "model_config": {}}
+                ),
             )
 
         responses.add_callback(
@@ -320,7 +336,14 @@ class TestAPIKeyHeaders:
             return (
                 200,
                 {},
-                json.dumps({"name": "test", "version": 1, "template": "test", "model_config": {}}),
+                json.dumps(
+                    {
+                        "name": "test",
+                        "version": 1,
+                        "template": "test",
+                        "model_config": {},
+                    }
+                ),
             )
 
         responses.add_callback(
@@ -357,7 +380,9 @@ class TestCreatePrompt:
         )
 
         client = OmnevalClient("http://localhost:8080", "oev_proj_test")
-        result = client.create_prompt("greeting", "Hello, {{.Name}}!", model_config={"model": "gpt-4"})
+        result = client.create_prompt(
+            "greeting", "Hello, {{.Name}}!", model_config={"model": "gpt-4"}
+        )
 
         assert len(responses.calls) == 1
         req = responses.calls[0].request
@@ -377,7 +402,20 @@ class TestCreatePrompt:
         def capture_request(request):
             nonlocal captured_headers
             captured_headers = dict(request.headers)
-            return (201, {}, json.dumps({"name": "test", "version": 1, "template": "t", "model": "", "temperature": 0, "max_tokens": 0}))
+            return (
+                201,
+                {},
+                json.dumps(
+                    {
+                        "name": "test",
+                        "version": 1,
+                        "template": "t",
+                        "model": "",
+                        "temperature": 0,
+                        "max_tokens": 0,
+                    }
+                ),
+            )
 
         responses.add_callback(
             responses.POST,
@@ -420,7 +458,11 @@ class TestListPrompts:
             responses.GET,
             "http://localhost:8080/api/v1/prompts",
             json=[
-                {"name": "greeting", "latest_version": 2, "labels": {"production": 2, "staging": 1}},
+                {
+                    "name": "greeting",
+                    "latest_version": 2,
+                    "labels": {"production": 2, "staging": 1},
+                },
                 {"name": "eval", "latest_version": 1, "labels": {}},
             ],
             status=200,
@@ -502,7 +544,11 @@ class TestSetPromptLabel:
         def capture_request(request):
             nonlocal captured_headers
             captured_headers = dict(request.headers)
-            return (200, {}, json.dumps({"name": "test", "label": "production", "version": 1}))
+            return (
+                200,
+                {},
+                json.dumps({"name": "test", "label": "production", "version": 1}),
+            )
 
         responses.add_callback(
             responses.PUT,
@@ -619,7 +665,9 @@ class TestCreateEvalRule:
         )
 
         client = OmnevalClient("http://localhost:8080", "oev_proj_test")
-        result = client.create_eval_rule("helpfulness", "eval-prompt", filter={"model": "gpt-4"})
+        result = client.create_eval_rule(
+            "helpfulness", "eval-prompt", filter={"model": "gpt-4"}
+        )
 
         assert len(responses.calls) == 1
         req = responses.calls[0].request
@@ -658,7 +706,12 @@ class TestGetPromptVersion:
         responses.add(
             responses.GET,
             "http://localhost:8080/api/v1/prompts/greeting?version=2",
-            json={"name": "greeting", "version": 2, "template": "Welcome!", "model_config": {}},
+            json={
+                "name": "greeting",
+                "version": 2,
+                "template": "Welcome!",
+                "model_config": {},
+            },
             status=200,
         )
 
@@ -673,7 +726,12 @@ class TestGetPromptVersion:
         responses.add(
             responses.GET,
             "http://localhost:8080/api/v1/prompts/greeting?version=1",
-            json={"name": "greeting", "version": 1, "template": "Hello!", "model_config": {}},
+            json={
+                "name": "greeting",
+                "version": 1,
+                "template": "Hello!",
+                "model_config": {},
+            },
             status=200,
         )
 

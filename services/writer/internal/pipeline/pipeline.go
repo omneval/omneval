@@ -136,7 +136,10 @@ func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
 
 	now := time.Now()
 	for _, span := range spans {
-		cost := p.pricing.Cost(span.Model, span.InputTokens, span.OutputTokens)
+		var cost float64
+		if p.pricing != nil {
+			cost = p.pricing.Cost(span.Model, span.InputTokens, span.OutputTokens)
+		}
 		span.CostUSD = cost
 
 		startTime := span.StartTime
@@ -243,6 +246,9 @@ func (p *Pipeline) evalSpans(ctx context.Context, span *domain.Span, rules []dom
 
 // listEvalRules fetches all active eval rules for the project.
 func (p *Pipeline) listEvalRules(ctx context.Context) ([]domain.EvalRule, error) {
+	if p.store == nil {
+		return nil, nil
+	}
 	raw, err := p.store.ListEvalRules(ctx, "") // all projects
 	if err != nil {
 		return nil, err

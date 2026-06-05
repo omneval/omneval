@@ -27,10 +27,6 @@ func Open(path string) (*sql.DB, error) {
 	}
 
 	dsn := path
-	// For in-memory, use the file-based approach to avoid extension issues.
-	if path == ":memory:" {
-		dsn = "file::memory:?cache=shared"
-	}
 
 	db, err := sql.Open("duckdb", dsn)
 	if err != nil {

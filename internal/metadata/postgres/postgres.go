@@ -486,6 +486,7 @@ func (s *Store) GetPromptVersion(ctx context.Context, projectID, name string, ve
 		}
 		return nil, fmt.Errorf("postgres: get prompt version: %w", err)
 	}
+	pv.Version = version
 	pv.CreatedAt = createdAt
 	pv.ModelConfig = domain.PromptModelConfig{
 		Model:       model,
