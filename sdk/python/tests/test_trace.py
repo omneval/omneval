@@ -1,4 +1,5 @@
 """Tests for @omneval.trace decorator and configure function."""
+
 import responses
 from unittest import mock
 
@@ -80,9 +81,7 @@ class TestTraceDecorator:
         provider, exporter = self._make_test_provider()
         old_provider = omneval_sdk.exporter._tracer_provider
 
-        with mock.patch(
-            "omneval_sdk.trace.get_tracer_provider", return_value=provider
-        ):
+        with mock.patch("omneval_sdk.trace.get_tracer_provider", return_value=provider):
 
             @trace
             def my_function(arg1, arg2="default"):
@@ -102,9 +101,7 @@ class TestTraceDecorator:
         provider, exporter = self._make_test_provider()
         old_provider = omneval_sdk.exporter._tracer_provider
 
-        with mock.patch(
-            "omneval_sdk.trace.get_tracer_provider", return_value=provider
-        ):
+        with mock.patch("omneval_sdk.trace.get_tracer_provider", return_value=provider):
 
             @trace
             def named_function():
@@ -123,9 +120,7 @@ class TestTraceDecorator:
         provider, exporter = self._make_test_provider()
         old_provider = omneval_sdk.exporter._tracer_provider
 
-        with mock.patch(
-            "omneval_sdk.trace.get_tracer_provider", return_value=provider
-        ):
+        with mock.patch("omneval_sdk.trace.get_tracer_provider", return_value=provider):
 
             @trace
             def outer():
@@ -147,11 +142,9 @@ class TestTraceDecorator:
     def test_span_has_context_propagation(self):
         """Child spans reference parent span via parent_span_id."""
         provider, exporter = self._make_test_provider()
-        old_provider = omneval_sdk.exporter._tracer_provider
+        _ = omneval_sdk.exporter._tracer_provider
 
-        with mock.patch(
-            "omneval_sdk.trace.get_tracer_provider", return_value=provider
-        ):
+        with mock.patch("omneval_sdk.trace.get_tracer_provider", return_value=provider):
 
             @trace
             def parent():
@@ -178,11 +171,9 @@ class TestTraceDecorator:
     def test_decorator_propagates_exceptions(self):
         """@omneval.trace propagates exceptions raised by the decorated function."""
         provider, exporter = self._make_test_provider()
-        old_provider = omneval_sdk.exporter._tracer_provider
+        _ = omneval_sdk.exporter._tracer_provider
 
-        with mock.patch(
-            "omneval_sdk.trace.get_tracer_provider", return_value=provider
-        ):
+        with mock.patch("omneval_sdk.trace.get_tracer_provider", return_value=provider):
 
             @trace
             def failing_function():

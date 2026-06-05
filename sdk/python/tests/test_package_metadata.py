@@ -1,4 +1,5 @@
 """Tests for package metadata and standalone installability."""
+
 import importlib.metadata
 
 
@@ -27,7 +28,9 @@ class TestPackageMetadata:
 
     def test_pyproject_has_python_requires(self):
         """Package specifies minimum Python version."""
-        requires_python = importlib.metadata.metadata("omneval-sdk").get("Requires-Python", "")
+        requires_python = importlib.metadata.metadata("omneval-sdk").get(
+            "Requires-Python", ""
+        )
         assert requires_python
 
     def test_dependencies_are_present(self):
@@ -115,9 +118,15 @@ class TestPackageMetadata:
     def test_package_has_license(self):
         """Package declares a license (required for PyPI publishing)."""
         metadata = importlib.metadata.metadata("omneval-sdk")
-        license_field = metadata.get("License-Expression", "") or metadata.get("License", "")
+        license_field = metadata.get("License-Expression", "") or metadata.get(
+            "License", ""
+        )
         assert license_field, "Package must declare a license for PyPI publishing"
-        assert "Apache" in license_field or "MIT" in license_field or "BSD" in license_field
+        assert (
+            "Apache" in license_field
+            or "MIT" in license_field
+            or "BSD" in license_field
+        )
 
     def test_package_has_classifiers(self):
         """Package has PyPI-relevant classifiers."""
@@ -141,4 +150,7 @@ class TestPackageMetadata:
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         )
         assert result.returncode == 0, f"Build failed: {result.stderr}"
-        assert "Successfully built" in result.stdout or "Successfully built" in result.stderr
+        assert (
+            "Successfully built" in result.stdout
+            or "Successfully built" in result.stderr
+        )

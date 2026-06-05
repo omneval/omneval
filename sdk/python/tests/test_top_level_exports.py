@@ -1,7 +1,7 @@
 """Tests for top-level exports in omneval_sdk.__init__.py."""
+
 from unittest import mock
 
-from omneval_sdk.trace import trace
 
 # OTel imports used by test helpers.
 from opentelemetry.sdk.trace import TracerProvider

@@ -2,7 +2,12 @@ package postgres_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
+	"net/url"
+	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,28 +18,98 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// helper creates a Postgres container and a Store bound to it.
-// Container cleanup is registered via t.Cleanup so the caller only needs Close().
+var testDBSeq atomic.Int64
+
+// openTestStore creates a fresh Postgres database and returns a migrated Store.
+//
+// In CI, TEST_POSTGRES_ADMIN_DSN must point to a running Postgres instance (the
+// admin database, e.g. "postgres"). Each call creates an isolated test database
+// and drops it in t.Cleanup. Locally, testcontainers-go is used; if Docker is
+// unavailable the test is skipped.
 func openTestStore(ctx context.Context, t *testing.T) *postgres.Store {
 	t.Helper()
+
+	if adminDSN := os.Getenv("TEST_POSTGRES_ADMIN_DSN"); adminDSN != "" {
+		return openTestStoreCI(ctx, t, adminDSN)
+	}
+	return openTestStoreLocal(ctx, t)
+}
+
+// openTestStoreCI connects to the GitHub Actions postgres service.
+// Each call creates a unique database so tests run in isolation.
+func openTestStoreCI(ctx context.Context, t *testing.T, adminDSN string) *postgres.Store {
+	t.Helper()
+
+	n := testDBSeq.Add(1)
+	dbName := fmt.Sprintf("omneval_t%d", n)
+
+	adminDB, err := sql.Open("pgx", adminDSN)
+	if err != nil {
+		t.Fatalf("open admin db: %v", err)
+	}
+	if _, err := adminDB.ExecContext(ctx, "CREATE DATABASE "+dbName); err != nil {
+		adminDB.Close()
+		t.Fatalf("create test db %s: %v", dbName, err)
+	}
+	adminDB.Close()
+
+	u, err := url.Parse(adminDSN)
+	if err != nil {
+		t.Fatalf("parse admin DSN: %v", err)
+	}
+	u.Path = "/" + dbName
+	dsn := u.String()
+
+	t.Cleanup(func() {
+		// Terminate any lingering connections, then drop the isolated DB.
+		adb, err := sql.Open("pgx", adminDSN)
+		if err != nil {
+			t.Logf("cleanup: open admin db: %v", err)
+			return
+		}
+		defer adb.Close()
+		adb.ExecContext(ctx, fmt.Sprintf( //nolint:errcheck
+			"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '%s'", dbName,
+		))
+		adb.ExecContext(ctx, "DROP DATABASE IF EXISTS "+dbName) //nolint:errcheck
+	})
+
+	s, err := postgres.New(dsn)
+	if err != nil {
+		t.Fatalf("open test store: %v", err)
+	}
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return s
+}
+
+// openTestStoreLocal spins up a throwaway Postgres container via testcontainers-go.
+// Skips the test if Docker is unavailable or the container fails to accept connections.
+func openTestStoreLocal(ctx context.Context, t *testing.T) *postgres.Store {
+	t.Helper()
+
 	pc, err := testpg.RunContainer(ctx,
 		testpg.WithDatabase("omneval"),
 		testpg.WithUsername("postgres"),
 		testpg.WithPassword("postgres"),
 	)
 	if err != nil {
-		t.Fatalf("run postgres container: %v", err)
+		t.Skipf("postgres container unavailable (is Docker running?): %v", err)
+		return nil // unreachable; t.Skipf calls runtime.Goexit
 	}
-	t.Cleanup(func() { pc.Terminate(ctx) })
+	t.Cleanup(func() { pc.Terminate(ctx) }) //nolint:errcheck
 
 	dsn, err := pc.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
-		t.Fatalf("get dsn: %v", err)
+		t.Skipf("postgres container port unavailable: %v", err)
+		return nil
 	}
 
 	s, err := postgres.New(dsn)
 	if err != nil {
-		t.Fatalf("open test store: %v", err)
+		t.Skipf("postgres container did not become ready: %v", err)
+		return nil
 	}
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatalf("migrate: %v", err)

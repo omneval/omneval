@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -331,6 +332,9 @@ func TestRun_SyncIntervalTriggeredSync(t *testing.T) {
 }
 
 func TestDoSync_CheckpointsWALBeforeUpload(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("DuckDB holds an exclusive file lock on Windows; covered by Linux CI")
+	}
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "omneval.db")
 
@@ -398,6 +402,9 @@ func TestDoSync_CheckpointsWALBeforeUpload(t *testing.T) {
 // recent writes trapped in the WAL. A fresh snapshot connection would
 // see empty tables.
 func TestDoSync_SnapshotContainsWrittenData(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("DuckDB holds an exclusive file lock on Windows; covered by Linux CI")
+	}
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "omneval.db")
 
@@ -534,6 +541,9 @@ func TestDoSync_SkipsUploadWhenUnchanged(t *testing.T) {
 // TestDoSync_DBWriteThenSkip exercises the real DuckDB path: after writing
 // data, the sync uploads; without writing, the next sync is skipped.
 func TestDoSync_DBWriteThenSkip(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("DuckDB holds an exclusive file lock on Windows; covered by Linux CI")
+	}
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "omneval.db")
 
