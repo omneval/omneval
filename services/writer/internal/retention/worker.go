@@ -55,16 +55,17 @@ func (w *Worker) Run(ctx context.Context) (domain.RotationResult, error) {
 		return result, nil
 	}
 
-	switch w.cfg.Action {
-	case "delete":
+	switch domain.RetentionAction(w.cfg.Action) {
+	case domain.ActionDelete:
 		err = w.deleteObjects(ctx, objects, &result)
-	case "move":
+	case domain.ActionMove:
 		err = w.moveObjects(ctx, objects, &result)
 	default:
 		return result, fmt.Errorf("retention: unknown action %q", w.cfg.Action)
 	}
 
 	if err != nil {
+		result.Duration = time.Since(start)
 		result.Errors = append(result.Errors, err)
 		return result, err
 	}
@@ -131,16 +132,13 @@ func (w *Worker) moveObjects(ctx context.Context, objects []s3pkg.ObjectInfo, re
 	dstPrefix := w.cfg.Destination.Prefix
 	storageClass := w.cfg.Destination.StorageClass
 
+	keys := make([]string, 0, len(objects))
+	var totalBytes int64
 	for _, obj := range objects {
 		dstKey := dstPrefix + obj.Key
 		if err := w.store.CopyObject(ctx, dstBucket, dstKey, obj.Key, storageClass); err != nil {
 			return fmt.Errorf("retention: copy %s: %w", obj.Key, err)
 		}
-	}
-
-	keys := make([]string, 0, len(objects))
-	var totalBytes int64
-	for _, obj := range objects {
 		keys = append(keys, obj.Key)
 		totalBytes += obj.Size
 	}

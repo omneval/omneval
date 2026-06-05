@@ -53,6 +53,11 @@ func Run() error {
 		cfg.Writer.LeaderElection.FencingEnabled = true
 	}
 
+	// Validate retention config before starting the worker.
+	if err := cfg.Writer.Retention.Validate(); err != nil {
+		return fmt.Errorf("writer: retention config: %w", err)
+	}
+
 	// Register Prometheus metrics.
 	if err := metrics.Register(cfg.Metrics.DisableProjectLabels); err != nil {
 		return fmt.Errorf("writer: register metrics: %w", err)

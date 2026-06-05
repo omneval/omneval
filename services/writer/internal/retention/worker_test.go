@@ -98,22 +98,22 @@ func TestRun_DeleteAction(t *testing.T) {
 	}
 }
 
+type copyRecord struct {
+	dstBucket, dstKey, srcKey, storageClass string
+}
+
 func TestRun_MoveAction(t *testing.T) {
 	objects := []s3pkg.ObjectInfo{
 		{Key: "old/trace1.parquet", Bucket: "test-bucket", LastModified: time.Now().Add(-48 * time.Hour), Size: 1024},
 	}
-	var copied []struct {
-		dstBucket, dstKey, srcKey, storageClass string
-	}
+	var copyRecords []copyRecord
 	var deletedKeys []string
 	mock := &mockStore{
 		listObjectsFn: func(ctx context.Context, prefix string, cutoff time.Time) ([]s3pkg.ObjectInfo, error) {
 			return objects, nil
 		},
 		copyObjectFn: func(ctx context.Context, dstBucket, dstKey, srcKey, storageClass string) error {
-			copied = append(copied, struct {
-				dstBucket, dstKey, srcKey, storageClass string
-			}{dstBucket, dstKey, srcKey, storageClass})
+			copyRecords = append(copyRecords, copyRecord{dstBucket, dstKey, srcKey, storageClass})
 			return nil
 		},
 		deleteFn: func(ctx context.Context, bucket string, keys []string) error {
@@ -147,17 +147,17 @@ func TestRun_MoveAction(t *testing.T) {
 	if result.ObjectsActedOn != 1 {
 		t.Errorf("ObjectsActedOn = %d, want 1", result.ObjectsActedOn)
 	}
-	if len(copied) != 1 {
-		t.Fatalf("copied length = %d, want 1", len(copied))
+	if len(copyRecords) != 1 {
+		t.Fatalf("copyRecords length = %d, want 1", len(copyRecords))
 	}
-	if copied[0].dstBucket != "cold-archive" {
-		t.Errorf("dstBucket = %q, want %q", copied[0].dstBucket, "cold-archive")
+	if copyRecords[0].dstBucket != "cold-archive" {
+		t.Errorf("dstBucket = %q, want %q", copyRecords[0].dstBucket, "cold-archive")
 	}
-	if copied[0].dstKey != "archived/old/trace1.parquet" {
-		t.Errorf("dstKey = %q, want %q", copied[0].dstKey, "archived/old/trace1.parquet")
+	if copyRecords[0].dstKey != "archived/old/trace1.parquet" {
+		t.Errorf("dstKey = %q, want %q", copyRecords[0].dstKey, "archived/old/trace1.parquet")
 	}
-	if copied[0].storageClass != "GLACIER" {
-		t.Errorf("storageClass = %q, want %q", copied[0].storageClass, "GLACIER")
+	if copyRecords[0].storageClass != "GLACIER" {
+		t.Errorf("storageClass = %q, want %q", copyRecords[0].storageClass, "GLACIER")
 	}
 	if len(deletedKeys) != 1 {
 		t.Errorf("deletedKeys length = %d, want 1", len(deletedKeys))
