@@ -3,6 +3,7 @@ package s3
 import (
 	"io"
 	"testing"
+	"time"
 
 	"github.com/omneval/omneval/internal/config"
 )
@@ -172,4 +173,51 @@ func TestPutSized_PassesSizeToPutObject(t *testing.T) {
 		t.Errorf("PutSized appears to have buffered the entire body: maxRead=%d, size=%d", tr.maxRead, size)
 	}
 	t.Logf("PutSized streaming: maxRead=%d, total=%d, size=%d", tr.maxRead, tr.totalRead, size)
+}
+
+func TestListObjectsOlderThan_NoClient(t *testing.T) {
+	var store *Store
+	result, err := store.ListObjectsOlderThan(nil, "prefix/", time.Now())
+	if err == nil {
+		t.Error("expected error for nil store")
+	}
+	if result != nil {
+		t.Error("expected nil result for nil store")
+	}
+}
+
+func TestDeleteObjectsBatch_NoClient(t *testing.T) {
+	var store *Store
+	err := store.DeleteObjectsBatch(nil, "bucket", []string{"key1"})
+	if err == nil {
+		t.Error("expected error for nil store")
+	}
+}
+
+func TestDeleteObjectsBatch_EmptyKeys(t *testing.T) {
+	cfg := &config.StorageConfig{
+		Endpoint:  "http://localhost:9000",
+		Bucket:    "test-bucket",
+		AccessKey: "minioadmin",
+		SecretKey: "minioadmin",
+		Region:    "us-east-1",
+	}
+	store := New(cfg)
+	if store == nil {
+		t.Fatal("expected non-nil store")
+	}
+
+	// Empty keys should return nil (no-op)
+	err := store.DeleteObjectsBatch(nil, "bucket", nil)
+	if err != nil {
+		t.Errorf("expected nil error for empty keys, got: %v", err)
+	}
+}
+
+func TestCopyObject_NoClient(t *testing.T) {
+	var store *Store
+	err := store.CopyObject(nil, "dst-bucket", "dst/key", "src/key", "GLACIER")
+	if err == nil {
+		t.Error("expected error for nil store")
+	}
 }

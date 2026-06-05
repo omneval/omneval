@@ -228,3 +228,179 @@ log_level: debug
 		t.Errorf("log_level: got %q, want %q", cfg.LogLevel, "debug")
 	}
 }
+
+func TestLoad_RetentionDefaults(t *testing.T) {
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.Writer.Retention.Enabled {
+		t.Error("retention.enabled: got true, want false (disabled by default)")
+	}
+	if cfg.Writer.Retention.Action != "" {
+		t.Errorf("retention.action: got %q, want empty", cfg.Writer.Retention.Action)
+	}
+	if cfg.Writer.Retention.MaxAgeDays != 0 {
+		t.Errorf("retention.max_age_days: got %d, want 0", cfg.Writer.Retention.MaxAgeDays)
+	}
+	if cfg.Writer.Retention.IntervalMinutes != 60 {
+		t.Errorf("retention.interval_minutes: got %d, want 60", cfg.Writer.Retention.IntervalMinutes)
+	}
+}
+
+func TestLoad_RetentionFromFile(t *testing.T) {
+	yaml := `
+writer:
+  retention:
+    enabled: true
+    action: "delete"
+    max_age_days: 30
+    interval_minutes: 15
+`
+	f := filepath.Join(t.TempDir(), "omneval.yaml")
+	if err := os.WriteFile(f, []byte(yaml), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(f)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if !cfg.Writer.Retention.Enabled {
+		t.Error("retention.enabled: got false, want true")
+	}
+	if cfg.Writer.Retention.Action != "delete" {
+		t.Errorf("retention.action: got %q, want %q", cfg.Writer.Retention.Action, "delete")
+	}
+	if cfg.Writer.Retention.MaxAgeDays != 30 {
+		t.Errorf("retention.max_age_days: got %d, want 30", cfg.Writer.Retention.MaxAgeDays)
+	}
+	if cfg.Writer.Retention.IntervalMinutes != 15 {
+		t.Errorf("retention.interval_minutes: got %d, want 15", cfg.Writer.Retention.IntervalMinutes)
+	}
+}
+
+func TestLoad_RetentionEnvOverride(t *testing.T) {
+	t.Setenv("OMNEVAL_WRITER_RETENTION_ENABLED", "true")
+	t.Setenv("OMNEVAL_WRITER_RETENTION_ACTION", "move")
+	t.Setenv("OMNEVAL_WRITER_RETENTION_MAX_AGE_DAYS", "7")
+	t.Setenv("OMNEVAL_WRITER_RETENTION_INTERVAL_MINUTES", "30")
+	t.Setenv("OMNEVAL_WRITER_RETENTION_DESTINATION_BUCKET", "cold-archive")
+	t.Setenv("OMNEVAL_WRITER_RETENTION_DESTINATION_PREFIX", "aged/")
+	t.Setenv("OMNEVAL_WRITER_RETENTION_DESTINATION_STORAGE_CLASS", "STANDARD_IA")
+
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if !cfg.Writer.Retention.Enabled {
+		t.Error("retention.enabled: got false, want true")
+	}
+	if cfg.Writer.Retention.Action != "move" {
+		t.Errorf("retention.action: got %q, want %q", cfg.Writer.Retention.Action, "move")
+	}
+	if cfg.Writer.Retention.MaxAgeDays != 7 {
+		t.Errorf("retention.max_age_days: got %d, want 7", cfg.Writer.Retention.MaxAgeDays)
+	}
+	if cfg.Writer.Retention.IntervalMinutes != 30 {
+		t.Errorf("retention.interval_minutes: got %d, want 30", cfg.Writer.Retention.IntervalMinutes)
+	}
+	if cfg.Writer.Retention.Destination.Bucket != "cold-archive" {
+		t.Errorf("retention.destination.bucket: got %q, want %q", cfg.Writer.Retention.Destination.Bucket, "cold-archive")
+	}
+	if cfg.Writer.Retention.Destination.Prefix != "aged/" {
+		t.Errorf("retention.destination.prefix: got %q, want %q", cfg.Writer.Retention.Destination.Prefix, "aged/")
+	}
+	if cfg.Writer.Retention.Destination.StorageClass != "STANDARD_IA" {
+		t.Errorf("retention.destination.storage_class: got %q, want %q", cfg.Writer.Retention.Destination.StorageClass, "STANDARD_IA")
+	}
+}
+
+func TestRetentionConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     config.RetentionConfig
+		wantErr bool
+	}{
+		{
+			name: "disabled is valid",
+			cfg: config.RetentionConfig{
+				Enabled: false,
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid delete action",
+			cfg: config.RetentionConfig{
+				Enabled:         true,
+				Action:          "delete",
+				MaxAgeDays:      30,
+				IntervalMinutes: 60,
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid move action with destination",
+			cfg: config.RetentionConfig{
+				Enabled:         true,
+				Action:          "move",
+				MaxAgeDays:      90,
+				IntervalMinutes: 120,
+				Destination: config.RetentionDestinationConfig{
+					Bucket:       "cold-archive",
+					StorageClass: "GLACIER",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid action value",
+			cfg: config.RetentionConfig{
+				Enabled:  true,
+				Action:   "archive",
+				MaxAgeDays: 30,
+			},
+			wantErr: true,
+		},
+		{
+			name: "move without destination bucket",
+			cfg: config.RetentionConfig{
+				Enabled:    true,
+				Action:     "move",
+				MaxAgeDays: 30,
+			},
+			wantErr: true,
+		},
+		{
+			name: "max age days negative",
+			cfg: config.RetentionConfig{
+				Enabled:    true,
+				Action:     "delete",
+				MaxAgeDays: -1,
+			},
+			wantErr: true,
+		},
+		{
+			name: "interval minutes zero",
+			cfg: config.RetentionConfig{
+				Enabled:         true,
+				Action:          "delete",
+				MaxAgeDays:      30,
+				IntervalMinutes: 0,
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
