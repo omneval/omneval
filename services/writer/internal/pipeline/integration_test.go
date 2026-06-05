@@ -199,6 +199,9 @@ func TestOTLP_EndToEndJSON(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
+	// traceId/spanId must be base64-encoded (proto JSON format, not OTLP hex format).
+	// traceId = [0x01..0xef repeated] base64 = "ASNFZ4mrze8BI0VniavN7w=="
+	// spanId  = [0x01..0xef]          base64 = "ASNFZ4mrze8="
 	jsonBody := []byte(`{
 		"resourceSpans": [{
 			"resource": {
@@ -209,8 +212,8 @@ func TestOTLP_EndToEndJSON(t *testing.T) {
 			},
 			"scopeSpans": [{
 				"spans": [{
-					"traceId": "0123456789abcdef0123456789abcdef",
-					"spanId": "0123456789abcdef",
+					"traceId": "ASNFZ4mrze8BI0VniavN7w==",
+					"spanId": "ASNFZ4mrze8=",
 					"name": "json-llm-span",
 					"startTimeUnixNano": "1704067200000000000",
 					"endTimeUnixNano": "1704067201000000000",
