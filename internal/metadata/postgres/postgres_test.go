@@ -793,6 +793,17 @@ func TestDatasetRun_CreateAndGet(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 	s.CreateDataset(ctx, &domain.Dataset{DatasetID: "ds-1", ProjectID: "proj-1", Name: "Set", CreatedAt: now})
+	if err := s.CreateEvalRule(ctx, &domain.EvalRule{
+		RuleID:    "rule-1",
+		ProjectID: "proj-1",
+		Name:      "test rule",
+		JudgeModel: "gpt-4",
+		SampleRate: 1.0,
+		Enabled:   true,
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("create eval rule: %v", err)
+	}
 
 	run := &domain.DatasetRun{RunID: "run-1", DatasetID: "ds-1", EvalRuleID: "rule-1", PromptVersion: 1, CreatedAt: now}
 	if err := s.CreateDatasetRun(ctx, run); err != nil {
