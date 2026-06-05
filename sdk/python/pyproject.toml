@@ -32,3 +32,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio", "responses"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.16",
+]

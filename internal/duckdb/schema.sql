@@ -11,8 +11,8 @@ CREATE TABLE IF NOT EXISTS spans (
     end_time       TIMESTAMPTZ,
 
     model          VARCHAR,
-    input          JSON,
-    output         JSON,
+    input          VARCHAR,
+    output         VARCHAR,
     input_tokens   BIGINT,
     output_tokens  BIGINT,
     cost_usd       DOUBLE,
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS spans (
     status_code    VARCHAR,
     status_message VARCHAR,
 
-    attributes     JSON,
+    attributes     VARCHAR,
 
     PRIMARY KEY (trace_id, span_id)
 );

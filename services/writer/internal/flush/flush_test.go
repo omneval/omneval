@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -102,6 +103,9 @@ func TestNew_CustomFlushAge(t *testing.T) {
 // TestFlush_AgedPartitionsWrittenToS3 tests that spans older than flushAge
 // are written to S3 as Parquet files before being deleted from DuckDB.
 func TestFlush_AgedPartitionsWrittenToS3(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("DuckDB COPY TO file:// does not accept Windows paths; covered by Linux CI")
+	}
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.duckdb")
 
@@ -229,6 +233,9 @@ func TestFlush_AgedPartitionsWrittenToS3(t *testing.T) {
 
 // TestFlush_Atomicity verifies that DuckDB rows are NOT deleted if S3 upload fails.
 func TestFlush_Atomicity(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("DuckDB COPY TO file:// does not accept Windows paths; covered by Linux CI")
+	}
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.duckdb")
 

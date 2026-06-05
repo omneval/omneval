@@ -1,0 +1,167 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+# go test ./... does not work from the workspace root (no go.mod there).
+# All Go commands must enumerate modules explicitly.
+env:
+  GO_MODULES: >-
+    ./internal/...
+    ./sdk/go/...
+    ./services/ingest/...
+    ./services/writer/...
+    ./services/query/...
+    ./services/eval/...
+
+jobs:
+  go-test:
+    name: Go - vet & test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_POSTGRES_ADMIN_DSN: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache-dependency-path: '**/go.sum'
+
+      - name: Install C/C++ compilers
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc g++
+
+      - run: go vet ${{ env.GO_MODULES }}
+
+      - run: go test -race ${{ env.GO_MODULES }}
+
+  go-build:
+    name: Go - build binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache-dependency-path: '**/go.sum'
+
+      - name: Install C/C++ compilers
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc g++
+
+      - run: go build ./services/ingest/cmd/ingest/
+      - run: go build ./services/writer/cmd/writer/
+      - run: go build ./services/query/cmd/query/
+      - run: go build ./services/eval/cmd/eval/
+
+  ui:
+    name: UI - type-check, build & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  python-sdk:
+    name: Python SDK - test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b 
+        with:
+          python-version: '3.12'
+          version: "0.11.19"
+
+      - name: Install the project
+        run: uv sync --locked --all-extras --dev
+
+      - name: Lint
+        run: uv run ruff check --fix .
+
+      - run: uv run pytest
+
+  typescript-sdk:
+    name: TypeScript SDK - build & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/ts
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: sdk/ts/package-lock.json
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  helm:
+    name: Helm - lint & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: '4.2.0'
+
+      - name: Install helm-unittest plugin
+        run: helm plugin install --verify=False https://github.com/helm-unittest/helm-unittest
+
+      - name: Lint chart
+        run: helm lint deploy/helm
+
+      - name: Run unit tests
+        run: helm unittest deploy/helm
+
+  docker-build:
+    name: Docker - build image (no push)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          tags: omneval:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
