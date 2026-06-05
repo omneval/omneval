@@ -259,3 +259,5 @@ __marimo__/
 .streamlit/secrets.toml
 
 internal/duckdb/test_*.db
+
+**/.DS_Store
