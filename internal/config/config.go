@@ -96,6 +96,8 @@ type RetentionConfig struct {
 	IntervalMinutes int `mapstructure:"interval_minutes"`
 	// Destination is the target bucket for "move" actions.
 	Destination RetentionDestinationConfig `mapstructure:"destination"`
+	// TriggerEndpointEnabled exposes a POST /retention/trigger endpoint.
+	TriggerEndpointEnabled bool `mapstructure:"trigger_endpoint_enabled"`
 }
 
 // RetentionDestinationConfig describes where aged objects should be moved.
@@ -306,6 +308,7 @@ func Load(path string) (*Config, error) {
 	envString(&cfg.Writer.Retention.Destination.Bucket, "OMNEVAL_WRITER_RETENTION_DESTINATION_BUCKET")
 	envString(&cfg.Writer.Retention.Destination.Prefix, "OMNEVAL_WRITER_RETENTION_DESTINATION_PREFIX")
 	envString(&cfg.Writer.Retention.Destination.StorageClass, "OMNEVAL_WRITER_RETENTION_DESTINATION_STORAGE_CLASS")
+	envBool(&cfg.Writer.Retention.TriggerEndpointEnabled, "OMNEVAL_WRITER_RETENTION_TRIGGER_ENDPOINT_ENABLED")
 	envString(&cfg.Query.Addr, "OMNEVAL_QUERY_ADDR")
 	envString(&cfg.Query.DuckDBPath, "OMNEVAL_QUERY_DUCKDB_PATH")
 	envString(&cfg.Query.SyncInterval, "OMNEVAL_QUERY_SYNC_INTERVAL")

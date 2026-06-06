@@ -18,11 +18,15 @@ type Store interface {
 	DeleteObjectsBatch(ctx context.Context, bucket string, keys []string) error
 }
 
+// retentionPrefix is the S3 key prefix that contains trace parquet files.
+const retentionPrefix = "parquet/"
+
 // Worker scans S3 for objects older than the configured MaxAgeDays and applies
 // the configured retention action (delete or move).
 type Worker struct {
-	store Store
-	cfg   *config.RetentionConfig
+	store    Store
+	cfg      *config.RetentionConfig
+	lastRunAt time.Time
 }
 
 // New creates a retention Worker. Returns nil if retention is disabled in cfg.
@@ -43,7 +47,7 @@ func (w *Worker) Run(ctx context.Context) (domain.RotationResult, error) {
 
 	cutoff := time.Now().AddDate(0, 0, -w.cfg.MaxAgeDays)
 
-	objects, err := w.store.ListObjectsOlderThan(ctx, "", cutoff)
+	objects, err := w.store.ListObjectsOlderThan(ctx, retentionPrefix, cutoff)
 	if err != nil {
 		return result, fmt.Errorf("retention: list objects: %w", err)
 	}
@@ -51,6 +55,7 @@ func (w *Worker) Run(ctx context.Context) (domain.RotationResult, error) {
 	result.ObjectsScanned = len(objects)
 	if len(objects) == 0 {
 		result.Duration = time.Since(start)
+		w.lastRunAt = time.Now()
 		slog.Info("retention: no eligible objects", "max_age_days", w.cfg.MaxAgeDays)
 		return result, nil
 	}
@@ -64,13 +69,22 @@ func (w *Worker) Run(ctx context.Context) (domain.RotationResult, error) {
 		return result, fmt.Errorf("retention: unknown action %q", w.cfg.Action)
 	}
 
+	result.Duration = time.Since(start)
+	w.lastRunAt = time.Now()
+
 	if err != nil {
-		result.Duration = time.Since(start)
 		result.Errors = append(result.Errors, err)
+		slog.Warn("retention: run completed with errors",
+			"action", w.cfg.Action,
+			"scanned", result.ObjectsScanned,
+			"acted_on", result.ObjectsActedOn,
+			"bytes_acted_on", result.BytesActedOn,
+			"duration", result.Duration,
+			"error", err,
+		)
 		return result, err
 	}
 
-	result.Duration = time.Since(start)
 	slog.Info("retention: run complete",
 		"action", w.cfg.Action,
 		"scanned", result.ObjectsScanned,
@@ -79,6 +93,11 @@ func (w *Worker) Run(ctx context.Context) (domain.RotationResult, error) {
 		"duration", result.Duration,
 	)
 	return result, nil
+}
+
+// LastRunAt returns the time of the last completed retention run.
+func (w *Worker) LastRunAt() time.Time {
+	return w.lastRunAt
 }
 
 // RunLoop starts the retention ticker. It blocks until ctx is canceled.
@@ -126,28 +145,41 @@ func (w *Worker) deleteObjects(ctx context.Context, objects []s3pkg.ObjectInfo, 
 }
 
 // moveObjects copies each object to the configured destination bucket, then
-// deletes the source objects.
+// deletes the successfully-copied source objects. Per-object copy failures
+// are recorded but do not abort the entire batch.
 func (w *Worker) moveObjects(ctx context.Context, objects []s3pkg.ObjectInfo, result *domain.RotationResult) error {
 	dstBucket := w.cfg.Destination.Bucket
 	dstPrefix := w.cfg.Destination.Prefix
 	storageClass := w.cfg.Destination.StorageClass
 
-	keys := make([]string, 0, len(objects))
+	var keysToDelete []string
 	var totalBytes int64
+	var hasError bool
 	for _, obj := range objects {
 		dstKey := dstPrefix + obj.Key
 		if err := w.store.CopyObject(ctx, dstBucket, dstKey, obj.Key, storageClass); err != nil {
-			return fmt.Errorf("retention: copy %s: %w", obj.Key, err)
+			slog.Error("retention: copy failed", "key", obj.Key, "err", err)
+			result.Errors = append(result.Errors, fmt.Errorf("copy %s: %w", obj.Key, err))
+			hasError = true
+			continue
 		}
-		keys = append(keys, obj.Key)
+		keysToDelete = append(keysToDelete, obj.Key)
 		totalBytes += obj.Size
 	}
 
-	if err := w.store.DeleteObjectsBatch(ctx, objects[0].Bucket, keys); err != nil {
-		return fmt.Errorf("retention: delete source batch: %w", err)
+	result.ObjectsActedOn = len(keysToDelete)
+	result.BytesActedOn = totalBytes
+
+	if len(keysToDelete) > 0 {
+		if err := w.store.DeleteObjectsBatch(ctx, objects[0].Bucket, keysToDelete); err != nil {
+			slog.Error("retention: delete source batch failed", "err", err)
+			result.Errors = append(result.Errors, fmt.Errorf("delete source batch: %w", err))
+			hasError = true
+		}
 	}
 
-	result.ObjectsActedOn = len(objects)
-	result.BytesActedOn = totalBytes
+	if hasError {
+		return fmt.Errorf("retention: move completed with %d error(s)", len(result.Errors))
+	}
 	return nil
 }
