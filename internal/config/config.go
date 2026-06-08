@@ -240,6 +240,7 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("writer.retention.destination.bucket", "")
 	v.SetDefault("writer.retention.destination.prefix", "")
 	v.SetDefault("writer.retention.destination.storage_class", "")
+	v.SetDefault("writer.retention.trigger_endpoint_enabled", false)
 	// query
 	v.SetDefault("query.addr", ":8002")
 	v.SetDefault("query.duckdb_path", "")

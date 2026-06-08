@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/omneval/omneval/internal/config"
@@ -24,8 +25,9 @@ const retentionPrefix = "parquet/"
 // Worker scans S3 for objects older than the configured MaxAgeDays and applies
 // the configured retention action (delete or move).
 type Worker struct {
-	store    Store
-	cfg      *config.RetentionConfig
+	store     Store
+	cfg       *config.RetentionConfig
+	mu        sync.Mutex
 	lastRunAt time.Time
 }
 
@@ -55,7 +57,9 @@ func (w *Worker) Run(ctx context.Context) (domain.RotationResult, error) {
 	result.ObjectsScanned = len(objects)
 	if len(objects) == 0 {
 		result.Duration = time.Since(start)
+		w.mu.Lock()
 		w.lastRunAt = time.Now()
+		w.mu.Unlock()
 		slog.Info("retention: no eligible objects", "max_age_days", w.cfg.MaxAgeDays)
 		return result, nil
 	}
@@ -70,7 +74,9 @@ func (w *Worker) Run(ctx context.Context) (domain.RotationResult, error) {
 	}
 
 	result.Duration = time.Since(start)
+	w.mu.Lock()
 	w.lastRunAt = time.Now()
+	w.mu.Unlock()
 
 	if err != nil {
 		result.Errors = append(result.Errors, err)
@@ -97,6 +103,8 @@ func (w *Worker) Run(ctx context.Context) (domain.RotationResult, error) {
 
 // LastRunAt returns the time of the last completed retention run.
 func (w *Worker) LastRunAt() time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	return w.lastRunAt
 }
 
