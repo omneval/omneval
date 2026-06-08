@@ -404,3 +404,16 @@ func TestRetentionConfig_Validate(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_RetentionTriggerEndpointEnvOverride(t *testing.T) {
+	t.Setenv("OMNEVAL_WRITER_RETENTION_TRIGGER_ENDPOINT_ENABLED", "true")
+
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if !cfg.Writer.Retention.TriggerEndpointEnabled {
+		t.Error("trigger_endpoint_enabled: got false, want true")
+	}
+}
