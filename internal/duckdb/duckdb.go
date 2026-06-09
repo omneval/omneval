@@ -15,8 +15,11 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
+//go:embed migrations/0001_add_conversation_id.up.sql
+var migrationSQL001 string
+
 // Open opens (or creates) a DuckDB database at the given path.
-// It applies the embedded schema if the spans table does not exist.
+// It applies the embedded schema and any pending migrations.
 func Open(path string) (*sql.DB, error) {
 	// Ensure parent directory exists (skip for bare filenames).
 	dir := filepath.Dir(path)
@@ -44,6 +47,12 @@ func Open(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("duckdb: apply schema: %w", err)
 	}
 
+	// Apply migrations.
+	if err := ApplyMigrations(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("duckdb: apply migrations: %w", err)
+	}
+
 	return db, nil
 }
 
@@ -59,6 +68,53 @@ func ApplySchema(db *sql.DB) error {
 			return fmt.Errorf("duckdb: exec: %s: %w", stmt, err)
 		}
 	}
+	return nil
+}
+
+// ApplyMigrations creates the migrations tracking table and runs any pending
+// migrations that have not yet been applied.
+func ApplyMigrations(db *sql.DB) error {
+	// Create migrations tracking table.
+	if _, err := db.ExecContext(context.Background(), `
+		CREATE TABLE IF NOT EXISTS _schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)
+	`); err != nil {
+		return fmt.Errorf("duckdb: create migrations table: %w", err)
+	}
+
+	migrations := []struct {
+		version int
+		sql     string
+	}{
+		{1, migrationSQL001},
+	}
+
+	for _, m := range migrations {
+		var count int
+		err := db.QueryRowContext(
+			context.Background(),
+			"SELECT count(*) FROM _schema_migrations WHERE version = ?",
+			m.version,
+		).Scan(&count)
+		if err != nil {
+			return fmt.Errorf("duckdb: check migration %d status: %w", m.version, err)
+		}
+		if count == 0 {
+			if _, err := db.ExecContext(context.Background(), m.sql); err != nil {
+				return fmt.Errorf("duckdb: apply migration %d: %w", m.version, err)
+			}
+			if _, err := db.ExecContext(
+				context.Background(),
+				"INSERT INTO _schema_migrations (version) VALUES (?)",
+				m.version,
+			); err != nil {
+				return fmt.Errorf("duckdb: record migration %d: %w", m.version, err)
+			}
+		}
+	}
+
 	return nil
 }
 
