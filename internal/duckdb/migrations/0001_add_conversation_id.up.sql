@@ -1,1 +1,1 @@
-ALTER TABLE spans ADD COLUMN conversation_id VARCHAR;
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS conversation_id VARCHAR;
