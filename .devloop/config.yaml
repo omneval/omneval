@@ -1,0 +1,25 @@
+# Repo-native devloop agent configuration (devloop >= 0.0.19).
+#
+# `tests:` is the authoritative list of suites that gate every agent PR —
+# devloop runs each command from the repo root after the agent finishes and
+# reports the combined pass/fail in the PR. All ecosystems are listed
+# deliberately: omneval is a Go workspace PLUS a React UI and three SDKs, and
+# a change is only complete when every affected layer is green.
+#
+# `install:` is intentionally omitted — devloop's default root install
+# (npm ci, driven by the root package-lock.json) is sufficient; the Go
+# toolchain fetches modules on demand and each test command below installs
+# its own ecosystem deps.
+tests:
+  - name: go
+    # go.work makes ./... span every workspace module (internal, sdk/go,
+    # services/*) from the repo root.
+    command: go build ./... && go vet ./... && go test ./...
+  - name: ui
+    # `npm run build` runs tsc — vitest alone does not typecheck.
+    command: cd ui && npm ci && npm test && npm run build
+  - name: sdk-ts
+    command: cd sdk/ts && npm ci && npm test
+  - name: sdk-python
+    # pytest lives in the `dev` extra of sdk/python/pyproject.toml.
+    command: cd sdk/python && uv run --extra dev pytest
