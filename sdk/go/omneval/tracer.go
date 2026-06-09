@@ -93,6 +93,12 @@ func StartSpan(ctx context.Context, name string) context.Context {
 	}
 
 	newCtx, span := t.Start(ctx, name)
+
+	// Propagate conversation ID from parent context if set.
+	if cid := conversationIDFromCtx(ctx); cid != "" {
+		span.SetAttributes(attribute.String("gen_ai.conversation.id", cid))
+	}
+
 	return ctxWithSpan(newCtx, span)
 }
 
@@ -148,6 +154,21 @@ func SetConversationID(ctx context.Context, id string) {
 	if span != nil {
 		span.SetAttributes(attribute.String("gen_ai.conversation.id", id))
 	}
+}
+
+// WithConversationID returns a new context that carries the given conversation
+// ID. Every subsequent StartSpan call using this context will automatically
+// inherit the conversation ID (issue #67 §6, preferred pattern).
+func WithConversationID(ctx context.Context, id string) context.Context {
+	newCtx := context.WithValue(ctx, convIDCtxKey{}, id)
+
+	// Also attach to the currently active span if there is one.
+	span := spanFromCtx(ctx)
+	if span != nil {
+		span.SetAttributes(attribute.String("gen_ai.conversation.id", id))
+	}
+
+	return newCtx
 }
 
 // Flush blocks until all pending spans have been exported.
@@ -209,6 +230,9 @@ func sanitizeEndpoint(endpoint string) (string, string, error) {
 // spanCtxKey is the context key for carrying the active span.
 type spanCtxKey struct{}
 
+// convIDCtxKey is the context key for carrying the conversation ID.
+type convIDCtxKey struct{}
+
 func ctxWithSpan(ctx context.Context, span trace.Span) context.Context {
 	return context.WithValue(ctx, spanCtxKey{}, span)
 }
@@ -220,4 +244,13 @@ func spanFromCtx(ctx context.Context) trace.Span {
 	}
 	span, _ := v.(trace.Span)
 	return span
+}
+
+func conversationIDFromCtx(ctx context.Context) string {
+	v := ctx.Value(convIDCtxKey{})
+	if v == nil {
+		return ""
+	}
+	id, _ := v.(string)
+	return id
 }

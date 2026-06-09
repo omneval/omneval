@@ -8,6 +8,7 @@ from omneval_sdk.trace import (
     generate_conversation_id,
     set_conversation_id,
     set_active_conversation_id,
+    get_active_conversation_id,
 )
 from omneval_sdk.exporter import configure
 from omneval_sdk.client import OmnevalClient
@@ -30,4 +31,5 @@ __all__ = [
     "generate_conversation_id",
     "set_conversation_id",
     "set_active_conversation_id",
+    "get_active_conversation_id",
 ]

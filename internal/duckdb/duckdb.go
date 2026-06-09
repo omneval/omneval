@@ -72,7 +72,9 @@ func ApplySchema(db *sql.DB) error {
 }
 
 // ApplyMigrations creates the migrations tracking table and runs any pending
-// migrations that have not yet been applied.
+// migrations that have not yet been applied. Each migration is applied within
+// a transaction so that both the schema change and the tracking insert are
+// atomic.
 func ApplyMigrations(db *sql.DB) error {
 	// Create migrations tracking table.
 	if _, err := db.ExecContext(context.Background(), `
@@ -102,15 +104,24 @@ func ApplyMigrations(db *sql.DB) error {
 			return fmt.Errorf("duckdb: check migration %d status: %w", m.version, err)
 		}
 		if count == 0 {
-			if _, err := db.ExecContext(context.Background(), m.sql); err != nil {
+			tx, err := db.BeginContext(context.Background())
+			if err != nil {
+				return fmt.Errorf("duckdb: begin migration %d: %w", m.version, err)
+			}
+			if _, err := tx.ExecContext(context.Background(), m.sql); err != nil {
+				tx.Rollback()
 				return fmt.Errorf("duckdb: apply migration %d: %w", m.version, err)
 			}
-			if _, err := db.ExecContext(
+			if _, err := tx.ExecContext(
 				context.Background(),
 				"INSERT INTO _schema_migrations (version) VALUES (?)",
 				m.version,
 			); err != nil {
+				tx.Rollback()
 				return fmt.Errorf("duckdb: record migration %d: %w", m.version, err)
+			}
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("duckdb: commit migration %d: %w", m.version, err)
 			}
 		}
 	}

@@ -119,31 +119,35 @@ func translateSpan(projectID string, resource Resource, span Span, opts Options)
 	// Extract prompt linkage.
 	promptName, promptVersion := resolvePromptInfo(span.Attributes)
 
-	// Extract conversation_id from OTel GenAI semantic conventions.
+	// Extract conversation_id: prefer OTel GenAI semantic conventions, fall back
+	// to the native omneval attribute name (issue #67 §2).
 	conversationID := extractAttributeString(span.Attributes, "gen_ai.conversation.id")
+	if conversationID == "" {
+		conversationID = extractAttributeString(span.Attributes, "omneval.conversation.id")
+	}
 
 	return &domain.Span{
-		SpanID:          span.SpanID,
-		TraceID:         span.TraceID,
-		ParentID:        span.ParentID,
-		ConversationID:  conversationID,
-		ProjectID:       projectID,
-		ServiceName:     serviceName,
-		Name:            span.Name,
-		Kind:            kind,
-		StartTime:       span.StartTime,
-		EndTime:         span.EndTime,
-		Model:           model,
-		Input:           input,
-		Output:          output,
-		InputTokens:     inputTokens,
-		OutputTokens:    outputTokens,
-		CostUSD:         0, // pre-computed by Writer Service
-		StatusCode:      span.StatusCode,
-		StatusMessage:   span.StatusMsg,
-		PromptName:      promptName,
-		PromptVersion:   promptVersion,
-		Attributes:      overflow,
+		SpanID:         span.SpanID,
+		TraceID:        span.TraceID,
+		ParentID:       span.ParentID,
+		ConversationID: conversationID,
+		ProjectID:      projectID,
+		ServiceName:    serviceName,
+		Name:           span.Name,
+		Kind:           kind,
+		StartTime:      span.StartTime,
+		EndTime:        span.EndTime,
+		Model:          model,
+		Input:          input,
+		Output:         output,
+		InputTokens:    inputTokens,
+		OutputTokens:   outputTokens,
+		CostUSD:        0, // pre-computed by Writer Service
+		StatusCode:     span.StatusCode,
+		StatusMessage:  span.StatusMsg,
+		PromptName:     promptName,
+		PromptVersion:  promptVersion,
+		Attributes:     overflow,
 	}
 }
 
@@ -363,9 +367,12 @@ func buildOverflowAttributes(attrs map[string]any, model string, inputTokens, ou
 		remove["service.name"] = true
 	}
 
-	// Conversation ID.
+	// Conversation ID — remove both gen_ai and omneval variants.
 	if _, hasConvID := attrs["gen_ai.conversation.id"]; hasConvID {
 		remove["gen_ai.conversation.id"] = true
+	}
+	if _, hasOmnevalConvID := attrs["omneval.conversation.id"]; hasOmnevalConvID {
+		remove["omneval.conversation.id"] = true
 	}
 
 	// Build overflow without removed keys.

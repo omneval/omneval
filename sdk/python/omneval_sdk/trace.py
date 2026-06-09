@@ -168,3 +168,8 @@ def set_active_conversation_id(conversation_id: str) -> None:
     span = get_active_span()
     if span is not None:
         set_conversation_id(span, conversation_id)
+
+
+def get_active_conversation_id() -> Optional[str]:
+    """Return the currently active conversation ID from the contextvar."""
+    return _active_conversation_id.get()
