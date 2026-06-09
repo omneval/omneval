@@ -1,35 +1,39 @@
 CREATE TABLE IF NOT EXISTS spans (
-    span_id        VARCHAR      NOT NULL,
-    trace_id       VARCHAR      NOT NULL,
-    parent_id      VARCHAR,
-    project_id     VARCHAR      NOT NULL,
-    service_name   VARCHAR,
+    span_id           VARCHAR      NOT NULL,
+    trace_id          VARCHAR      NOT NULL,
+    parent_id         VARCHAR,
+    conversation_id   VARCHAR,
+    project_id        VARCHAR      NOT NULL,
+    service_name      VARCHAR,
 
-    name           VARCHAR,
-    kind           VARCHAR,
-    start_time     TIMESTAMPTZ  NOT NULL,
-    end_time       TIMESTAMPTZ,
+    name              VARCHAR,
+    kind              VARCHAR,
+    start_time        TIMESTAMPTZ  NOT NULL,
+    end_time          TIMESTAMPTZ,
 
-    model          VARCHAR,
-    input          VARCHAR,
-    output         VARCHAR,
-    input_tokens   BIGINT,
-    output_tokens  BIGINT,
-    cost_usd       DOUBLE,
+    model             VARCHAR,
+    input             VARCHAR,
+    output            VARCHAR,
+    input_tokens      BIGINT,
+    output_tokens     BIGINT,
+    cost_usd          DOUBLE,
 
-    prompt_name    VARCHAR,
-    prompt_version BIGINT,
+    prompt_name       VARCHAR,
+    prompt_version    BIGINT,
 
-    status_code    VARCHAR,
-    status_message VARCHAR,
+    status_code       VARCHAR,
+    status_message    VARCHAR,
 
-    attributes     VARCHAR,
+    attributes        VARCHAR,
 
     PRIMARY KEY (trace_id, span_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_spans_project_time
     ON spans (project_id, start_time);
+
+CREATE INDEX IF NOT EXISTS idx_spans_conversation
+    ON spans (project_id, conversation_id);
 
 CREATE TABLE IF NOT EXISTS bookmarks (
     trace_id       VARCHAR      NOT NULL,

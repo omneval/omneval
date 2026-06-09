@@ -281,7 +281,7 @@ func (f *Flusher) uploadToS3(ctx context.Context, s3Key string, localPath string
 func (f *Flusher) writeSpansParquet(ctx context.Context, pk partitionKey, url string) error {
 	query := fmt.Sprintf(`
 		COPY (
-			SELECT span_id, trace_id, parent_id, project_id, service_name, name, kind,
+			SELECT span_id, trace_id, parent_id, conversation_id, project_id, service_name, name, kind,
 			       start_time, end_time, model, input, output,
 			       input_tokens, output_tokens, cost_usd,
 			       prompt_name, prompt_version,

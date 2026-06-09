@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -19,12 +20,13 @@ import (
 
 // mockStore implements storage.ObjectStore for testing.
 type mockStore struct {
-	mu      sync.Mutex
-	puts    map[string][]byte // key -> data
-	gets    []string
-	deletes []string
-	failPut bool
-	failGet bool
+	mu        sync.Mutex
+	puts      map[string][]byte // key -> data
+	gets      []string
+	deletes   []string
+	failPut   bool
+	failGet   bool
+	onPutSized func(key string, data []byte) // callback for PutSized (testing hook)
 }
 
 func newMockStore() *mockStore {
@@ -36,7 +38,20 @@ func (m *mockStore) Put(_ context.Context, key string, r io.Reader) error {
 }
 
 func (m *mockStore) PutSized(_ context.Context, key string, r io.Reader, _ int64) error {
-	return m.put(key, r)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	if m.failPut {
+		return fmt.Errorf("simulated S3 failure")
+	}
+	if m.onPutSized != nil {
+		m.onPutSized(key, data)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.puts[key] = data
+	return nil
 }
 
 func (m *mockStore) put(key string, r io.Reader) error {
@@ -488,6 +503,84 @@ func TestPartitionPath(t *testing.T) {
 	}
 }
 
+// TestFlush_ConversationIDInParquet verifies that conversation_id is preserved
+// in the Parquet cold archive export.
+func TestFlush_ConversationIDInParquet(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("DuckDB COPY TO file:// does not accept Windows paths; covered by Linux CI")
+	}
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.duckdb")
+	writeDir := filepath.Join(tmpDir, "parquet")
+
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if err := createTestTables(db); err != nil {
+		t.Fatalf("create tables: %v", err)
+	}
+
+	// Insert an aged span with conversation_id.
+	agedTime := time.Now().UTC().Add(-72 * time.Hour)
+	convID := "conv-abc-123"
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, parent_id, conversation_id, project_id, model, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"span-conv-1", "trace-conv", "", convID, "proj-1", "gpt-4", agedTime, agedTime.Add(10*time.Second)); err != nil {
+		t.Fatalf("insert span with conversation_id: %v", err)
+	}
+
+	// Capture parquet data from S3 upload for verification.
+	store := newMockStore()
+	tmpParquetFile := filepath.Join(tmpDir, "spans_check.parquet")
+	var parquetData []byte
+	store.onPutSized = func(key string, data []byte) {
+		if strings.Contains(key, "spans") {
+			parquetData = data
+		}
+	}
+
+	cfg := &config.Config{
+		Storage: config.StorageConfig{
+			Endpoint: "http://localhost:9000",
+			Bucket:   "test",
+		},
+	}
+
+	f := NewWithDB(store, db, cfg).WithFlushAge(48 * time.Hour).WithWriteDir(writeDir)
+
+	if err := f.doFlush(context.Background()); err != nil {
+		t.Fatalf("doFlush: %v", err)
+	}
+
+	if len(parquetData) == 0 {
+		t.Fatal("no parquet data captured — spans were not flushed to S3")
+	}
+
+	// Write parquet data to a file so DuckDB can read it back.
+	if err := os.WriteFile(tmpParquetFile, parquetData, 0644); err != nil {
+		t.Fatalf("write parquet file: %v", err)
+	}
+
+	// Read back the Parquet file via DuckDB to verify conversation_id is present.
+	var readConvID sql.NullString
+	err = db.QueryRowContext(context.Background(),
+		`SELECT conversation_id FROM read_parquet(?) WHERE span_id = 'span-conv-1'`,
+		tmpParquetFile,
+	).Scan(&readConvID)
+	if err != nil {
+		t.Fatalf("read parquet conversation_id: %v", err)
+	}
+	if !readConvID.Valid {
+		t.Fatal("conversation_id is NULL in Parquet — it should be preserved in the cold archive")
+	}
+	if readConvID.String != convID {
+		t.Errorf("conversation_id in parquet: got %q, want %q", readConvID.String, convID)
+	}
+}
+
 func keys(m map[string][]byte) []string {
 	result := make([]string, 0, len(m))
 	for k := range m {
@@ -501,7 +594,8 @@ func createTestTables(db *sql.DB) error {
 		CREATE TABLE spans (
 			span_id        VARCHAR NOT NULL,
 			trace_id       VARCHAR NOT NULL,
-			parent_id      VARCHAR,
+			parent_id        VARCHAR,
+			conversation_id  VARCHAR,
 			project_id     VARCHAR NOT NULL,
 			service_name   VARCHAR,
 			name           VARCHAR,

@@ -15,6 +15,7 @@ interface TrackedSpan {
   output_tokens?: number;
   prompt_name?: string;
   prompt_version?: number;
+  conversation_id?: string;
   attributes?: Record<string, string | number | boolean>;
   start_time: number;
   end_time?: number;
@@ -26,6 +27,7 @@ interface TrackedSpan {
 export class ManualTracer {
   private readonly exporter: SpanExporter;
   private pending: TrackedSpan[] = [];
+  private activeConversationId?: string;
 
   constructor(exporter: SpanExporter) {
     this.exporter = exporter;
@@ -53,11 +55,23 @@ export class ManualTracer {
       name,
       kind: options?.kind,
       attributes: options?.attributes,
+      conversation_id: this.activeConversationId,
       start_time: Date.now(),
     };
 
     this.pending.push(tracked);
     return spanId;
+  }
+
+  setConversationId(spanId: string, conversationId: string): void {
+    const tracked = this.pending.find((s) => s.span_id === spanId);
+    if (tracked) {
+      tracked.conversation_id = conversationId;
+    }
+  }
+
+  setActiveConversationId(conversationId: string): void {
+    this.activeConversationId = conversationId;
   }
 
   async endSpan(
@@ -106,6 +120,7 @@ export class ManualTracer {
       output_tokens: s.output_tokens,
       prompt_name: s.prompt_name,
       prompt_version: s.prompt_version,
+      conversation_id: s.conversation_id,
       attributes: s.attributes,
       start_time: s.start_time,
       end_time: s.end_time,

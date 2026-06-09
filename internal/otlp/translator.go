@@ -119,27 +119,31 @@ func translateSpan(projectID string, resource Resource, span Span, opts Options)
 	// Extract prompt linkage.
 	promptName, promptVersion := resolvePromptInfo(span.Attributes)
 
+	// Extract conversation_id from OTel GenAI semantic conventions.
+	conversationID := extractAttributeString(span.Attributes, "gen_ai.conversation.id")
+
 	return &domain.Span{
-		SpanID:        span.SpanID,
-		TraceID:       span.TraceID,
-		ParentID:      span.ParentID,
-		ProjectID:     projectID,
-		ServiceName:   serviceName,
-		Name:          span.Name,
-		Kind:          kind,
-		StartTime:     span.StartTime,
-		EndTime:       span.EndTime,
-		Model:         model,
-		Input:         input,
-		Output:        output,
-		InputTokens:   inputTokens,
-		OutputTokens:  outputTokens,
-		CostUSD:       0, // pre-computed by Writer Service
-		StatusCode:    span.StatusCode,
-		StatusMessage: span.StatusMsg,
-		PromptName:    promptName,
-		PromptVersion: promptVersion,
-		Attributes:    overflow,
+		SpanID:          span.SpanID,
+		TraceID:         span.TraceID,
+		ParentID:        span.ParentID,
+		ConversationID:  conversationID,
+		ProjectID:       projectID,
+		ServiceName:     serviceName,
+		Name:            span.Name,
+		Kind:            kind,
+		StartTime:       span.StartTime,
+		EndTime:         span.EndTime,
+		Model:           model,
+		Input:           input,
+		Output:          output,
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
+		CostUSD:         0, // pre-computed by Writer Service
+		StatusCode:      span.StatusCode,
+		StatusMessage:   span.StatusMsg,
+		PromptName:      promptName,
+		PromptVersion:   promptVersion,
+		Attributes:      overflow,
 	}
 }
 
@@ -357,6 +361,11 @@ func buildOverflowAttributes(attrs map[string]any, model string, inputTokens, ou
 	// Service name.
 	if _, hasServiceName := attrs["service.name"]; hasServiceName {
 		remove["service.name"] = true
+	}
+
+	// Conversation ID.
+	if _, hasConvID := attrs["gen_ai.conversation.id"]; hasConvID {
+		remove["gen_ai.conversation.id"] = true
 	}
 
 	// Build overflow without removed keys.

@@ -19,17 +19,17 @@ import (
 )
 
 // insertSpansSQL is the INSERT OR REPLACE statement for the DuckDB spans table.
-// Columns: span_id, trace_id, parent_id, project_id, service_name, name, kind,
-// start_time, end_time, model, input, output, input_tokens, output_tokens,
+// Columns: span_id, trace_id, parent_id, conversation_id, project_id, service_name,
+// name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens,
 // cost_usd, prompt_name, prompt_version, status_code, status_message, attributes.
 const insertSpansSQL = `
 	INSERT OR REPLACE INTO spans (
-		span_id, trace_id, parent_id, project_id, service_name,
+		span_id, trace_id, parent_id, conversation_id, project_id, service_name,
 		name, kind, start_time, end_time,
 		model, input, output, input_tokens, output_tokens, cost_usd,
 		prompt_name, prompt_version,
 		status_code, status_message, attributes
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 // Pipeline drains the Redis ingest queue and batches writes into DuckDB.
@@ -165,6 +165,7 @@ func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
 			span.SpanID,
 			span.TraceID,
 			span.ParentID,
+			span.ConversationID,
 			span.ProjectID,
 			span.ServiceName,
 			span.Name,

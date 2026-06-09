@@ -5,6 +5,9 @@ from omneval_sdk.trace import (
     set_model,
     set_tokens,
     get_active_span,
+    generate_conversation_id,
+    set_conversation_id,
+    set_active_conversation_id,
 )
 from omneval_sdk.exporter import configure
 from omneval_sdk.client import OmnevalClient
@@ -24,4 +27,7 @@ __all__ = [
     "set_model",
     "set_tokens",
     "get_active_span",
+    "generate_conversation_id",
+    "set_conversation_id",
+    "set_active_conversation_id",
 ]

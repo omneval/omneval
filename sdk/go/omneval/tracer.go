@@ -141,6 +141,15 @@ func SetTokens(ctx context.Context, inputTokens, outputTokens int64) {
 	}
 }
 
+// SetConversationID attaches a gen_ai.conversation.id attribute to the active
+// span in ctx, grouping traces produced by a single agent session.
+func SetConversationID(ctx context.Context, id string) {
+	span := spanFromCtx(ctx)
+	if span != nil {
+		span.SetAttributes(attribute.String("gen_ai.conversation.id", id))
+	}
+}
+
 // Flush blocks until all pending spans have been exported.
 // This is primarily useful for tests; in production, use Shutdown at exit.
 func Flush() {

@@ -58,6 +58,12 @@ def trace(fn: F) -> F:
         with tracer.start_as_current_span(func_name, context=ctx) as span:
             # Store this span in the context variable for nested calls.
             token = _current_span.set(span)
+
+            # Auto-apply active conversation ID if one is set.
+            active_cid = _active_conversation_id.get()
+            if active_cid is not None:
+                set_conversation_id(span, active_cid)
+
             try:
                 result = fn(*args, **kwargs)
                 return result
@@ -125,3 +131,40 @@ def generate_span_id() -> str:
 def generate_trace_id() -> str:
     """Generate a 32-character hex trace ID (16 bytes)."""
     return uuid.uuid4().hex[:32]
+
+
+def generate_conversation_id() -> str:
+    """Generate a 32-character hex conversation ID (16 bytes).
+
+    Per OTel GenAI semantic conventions (gen_ai.conversation.id).
+    """
+    return uuid.uuid4().hex[:32]
+
+
+# Context variable for carrying the active conversation ID across nested spans.
+_active_conversation_id: contextvars.ContextVar[Optional[str]] = (
+    contextvars.ContextVar("_active_conversation_id", default=None)
+)
+
+
+def set_conversation_id(span: Span | None, conversation_id: str) -> None:
+    """Attach a conversation ID to the span as 'gen_ai.conversation.id'.
+
+    Silently returns if span is None (e.g. SDK not configured).
+    """
+    if span is None:
+        return
+    span.set_attribute("gen_ai.conversation.id", conversation_id)
+
+
+def set_active_conversation_id(conversation_id: str) -> None:
+    """Set the active conversation ID on the current span and store it in
+    the context variable so nested spans automatically inherit it.
+
+    If no span is active, the ID is stored in the contextvar for the next
+    span that starts.
+    """
+    _active_conversation_id.set(conversation_id)
+    span = get_active_span()
+    if span is not None:
+        set_conversation_id(span, conversation_id)

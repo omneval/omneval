@@ -78,6 +78,14 @@ export class OmnevalSDK {
     this.tracer?.setPrompt(spanId, name, version);
   }
 
+  setConversationId(spanId: string, conversationId: string): void {
+    this.tracer?.setConversationId(spanId, conversationId);
+  }
+
+  setActiveConversationId(conversationId: string): void {
+    this.tracer?.setActiveConversationId(conversationId);
+  }
+
   async getPrompt(
     name: string,
     labelOrOptions?: string | { label?: string; version?: number }

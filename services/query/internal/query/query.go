@@ -64,20 +64,21 @@ func acceptedOperatorsMessage() string {
 type spanField string
 
 const (
-	fieldProjectID    spanField = "project_id"
-	fieldTraceID      spanField = "trace_id"
-	fieldSpanID       spanField = "span_id"
-	fieldServiceName  spanField = "service_name"
-	fieldName         spanField = "name"
-	fieldKind         spanField = "kind"
-	fieldModel        spanField = "model"
-	fieldStartTime    spanField = "start_time"
-	fieldEndTime      spanField = "end_time"
-	fieldInputTokens  spanField = "input_tokens"
-	fieldOutputTokens spanField = "output_tokens"
-	fieldCostUSD      spanField = "cost_usd"
-	fieldPromptName   spanField = "prompt_name"
-	fieldStatusCode   spanField = "status_code"
+	fieldProjectID       spanField = "project_id"
+	fieldTraceID         spanField = "trace_id"
+	fieldSpanID          spanField = "span_id"
+	fieldConversationID  spanField = "conversation_id"
+	fieldServiceName     spanField = "service_name"
+	fieldName            spanField = "name"
+	fieldKind            spanField = "kind"
+	fieldModel           spanField = "model"
+	fieldStartTime       spanField = "start_time"
+	fieldEndTime         spanField = "end_time"
+	fieldInputTokens     spanField = "input_tokens"
+	fieldOutputTokens    spanField = "output_tokens"
+	fieldCostUSD         spanField = "cost_usd"
+	fieldPromptName      spanField = "prompt_name"
+	fieldStatusCode      spanField = "status_code"
 )
 
 // specialFilterFields are filter fields handled specially (not simple column comparisons).
@@ -88,7 +89,7 @@ var specialFilterFields = map[string]struct{}{
 
 // allSpanFields is the full allowlist of valid span fields.
 var allSpanFields = map[spanField]struct{}{
-	fieldProjectID: {}, fieldTraceID: {}, fieldSpanID: {},
+	fieldProjectID: {}, fieldTraceID: {}, fieldSpanID: {}, fieldConversationID: {},
 	fieldServiceName: {}, fieldName: {}, fieldKind: {},
 	fieldModel: {}, fieldStartTime: {}, fieldEndTime: {},
 	fieldInputTokens: {}, fieldOutputTokens: {}, fieldCostUSD: {},
@@ -297,7 +298,7 @@ func (q *SpanQuery) SQL() (sql string, args []any, err error) {
 // by the outer query to support UNION properly.
 func (q *SpanQuery) hotSQL() (string, []any, error) {
 	var sb strings.Builder
-	sb.WriteString("SELECT span_id, trace_id, parent_id, project_id, service_name, name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message FROM spans")
+	sb.WriteString("SELECT span_id, trace_id, parent_id, conversation_id, project_id, service_name, name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message FROM spans")
 
 	args, where := q.buildWhereClause()
 	sb.WriteString(where)
@@ -313,7 +314,7 @@ func (q *SpanQuery) hotSQL() (string, []any, error) {
 func (q *SpanQuery) coldSQL() string {
 	if q.s3Store == nil {
 		// No S3 configured: return a no-op that produces zero rows.
-		return `SELECT span_id, trace_id, parent_id, project_id, service_name, name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message FROM (VALUES (CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS TIMESTAMPTZ), CAST(NULL AS TIMESTAMPTZ), CAST(NULL AS VARCHAR), CAST(NULL AS JSON), CAST(NULL AS JSON), CAST(NULL AS BIGINT), CAST(NULL AS BIGINT), CAST(NULL AS DOUBLE), CAST(NULL AS VARCHAR), CAST(NULL AS BIGINT), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR)) LIMIT 0) AS t(span_id, trace_id, parent_id, project_id, service_name, name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message)`
+		return `SELECT span_id, trace_id, parent_id, conversation_id, project_id, service_name, name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message FROM (VALUES (CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS TIMESTAMPTZ), CAST(NULL AS TIMESTAMPTZ), CAST(NULL AS VARCHAR), CAST(NULL AS JSON), CAST(NULL AS JSON), CAST(NULL AS BIGINT), CAST(NULL AS BIGINT), CAST(NULL AS DOUBLE), CAST(NULL AS VARCHAR), CAST(NULL AS BIGINT), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR)) LIMIT 0) AS t(span_id, trace_id, parent_id, conversation_id, project_id, service_name, name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message)`
 	}
 
 	parquetPrefix := fmt.Sprintf(
@@ -323,7 +324,7 @@ func (q *SpanQuery) coldSQL() string {
 	)
 
 	return fmt.Sprintf(`
-		SELECT span_id, trace_id, parent_id, project_id, service_name, name, kind,
+		SELECT span_id, trace_id, parent_id, conversation_id, project_id, service_name, name, kind,
 		       start_time, end_time, model, input, output,
 		       input_tokens, output_tokens, cost_usd,
 		       prompt_name, prompt_version,
@@ -567,47 +568,49 @@ func strVal(v any) string {
 }
 
 // ScanRows converts raw rows from the query result into domain.Span objects.
-// Expected column order: span_id, trace_id, parent_id, project_id, service_name,
-// name, kind, start_time, end_time, model, input, output, input_tokens,
-// output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message
+// Expected column order: span_id, trace_id, parent_id, conversation_id, project_id,
+// service_name, name, kind, start_time, end_time, model, input, output,
+// input_tokens, output_tokens, cost_usd, prompt_name, prompt_version,
+// status_code, status_message
 func ScanRows(rows [][]any) ([]*domain.Span, error) {
 	spans := make([]*domain.Span, len(rows))
 	for i, row := range rows {
-		if len(row) < 19 {
-			return nil, fmt.Errorf("scan: expected 19 columns, got %d", len(row))
+		if len(row) < 20 {
+			return nil, fmt.Errorf("scan: expected 20 columns, got %d", len(row))
 		}
 		s := &domain.Span{}
 		s.SpanID = strVal(row[0])
 		s.TraceID = strVal(row[1])
 		s.ParentID = strVal(row[2])
-		s.ProjectID = strVal(row[3])
-		s.ServiceName = strVal(row[4])
-		s.Name = strVal(row[5])
-		s.Kind = domain.SpanKind(strVal(row[6]))
-		if v, ok := row[7].(time.Time); ok {
+		s.ConversationID = strVal(row[3])
+		s.ProjectID = strVal(row[4])
+		s.ServiceName = strVal(row[5])
+		s.Name = strVal(row[6])
+		s.Kind = domain.SpanKind(strVal(row[7]))
+		if v, ok := row[8].(time.Time); ok {
 			s.StartTime = v
 		}
-		if v, ok := row[8].(time.Time); ok {
+		if v, ok := row[9].(time.Time); ok {
 			s.EndTime = v
 		}
-		s.Model = strVal(row[9])
-		s.Input = strVal(row[10])
-		s.Output = strVal(row[11])
-		if v, ok := row[12].(int64); ok {
+		s.Model = strVal(row[10])
+		s.Input = strVal(row[11])
+		s.Output = strVal(row[12])
+		if v, ok := row[13].(int64); ok {
 			s.InputTokens = v
 		}
-		if v, ok := row[13].(int64); ok {
+		if v, ok := row[14].(int64); ok {
 			s.OutputTokens = v
 		}
-		if v, ok := row[14].(float64); ok {
+		if v, ok := row[15].(float64); ok {
 			s.CostUSD = v
 		}
-		s.PromptName = strVal(row[15])
-		if v, ok := row[16].(int64); ok {
+		s.PromptName = strVal(row[16])
+		if v, ok := row[17].(int64); ok {
 			s.PromptVersion = v
 		}
-		s.StatusCode = strVal(row[17])
-		s.StatusMessage = strVal(row[18])
+		s.StatusCode = strVal(row[18])
+		s.StatusMessage = strVal(row[19])
 		spans[i] = s
 	}
 	return spans, nil

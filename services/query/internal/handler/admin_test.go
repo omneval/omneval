@@ -418,7 +418,8 @@ func setupTestDB(t *testing.T) *sql.DB {
 		CREATE TABLE spans (
 			span_id        VARCHAR NOT NULL,
 			trace_id       VARCHAR NOT NULL,
-			parent_id      VARCHAR,
+			parent_id        VARCHAR,
+			conversation_id  VARCHAR,
 			project_id     VARCHAR NOT NULL,
 			service_name   VARCHAR,
 			name           VARCHAR,

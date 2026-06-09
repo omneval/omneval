@@ -216,6 +216,119 @@ class TestSpanHelperNoneSafe:
         # Without configure(), _current_span should be None.
         assert get_active_span() is None
 
+    def test_set_conversation_id_none_span(self):
+        """set_conversation_id(None, ...) should not raise an exception."""
+        from omneval_sdk.trace import set_conversation_id
+        set_conversation_id(None, "test-conv")  # Should not raise
+
+
+class TestConversationID:
+    """Tests for conversation ID functions (issue #67)."""
+
+    def _make_test_provider(self):
+        """Create a TracerProvider with an in-memory exporter for testing."""
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter as _OTelInMemoryExporter,
+        )
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+
+        exporter = _OTelInMemoryExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        return provider, exporter
+
+    def teardown_method(self, method) -> None:
+        """Restore tracer provider after each test to avoid state leakage."""
+        omneval_sdk.exporter._tracer_provider = None
+        from omneval_sdk.trace import _active_conversation_id
+        _active_conversation_id.set(None)
+
+    def test_generate_conversation_id_returns_32_hex_chars(self):
+        """generate_conversation_id() returns a 32-character hex string."""
+        from omneval_sdk.trace import generate_conversation_id
+        cid = generate_conversation_id()
+        assert len(cid) == 32
+        assert all(c in "0123456789abcdef" for c in cid)
+
+    def test_set_conversation_id_attaches_attribute(self):
+        """set_conversation_id attaches gen_ai.conversation.id to the span."""
+        from omneval_sdk.trace import set_conversation_id
+
+        provider, exporter = self._make_test_provider()
+        old_provider = omneval_sdk.exporter._tracer_provider
+
+        try:
+            with mock.patch("omneval_sdk.trace.get_tracer_provider", return_value=provider):
+
+                @trace
+                def my_func():
+                    span = get_active_span()
+                    set_conversation_id(span, "conv-123")
+                    return "ok"
+
+                my_func()
+
+                spans = exporter.get_finished_spans()
+                assert len(spans) >= 1
+                span = spans[0]
+                assert span.attributes.get("gen_ai.conversation.id") == "conv-123"
+        finally:
+            omneval_sdk.exporter._tracer_provider = old_provider
+
+    def test_set_active_conversation_id(self):
+        """set_active_conversation_id sets the conversation ID on the active span."""
+        from omneval_sdk.trace import set_active_conversation_id
+
+        provider, exporter = self._make_test_provider()
+        old_provider = omneval_sdk.exporter._tracer_provider
+
+        try:
+            with mock.patch("omneval_sdk.trace.get_tracer_provider", return_value=provider):
+
+                @trace
+                def my_func():
+                    set_active_conversation_id("conv-456")
+                    return "ok"
+
+                my_func()
+
+                spans = exporter.get_finished_spans()
+                assert len(spans) >= 1
+                span = spans[0]
+                assert span.attributes.get("gen_ai.conversation.id") == "conv-456"
+        finally:
+            omneval_sdk.exporter._tracer_provider = old_provider
+
+    def test_active_conversation_id_propagates_to_nested_spans(self):
+        """An active conversation ID set on a parent propagates to child spans."""
+        from omneval_sdk.trace import set_active_conversation_id
+
+        provider, exporter = self._make_test_provider()
+        old_provider = omneval_sdk.exporter._tracer_provider
+
+        try:
+            with mock.patch("omneval_sdk.trace.get_tracer_provider", return_value=provider):
+
+                @trace
+                def inner():
+                    return "nested"
+
+                @trace
+                def outer():
+                    set_active_conversation_id("conv-nested")
+                    return inner()
+
+                outer()
+
+                spans = exporter.get_finished_spans()
+                # Both spans should have the conversation ID.
+                for span in spans:
+                    assert span.attributes.get("gen_ai.conversation.id") == "conv-nested", \
+                        f"Span {span.name} missing conversation_id"
+        finally:
+            omneval_sdk.exporter._tracer_provider = old_provider
+
 
 class TestInitAlias:
     """Tests that `init` is an alias for `configure` (issue #4)."""
