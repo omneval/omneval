@@ -213,6 +213,46 @@ func TestNativeHandler_RejectsInvalidKey(t *testing.T) {
 	}
 }
 
+func TestNativeHandler_AcceptsConversationID(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewNativeHandler(q, v, nil)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	body := map[string]any{
+		"spans": []map[string]any{
+			{
+				"span_id":         "0102030405060708",
+				"trace_id":        "0102030405060708090a0b0c0d0e0f10",
+				"conversation_id": "conv-abc-123",
+				"name":            "test-span",
+			},
+		},
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	rq, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(jsonBody))
+	rq.Header.Set("X-API-Key", "valid_project_key")
+	rq.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(rq)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+	if len(q.batches) != 1 || len(q.batches[0]) != 1 {
+		t.Fatalf("expected 1 batch with 1 span, got %d batches", len(q.batches))
+	}
+	if q.batches[0][0].ConversationID != "conv-abc-123" {
+		t.Errorf("conversation_id: got %q, want %q", q.batches[0][0].ConversationID, "conv-abc-123")
+	}
+}
+
 func TestNativeHandler_ValidatesSpanFields(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
