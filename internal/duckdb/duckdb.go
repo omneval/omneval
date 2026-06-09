@@ -104,7 +104,7 @@ func ApplyMigrations(db *sql.DB) error {
 			return fmt.Errorf("duckdb: check migration %d status: %w", m.version, err)
 		}
 		if count == 0 {
-			tx, err := db.BeginContext(context.Background())
+			tx, err := db.BeginTx(context.Background(), nil)
 			if err != nil {
 				return fmt.Errorf("duckdb: begin migration %d: %w", m.version, err)
 			}

@@ -100,8 +100,8 @@ func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *
 			COALESCE(MAX(service_name), '') AS service_name,
 			COUNT(DISTINCT trace_id) AS trace_count,
 			COUNT(*) AS span_count,
-			MIN(start_time) AS start_time,
-			MAX(end_time) AS end_time,
+			CAST(MIN(start_time) AS VARCHAR) AS start_time,
+			COALESCE(CAST(MAX(end_time) AS VARCHAR), '') AS end_time,
 			ROUND(COALESCE(SUM(cost_usd), 0), 6) AS total_cost_usd,
 			COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
 			COALESCE(SUM(output_tokens), 0) AS total_output_tokens
@@ -117,7 +117,7 @@ func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *
 	}
 
 	query += `
-		GROUP BY conversation_id
+		GROUP BY conversation_id, project_id
 		ORDER BY end_time DESC, conversation_id DESC
 		LIMIT ?
 	`
@@ -179,8 +179,8 @@ func (h *ConversationHandler) HandleConversationDetail(w http.ResponseWriter, r 
 	rows, err := h.DB.Query(`
 		SELECT
 			trace_id,
-			MIN(start_time) AS start_time,
-			MAX(end_time) AS end_time,
+			CAST(MIN(start_time) AS VARCHAR) AS start_time,
+			COALESCE(CAST(MAX(end_time) AS VARCHAR), '') AS end_time,
 			COUNT(*) AS span_count,
 			ROUND(COALESCE(SUM(cost_usd), 0), 6) AS cost_usd,
 			COALESCE(SUM(input_tokens), 0) AS input_tokens,
