@@ -20,12 +20,12 @@ import (
 
 // mockStore implements storage.ObjectStore for testing.
 type mockStore struct {
-	mu        sync.Mutex
-	puts      map[string][]byte // key -> data
-	gets      []string
-	deletes   []string
-	failPut   bool
-	failGet   bool
+	mu         sync.Mutex
+	puts       map[string][]byte // key -> data
+	gets       []string
+	deletes    []string
+	failPut    bool
+	failGet    bool
 	onPutSized func(key string, data []byte) // callback for PutSized (testing hook)
 }
 
@@ -592,27 +592,27 @@ func keys(m map[string][]byte) []string {
 func createTestTables(db *sql.DB) error {
 	_, err := db.ExecContext(context.Background(), `
 		CREATE TABLE spans (
-			span_id        VARCHAR NOT NULL,
-			trace_id       VARCHAR NOT NULL,
-			parent_id        VARCHAR,
-			conversation_id  VARCHAR,
-			project_id     VARCHAR NOT NULL,
-			service_name   VARCHAR,
-			name           VARCHAR,
-			kind           VARCHAR,
-			start_time     TIMESTAMPTZ NOT NULL,
-			end_time       TIMESTAMPTZ,
-			model          VARCHAR,
-			input          JSON,
-			output         JSON,
-			input_tokens   BIGINT,
-			output_tokens  BIGINT,
-			cost_usd       DOUBLE,
-			prompt_name    VARCHAR,
-			prompt_version BIGINT,
-			status_code    VARCHAR,
-			status_message VARCHAR,
-			attributes     JSON,
+			span_id         VARCHAR NOT NULL,
+			trace_id        VARCHAR NOT NULL,
+			parent_id       VARCHAR,
+			conversation_id VARCHAR,
+			project_id      VARCHAR NOT NULL,
+			service_name    VARCHAR,
+			name            VARCHAR,
+			kind            VARCHAR,
+			start_time      TIMESTAMPTZ NOT NULL,
+			end_time        TIMESTAMPTZ,
+			model           VARCHAR,
+			input           JSON,
+			output          JSON,
+			input_tokens    BIGINT,
+			output_tokens   BIGINT,
+			cost_usd        DOUBLE,
+			prompt_name     VARCHAR,
+			prompt_version  BIGINT,
+			status_code     VARCHAR,
+			status_message  VARCHAR,
+			attributes      JSON,
 			PRIMARY KEY (trace_id, span_id)
 		);
 		CREATE INDEX idx_spans_project_time ON spans (project_id, start_time);

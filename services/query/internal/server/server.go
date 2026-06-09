@@ -636,7 +636,7 @@ func createEmptyDB(path string) error {
 		CREATE INDEX IF NOT EXISTS idx_spans_project_time
 			ON spans (project_id, start_time);
 		CREATE INDEX IF NOT EXISTS idx_spans_conversation
-			ON spans (conversation_id);
+			ON spans (project_id, conversation_id);
 
 		CREATE TABLE IF NOT EXISTS bookmarks (
 			trace_id       VARCHAR      NOT NULL,

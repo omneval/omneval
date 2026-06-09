@@ -42,13 +42,14 @@ type ConversationTraceItem struct {
 // ConversationDetailResponse is the response for
 // GET /api/v1/conversations/:conversationId.
 type ConversationDetailResponse struct {
-	ConversationID string                `json:"conversation_id"`
+	ConversationID string                  `json:"conversation_id"`
 	Traces         []ConversationTraceItem `json:"traces"`
 }
 
-// HandleListConversations returns paginated conversation list with aggregate
-// metadata, ordered by most recent start_time descending.
-func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *http.Request) {
+// resolveProjectID validates that a project is available from the session store
+// and returns the project ID. It writes an appropriate HTTP error if validation
+// fails and returns an empty string.
+func (h *ConversationHandler) resolveProjectID(w http.ResponseWriter, r *http.Request) string {
 	projectID, ok := h.SessionStore.ProjectID(r)
 	if !ok || projectID == "" {
 		if auth.CurrentUserFromContext(r) != nil {
@@ -56,6 +57,16 @@ func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *
 		} else {
 			writeJSONError(w, "unauthorized", http.StatusUnauthorized)
 		}
+		return ""
+	}
+	return projectID
+}
+
+// HandleListConversations returns paginated conversation list with aggregate
+// metadata, ordered by most recent start_time descending.
+func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *http.Request) {
+	projectID := h.resolveProjectID(w, r)
+	if projectID == "" {
 		return
 	}
 
@@ -102,36 +113,14 @@ func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *
 // HandleConversationDetail returns ordered trace list with root span metadata
 // for a single conversation.
 func (h *ConversationHandler) HandleConversationDetail(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.SessionStore.ProjectID(r)
-	if !ok || projectID == "" {
-		if auth.CurrentUserFromContext(r) != nil {
-			writeJSONError(w, "no project found — create a project first via POST /api/v1/projects", http.StatusBadRequest)
-		} else {
-			writeJSONError(w, "unauthorized", http.StatusUnauthorized)
-		}
+	projectID := h.resolveProjectID(w, r)
+	if projectID == "" {
 		return
 	}
 
 	conversationID := r.PathValue("conversationId")
 	if conversationID == "" {
 		writeJSONError(w, "missing conversation ID", http.StatusBadRequest)
-		return
-	}
-
-	// Verify the conversation exists.
-	var exists int
-	err := h.DB.QueryRow(`
-		SELECT COUNT(*) FROM spans
-		WHERE project_id = ? AND conversation_id = ?
-	`, projectID, conversationID).Scan(&exists)
-	if err != nil {
-		writeJSONError(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if exists == 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "conversation not found"})
 		return
 	}
 
@@ -167,6 +156,13 @@ func (h *ConversationHandler) HandleConversationDetail(w http.ResponseWriter, r 
 			t.RootSpanName = "unknown"
 		}
 		traces = append(traces, t)
+	}
+
+	if len(traces) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "conversation not found"})
+		return
 	}
 
 	resp := ConversationDetailResponse{

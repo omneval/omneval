@@ -16,6 +16,7 @@ export interface OmnevalSpan {
   span_id: string;
   trace_id: string;
   parent_id?: string;
+  conversation_id?: string;
   name: string;
   kind?: SpanKind;
   model?: string;
@@ -25,7 +26,6 @@ export interface OmnevalSpan {
   output_tokens?: number;
   prompt_name?: string;
   prompt_version?: number;
-  conversation_id?: string;
   attributes?: Record<string, string | number | boolean>;
   start_time?: number; // epoch milliseconds
   end_time?: number;   // epoch milliseconds

@@ -178,7 +178,7 @@ func TestAdminHandler_APIKeysList_ReturnsAllOrgKeys(t *testing.T) {
 	}
 
 	handler := &AdminHandler{
-		DB: db,
+		DB:    db,
 		Store: store,
 		SessionStore: &FakeSessionStore{
 			userProjects: []*domain.Project{
@@ -217,7 +217,7 @@ func TestAdminHandler_APIKeysList_EmptyWhenNoKeys(t *testing.T) {
 	// No keys inserted.
 
 	handler := &AdminHandler{
-		DB: db,
+		DB:    db,
 		Store: store,
 		SessionStore: &FakeSessionStore{
 			userProjects: []*domain.Project{
@@ -299,7 +299,7 @@ func (f *fakeAdminStore) GetUserByEmail(_ context.Context, _ string) (*domain.Us
 func (f *fakeAdminStore) GetUserByID(_ context.Context, _ string) (*domain.User, error) {
 	return nil, metadata.ErrNotFound
 }
-func (f *fakeAdminStore) CountUsers(_ context.Context) (int, error) { return 0, nil }
+func (f *fakeAdminStore) CountUsers(_ context.Context) (int, error)               { return 0, nil }
 func (f *fakeAdminStore) UpdateUserPassword(_ context.Context, _, _ string) error { return nil }
 func (f *fakeAdminStore) UpdateUserResetToken(_ context.Context, _, _ string, _ time.Time) error {
 	return nil
@@ -310,12 +310,12 @@ func (f *fakeAdminStore) GetUserByResetToken(_ context.Context, _ string) (*doma
 func (f *fakeAdminStore) ListUsers(_ context.Context, _ string) ([]*domain.User, error) {
 	return nil, nil
 }
-func (f *fakeAdminStore) CheckPassword(_, _ string) error { return nil }
+func (f *fakeAdminStore) CheckPassword(_, _ string) error                          { return nil }
 func (f *fakeAdminStore) CreateSession(_ context.Context, _ *domain.Session) error { return nil }
 func (f *fakeAdminStore) GetSession(_ context.Context, _ string) (*domain.Session, error) {
 	return nil, metadata.ErrNotFound
 }
-func (f *fakeAdminStore) DeleteSession(_ context.Context, _ string) error { return nil }
+func (f *fakeAdminStore) DeleteSession(_ context.Context, _ string) error        { return nil }
 func (f *fakeAdminStore) CreateAPIKey(_ context.Context, _ *domain.APIKey) error { return nil }
 func (f *fakeAdminStore) GetAPIKeyByHash(_ context.Context, _ string) (*domain.APIKey, error) {
 	return nil, metadata.ErrNotFound
@@ -416,26 +416,26 @@ func setupTestDB(t *testing.T) *sql.DB {
 	// Create spans table.
 	_, err = db.ExecContext(context.Background(), `
 		CREATE TABLE spans (
-			span_id        VARCHAR NOT NULL,
-			trace_id       VARCHAR NOT NULL,
-			parent_id        VARCHAR,
-			conversation_id  VARCHAR,
-			project_id     VARCHAR NOT NULL,
-			service_name   VARCHAR,
-			name           VARCHAR,
-			kind           VARCHAR,
-			start_time     TIMESTAMPTZ NOT NULL,
-			end_time       TIMESTAMPTZ,
-			model          VARCHAR,
-			input          JSON,
-			output         JSON,
-			token_input    INTEGER DEFAULT 0,
-			token_output   INTEGER DEFAULT 0,
-			cost_usd       DECIMAL(12,8) DEFAULT 0,
-			observation    JSON,
-			attributes     JSON,
-			bookmark       INTEGER DEFAULT 0,
-			scores         JSON DEFAULT '[]',
+			span_id         VARCHAR NOT NULL,
+			trace_id        VARCHAR NOT NULL,
+			parent_id       VARCHAR,
+			conversation_id VARCHAR,
+			project_id      VARCHAR NOT NULL,
+			service_name    VARCHAR,
+			name            VARCHAR,
+			kind            VARCHAR,
+			start_time      TIMESTAMPTZ NOT NULL,
+			end_time        TIMESTAMPTZ,
+			model           VARCHAR,
+			input           JSON,
+			output          JSON,
+			token_input     INTEGER DEFAULT 0,
+			token_output    INTEGER DEFAULT 0,
+			cost_usd        DECIMAL(12,8) DEFAULT 0,
+			observation     JSON,
+			attributes      JSON,
+			bookmark        INTEGER DEFAULT 0,
+			scores          JSON DEFAULT '[]',
 			PRIMARY KEY (trace_id, span_id)
 		)`)
 	if err != nil {
