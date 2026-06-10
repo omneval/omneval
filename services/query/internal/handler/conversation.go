@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/omneval/omneval/services/query/internal/auth"
 )
@@ -60,20 +61,42 @@ type ConversationDetailResponse struct {
 	Traces         []ConversationTraceItem `json:"traces"`
 }
 
-// resolveProjectID validates that a project is available from the session store
-// and returns the project ID. It writes an appropriate HTTP error if validation
-// fails and returns an empty string.
+// resolveProjectID determines the project a request should query, mirroring
+// SpanHandler.resolveProjectID: an explicit ?project_id= (the UI project
+// switcher always sends one) is honored after verifying it belongs to the
+// authenticated user's org; otherwise the session default is used. It writes
+// the appropriate HTTP error and returns "" on failure.
 func (h *ConversationHandler) resolveProjectID(w http.ResponseWriter, r *http.Request) string {
-	projectID, ok := h.SessionStore.ProjectID(r)
-	if !ok || projectID == "" {
-		if auth.CurrentUserFromContext(r) != nil {
-			writeJSONError(w, "no project found — create a project first via POST /api/v1/projects", http.StatusBadRequest)
-		} else {
-			writeJSONError(w, "unauthorized", http.StatusUnauthorized)
+	explicitID := r.URL.Query().Get("project_id")
+	if explicitID == "" {
+		projectID, ok := h.SessionStore.ProjectID(r)
+		if !ok || projectID == "" {
+			if auth.CurrentUserFromContext(r) != nil {
+				writeJSONError(w, "no project found — create a project first via POST /api/v1/projects", http.StatusBadRequest)
+			} else {
+				writeJSONError(w, "unauthorized", http.StatusUnauthorized)
+			}
+			return ""
 		}
+		return projectID
+	}
+
+	if auth.CurrentUserFromContext(r) == nil {
+		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
 		return ""
 	}
-	return projectID
+	userProjects, err := h.SessionStore.ListProjects(r)
+	if err != nil {
+		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
+		return ""
+	}
+	for _, p := range userProjects {
+		if p.ProjectID == explicitID {
+			return explicitID
+		}
+	}
+	writeJSONError(w, "project_id not found in user's organizations", http.StatusForbidden)
+	return ""
 }
 
 // HandleListConversations returns paginated conversation list with aggregate
@@ -109,6 +132,26 @@ func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *
 		WHERE project_id = ? AND conversation_id IS NOT NULL AND conversation_id != ''
 	`
 	args := []any{projectID}
+
+	// Optional RFC 3339 time-range bounds (the UI sends the header range).
+	if fromStr := r.URL.Query().Get("from"); fromStr != "" {
+		from, err := time.Parse(time.RFC3339, fromStr)
+		if err != nil {
+			writeJSONError(w, "invalid 'from': expected RFC 3339 timestamp", http.StatusBadRequest)
+			return
+		}
+		query += " AND start_time >= ?"
+		args = append(args, from)
+	}
+	if toStr := r.URL.Query().Get("to"); toStr != "" {
+		to, err := time.Parse(time.RFC3339, toStr)
+		if err != nil {
+			writeJSONError(w, "invalid 'to': expected RFC 3339 timestamp", http.StatusBadRequest)
+			return
+		}
+		query += " AND start_time <= ?"
+		args = append(args, to)
+	}
 
 	// Apply keyset pagination using cursor (conversation_id boundary).
 	if cursor != "" {
