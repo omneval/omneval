@@ -270,6 +270,19 @@ func (q *SpanQuery) SQL() (sql string, args []any, err error) {
 
 	// --- Cold side: Parquet on S3 via read_parquet ---
 	coldSQL := q.coldSQL()
+	var coldArgs []any
+	if q.s3Store != nil {
+		// Apply the same WHERE clause as the hot side. Without it the cold
+		// branch returned every archived span of the project regardless of
+		// filters or time range — which made GET /api/v1/traces/{traceId}
+		// build its tree from unrelated spans and render the same trace no
+		// matter which id was requested (issue #66). Aliased as "spans" so
+		// special filters (bookmarked) that reference spans.trace_id keep
+		// resolving inside the wrapper.
+		whereArgs, where := q.buildWhereClause()
+		coldSQL = "SELECT * FROM (" + coldSQL + ") AS spans" + where
+		coldArgs = whereArgs
+	}
 
 	parts := []string{hotSQL, coldSQL}
 	unionSQL := strings.Join(parts, "\nUNION ALL\n")
@@ -277,10 +290,10 @@ func (q *SpanQuery) SQL() (sql string, args []any, err error) {
 	// Wrap in outer query for cursor, ordering, and limit.
 	outerSQL := q.outerSQL(unionSQL)
 
-	// Collect all args: hot side args + cursor args.
-	// Always fetch limit+1 rows so NextCursor can distinguish "exactly limit
-	// results (last page)" from "limit results with more remaining".
-	args = hotArgs
+	// Collect all args: hot side args + cold side args + cursor args —
+	// positional placeholders resolve in SQL order (hot WHERE, cold WHERE,
+	// outer cursor/limit).
+	args = append(hotArgs, coldArgs...)
 	if q.cursor.StartTime.IsZero() && q.cursor.SpanID == "" {
 		// First page: pass limit+1 as arg for the outer LIMIT.
 		args = append(args, q.limit+1)
