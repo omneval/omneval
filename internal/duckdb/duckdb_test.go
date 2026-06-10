@@ -2,6 +2,7 @@ package duckdb
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"testing"
 	"time"
@@ -195,5 +196,47 @@ func cleanupTestFiles(t *testing.T, paths ...string) {
 		if err := os.Remove(p); err != nil {
 			t.Logf("cleanup: %s: %v", p, err)
 		}
+	}
+}
+
+// TestOpen_UpgradesLegacyDatabase simulates a database created before
+// conversation_id existed (issue #67): Open must succeed — the schema pass
+// must not reference the column (it runs before migrations), and migration
+// 0001 must add the column + index.
+func TestOpen_UpgradesLegacyDatabase(t *testing.T) {
+	path := "test_legacy.db"
+	defer cleanupTestFiles(t, path)
+
+	// Build a legacy database: spans table without conversation_id.
+	legacy, err := sql.Open("duckdb", path)
+	if err != nil {
+		t.Fatalf("open legacy: %v", err)
+	}
+	if _, err := legacy.ExecContext(context.Background(), `
+		CREATE TABLE spans (
+			span_id    VARCHAR NOT NULL,
+			trace_id   VARCHAR NOT NULL,
+			project_id VARCHAR NOT NULL,
+			start_time TIMESTAMPTZ NOT NULL,
+			PRIMARY KEY (trace_id, span_id)
+		)`); err != nil {
+		legacy.Close()
+		t.Fatalf("create legacy spans: %v", err)
+	}
+	legacy.Close()
+
+	// Open must apply schema + migrations without error.
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open on legacy db: %v", err)
+	}
+	defer db.Close()
+
+	// conversation_id must now exist.
+	var n int
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT COUNT(*) FROM spans WHERE conversation_id IS NULL OR conversation_id IS NOT NULL",
+	).Scan(&n); err != nil {
+		t.Fatalf("conversation_id column missing after Open: %v", err)
 	}
 }

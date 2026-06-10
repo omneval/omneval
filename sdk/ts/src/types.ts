@@ -16,6 +16,7 @@ export interface OmnevalSpan {
   span_id: string;
   trace_id: string;
   parent_id?: string;
+  conversation_id?: string;
   name: string;
   kind?: SpanKind;
   model?: string;

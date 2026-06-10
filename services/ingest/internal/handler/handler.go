@@ -23,19 +23,20 @@ type ValidatedKey = auth.ValidatedKey
 
 // NativeSpan is the REST API request body for a single span.
 type NativeSpan struct {
-	SpanID        string         `json:"span_id,omitempty"`
-	TraceID       string         `json:"trace_id,omitempty"`
-	ParentID      string         `json:"parent_id,omitempty"`
-	Name          string         `json:"name,omitempty"`
-	Kind          string         `json:"kind,omitempty"`
-	Model         string         `json:"model,omitempty"`
-	Input         any            `json:"input,omitempty"`  // string or JSON array
-	Output        any            `json:"output,omitempty"` // string or JSON array
-	InputTokens   int64          `json:"input_tokens,omitempty"`
-	OutputTokens  int64          `json:"output_tokens,omitempty"`
-	PromptName    string         `json:"prompt_name,omitempty"`
-	PromptVersion int64          `json:"prompt_version,omitempty"`
-	Attributes    map[string]any `json:"attributes,omitempty"`
+	SpanID          string         `json:"span_id,omitempty"`
+	TraceID         string         `json:"trace_id,omitempty"`
+	ParentID        string         `json:"parent_id,omitempty"`
+	ConversationID  string         `json:"conversation_id,omitempty"`
+	Name            string         `json:"name,omitempty"`
+	Kind            string         `json:"kind,omitempty"`
+	Model           string         `json:"model,omitempty"`
+	Input           any            `json:"input,omitempty"`  // string or JSON array
+	Output          any            `json:"output,omitempty"` // string or JSON array
+	InputTokens     int64          `json:"input_tokens,omitempty"`
+	OutputTokens    int64          `json:"output_tokens,omitempty"`
+	PromptName      string         `json:"prompt_name,omitempty"`
+	PromptVersion   int64          `json:"prompt_version,omitempty"`
+	Attributes      map[string]any `json:"attributes,omitempty"`
 }
 
 // IngestRequest is the JSON body of POST /api/v1/spans.
@@ -282,23 +283,24 @@ func nsToDomain(ns *NativeSpan, vk *auth.ValidatedKey) *domain.Span {
 	}
 
 	span := &domain.Span{
-		SpanID:        ns.SpanID,
-		TraceID:       ns.TraceID,
-		ParentID:      ns.ParentID,
-		ProjectID:     vk.ProjectID,
-		ServiceName:   vk.ServiceName,
-		Name:          ns.Name,
-		Kind:          kind,
-		StartTime:     time.Now(),
-		EndTime:       time.Now(),
-		Model:         ns.Model,
-		Input:         inputJSON,
-		Output:        outputJSON,
-		InputTokens:   ns.InputTokens,
-		OutputTokens:  ns.OutputTokens,
-		PromptName:    ns.PromptName,
-		PromptVersion: ns.PromptVersion,
-		Attributes:    ns.Attributes,
+		SpanID:          ns.SpanID,
+		TraceID:         ns.TraceID,
+		ParentID:        ns.ParentID,
+		ConversationID:  ns.ConversationID,
+		ProjectID:       vk.ProjectID,
+		ServiceName:     vk.ServiceName,
+		Name:            ns.Name,
+		Kind:            kind,
+		StartTime:       time.Now(),
+		EndTime:         time.Now(),
+		Model:           ns.Model,
+		Input:           inputJSON,
+		Output:          outputJSON,
+		InputTokens:     ns.InputTokens,
+		OutputTokens:    ns.OutputTokens,
+		PromptName:      ns.PromptName,
+		PromptVersion:   ns.PromptVersion,
+		Attributes:      ns.Attributes,
 	}
 
 	return span

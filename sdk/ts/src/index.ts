@@ -12,6 +12,7 @@
  */
 
 export { Omneval, createOmneval, OmnevalSDK } from "./omneval";
+export { generateConversationId } from "./id";
 export type {
   OmnevalConfig,
   OmnevalSpan,

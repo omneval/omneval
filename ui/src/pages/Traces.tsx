@@ -16,6 +16,10 @@ interface TracesPageProps {
   activeProject: string;
   onNavigateToTrace: (traceId: string) => void;
   onNavigateToTraceDetail: () => void;
+  onNavigateToConversation: (conversationId: string) => void;
+  /** Tab shown on mount — lets the back button from ConversationDetail
+   *  return to the Conversations tab rather than the default Traces tab. */
+  initialTab?: "traces" | "conversations";
 }
 
 interface Span {
@@ -58,8 +62,29 @@ interface QueryFilter {
   value: string | string[] | number;
 }
 
-// Observation-level span kinds shown on the Observations tab.
+// Observation-level span kinds (used by the Levels column pills).
 export const OBSERVATION_KINDS: string[] = ["llm", "tool", "agent", "chain"];
+
+// ── Conversation types (issue #67) ─────────────────────────────────
+
+interface ConversationListItem {
+  conversation_id: string;
+  project_id: string;
+  service_name: string;
+  trace_count: number;
+  span_count: number;
+  start_time: string;
+  end_time: string;
+  total_cost_usd: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+}
+
+interface ConversationListResponse {
+  conversations: ConversationListItem[];
+  next?: string;
+  limit: number;
+}
 
 // ── Observation Level Pills ────────────────────────────────────────
 
@@ -663,6 +688,8 @@ export default function TracesPage({
   activeProject,
   onNavigateToTrace,
   onNavigateToTraceDetail,
+  onNavigateToConversation,
+  initialTab,
 }: TracesPageProps) {
   const [spans, setSpans] = useState<Span[]>([]);
   const [nextCursor, setNextCursor] = useState("");
@@ -674,7 +701,9 @@ export default function TracesPage({
   useEffect(() => {
     searchQueryRef.current = searchQuery;
   }, [searchQuery]);
-  const [activeTab, setActiveTab] = useState<"traces" | "observations">("traces");
+  const [activeTab, setActiveTab] = useState<"traces" | "conversations">(
+    initialTab ?? "traces",
+  );
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [columnVisibility, setColumnVisibility] = useState({
     bookmark: true,
@@ -749,12 +778,6 @@ export default function TracesPage({
           ];
         }
 
-        // Observations tab: show only observation-level spans (LLM, tool, agent, chain).
-        if (activeTab === "observations") {
-          body.filters = body.filters ?? [];
-          body.filters.push({ field: "kind", op: "in", value: OBSERVATION_KINDS });
-        }
-
         // Apply filter sidebar state.
         const builtFilters = buildFiltersFromState(filterState);
         if (builtFilters.length > 0) {
@@ -786,7 +809,7 @@ export default function TracesPage({
         setLoading(false);
       }
     },
-    [activeProject, pageSize, filterState, searchQueryRef, activeTab],
+    [activeProject, pageSize, filterState, searchQueryRef],
   );
 
   useEffect(() => {
@@ -911,7 +934,7 @@ export default function TracesPage({
         >
           {/* Tabs */}
           <div className="flex gap-1">
-            {(["traces", "observations"] as const).map((tab) => (
+            {(["traces", "conversations"] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -936,6 +959,7 @@ export default function TracesPage({
 
           {/* Search */}
           <div className="flex-1" />
+          {activeTab === "traces" && (
           <input
             type="text"
             placeholder="Search by ID/Name..."
@@ -947,8 +971,10 @@ export default function TracesPage({
             }}
             className="input-focus w-48 text-sm px-2.5 py-1.5 rounded border border-omneval-border bg-omneval-depth text-omneval-text-pure placeholder-omneval-text-muted"
           />
+          )}
 
           {/* Auto-refresh toggle */}
+          {activeTab === "traces" && (
           <label className="flex items-center gap-2 text-sm text-omneval-text-muted cursor-pointer">
             <input
               type="checkbox"
@@ -961,8 +987,10 @@ export default function TracesPage({
               30s
             </span>
           </label>
+          )}
 
           {/* Column visibility menu */}
+          {activeTab === "traces" && (
           <div className="relative">
             {/* Screen-reader / test accessible column toggles — always in DOM, no visible text */}
             <div className="sr-only">
@@ -1036,8 +1064,16 @@ export default function TracesPage({
               </div>
             )}
           </div>
+          )}
         </div>
 
+        {activeTab === "conversations" ? (
+          <ConversationsView
+            activeProject={activeProject}
+            onOpenConversation={onNavigateToConversation}
+          />
+        ) : (
+        <>
         {/* Table */}
         <div className="flex-1 overflow-auto">
           {spans.length === 0 && !loading ? (
@@ -1134,7 +1170,177 @@ export default function TracesPage({
           loading={loading}
           onLoadNext={() => fetchSpans(nextCursor, true)}
         />
+        </>
+        )}
       </div>
     </div>
+  );
+}
+
+// ── Conversations Tab (issue #67) ───────────────────────────────────
+
+function ConversationsView({
+  activeProject,
+  onOpenConversation,
+}: {
+  activeProject: string;
+  onOpenConversation: (conversationId: string) => void;
+}) {
+  const [conversations, setConversations] = useState<ConversationListItem[]>([]);
+  const [nextCursor, setNextCursor] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const fetchConversations = useCallback(
+    async (cursor: string, append = false) => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({
+          project_id: activeProject,
+          from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+          to: new Date().toISOString(),
+          limit: "50",
+        });
+        if (cursor) params.set("cursor", cursor);
+
+        let res: Response;
+        try {
+          res = await fetch(`/api/v1/conversations?${params.toString()}`);
+        } catch {
+          return;
+        }
+        if (res.ok) {
+          const data: ConversationListResponse = await res.json();
+          if (append) {
+            setConversations((prev) => [...prev, ...(data.conversations ?? [])]);
+          } else {
+            setConversations(data.conversations ?? []);
+          }
+          setNextCursor(data.next ?? "");
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [activeProject],
+  );
+
+  useEffect(() => {
+    fetchConversations("");
+  }, [fetchConversations]);
+
+  const headers = [
+    "Conversation ID",
+    "Service",
+    "Traces",
+    "Spans",
+    "Started",
+    "Duration",
+    "Total Cost",
+    "Tokens",
+  ];
+
+  return (
+    <>
+      <div className="flex-1 overflow-auto">
+        {conversations.length === 0 && !loading ? (
+          <EmptyState
+            variant="default"
+            title="No conversations yet"
+            description="Group an agent session's traces by sending a conversation_id from the SDK — e.g. set_active_conversation_id() in Python, WithConversationID() in Go, or Omneval.setActiveConversationId() in TypeScript"
+          />
+        ) : loading && conversations.length === 0 ? (
+          <div className="flex flex-col gap-2 p-4">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-6 rounded" style={{ width: "85%" }} />
+            ))}
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr
+                style={{
+                  background: colors.backgrounds.slightIllumination,
+                  borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
+                  color: colors.typography.ashGrey,
+                }}
+              >
+                {headers.map((h) => (
+                  <th
+                    key={h}
+                    className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider whitespace-nowrap"
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {conversations.map((c) => (
+                <tr
+                  key={c.conversation_id}
+                  className="cursor-pointer transition-colors duration-150 hover:bg-omneval-violet-hover"
+                  style={{ borderBottom: `1px solid ${colors.backgrounds.caveWall}` }}
+                  onClick={() => onOpenConversation(c.conversation_id)}
+                  role="button"
+                  aria-label={`Open conversation ${c.conversation_id}`}
+                >
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    <span className="font-mono text-xs text-omneval-violet-pale">
+                      {c.conversation_id.slice(0, 12)}…
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-omneval-text-pure text-xs">
+                    {c.service_name || "—"}
+                  </td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-omneval-text-muted font-mono text-xs">
+                    {c.trace_count}
+                  </td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-omneval-text-muted font-mono text-xs">
+                    {c.span_count}
+                  </td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-omneval-text-muted text-xs">
+                    {formatTimeWithYear(c.start_time)}
+                  </td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-omneval-text-muted text-xs">
+                    {formatDuration(c.start_time, c.end_time || c.start_time)}
+                  </td>
+                  <td
+                    className="px-3 py-2.5 whitespace-nowrap font-medium text-xs"
+                    style={{ color: colors.accents.emberFlare }}
+                  >
+                    ${c.total_cost_usd.toFixed(4)}
+                  </td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-omneval-text-muted font-mono text-xs">
+                    {(c.total_input_tokens + c.total_output_tokens).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Pagination */}
+      <div
+        className="flex items-center justify-end px-4 py-3 border-t"
+        style={{ borderColor: colors.backgrounds.caveWall }}
+      >
+        <button
+          disabled={loading || !nextCursor}
+          onClick={() => fetchConversations(nextCursor, true)}
+          className="text-sm px-4 py-1.5 rounded-md font-medium text-white transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed hover:brightness-110 active:brightness-90"
+          style={
+            nextCursor
+              ? {
+                  background: colors.accents.emberFlare,
+                  boxShadow: "0 2px 8px rgba(255, 87, 34, 0.25)",
+                }
+              : { background: colors.backgrounds.caveWall, boxShadow: "none" }
+          }
+        >
+          {loading ? "Loading..." : nextCursor ? "Load Next Page" : "No more data"}
+        </button>
+      </div>
+    </>
   );
 }

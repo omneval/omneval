@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import LoginPage from "./pages/Login";
 import TracesPage from "./pages/Traces";
 import TraceDetailPage from "./pages/TraceDetail";
+import ConversationDetailPage from "./pages/ConversationDetail";
 import DashboardPage from "./pages/Dashboard";
 import PromptsPage from "./pages/Prompts";
 import DatasetDetailPage from "./pages/DatasetDetail";
@@ -22,6 +23,7 @@ type Page =
   | "login"
   | "traces"
   | "trace-detail"
+  | "conversation-detail"
   | "dashboard"
   | "prompts"
   | "datasets"
@@ -47,6 +49,7 @@ const PAGE_TO_PATH: Record<Page, string> = {
   dashboard: "",
   traces: "traces",
   "trace-detail": "traces",
+  "conversation-detail": "traces",
   prompts: "prompts",
   datasets: "datasets",
   "dataset-detail": "datasets",
@@ -79,6 +82,12 @@ export default function App() {
   const [activeProject, setActiveProject] = useState<string>("");
   const [activeTraceId, setActiveTraceId] = useState<string>("");
   const [activeDatasetId, setActiveDatasetId] = useState<string>("");
+  const [activeConversationId, setActiveConversationId] = useState<string>("");
+  // Which tab the Traces page opens on (back from ConversationDetail returns
+  // to the Conversations tab), and where TraceDetail's back button leads
+  // (Conversations tab → ConversationDetail → TraceDetail chain, issue #67).
+  const [tracesInitialTab, setTracesInitialTab] = useState<"traces" | "conversations">("traces");
+  const [traceDetailReturnTo, setTraceDetailReturnTo] = useState<Page>("traces");
 
   const [timeRange, setTimeRange] = useState("1d");
   const [environment, setEnvironment] = useState("default");
@@ -206,6 +215,8 @@ export default function App() {
   const handleNavigate = (id: string) => {
     const route = NAV_MAP[id];
     if (route) {
+      // Direct sidebar navigation to Traces always lands on the default tab.
+      if (route === "traces") setTracesInitialTab("traces");
       setPage(route);
       // Keep the URL in sync so the back button works and hard-reloading
       // the page returns to the same section.
@@ -245,7 +256,7 @@ export default function App() {
       />
 
       {/* Main Content */}
-      <Layout activeNav={page === "trace-detail" ? "traces" : page} onNavigate={handleNavigate} onLogout={handleLogout}>
+      <Layout activeNav={page === "trace-detail" || page === "conversation-detail" ? "traces" : page} onNavigate={handleNavigate} onLogout={handleLogout}>
         <ToastProvider>
           <div style={{ background: colors.backgrounds.voidBlack }}>
             {showNewProject && (
@@ -260,15 +271,38 @@ export default function App() {
             {page === "traces" && (
               <TracesPage
                 activeProject={activeProject}
+                initialTab={tracesInitialTab}
                 onNavigateToTrace={setActiveTraceId}
-                onNavigateToTraceDetail={() => setPage("trace-detail")}
+                onNavigateToTraceDetail={() => {
+                  setTraceDetailReturnTo("traces");
+                  setPage("trace-detail");
+                }}
+                onNavigateToConversation={(conversationId) => {
+                  setActiveConversationId(conversationId);
+                  setPage("conversation-detail");
+                }}
               />
             )}
             {page === "trace-detail" && (
               <TraceDetailPage
                 traceId={activeTraceId}
                 activeProject={activeProject}
-                onBack={() => setPage("traces")}
+                onBack={() => setPage(traceDetailReturnTo)}
+              />
+            )}
+            {page === "conversation-detail" && activeConversationId && (
+              <ConversationDetailPage
+                conversationId={activeConversationId}
+                activeProject={activeProject}
+                onBack={() => {
+                  setTracesInitialTab("conversations");
+                  setPage("traces");
+                }}
+                onNavigateToTrace={setActiveTraceId}
+                onNavigateToTraceDetail={() => {
+                  setTraceDetailReturnTo("conversation-detail");
+                  setPage("trace-detail");
+                }}
               />
             )}
             {page === "prompts" && (

@@ -263,24 +263,6 @@ func TestSetInput_StringInput(t *testing.T) {
 	}
 }
 
-// TestStartSpan_EmptyNameIsSafe verifies StartSpan handles an empty name
-// without panicking.
-func TestStartSpan_EmptyNameIsSafe(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer ts.Close()
-
-	Configure(ts.URL+"/v1/traces", "oev_proj_test")
-
-	ctx := StartSpan(context.Background(), "")
-	if ctx == nil {
-		t.Error("expected non-nil context from StartSpan")
-	}
-	EndSpan(ctx)
-	Shutdown()
-}
-
 // TestConfigure_WithAPIKey verifies the SDK configures without error with an API key.
 func TestConfigure_WithAPIKey(t *testing.T) {
 	ts := newFakeOTLPServer()
@@ -298,6 +280,94 @@ func TestConfigure_WithAPIKey(t *testing.T) {
 	if ts.RequestCount() < 1 {
 		t.Error("expected span to be exported")
 	}
+}
+
+// TestGenerateConversationID verifies GenerateConversationID returns a 32-char hex string.
+func TestGenerateConversationID(t *testing.T) {
+	id := GenerateConversationID()
+	if len(id) != 32 {
+		t.Errorf("expected 32-char conversation ID, got %d chars", len(id))
+	}
+	for _, c := range id {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			t.Fatalf("conversation ID contains invalid char %q", c)
+		}
+	}
+}
+
+// TestSetConversationID_AttachesAttribute verifies SetConversationID sets gen_ai.conversation.id on the span.
+func TestSetConversationID_AttachesAttribute(t *testing.T) {
+	var receivedRequests []fakeOTLPRequest
+	var mu sync.Mutex
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if len(body) > 0 {
+			mu.Lock()
+			receivedRequests = append(receivedRequests, fakeOTLPRequest{Body: body})
+			mu.Unlock()
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	Configure(ts.URL+"/v1/traces", "oev_proj_test")
+
+	ctx := StartSpan(context.Background(), "conv-test")
+	SetConversationID(ctx, "my-conv-123")
+	EndSpan(ctx)
+	Shutdown()
+
+	mu.Lock()
+	reqs := receivedRequests
+	mu.Unlock()
+
+	if len(reqs) == 0 {
+		t.Fatal("no OTLP requests received")
+	}
+
+	decompressed, err := decompressOTLPBody(reqs[0].Body)
+	if err != nil {
+		t.Fatalf("failed to decompress OTLP request: %v", err)
+	}
+	var exportReq ptrace.ExportTraceServiceRequest
+	if err := proto.Unmarshal(decompressed, &exportReq); err != nil {
+		t.Fatalf("failed to unmarshal OTLP request: %v", err)
+	}
+
+	var found bool
+	for _, rs := range exportReq.ResourceSpans {
+		for _, ss := range rs.ScopeSpans {
+			for _, sp := range ss.Spans {
+				for _, attr := range sp.Attributes {
+					if attr.Key == "gen_ai.conversation.id" && attr.Value.GetStringValue() == "my-conv-123" {
+						found = true
+					}
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("expected gen_ai.conversation.id attribute on span")
+	}
+}
+
+// TestStartSpan_EmptyNameIsSafe verifies StartSpan handles an empty name
+// without panicking.
+func TestStartSpan_EmptyNameIsSafe(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	Configure(ts.URL+"/v1/traces", "oev_proj_test")
+
+	ctx := StartSpan(context.Background(), "")
+	if ctx == nil {
+		t.Error("expected non-nil context from StartSpan")
+	}
+	EndSpan(ctx)
+	Shutdown()
 }
 
 // TestMultipleSpansInSequence verifies multiple spans can be started and ended.

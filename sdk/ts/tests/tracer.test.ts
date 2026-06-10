@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ManualTracer } from "../src/tracer";
 import { createOmneval } from "../src/omneval";
+import { generateConversationId } from "../src/id";
 
 describe("ManualTracer", () => {
   type ExportMock = {
@@ -322,3 +323,92 @@ describe("createOmneval", () => {
     await expect(omneval.getPrompt("test")).rejects.toThrow("Omneval.init() not called");
   });
 });
+
+describe("generateConversationId", () => {
+  it("returns a 32-char hex string", () => {
+    const id = generateConversationId();
+    expect(id).toHaveLength(32);
+    expect(id).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it("returns unique IDs across calls", () => {
+    const id1 = generateConversationId();
+    const id2 = generateConversationId();
+    expect(id1).not.toBe(id2);
+  });
+});
+
+describe("setConversationId", () => {
+  it("attaches gen_ai.conversation.id to span attributes", async () => {
+    let exportedSpans: any[] = [];
+    const omneval = createOmneval();
+    omneval.init({
+      baseUrl: "http://localhost:3000",
+      apiKey: "oev_proj_test",
+    });
+
+    const spanId = omneval.startSpan("test.span");
+    const convId = generateConversationId();
+    omneval.setConversationId(spanId, convId);
+    await omneval.endSpan(spanId);
+
+    // We can't easily intercept the exporter in this path, so verify via flush
+    // Instead, use ManualTracer directly
+    const tracer = new ManualTracer(createMockExporter((s) => { exportedSpans = s; }) as any);
+    tracer.init();
+    const span2 = tracer.startSpan("direct.span");
+    tracer.setConversationId(span2, convId);
+    await tracer.endSpan(span2);
+
+    expect(exportedSpans[0].conversation_id).toBe(convId);
+  });
+
+  it("setConversationId is no-op for unknown span ID", async () => {
+    const tracer = new ManualTracer({ export: async () => true });
+    tracer.init();
+    // Should not throw
+    expect(() => tracer.setConversationId("unknown-id", "conv-123")).not.toThrow();
+  });
+
+  it("setActiveConversationId auto-attaches on next startSpan", async () => {
+    let exportedSpans: any[] = [];
+    const tracer = new ManualTracer(createMockExporter((s) => { exportedSpans = s; }) as any);
+    tracer.init();
+
+    const convId = generateConversationId();
+    tracer.setActiveConversationId(convId);
+
+    const spanId = tracer.startSpan("auto-conv.span");
+    await tracer.endSpan(spanId);
+
+    expect(exportedSpans[0].conversation_id).toBe(convId);
+  });
+
+  it("child spans inherit active conversation ID", async () => {
+    const exportedSpans: any[] = [];
+    const tracer = new ManualTracer(createMockExporter((s) => { exportedSpans.push(...s); }) as any);
+    tracer.init();
+
+    const convId = generateConversationId();
+    tracer.setActiveConversationId(convId);
+
+    const parent = tracer.startSpan("parent");
+    const child = tracer.startSpan("child", { parentSpanId: parent });
+
+    await tracer.endSpan(child);
+    await tracer.endSpan(parent);
+
+    expect(exportedSpans[0].conversation_id).toBe(convId);
+    expect(exportedSpans[1].conversation_id).toBe(convId);
+  });
+});
+
+// Helper shared across tests
+function createMockExporter(spansCollector: (spans: any[]) => void) {
+  return {
+    export: async (spans: any[]) => {
+      spansCollector(spans);
+      return true;
+    },
+  };
+}

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
-import TracesPage, { OBSERVATION_KINDS } from "./Traces";
+import type { ComponentProps } from "react";
+import TracesPage from "./Traces";
 
 // ── Helper data ──────────────────────────────────────────────────
 
@@ -117,12 +118,16 @@ const mockSpans = [
 
 // ── Render helper ────────────────────────────────────────────────
 
-function renderTracesPage() {
+function renderTracesPage(
+  props: Partial<ComponentProps<typeof TracesPage>> = {}
+) {
   return render(
     <TracesPage
       activeProject="test-project"
       onNavigateToTrace={() => {}}
       onNavigateToTraceDetail={() => {}}
+      onNavigateToConversation={() => {}}
+      {...props}
     />
   );
 }
@@ -286,100 +291,130 @@ describe("traces tab", () => {
   });
 });
 
-// ── Observations tab tests ───────────────────────────────────────
+// ── Conversations tab tests (issue #67) ───────────────────────────
 
-describe("observations tab", () => {
-  beforeEach(() => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          spans: mockSpans.filter((s) =>
-            OBSERVATION_KINDS.includes(s.kind)
-          ),
-          next: "",
-          limit: 25,
-        }),
-    } as Response);
-  });
+const mockConversations = [
+  {
+    conversation_id: "abc123def456abc123def456abc12345",
+    project_id: "test-project",
+    service_name: "my-agent",
+    trace_count: 5,
+    span_count: 23,
+    start_time: "2025-01-15T10:00:00Z",
+    end_time: "2025-01-15T10:04:32Z",
+    total_cost_usd: 0.042,
+    total_input_tokens: 12400,
+    total_output_tokens: 3200,
+  },
+];
 
+describe("conversations tab", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("shows only observation spans when observations tab is active", async () => {
-    renderTracesPage();
-
-    // Click the observations tab
-    const obsTab = screen.getByText("observations");
-    await act(async () => {
-      fireEvent.click(obsTab);
-    });
-
-    // All shown spans should have observation kinds
-    // The API returns only LLM/tool/agent/chain spans
-    await waitFor(() => {
-      expect(screen.getByText("llm-call-1")).toBeInTheDocument();
-      expect(screen.getByText("tool-use")).toBeInTheDocument();
-    });
-  });
-
-  it("sends 'kind' filter to API when switching to observations tab", async () => {
-    const fetchBodies: string[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
-      if (init?.body) {
-        fetchBodies.push(String(init.body));
+  function mockFetchWithConversations(conversations = mockConversations) {
+    const urls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      urls.push(String(url));
+      if (String(url).includes("/api/v1/conversations")) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({ conversations, next: "", limit: 50 }),
+        } as Response;
       }
       return {
         ok: true,
-        json: () =>
-          Promise.resolve({
-            spans: mockSpans.filter((s) =>
-              OBSERVATION_KINDS.includes(s.kind)
-            ),
-            next: "",
-            limit: 25,
-          }),
+        json: () => Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
       } as Response;
     });
+    return urls;
+  }
 
+  it("replaces the observations tab with a conversations tab", async () => {
+    mockFetchWithConversations();
     renderTracesPage();
 
-    // Wait for initial fetch (traces tab — no kind filter)
-    await waitFor(
-      () => {
-        expect(fetchBodies.length).toBeGreaterThanOrEqual(1);
-      },
-      { timeout: 2000 }
-    );
+    await waitFor(() => {
+      expect(screen.getByText("conversations")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("observations")).not.toBeInTheDocument();
+  });
 
-    // Initial fetch (traces tab) should NOT have the kind filter
-    expect(fetchBodies[0]).not.toContain("kind");
-    expect(fetchBodies[0]).not.toContain("llm");
+  it("fetches and renders the conversation list when the tab is clicked", async () => {
+    const urls = mockFetchWithConversations();
+    renderTracesPage();
 
-    // Click the observations tab
-    const obsTab = screen.getByText("observations");
+    const convTab = screen.getByText("conversations");
     await act(async () => {
-      fireEvent.click(obsTab);
+      fireEvent.click(convTab);
     });
 
-    // Wait for the second fetch to be initiated (from the useEffect)
-    await waitFor(
-      () => {
-        expect(fetchBodies.length).toBeGreaterThanOrEqual(2);
-      },
-      { timeout: 2000 }
-    );
+    await waitFor(() => {
+      // Truncated monospace conversation id
+      expect(screen.getByText(/abc123def456…/)).toBeInTheDocument();
+    });
+    expect(screen.getByText("my-agent")).toBeInTheDocument();
+    // Aggregates: 5 traces, 23 spans, cost, tokens
+    expect(screen.getByText("5")).toBeInTheDocument();
+    expect(screen.getByText("23")).toBeInTheDocument();
+    expect(screen.getByText("$0.0420")).toBeInTheDocument();
+    expect(screen.getByText("15,600")).toBeInTheDocument();
+    // The conversations endpoint was called with the project id
+    expect(
+      urls.some(
+        (u) =>
+          u.includes("/api/v1/conversations") &&
+          u.includes("project_id=test-project")
+      )
+    ).toBe(true);
+  });
 
-    // The second fetch (observations tab) MUST include the kind filter
-    // with values ["llm", "tool", "agent", "chain"]
-    const obsBody = fetchBodies[1];
-    expect(obsBody).toContain("kind");
-    expect(obsBody).toContain("in");
-    expect(obsBody).toContain("llm");
-    expect(obsBody).toContain("tool");
-    expect(obsBody).toContain("agent");
-    expect(obsBody).toContain("chain");
+  it("navigates to the conversation detail when a row is clicked", async () => {
+    mockFetchWithConversations();
+    const onNavigateToConversation = vi.fn();
+    renderTracesPage({ onNavigateToConversation });
+
+    const convTab = screen.getByText("conversations");
+    await act(async () => {
+      fireEvent.click(convTab);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/abc123def456…/)).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText(/abc123def456…/));
+    });
+
+    expect(onNavigateToConversation).toHaveBeenCalledWith(
+      "abc123def456abc123def456abc12345"
+    );
+  });
+
+  it("shows the SDK hint empty state when there are no conversations", async () => {
+    mockFetchWithConversations([]);
+    renderTracesPage();
+
+    const convTab = screen.getByText("conversations");
+    await act(async () => {
+      fireEvent.click(convTab);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("No conversations yet")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/conversation_id from the SDK/)).toBeInTheDocument();
+  });
+
+  it("opens on the conversations tab when initialTab is set", async () => {
+    mockFetchWithConversations();
+    renderTracesPage({ initialTab: "conversations" });
+
+    await waitFor(() => {
+      expect(screen.getByText(/abc123def456…/)).toBeInTheDocument();
+    });
   });
 });
 

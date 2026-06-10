@@ -203,6 +203,12 @@ func Run() error {
 		SessionStore: h,
 	}
 
+	// Conversation handler (list conversations and detail view).
+	conversationHandler := &handler.ConversationHandler{
+		DB:           sdb,
+		SessionStore: h,
+	}
+
 	// Prompt registry handler (requires metadata store).
 	// A CachingValidator is wired in so that SDK callers can authenticate
 	// GET prompt endpoints using X-API-Key in addition to session cookies.
@@ -282,6 +288,10 @@ func Run() error {
 
 	// Trace bookmark toggle.
 	mux.HandleFunc("POST /api/v1/traces/{traceId}/bookmark", bookmarkHandler.HandleBookmark)
+
+	// Conversation list and detail endpoints.
+	mux.HandleFunc("GET /api/v1/conversations", conversationHandler.HandleListConversations)
+	mux.HandleFunc("GET /api/v1/conversations/{conversationId}", conversationHandler.HandleConversationDetail)
 
 	// Prompt Registry endpoints (require metadata store).
 	if promptHandler != nil {
@@ -600,30 +610,33 @@ func createEmptyDB(path string) error {
 
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS spans (
-			span_id        VARCHAR      NOT NULL,
-			trace_id       VARCHAR      NOT NULL,
-			parent_id      VARCHAR,
-			project_id     VARCHAR      NOT NULL,
-			service_name   VARCHAR,
-			name           VARCHAR,
-			kind           VARCHAR,
-			start_time     TIMESTAMPTZ  NOT NULL,
-			end_time       TIMESTAMPTZ,
-			model          VARCHAR,
-			input          JSON,
-			output         JSON,
-			input_tokens   BIGINT,
-			output_tokens  BIGINT,
-			cost_usd       DOUBLE,
-			prompt_name    VARCHAR,
-			prompt_version BIGINT,
-			status_code    VARCHAR,
-			status_message VARCHAR,
-			attributes     JSON,
+			span_id          VARCHAR      NOT NULL,
+			trace_id         VARCHAR      NOT NULL,
+			parent_id        VARCHAR,
+			conversation_id  VARCHAR,
+			project_id       VARCHAR      NOT NULL,
+			service_name     VARCHAR,
+			name             VARCHAR,
+			kind             VARCHAR,
+			start_time       TIMESTAMPTZ  NOT NULL,
+			end_time         TIMESTAMPTZ,
+			model            VARCHAR,
+			input            JSON,
+			output           JSON,
+			input_tokens     BIGINT,
+			output_tokens    BIGINT,
+			cost_usd         DOUBLE,
+			prompt_name      VARCHAR,
+			prompt_version   BIGINT,
+			status_code      VARCHAR,
+			status_message   VARCHAR,
+			attributes       JSON,
 			PRIMARY KEY (trace_id, span_id)
 		);
 		CREATE INDEX IF NOT EXISTS idx_spans_project_time
 			ON spans (project_id, start_time);
+		CREATE INDEX IF NOT EXISTS idx_spans_conversation
+			ON spans (project_id, conversation_id);
 
 		CREATE TABLE IF NOT EXISTS bookmarks (
 			trace_id       VARCHAR      NOT NULL,
