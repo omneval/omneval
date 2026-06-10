@@ -1,12 +1,15 @@
 package query
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/storage"
 	"github.com/omneval/omneval/services/query/internal/cursor"
 )
 
@@ -1034,5 +1037,133 @@ func TestSQL_FilterContainsEmptyString(t *testing.T) {
 
 	if !strings.Contains(sql, "name LIKE ?") {
 		t.Errorf("expected 'name LIKE ?' in SQL, got:\n%s", sql)
+	}
+}
+
+// ── Cold-side filtering (issue #66) ─────────────────────────────────────────
+//
+// The cold (Parquet-on-S3) branch of the UNION must carry the same WHERE
+// clause as the hot branch. Without it, GET /api/v1/traces/{traceId} pulled
+// every archived span of the project and built its tree from unrelated spans
+// — rendering the same trace regardless of which id was requested.
+
+type fakeObjectStore struct{}
+
+func (fakeObjectStore) Put(_ context.Context, _ string, _ io.Reader) error { return nil }
+func (fakeObjectStore) PutSized(_ context.Context, _ string, _ io.Reader, _ int64) error {
+	return nil
+}
+func (fakeObjectStore) Get(_ context.Context, _ string) (io.ReadCloser, error) { return nil, nil }
+func (fakeObjectStore) Delete(_ context.Context, _ string) error               { return nil }
+func (fakeObjectStore) ListPrefix(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
+func (fakeObjectStore) Stat(_ context.Context, _ string) (*storage.ObjectStat, error) {
+	return nil, nil
+}
+
+func TestSQL_ColdSideCarriesWhereClause_WhenS3Configured(t *testing.T) {
+	req := SpanQueryRequest{
+		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Filters: []SpanQueryFilter{
+			{Field: "trace_id", Op: "eq", Value: "b81fa355ec7328cdb0addd47ef044f9d"},
+		},
+		Limit: 10,
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, fakeObjectStore{}, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, args, err := q.SQL()
+	if err != nil {
+		t.Fatalf("SQL error: %v", err)
+	}
+
+	if !strings.Contains(sql, "read_parquet") {
+		t.Fatalf("expected cold read_parquet branch in SQL, got:\n%s", sql)
+	}
+	// Both UNION branches must filter on trace_id.
+	if got := strings.Count(sql, "trace_id = ?"); got != 2 {
+		t.Errorf("expected trace_id filter on hot AND cold sides (2 occurrences), got %d:\n%s", got, sql)
+	}
+	if got := strings.Count(sql, "project_id = ?"); got != 2 {
+		t.Errorf("expected project_id predicate on hot AND cold sides (2 occurrences), got %d:\n%s", got, sql)
+	}
+	// Args: hot (project_id, from, to, trace_id) + cold (same 4) + limit.
+	if len(args) != 9 {
+		t.Errorf("expected 9 args (4 hot + 4 cold + limit), got %d: %v", len(args), args)
+	}
+	// The trace_id value must appear twice (hot + cold).
+	traceArgs := 0
+	for _, a := range args {
+		if a == "b81fa355ec7328cdb0addd47ef044f9d" {
+			traceArgs++
+		}
+	}
+	if traceArgs != 2 {
+		t.Errorf("expected trace_id arg twice (hot + cold), got %d", traceArgs)
+	}
+}
+
+func TestSQL_ColdSideNoWhere_WhenS3Absent(t *testing.T) {
+	// Without S3 the cold branch is a zero-row VALUES stub — no extra args.
+	req := SpanQueryRequest{
+		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Filters: []SpanQueryFilter{
+			{Field: "trace_id", Op: "eq", Value: "abc"},
+		},
+		Limit: 10,
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, nil, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, args, err := q.SQL()
+	if err != nil {
+		t.Fatalf("SQL error: %v", err)
+	}
+
+	if strings.Contains(sql, "read_parquet") {
+		t.Error("did not expect read_parquet without S3")
+	}
+	// Args: hot (project_id, from, to, trace_id) + limit.
+	if len(args) != 5 {
+		t.Errorf("expected 5 args (4 hot + limit), got %d: %v", len(args), args)
+	}
+}
+
+func TestSQL_ColdSideBookmarkedFilterResolves_WhenS3Configured(t *testing.T) {
+	// The special bookmarked filter references spans.trace_id; the cold
+	// wrapper is aliased "spans" so that correlated subquery still resolves.
+	req := SpanQueryRequest{
+		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Filters: []SpanQueryFilter{
+			{Field: "bookmarked", Op: "eq", Value: true},
+		},
+		Limit: 10,
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, fakeObjectStore{}, "/tmp/test.duckdb")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, _, err := q.SQL()
+	if err != nil {
+		t.Fatalf("SQL error: %v", err)
+	}
+
+	if !strings.Contains(sql, ") AS spans") {
+		t.Errorf("expected cold wrapper aliased AS spans, got:\n%s", sql)
+	}
+	if got := strings.Count(sql, "b.trace_id = spans.trace_id"); got != 2 {
+		t.Errorf("expected bookmarked subquery on both sides (2 occurrences), got %d", got)
 	}
 }
