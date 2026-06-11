@@ -19,6 +19,7 @@ import (
 
 	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/normalizer"
 	"github.com/omneval/omneval/internal/otlp"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -38,13 +39,14 @@ type Validator interface {
 // Accepts Content-Type: application/x-protobuf or application/json,
 // with optional gzip compression via Content-Encoding: gzip.
 type OTLPHandler struct {
-	queue     SpanQueue
-	validator Validator
+	queue      SpanQueue
+	validator  Validator
+	normalizer domain.SpanNormalizer
 }
 
 // NewOTLPHandler creates a new OTLPHandler.
 func NewOTLPHandler(queue SpanQueue, validator Validator) *OTLPHandler {
-	return &OTLPHandler{queue: queue, validator: validator}
+	return &OTLPHandler{queue: queue, validator: validator, normalizer: normalizer.New()}
 }
 
 // Router creates an HTTP handler for OTLP trace ingestion.
@@ -113,7 +115,7 @@ func (h *OTLPHandler) handleOTLPTraces(w http.ResponseWriter, r *http.Request) {
 	opts := otlp.Options{
 		ServiceNameOverride: vk.ServiceName,
 	}
-	domainSpans, err := otlp.Translate(vk.ProjectID, rss, opts)
+	domainSpans, err := otlp.Translate(r.Context(), vk.ProjectID, rss, opts, h.normalizer)
 	if err != nil {
 		slog.Error("ingest: translate failed", "error", err.Error())
 		http.Error(w, fmt.Sprintf("translate: %v", err), http.StatusInternalServerError)

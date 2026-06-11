@@ -1,6 +1,7 @@
 package otlp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -46,26 +47,25 @@ type Options struct {
 // Translate converts a slice of ResourceSpans into domain.Span values.
 // projectID is attached to every span. opts controls system-prompt logging
 // and service-name override for service-scoped API keys.
-func Translate(projectID string, rss []ResourceSpans, opts Options) ([]*domain.Span, error) {
+// normalizer validates and normalizes each translated span.
+func Translate(ctx context.Context, projectID string, rss []ResourceSpans, opts Options, normalizer domain.SpanNormalizer) ([]*domain.Span, error) {
 	spans := make([]*domain.Span, 0, totalSpanCount(rss))
 	for _, rs := range rss {
 		for _, s := range rs.Spans {
-			span := translateSpan(projectID, rs.Resource, *s, opts)
+			raw := toRawMap(projectID, rs.Resource, *s, opts)
+			span, err := normalizer.Normalize(ctx, raw)
+			if err != nil {
+				return nil, fmt.Errorf("normalize otlp span %s: %w", s.SpanID, err)
+			}
 			spans = append(spans, span)
 		}
 	}
 	return spans, nil
 }
 
-func totalSpanCount(rss []ResourceSpans) int {
-	total := 0
-	for _, rs := range rss {
-		total += len(rs.Spans)
-	}
-	return total
-}
-
-func translateSpan(projectID string, resource Resource, span Span, opts Options) *domain.Span {
+// toRawMap extracts OTLP-specific fields from an OTLP Span and produces
+// a raw map suitable for the SpanNormalizer.
+func toRawMap(projectID string, resource Resource, span Span, opts Options) map[string]any {
 	// Derive model from GenAI attributes.
 	model := extractAttributeString(span.Attributes, "gen_ai.request.model")
 	if model == "" {
@@ -81,8 +81,6 @@ func translateSpan(projectID string, resource Resource, span Span, opts Options)
 	if outputTokens == -1 {
 		outputTokens = extractAttributeInt64(span.Attributes, "completion_tokens")
 	}
-	// Normalise the -1 sentinel (attribute absent after all fallbacks) to 0
-	// so that downstream consumers never see a negative token count.
 	if inputTokens < 0 {
 		inputTokens = 0
 	}
@@ -107,8 +105,6 @@ func translateSpan(projectID string, resource Resource, span Span, opts Options)
 
 	// Derive ServiceName from Resource attributes.
 	serviceName := extractResourceAttributeString(resource.Attributes, "service.name")
-
-	// Apply service-name override if set (service-scoped API key).
 	if opts.ServiceNameOverride != "" {
 		serviceName = opts.ServiceNameOverride
 	}
@@ -119,37 +115,60 @@ func translateSpan(projectID string, resource Resource, span Span, opts Options)
 	// Extract prompt linkage.
 	promptName, promptVersion := resolvePromptInfo(span.Attributes)
 
-	// Extract conversation_id: prefer OTel GenAI semantic conventions, fall back
-	// to the native omneval attribute name (issue #67 §2).
+	// Extract conversation_id.
 	conversationID := extractAttributeString(span.Attributes, "gen_ai.conversation.id")
 	if conversationID == "" {
 		conversationID = extractAttributeString(span.Attributes, "omneval.conversation.id")
 	}
 
-	return &domain.Span{
-		SpanID:         span.SpanID,
-		TraceID:        span.TraceID,
-		ParentID:       span.ParentID,
-		ConversationID: conversationID,
-		ProjectID:      projectID,
-		ServiceName:    serviceName,
-		Name:           span.Name,
-		Kind:           kind,
-		StartTime:      span.StartTime,
-		EndTime:        span.EndTime,
-		Model:          model,
-		Input:          input,
-		Output:         output,
-		InputTokens:    inputTokens,
-		OutputTokens:   outputTokens,
-		CostUSD:        0, // pre-computed by Writer Service
-		StatusCode:     span.StatusCode,
-		StatusMessage:  span.StatusMsg,
-		PromptName:     promptName,
-		PromptVersion:  promptVersion,
-		Attributes:     overflow,
+	raw := map[string]any{
+		"span_id":         span.SpanID,
+		"trace_id":        span.TraceID,
+		"name":            span.Name,
+		"project_id":      projectID,
+		"service_name":    serviceName,
+		"model":           model,
+		"input":           input,
+		"output":          output,
+		"input_tokens":    inputTokens,
+		"output_tokens":   outputTokens,
+		"prompt_name":     promptName,
+		"prompt_version":  promptVersion,
+		"kind":            kind,
 	}
+	if span.ParentID != "" {
+		raw["parent_id"] = span.ParentID
+	}
+	if conversationID != "" {
+		raw["conversation_id"] = conversationID
+	}
+	if !span.StartTime.IsZero() {
+		raw["start_time"] = span.StartTime
+	}
+	if !span.EndTime.IsZero() {
+		raw["end_time"] = span.EndTime
+	}
+	if span.StatusCode != "" {
+		raw["status_code"] = span.StatusCode
+	}
+	if span.StatusMsg != "" {
+		raw["status_message"] = span.StatusMsg
+	}
+	if len(overflow) > 0 {
+		raw["attributes"] = overflow
+	}
+	return raw
 }
+
+func totalSpanCount(rss []ResourceSpans) int {
+	total := 0
+	for _, rs := range rss {
+		total += len(rs.Spans)
+	}
+	return total
+}
+
+
 
 // resolvePromptInfo extracts prompt linkage from omneval.* attributes.
 func resolvePromptInfo(attrs map[string]any) (string, int64) {

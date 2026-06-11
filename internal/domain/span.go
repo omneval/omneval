@@ -1,6 +1,15 @@
 package domain
 
-import "time"
+import (
+	"context"
+	"time"
+)
+
+// SpanNormalizer validates, normalizes, and converts raw span maps into
+// domain.Span values. Defined in the consumer package per CODING_STANDARDS.md.
+type SpanNormalizer interface {
+	Normalize(ctx context.Context, raw map[string]any) (*Span, error)
+}
 
 // SpanKind classifies a span by its role in the trace.
 type SpanKind string
