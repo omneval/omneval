@@ -2,16 +2,15 @@ package handler
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/normalizer"
 	handlers "github.com/omneval/omneval/internal/handlers"
 	"github.com/omneval/omneval/services/ingest/internal/metrics"
 )
@@ -62,12 +61,13 @@ type NativeHandler struct {
 	validator   Validator
 	corsOrigins []string
 	metrics     *metrics.IngestMetrics
+	normalizer  normalizer.SpanNormalizer
 }
 
 // NewNativeHandler creates a NativeHandler with optional CORS origins.
 // Pass a non-empty corsOrigins slice to enable CORS middleware.
 func NewNativeHandler(queue SpanQueue, validator Validator, corsOrigins []string, m *metrics.IngestMetrics) *NativeHandler {
-	return &NativeHandler{queue: queue, validator: validator, corsOrigins: corsOrigins, metrics: m}
+	return &NativeHandler{queue: queue, validator: validator, corsOrigins: corsOrigins, metrics: m, normalizer: normalizer.New()}
 }
 
 func (h *NativeHandler) Router() http.Handler {
@@ -142,16 +142,20 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate and normalize each span
+	// Normalize each span through the SpanNormalizer seam
+	now := time.Now()
 	domainSpans := make([]*domain.Span, 0, len(req.Spans))
 	for _, ns := range req.Spans {
-		if err := h.validateAndTransform(ns, vk); err != nil {
+		raw := toRawMap(ns, vk)
+		span, err := h.normalizer.Normalize(r.Context(), raw)
+		if err != nil {
 			slog.Warn("ingest: validation error", "span_id", ns.SpanID, "error", err.Error())
 			http.Error(w, fmt.Sprintf("invalid span: %v", err), http.StatusBadRequest)
 			return
 		}
-		h.normalizeInputOutput(ns)
-		domainSpans = append(domainSpans, nsToDomain(ns, vk))
+		span.StartTime = now
+		span.EndTime = now
+		domainSpans = append(domainSpans, span)
 	}
 
 	// Enqueue to Redis
@@ -174,134 +178,38 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-func (h *NativeHandler) validateAndTransform(ns *NativeSpan, vk *auth.ValidatedKey) error {
-	// Validate span_id: required, exactly 8 hex bytes = 16 hex chars
-	if ns.SpanID == "" {
-		return fmt.Errorf("span_id is required")
+// toRawMap converts a NativeSpan to a raw map for the SpanNormalizer,
+// injecting project_id and service_name from the validated key.
+func toRawMap(ns *NativeSpan, vk *auth.ValidatedKey) map[string]any {
+	raw := map[string]any{
+		"span_id":         ns.SpanID,
+		"trace_id":        ns.TraceID,
+		"project_id":      vk.ProjectID,
+		"service_name":    vk.ServiceName,
+		"name":            ns.Name,
+		"model":           ns.Model,
+		"input_tokens":    ns.InputTokens,
+		"output_tokens":   ns.OutputTokens,
+		"prompt_name":     ns.PromptName,
+		"prompt_version":  ns.PromptVersion,
 	}
-	if len(ns.SpanID) != 16 {
-		return fmt.Errorf("span_id must be a 16-character lowercase hex string (0-9, a-f), got %d characters", len(ns.SpanID))
+	if ns.ParentID != "" {
+		raw["parent_id"] = ns.ParentID
 	}
-	if ns.SpanID != strings.ToLower(ns.SpanID) {
-		return fmt.Errorf("span_id must be a 16-character lowercase hex string (0-9, a-f)")
+	if ns.ConversationID != "" {
+		raw["conversation_id"] = ns.ConversationID
 	}
-	if _, err := hex.DecodeString(ns.SpanID); err != nil {
-		return fmt.Errorf("span_id must be a 16-character lowercase hex string (0-9, a-f)")
-	}
-
-	// Validate trace_id: required, exactly 16 hex bytes = 32 hex chars
-	if ns.TraceID == "" {
-		return fmt.Errorf("trace_id is required")
-	}
-	if len(ns.TraceID) != 32 {
-		return fmt.Errorf("trace_id must be a 32-character lowercase hex string (0-9, a-f), got %d characters", len(ns.TraceID))
-	}
-	if ns.TraceID != strings.ToLower(ns.TraceID) {
-		return fmt.Errorf("trace_id must be a 32-character lowercase hex string (0-9, a-f)")
-	}
-	if _, err := hex.DecodeString(ns.TraceID); err != nil {
-		return fmt.Errorf("trace_id must be a 32-character lowercase hex string (0-9, a-f)")
-	}
-
-	// Validate kind
 	if ns.Kind != "" {
-		switch domain.SpanKind(ns.Kind) {
-		case domain.SpanKindLLM, domain.SpanKindTool, domain.SpanKindAgent,
-			domain.SpanKindChain, domain.SpanKindInternal:
-			// valid
-		default:
-			return fmt.Errorf("unknown span kind: %q", ns.Kind)
-		}
+		raw["kind"] = ns.Kind
 	}
-
-	return nil
-}
-
-func (h *NativeHandler) normalizeInputOutput(ns *NativeSpan) {
-	ns.Input = normalizeMessageArray(ns.Input, "user")
-	ns.Output = normalizeMessageArray(ns.Output, "assistant")
-}
-
-// normalizeMessageArray converts a plain string to a single-element JSON message array.
-// If the value is already a JSON string (starts with [ or {), it passes through.
-func normalizeMessageArray(v any, role string) any {
-	switch val := v.(type) {
-	case string:
-		trimmed := val
-		// If it looks like it's already JSON, return as-is
-		if len(trimmed) > 0 && (trimmed[0] == '[' || trimmed[0] == '{') {
-			return val
-		}
-		// Wrap plain string as a message with the given role
-		msg := map[string]any{
-			"role":    role,
-			"content": val,
-		}
-		enc, _ := json.Marshal([]any{msg})
-		return string(enc)
-	default:
-		// Already JSON or other type, pass through
-		return v
-	}
-}
-
-func nsToDomain(ns *NativeSpan, vk *auth.ValidatedKey) *domain.Span {
-	// Normalize input/output before conversion
-	var inputJSON, outputJSON string
 	if ns.Input != nil {
-		switch v := ns.Input.(type) {
-		case string:
-			inputJSON = v
-		case []any:
-			data, _ := json.Marshal(v)
-			inputJSON = string(data)
-		case map[string]any:
-			data, _ := json.Marshal(v)
-			inputJSON = string(data)
-		default:
-			inputJSON = fmt.Sprintf("%v", v)
-		}
+		raw["input"] = ns.Input
 	}
 	if ns.Output != nil {
-		switch v := ns.Output.(type) {
-		case string:
-			outputJSON = v
-		case []any:
-			data, _ := json.Marshal(v)
-			outputJSON = string(data)
-		case map[string]any:
-			data, _ := json.Marshal(v)
-			outputJSON = string(data)
-		default:
-			outputJSON = fmt.Sprintf("%v", v)
-		}
+		raw["output"] = ns.Output
 	}
-
-	var kind domain.SpanKind
-	if ns.Kind != "" {
-		kind = domain.SpanKind(ns.Kind)
+	if len(ns.Attributes) > 0 {
+		raw["attributes"] = ns.Attributes
 	}
-
-	span := &domain.Span{
-		SpanID:          ns.SpanID,
-		TraceID:         ns.TraceID,
-		ParentID:        ns.ParentID,
-		ConversationID:  ns.ConversationID,
-		ProjectID:       vk.ProjectID,
-		ServiceName:     vk.ServiceName,
-		Name:            ns.Name,
-		Kind:            kind,
-		StartTime:       time.Now(),
-		EndTime:         time.Now(),
-		Model:           ns.Model,
-		Input:           inputJSON,
-		Output:          outputJSON,
-		InputTokens:     ns.InputTokens,
-		OutputTokens:    ns.OutputTokens,
-		PromptName:      ns.PromptName,
-		PromptVersion:   ns.PromptVersion,
-		Attributes:      ns.Attributes,
-	}
-
-	return span
+	return raw
 }

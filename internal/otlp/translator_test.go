@@ -1,18 +1,28 @@
 package otlp
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/normalizer"
 )
 
-func TestTranslate_EmptyInput(t *testing.T) {
-	spans, err := Translate("proj-1", nil, Options{})
+// translateTest is a convenience wrapper for Translate that uses the real
+// normalizer so tests don't need to construct it on every call.
+func translateTest(t *testing.T, projectID string, rss []ResourceSpans, opts Options) []*domain.Span {
+	t.Helper()
+	spans, err := Translate(context.Background(), projectID, rss, opts, normalizer.New())
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("translate error: %v", err)
 	}
+	return spans
+}
+
+func TestTranslate_EmptyInput(t *testing.T) {
+	spans := translateTest(t, "proj-1", nil, Options{})
 	if len(spans) != 0 {
 		t.Errorf("got %d spans, want 0", len(spans))
 	}
@@ -32,10 +42,7 @@ func TestTranslate_SingleSpan(t *testing.T) {
 		},
 	}
 
-	spans, err := Translate("proj-1", rss, Options{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	spans := translateTest(t, "proj-1", rss, Options{})
 	if len(spans) != 1 {
 		t.Fatalf("got %d spans, want 1", len(spans))
 	}
@@ -73,10 +80,7 @@ func TestTranslate_ModelFromGenAIAttributes(t *testing.T) {
 		},
 	}
 
-	spans, err := Translate("proj-1", rss, Options{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	spans := translateTest(t, "proj-1", rss, Options{})
 
 	if spans[0].Model != "gpt-4o" {
 		t.Errorf("model: got %q, want %q", spans[0].Model, "gpt-4o")
@@ -98,10 +102,7 @@ func TestTranslate_TokenCountsFromGenAIAttributes(t *testing.T) {
 		},
 	}
 
-	spans, err := Translate("proj-1", rss, Options{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	spans := translateTest(t, "proj-1", rss, Options{})
 
 	if spans[0].InputTokens != 100 {
 		t.Errorf("input_tokens: got %d, want 100", spans[0].InputTokens)
@@ -126,10 +127,7 @@ func TestTranslate_TokenCountsFromLegacyAttributes(t *testing.T) {
 		},
 	}
 
-	spans, err := Translate("proj-1", rss, Options{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	spans := translateTest(t, "proj-1", rss, Options{})
 
 	if spans[0].InputTokens != 200 {
 		t.Errorf("input_tokens: got %d, want 200", spans[0].InputTokens)
@@ -159,10 +157,7 @@ func TestTranslate_InputOutputFromGenAIPrompt(t *testing.T) {
 		},
 	}
 
-	spans, err := Translate("proj-1", rss, Options{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	spans := translateTest(t, "proj-1", rss, Options{})
 
 	if spans[0].Input == "" {
 		t.Fatal("input is empty")
@@ -201,10 +196,7 @@ func TestTranslate_OutputFromGenAICompletion(t *testing.T) {
 		},
 	}
 
-	spans, err := Translate("proj-1", rss, Options{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	spans := translateTest(t, "proj-1", rss, Options{})
 
 	if spans[0].Output == "" {
 		t.Fatal("output is empty")
@@ -240,10 +232,7 @@ func TestTranslate_KindDerivation_GenAI(t *testing.T) {
 		},
 	}
 
-	spans, err := Translate("proj-1", rss, Options{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	spans := translateTest(t, "proj-1", rss, Options{})
 
 	if spans[0].Kind != domain.SpanKindLLM {
 		t.Errorf("kind: got %q, want %q", spans[0].Kind, domain.SpanKindLLM)
@@ -265,10 +254,7 @@ func TestTranslate_KindDerivation_Tool(t *testing.T) {
 		},
 	}
 
-	spans, err := Translate("proj-1", rss, Options{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	spans := translateTest(t, "proj-1", rss, Options{})
 
 	if spans[0].Kind != domain.SpanKindTool {
 		t.Errorf("kind: got %q, want %q", spans[0].Kind, domain.SpanKindTool)
@@ -290,10 +276,7 @@ func TestTranslate_KindDerivation_ExplicitOmnevalKind(t *testing.T) {
 		},
 	}
 
-	spans, err := Translate("proj-1", rss, Options{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	spans := translateTest(t, "proj-1", rss, Options{})
 
 	// Explicit omneval.kind should win over gen_ai heuristic.
 	if spans[0].Kind != domain.SpanKindInternal {
@@ -316,10 +299,7 @@ func TestTranslate_KindDerivation_DefaultInternal(t *testing.T) {
 		},
 	}
 
-	spans, err := Translate("proj-1", rss, Options{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	spans := translateTest(t, "proj-1", rss, Options{})
 
 	if spans[0].Kind != domain.SpanKindInternal {
 		t.Errorf("kind: got %q, want %q (default should be internal)", spans[0].Kind, domain.SpanKindInternal)
@@ -341,10 +321,7 @@ func TestTranslate_ServiceNameOverride(t *testing.T) {
 		},
 	}
 
-	spans, err := Translate("proj-1", rss, Options{ServiceNameOverride: "api-service"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	spans := translateTest(t, "proj-1", rss, Options{ServiceNameOverride: "api-service"})
 
 	if spans[0].ServiceName != "api-service" {
 		t.Errorf("service_name: got %q, want %q (override should win)", spans[0].ServiceName, "api-service")
@@ -371,10 +348,7 @@ func TestTranslate_AttributesOverflow(t *testing.T) {
 		},
 	}
 
-	spans, err := Translate("proj-1", rss, Options{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	spans := translateTest(t, "proj-1", rss, Options{})
 
 	// Extracted fields should NOT be in overflow.
 	if _, hasModel := spans[0].Attributes["gen_ai.request.model"]; hasModel {
@@ -409,10 +383,7 @@ func TestTranslate_ParentSpan(t *testing.T) {
 		},
 	}
 
-	spans, err := Translate("proj-1", rss, Options{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	spans := translateTest(t, "proj-1", rss, Options{})
 
 	if spans[0].ParentID != "0123456789abcdef" {
 		t.Errorf("parent_id: got %q, want %q", spans[0].ParentID, "0123456789abcdef")
@@ -441,10 +412,7 @@ func TestTranslate_NoTokenAttributes(t *testing.T) {
 		},
 	}
 
-	spans, err := Translate("proj-1", rss, Options{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	spans := translateTest(t, "proj-1", rss, Options{})
 	if len(spans) != 1 {
 		t.Fatalf("got %d spans, want 1", len(spans))
 	}
@@ -473,10 +441,7 @@ func TestTranslate_MultipleResourceSpans(t *testing.T) {
 		},
 	}
 
-	spans, err := Translate("proj-1", rss, Options{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	spans := translateTest(t, "proj-1", rss, Options{})
 
 	if len(spans) != 3 {
 		t.Fatalf("got %d spans, want 3", len(spans))
