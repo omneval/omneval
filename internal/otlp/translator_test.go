@@ -480,3 +480,30 @@ func TestTranslate_StartTimeEndTimePreserved(t *testing.T) {
 		t.Errorf("EndTime: got %v, want %v", spans[0].EndTime, end)
 	}
 }
+
+func TestTranslate_StatusCodeAndMessagePreserved(t *testing.T) {
+	rss := []ResourceSpans{{
+		Resource: Resource{Attributes: map[string]any{"service.name": "svc-1"}},
+		Spans: []*Span{{
+			SpanID:     "0123456789abcdef",
+			TraceID:    "0123456789abcdef0123456789abcdef",
+			Name:       "test-span",
+			StartTime:  time.Now(),
+			EndTime:    time.Now(),
+			StatusCode: "ERROR",
+			StatusMsg:  "boom",
+		}},
+	}}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	if spans[0].StatusCode != "ERROR" {
+		t.Errorf("StatusCode: got %q, want %q", spans[0].StatusCode, "ERROR")
+	}
+	if spans[0].StatusMessage != "boom" {
+		t.Errorf("StatusMessage: got %q, want %q", spans[0].StatusMessage, "boom")
+	}
+}
