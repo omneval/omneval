@@ -15,8 +15,6 @@ interface HeaderProps {
   onNewProject: () => void;
   timeRange: string;
   onTimeRangeChange: (range: string) => void;
-  environment: string;
-  onEnvironmentChange: (env: string) => void;
 }
 
 interface TimeRangeOption {
@@ -34,8 +32,6 @@ const TIME_RANGES: TimeRangeOption[] = [
   { label: "Past 30 days", value: "30d" },
   { label: "Custom...", value: "custom" },
 ];
-
-const ENVIRONMENTS = ["default", "production", "staging", "development"];
 
 // ── Components ─────────────────────────────────────────────────────
 
@@ -60,7 +56,9 @@ function Dropdown({
         onClick={() => setOpen(!open)}
         className="flex items-center gap-2 px-2.5 py-1.5 text-sm rounded-md bg-omneval-surface border border-omneval-border text-omneval-text-muted hover:border-omneval-violet hover:text-omneval-text-pure transition-all duration-150"
       >
-        <span className="text-omneval-text-muted font-medium">{label}:</span>
+        <span className="text-omneval-text-muted font-mono text-[10px] uppercase tracking-wider">
+          {label}
+        </span>
         <span className="text-omneval-text-pure">{selected?.label ?? value}</span>
         <svg
           width="12"
@@ -109,23 +107,6 @@ function Dropdown({
   );
 }
 
-function EnvironmentBadge({ env }: { env: string }) {
-  const colorMap: Record<string, string> = {
-    production: "text-amber-400 bg-amber-400/10 border border-amber-400/20",
-    staging: "text-omneval-cyan-light bg-omneval-cyan/10 border border-omneval-cyan/20",
-    development: "text-omneval-text-muted bg-omneval-surface border border-omneval-border",
-    default: "text-omneval-text-muted bg-omneval-surface border border-omneval-border",
-  };
-
-  const cls = colorMap[env] ?? colorMap.default;
-
-  return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
-      {env}
-    </span>
-  );
-}
-
 // ── Header Component ───────────────────────────────────────────────
 
 export default function Header({
@@ -135,8 +116,6 @@ export default function Header({
   onNewProject,
   timeRange,
   onTimeRangeChange,
-  environment,
-  onEnvironmentChange,
 }: HeaderProps) {
   return (
     <header
@@ -174,18 +153,6 @@ export default function Header({
           options={TIME_RANGES}
           onChange={onTimeRangeChange}
         />
-
-        <Dropdown
-          label="Environment"
-          value={environment}
-          options={ENVIRONMENTS.map((e) => ({ label: e, value: e }))}
-          onChange={onEnvironmentChange}
-        />
-      </div>
-
-      {/* Right: environment info only — logout in sidebar */}
-      <div className="flex items-center gap-3">
-        <EnvironmentBadge env={environment} />
       </div>
     </header>
   );

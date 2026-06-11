@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   LineChart,
   Line,
@@ -99,6 +99,25 @@ function presetToFromTo(preset: string | undefined): { from: string; to: string 
     from: from.toISOString(),
     to: now.toISOString(),
   };
+}
+
+/**
+ * Format an ISO timestamp for a datetime-local input, which expects
+ * *local* wall-clock time ("YYYY-MM-DDTHH:mm") with no timezone suffix.
+ * Slicing toISOString() here would display UTC and shift the picker by
+ * the user's UTC offset.
+ */
+function toLocalInputValue(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Parse a datetime-local input value (local time) back to a UTC ISO string. */
+function fromLocalInputValue(value: string): string | null {
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 // ── Card Wrapper ───────────────────────────────────────────────────
@@ -733,7 +752,12 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
   // Token Usage tab data
   const [tokenUsageData, setTokenUsageData] = useState<CostData[]>([]);
 
+  // Monotonic sequence so a slow in-flight response (e.g. for a previous
+  // project) can never overwrite the latest results.
+  const requestSeq = useRef(0);
+
   const fetchData = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     setError(null);
     try {
@@ -844,77 +868,63 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         }),
       ]);
 
-      if (tracesByNameResp.ok) {
-        const data = await tracesByNameResp.json();
-        if (data.rows) {
-          setTracesByName(
-            data.rows.map((row: Record<string, unknown>) => ({
-              name: (row.model as string) || "unknown",
-              count: Number(row.count) || 0,
-            })),
-          );
-        }
-      }
+      // Parse all responses, then bail if a newer request superseded this
+      // one. Every widget's state is always set — a response with no rows
+      // (Go marshals empty slices as null) must clear the previous
+      // project's data rather than leave it on screen.
+      const [
+        tracesByNameData,
+        tracesByTimeData,
+        tokenUsageJson,
+        modelCostsJson,
+        userConsumptionJson,
+      ] = await Promise.all([
+        tracesByNameResp.ok ? tracesByNameResp.json() : { rows: [] },
+        tracesByTimeResp.ok ? tracesByTimeResp.json() : { rows: [] },
+        tokenUsageResp.ok ? tokenUsageResp.json() : { rows: [] },
+        modelCostsResp.ok ? modelCostsResp.json() : { rows: [] },
+        userConsumptionResp.ok ? userConsumptionResp.json() : { rows: [] },
+      ]);
 
-      if (tracesByTimeResp.ok) {
-        const data = await tracesByTimeResp.json();
-        if (data.rows) {
-          setTracesByTime(
-            data.rows
-              .map((row: Record<string, unknown>) => ({
-                time: extractRawTime(row),
-                count: Number(row.count) || 0,
-              }))
-              .filter((d: TimeSeriesData) => d.time > 0),
-          );
-        }
-      }
+      if (seq !== requestSeq.current) return;
 
-      if (tokenUsageResp.ok) {
-        const data = await tokenUsageResp.json();
-        if (data.rows) {
-          setTokenUsageData(
-            data.rows.map((row: Record<string, unknown>) => ({
-              model: (row.model as string) || "unknown",
-              inputTokens: Number(row.input_tokens) || 0,
-              outputTokens: Number(row.output_tokens) || 0,
-              totalCost: Number(row.total_cost) || 0,
-            })),
-          );
-        }
-      }
+      const mapCostRows = (rows: Record<string, unknown>[]): CostData[] =>
+        rows.map((row) => ({
+          model: (row.model as string) || "unknown",
+          inputTokens: Number(row.input_tokens) || 0,
+          outputTokens: Number(row.output_tokens) || 0,
+          totalCost: Number(row.total_cost) || 0,
+        }));
 
-      if (modelCostsResp.ok) {
-        const data = await modelCostsResp.json();
-        if (data.rows) {
-          setModelCosts(
-            data.rows.map((row: Record<string, unknown>) => ({
-              model: (row.model as string) || "unknown",
-              inputTokens: Number(row.input_tokens) || 0,
-              outputTokens: Number(row.output_tokens) || 0,
-              totalCost: Number(row.total_cost) || 0,
-            })),
-          );
-        }
-      }
-
-      if (userConsumptionResp.ok) {
-        const data = await userConsumptionResp.json();
-        if (data.rows) {
-          setUserConsumption(
-            data.rows.map((row: Record<string, unknown>) => ({
-              user: (row.service_name as string) || "anonymous",
-              count: Number(row.count) || 0,
-            })),
-          );
-        }
-      }
+      setTracesByName(
+        (tracesByNameData.rows ?? []).map((row: Record<string, unknown>) => ({
+          name: (row.model as string) || "unknown",
+          count: Number(row.count) || 0,
+        })),
+      );
+      setTracesByTime(
+        (tracesByTimeData.rows ?? [])
+          .map((row: Record<string, unknown>) => ({
+            time: extractRawTime(row),
+            count: Number(row.count) || 0,
+          }))
+          .filter((d: TimeSeriesData) => d.time > 0),
+      );
+      setTokenUsageData(mapCostRows(tokenUsageJson.rows ?? []));
+      setModelCosts(mapCostRows(modelCostsJson.rows ?? []));
+      setUserConsumption(
+        (userConsumptionJson.rows ?? []).map((row: Record<string, unknown>) => ({
+          user: (row.service_name as string) || "anonymous",
+          count: Number(row.count) || 0,
+        })),
+      );
     } catch (err) {
+      if (seq !== requestSeq.current) return;
       const msg = err instanceof Error ? err.message : "Failed to load dashboard data";
       setError(msg);
       console.error("Dashboard fetch error:", err);
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, [activeProject, from, to]);
 
@@ -939,8 +949,11 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
             <label className="text-sm text-omneval-text-muted">From:</label>
             <input
               type="datetime-local"
-              value={new Date(from).toISOString().slice(0, 16)}
-              onChange={(e) => setFrom(e.target.value)}
+              value={toLocalInputValue(from)}
+              onChange={(e) => {
+                const iso = fromLocalInputValue(e.target.value);
+                if (iso) setFrom(iso);
+              }}
               className="input-focus text-sm px-2 py-1 rounded-md border border-omneval-border bg-omneval-surface text-omneval-text-pure"
               style={{
                 colorScheme: "dark",
@@ -951,8 +964,11 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
             <label className="text-sm text-omneval-text-muted">To:</label>
             <input
               type="datetime-local"
-              value={new Date(to).toISOString().slice(0, 16)}
-              onChange={(e) => setTo(e.target.value)}
+              value={toLocalInputValue(to)}
+              onChange={(e) => {
+                const iso = fromLocalInputValue(e.target.value);
+                if (iso) setTo(iso);
+              }}
               className="input-focus text-sm px-2 py-1 rounded-md border border-omneval-border bg-omneval-surface text-omneval-text-pure"
               style={{
                 colorScheme: "dark",
