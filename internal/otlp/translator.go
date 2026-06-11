@@ -57,9 +57,6 @@ func Translate(ctx context.Context, projectID string, rss []ResourceSpans, opts 
 			if err != nil {
 				return nil, fmt.Errorf("normalize otlp span %s: %w", s.SpanID, err)
 			}
-			// Restore OTLP-specific fields that the normalizer doesn't set
-			span.StatusCode = s.StatusCode
-			span.StatusMessage = s.StatusMsg
 			spans = append(spans, span)
 		}
 	}
@@ -150,6 +147,12 @@ func toRawMap(projectID string, resource Resource, span Span, opts Options) map[
 	}
 	if !span.EndTime.IsZero() {
 		raw["end_time"] = span.EndTime
+	}
+	if span.StatusCode != "" {
+		raw["status_code"] = span.StatusCode
+	}
+	if span.StatusMsg != "" {
+		raw["status_message"] = span.StatusMsg
 	}
 	if len(overflow) > 0 {
 		raw["attributes"] = overflow

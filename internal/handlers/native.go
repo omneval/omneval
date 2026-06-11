@@ -89,6 +89,9 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("invalid span: %v", err), http.StatusBadRequest)
 			return
 		}
+		// Native spans don't carry client-supplied timestamps, so use
+		// ingestion time for both StartTime and EndTime, overriding
+		// whatever the normalizer derived from the (empty) raw map.
 		span.StartTime = now
 		span.EndTime = now
 		domainSpans = append(domainSpans, span)
