@@ -724,6 +724,117 @@ describe("search", () => {
   });
 });
 
+// ── Data correctness tests (filters, project switch, time range) ──
+
+describe("fetch correctness", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("every fetch after applying a filter includes the new filter state (no stale-closure fetch)", async () => {
+    const fetchBodies: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (init?.body) fetchBodies.push(String(init.body));
+      return {
+        ok: true,
+        json: () => Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response;
+    });
+
+    renderTracesPage();
+    await waitFor(() => {
+      expect(fetchBodies.length).toBeGreaterThanOrEqual(1);
+    });
+
+    // Expand the Model filter and apply "gpt-4"
+    const modelHeader = screen.getByText("Model");
+    await act(async () => {
+      fireEvent.click(modelHeader);
+    });
+    const modelBorderDiv = modelHeader.closest("div.border-b") as HTMLElement;
+    const expanded = modelBorderDiv.querySelector("div.px-3") as HTMLElement;
+    const input = expanded.querySelector<HTMLInputElement>('input[type="text"]');
+    await act(async () => {
+      fireEvent.change(input!, { target: { value: "gpt-4" } });
+    });
+    await act(async () => {
+      fireEvent.click(expanded.querySelector("button") as HTMLButtonElement);
+    });
+
+    await waitFor(() => {
+      expect(fetchBodies.length).toBeGreaterThanOrEqual(2);
+    });
+    // Let any further effect-driven fetches settle
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 400));
+    });
+
+    // Every fetch issued AFTER the apply must carry the model filter. A
+    // stale-closure fetch (issued with the pre-apply filter state) is the
+    // bug that makes filters appear to "not work" and can race the correct
+    // response.
+    const postApply = fetchBodies.slice(1);
+    expect(postApply.length).toBeGreaterThanOrEqual(1);
+    for (const body of postApply) {
+      expect(body).toContain("gpt-4");
+    }
+  });
+
+  it("does not keep showing the previous project's spans after switching projects", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      if (body.project_id === "test-project") {
+        return {
+          ok: true,
+          json: () => Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+        } as Response;
+      }
+      // The other project errors out — old rows must still be cleared.
+      return { ok: false, json: () => Promise.resolve({}) } as Response;
+    });
+
+    const view = renderTracesPage();
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    view.rerender(
+      <TracesPage
+        activeProject="other-project"
+        onNavigateToTrace={() => {}}
+        onNavigateToTraceDetail={() => {}}
+        onNavigateToConversation={() => {}}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("main-trace")).not.toBeInTheDocument();
+    });
+  });
+
+  it("uses the header time range preset for the query window", async () => {
+    const fetchBodies: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (init?.body) fetchBodies.push(String(init.body));
+      return {
+        ok: true,
+        json: () => Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response;
+    });
+
+    renderTracesPage({ timeRange: "1h" });
+    await waitFor(() => {
+      expect(fetchBodies.length).toBeGreaterThanOrEqual(1);
+    });
+
+    const body = JSON.parse(fetchBodies[0]);
+    const diffMs =
+      new Date(body.to).getTime() - new Date(body.from).getTime();
+    expect(diffMs).toBeGreaterThanOrEqual(59 * 60 * 1000);
+    expect(diffMs).toBeLessThanOrEqual(61 * 60 * 1000);
+  });
+});
+
 // ── Pagination tests ─────────────────────────────────────────────
 
 describe("pagination", () => {

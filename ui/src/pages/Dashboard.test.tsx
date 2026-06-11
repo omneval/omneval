@@ -67,6 +67,47 @@ describe("DashboardPage", () => {
     }
   });
 
+  it("clears the previous project's data when switching to a project with no rows", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (url === "/api/v1/analytics/spans" && options?.body) {
+        const body = JSON.parse(options.body as string);
+        if (body.project_id === "proj-1") {
+          return resolveAnalyticsResponse({
+            rows: [
+              {
+                model: "gpt-4-from-proj-1",
+                count: 150,
+                input_tokens: 10000,
+                output_tokens: 5000,
+                total_cost: 1.23,
+              },
+            ],
+          });
+        }
+        // Go's JSON encoder marshals empty slices as null — the UI must
+        // treat that as "no data", not "keep the old data".
+        return resolveAnalyticsResponse({ rows: null });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    const view = renderWithToast(<DashboardPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("gpt-4-from-proj-1").length).toBeGreaterThan(0);
+    });
+
+    view.rerender(
+      <ToastProvider>
+        <DashboardPage activeProject="proj-2" />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("gpt-4-from-proj-1")).not.toBeInTheDocument();
+    });
+  });
+
   it("displays traces by model chart when data is returned", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       if (url === "/api/v1/analytics/spans") {

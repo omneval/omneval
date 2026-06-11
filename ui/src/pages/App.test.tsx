@@ -257,6 +257,94 @@ describe("URL sync on sidebar navigation", () => {
   });
 });
 
+// ── Browser history navigation (popstate) ───────────────────────
+
+describe("browser back/forward navigation", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const urlStr = String(url);
+      if (urlStr === "/api/v1/me") {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              user_id: "user-1",
+              email: "alice@example.com",
+              projects: mockProjects,
+            }),
+        } as Response;
+      }
+      if (urlStr.startsWith("/api/v1/prompts")) {
+        return {
+          ok: true,
+          json: () => Promise.resolve([]),
+        } as Response;
+      }
+      return {
+        ok: false,
+        json: () => Promise.resolve({}),
+      } as Response;
+    });
+    window.history.replaceState({}, "", "/");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("pressing browser back after navigating to Traces returns to Dashboard", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(
+      () => {
+        expect(screen.getByText("Test Project")).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+
+    // Navigate Dashboard → Traces via the sidebar
+    await user.click(screen.getByRole("button", { name: /^traces$/i }));
+    expect(window.location.pathname).toBe("/traces");
+    await waitFor(() => {
+      expect(screen.getByText("Filters")).toBeInTheDocument();
+    });
+
+    // Simulate the browser back button: URL returns to "/" and a popstate
+    // event fires. The app must react and render the Dashboard again.
+    window.history.replaceState({}, "", "/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: "Dashboard" })
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Filters")).toBeNull();
+  });
+
+  it("popstate to /prompts renders the Prompts page", async () => {
+    render(<App />);
+
+    await waitFor(
+      () => {
+        expect(screen.getByText("Test Project")).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+
+    window.history.replaceState({}, "", "/prompts");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /prompt registry/i })
+      ).toBeInTheDocument();
+    });
+  });
+});
+
 // ── Project setting persistence (issue #56) ─────────────────────
 
 describe("project setting persistence across page refresh", () => {

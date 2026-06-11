@@ -9,6 +9,7 @@ import {
   formatJsonPreview,
   totalTokens,
 } from "@/utils/formatters";
+import { presetToFromTo } from "@/utils/timeRange";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -20,6 +21,8 @@ interface TracesPageProps {
   /** Tab shown on mount — lets the back button from ConversationDetail
    *  return to the Conversations tab rather than the default Traces tab. */
   initialTab?: "traces" | "conversations";
+  /** Time-range preset from the Header (e.g. "1h", "1d", "7d"). */
+  timeRange?: string;
 }
 
 interface Span {
@@ -295,7 +298,7 @@ function TextFilter({
         className="text-xs px-2 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
         style={{
           background: colors.accents.emberFlare,
-          boxShadow: "0 1px 4px rgba(255, 87, 34, 0.2)",
+          boxShadow: "0 1px 4px rgba(124, 58, 237, 0.25)",
         }}
       >
         Apply
@@ -406,7 +409,7 @@ function RangeFilterField({
         className="text-xs px-2 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
         style={{
           background: colors.accents.emberFlare,
-          boxShadow: "0 1px 4px rgba(255, 87, 34, 0.2)",
+          boxShadow: "0 1px 4px rgba(124, 58, 237, 0.25)",
         }}
       >
         Apply
@@ -602,8 +605,6 @@ function TableCellRenderer({
           ${span.cost_usd.toFixed(4)}
         </span>
       );
-    case "environment":
-      return <span key={col.key} className="text-omneval-text-muted text-xs">default</span>;
     default:
       return null;
   }
@@ -645,7 +646,7 @@ function PaginationControls({
   const buttonStyle: React.CSSProperties = hasMore
     ? {
         background: colors.accents.emberFlare,
-        boxShadow: "0 2px 8px rgba(255, 87, 34, 0.25)",
+        boxShadow: "0 2px 8px rgba(124, 58, 237, 0.3)",
       }
     : {
         background: colors.backgrounds.caveWall,
@@ -690,17 +691,25 @@ export default function TracesPage({
   onNavigateToTraceDetail,
   onNavigateToConversation,
   initialTab,
+  timeRange,
 }: TracesPageProps) {
   const [spans, setSpans] = useState<Span[]>([]);
   const [nextCursor, setNextCursor] = useState("");
   const [loading, setLoading] = useState(false);
   const [pageSize, setPageSize] = useState(25);
   const [searchQuery, setSearchQuery] = useState("");
-  const searchQueryRef = useRef(searchQuery);
-  // Keep ref in sync so fetchSpans always reads the latest value.
+  // Debounced copy of the search query — fetches are driven by this value
+  // so a fetch fires shortly after the user stops typing instead of one
+  // racing request per keystroke.
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   useEffect(() => {
-    searchQueryRef.current = searchQuery;
+    const t = setTimeout(() => setDebouncedQuery(searchQuery), 250);
+    return () => clearTimeout(t);
   }, [searchQuery]);
+  // Monotonic sequence number for span fetches. Responses that arrive for
+  // an outdated sequence are dropped so a slow stale request can never
+  // overwrite the latest results (filters/search/project switches race).
+  const requestSeq = useRef(0);
   const [activeTab, setActiveTab] = useState<"traces" | "conversations">(
     initialTab ?? "traces",
   );
@@ -715,7 +724,6 @@ export default function TracesPage({
     latency: true,
     tokens: true,
     cost: true,
-    environment: true,
   });
 
   // Filters
@@ -737,7 +745,6 @@ export default function TracesPage({
     { key: "latency", label: "Latency", visible: columnVisibility.latency },
     { key: "tokens", label: "Tokens", visible: columnVisibility.tokens },
     { key: "cost", label: "Cost", visible: columnVisibility.cost },
-    { key: "environment", label: "Env", visible: columnVisibility.environment },
   ];
 
   const columnTooltips: Record<string, string> = {
@@ -749,32 +756,29 @@ export default function TracesPage({
     latency: "Duration of the span",
     tokens: "Total token count (input + output)",
     cost: "Estimated cost in USD",
-    environment: "Deployment environment",
   };
 
   const fetchSpans = useCallback(
     async (cursor: string, append = false) => {
+      const seq = ++requestSeq.current;
       setLoading(true);
       try {
+        const { from, to } = presetToFromTo(timeRange);
         const body: SpanQueryRequest = {
           project_id: activeProject,
-          from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-          to: new Date().toISOString(),
+          from,
+          to,
           limit: pageSize,
         };
 
         if (cursor) body.cursor = cursor;
 
-        // Apply text search — always read from the ref to avoid stale
-        // closures (e.g. when onChange calls fetchSpans synchronously
-        // before React has re-rendered with the new state).
-        const currentQuery = searchQueryRef.current;
-        if (currentQuery) {
+        if (debouncedQuery) {
           // "contains" compiles server-side to LIKE '%value%'. The substring
           // wrapping is applied by the query compiler, so the raw term is sent
           // as-is. ("ilike" is not in the operator allowlist and 400s.)
           body.filters = [
-            { field: "name", op: "contains", value: currentQuery },
+            { field: "name", op: "contains", value: debouncedQuery },
           ];
         }
 
@@ -796,25 +800,40 @@ export default function TracesPage({
           return;
         }
 
+        // A newer request was started while this one was in flight —
+        // discard this response so it can't overwrite fresher data.
+        if (seq !== requestSeq.current) return;
+
         if (res.ok) {
           const data: SpanQueryResponse = await res.json();
+          if (seq !== requestSeq.current) return;
           if (append) {
             setSpans((prev) => [...prev, ...(data.spans ?? [])]);
           } else {
             setSpans(data.spans ?? []);
           }
           setNextCursor(data.next ?? "");
+        } else if (!append) {
+          // The query failed for the current parameters (e.g. after a
+          // project switch). Showing the previous results would attribute
+          // them to the wrong project — clear instead.
+          setSpans([]);
+          setNextCursor("");
         }
       } finally {
-        setLoading(false);
+        if (seq === requestSeq.current) setLoading(false);
       }
     },
-    [activeProject, pageSize, filterState, searchQueryRef],
+    [activeProject, pageSize, filterState, debouncedQuery, timeRange],
   );
 
+  // Single fetch driver: any change to project, page size, filters, search
+  // or time range changes fetchSpans' identity and triggers exactly one
+  // fresh (non-append) fetch. Event handlers only update state — they never
+  // call fetchSpans directly, which previously caused stale-closure fetches.
   useEffect(() => {
     fetchSpans("");
-  }, [activeProject, pageSize, fetchSpans]);
+  }, [fetchSpans]);
 
   // Auto-refresh effect
   useEffect(() => {
@@ -854,11 +873,11 @@ export default function TracesPage({
   };
 
   const applyFilter = (field: string, val: string[] | RangeFilter) => {
+    // State change alone re-triggers the fetch effect with the new filters.
     setFilterState((prev) => ({
       ...prev,
       [field]: val,
     }));
-    fetchSpans("", false);
   };
 
   // Reconstruct parent-child relationships from the flat span list.
@@ -901,7 +920,6 @@ export default function TracesPage({
             onClick={() => {
               setFilterState(DEFAULT_FILTERS);
               setExpandedFilters({ trace_name: true });
-              fetchSpans("", false);
             }}
             className="w-full text-center text-sm py-1.5 rounded transition-colors"
             style={{
@@ -964,11 +982,7 @@ export default function TracesPage({
             type="text"
             placeholder="Search by ID/Name..."
             value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value);
-              searchQueryRef.current = e.target.value;
-              fetchSpans("", false);
-            }}
+            onChange={(e) => setSearchQuery(e.target.value)}
             className="input-focus w-48 text-sm px-2.5 py-1.5 rounded border border-omneval-border bg-omneval-depth text-omneval-text-pure placeholder-omneval-text-muted"
           />
           )}
@@ -1133,7 +1147,7 @@ export default function TracesPage({
                       }}
                       onMouseEnter={(e) => {
                         (e.currentTarget as HTMLElement).style.background =
-                          `rgba(255, 204, 188, 0.1)`;
+                          "rgba(124, 58, 237, 0.12)";
                       }}
                       onMouseLeave={(e) => {
                         (e.currentTarget as HTMLElement).style.background = "transparent";
@@ -1333,7 +1347,7 @@ function ConversationsView({
             nextCursor
               ? {
                   background: colors.accents.emberFlare,
-                  boxShadow: "0 2px 8px rgba(255, 87, 34, 0.25)",
+                  boxShadow: "0 2px 8px rgba(124, 58, 237, 0.3)",
                 }
               : { background: colors.backgrounds.caveWall, boxShadow: "none" }
           }

@@ -90,7 +90,6 @@ export default function App() {
   const [traceDetailReturnTo, setTraceDetailReturnTo] = useState<Page>("traces");
 
   const [timeRange, setTimeRange] = useState("1d");
-  const [environment, setEnvironment] = useState("default");
   const [showNewProject, setShowNewProject] = useState(false);
 
   // Persist active project to localStorage whenever it changes
@@ -165,6 +164,19 @@ export default function App() {
       });
   }, []);
 
+  // React to browser back/forward: re-derive the page from the URL whenever
+  // a popstate event fires. Without this, pushState-based navigation makes
+  // the back button change the URL but not the rendered page.
+  useEffect(() => {
+    const onPopState = () => {
+      setPage((current) =>
+        current === "login" ? current : pageFromPathname(window.location.pathname)
+      );
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
   const fetchProjects = useCallback(async (_session: string) => {
     const res = await fetch("/api/v1/projects");
     if (res.ok) {
@@ -202,7 +214,6 @@ export default function App() {
     setProjects([]);
     setActiveProject("");
     setTimeRange("1d");
-    setEnvironment("default");
     setPage("login");
   };
 
@@ -251,8 +262,6 @@ export default function App() {
         onNewProject={handleNewProjectTrigger}
         timeRange={timeRange}
         onTimeRangeChange={setTimeRange}
-        environment={environment}
-        onEnvironmentChange={setEnvironment}
       />
 
       {/* Main Content */}
@@ -271,6 +280,7 @@ export default function App() {
             {page === "traces" && (
               <TracesPage
                 activeProject={activeProject}
+                timeRange={timeRange}
                 initialTab={tracesInitialTab}
                 onNavigateToTrace={setActiveTraceId}
                 onNavigateToTraceDetail={() => {
