@@ -453,3 +453,30 @@ func TestTranslate_MultipleResourceSpans(t *testing.T) {
 		t.Errorf("span 2 service_name: got %q, want %q", spans[2].ServiceName, "svc-b")
 	}
 }
+
+func TestTranslate_StartTimeEndTimePreserved(t *testing.T) {
+	start := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	end := time.Date(2024, 1, 15, 10, 30, 5, 0, time.UTC)
+	rss := []ResourceSpans{{
+		Resource: Resource{Attributes: map[string]any{"service.name": "svc-1"}},
+		Spans: []*Span{{
+			SpanID:    "0123456789abcdef",
+			TraceID:   "0123456789abcdef0123456789abcdef",
+			Name:      "test-span",
+			StartTime: start,
+			EndTime:   end,
+		}},
+	}}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	if !spans[0].StartTime.Equal(start) {
+		t.Errorf("StartTime: got %v, want %v", spans[0].StartTime, start)
+	}
+	if !spans[0].EndTime.Equal(end) {
+		t.Errorf("EndTime: got %v, want %v", spans[0].EndTime, end)
+	}
+}

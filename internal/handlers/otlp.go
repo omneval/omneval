@@ -41,7 +41,7 @@ type Validator interface {
 type OTLPHandler struct {
 	queue      SpanQueue
 	validator  Validator
-	normalizer normalizer.SpanNormalizer
+	normalizer domain.SpanNormalizer
 }
 
 // NewOTLPHandler creates a new OTLPHandler.

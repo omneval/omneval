@@ -6,22 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/omneval/omneval/internal/domain"
 )
 
-// SpanNormalizer validates, normalizes, and converts raw span maps into
-// domain.Span values. It carries all domain rules behind a clean interface
-// so that the Native handler and OTLP translator call it through a seam.
-type SpanNormalizer interface {
-	Normalize(ctx context.Context, raw map[string]any) (*domain.Span, error)
-}
-
-// defaultNormalizer is the concrete implementation of SpanNormalizer.
+// defaultNormalizer is the concrete implementation of domain.SpanNormalizer.
 type defaultNormalizer struct{}
 
-// New returns a SpanNormalizer ready for use.
-func New() SpanNormalizer {
+// New returns a domain.SpanNormalizer ready for use.
+func New() domain.SpanNormalizer {
 	return &defaultNormalizer{}
 }
 
@@ -63,6 +57,8 @@ func (n *defaultNormalizer) Normalize(_ context.Context, raw map[string]any) (*d
 		ServiceName:    getStringField(raw, "service_name"),
 		Name:           getStringField(raw, "name"),
 		Kind:           kind,
+		StartTime:      getTimeField(raw, "start_time"),
+		EndTime:        getTimeField(raw, "end_time"),
 		Model:          getStringField(raw, "model"),
 		Input:          spanValueToString(input),
 		Output:         spanValueToString(output),
@@ -124,6 +120,19 @@ func getAttributes(raw map[string]any) map[string]any {
 		return attrs
 	default:
 		return nil
+	}
+}
+
+func getTimeField(raw map[string]any, key string) time.Time {
+	v, ok := raw[key]
+	if !ok {
+		return time.Time{}
+	}
+	switch val := v.(type) {
+	case time.Time:
+		return val
+	default:
+		return time.Time{}
 	}
 }
 

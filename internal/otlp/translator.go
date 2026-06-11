@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
-	"github.com/omneval/omneval/internal/normalizer"
 )
 
 // Resource represents a normalized OTLP Resource (resource-level attributes).
@@ -49,7 +48,7 @@ type Options struct {
 // projectID is attached to every span. opts controls system-prompt logging
 // and service-name override for service-scoped API keys.
 // normalizer validates and normalizes each translated span.
-func Translate(ctx context.Context, projectID string, rss []ResourceSpans, opts Options, normalizer normalizer.SpanNormalizer) ([]*domain.Span, error) {
+func Translate(ctx context.Context, projectID string, rss []ResourceSpans, opts Options, normalizer domain.SpanNormalizer) ([]*domain.Span, error) {
 	spans := make([]*domain.Span, 0, totalSpanCount(rss))
 	for _, rs := range rss {
 		for _, s := range rs.Spans {

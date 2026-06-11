@@ -61,7 +61,7 @@ type NativeHandler struct {
 	validator   Validator
 	corsOrigins []string
 	metrics     *metrics.IngestMetrics
-	normalizer  normalizer.SpanNormalizer
+	normalizer  domain.SpanNormalizer
 }
 
 // NewNativeHandler creates a NativeHandler with optional CORS origins.

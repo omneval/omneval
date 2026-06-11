@@ -39,7 +39,7 @@ type NativeHandler struct {
 	queue       SpanQueue
 	validator   Validator
 	corsOrigins []string
-	normalizer  normalizer.SpanNormalizer
+	normalizer  domain.SpanNormalizer
 }
 
 // NewNativeHandler creates a NativeHandler with optional CORS origins.

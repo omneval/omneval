@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/normalizer"
@@ -365,5 +366,50 @@ func TestNormalize_AllValidKindsAccepted(t *testing.T) {
 				t.Errorf("kind: got %q, want %q", span.Kind, kind)
 			}
 		})
+	}
+}
+
+// --- Timestamp Tests ---
+
+func TestNormalize_TimestampsPropagatedFromRawMap(t *testing.T) {
+	n := normalizer.New()
+	start := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	end := time.Date(2024, 1, 15, 10, 30, 5, 0, time.UTC)
+
+	span, err := n.Normalize(context.Background(), map[string]any{
+		"span_id":    "0123456789abcdef",
+		"trace_id":   "0123456789abcdef0123456789abcdef",
+		"project_id": "proj-1",
+		"start_time": start,
+		"end_time":   end,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !span.StartTime.Equal(start) {
+		t.Errorf("StartTime: got %v, want %v", span.StartTime, start)
+	}
+	if !span.EndTime.Equal(end) {
+		t.Errorf("EndTime: got %v, want %v", span.EndTime, end)
+	}
+}
+
+func TestNormalize_ZeroTimestampsWhenMissing(t *testing.T) {
+	n := normalizer.New()
+	span, err := n.Normalize(context.Background(), map[string]any{
+		"span_id":    "0123456789abcdef",
+		"trace_id":   "0123456789abcdef0123456789abcdef",
+		"project_id": "proj-1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !span.StartTime.IsZero() {
+		t.Errorf("StartTime should be zero when missing, got %v", span.StartTime)
+	}
+	if !span.EndTime.IsZero() {
+		t.Errorf("EndTime should be zero when missing, got %v", span.EndTime)
 	}
 }
