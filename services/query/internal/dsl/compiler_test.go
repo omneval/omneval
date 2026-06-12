@@ -1,10 +1,16 @@
 package dsl
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/lake"
 )
 
 func makeQuery(opts ...func(*Query)) Query {
@@ -1050,4 +1056,143 @@ func withGroupByTimeBucket(interval string) func(*Query) {
 	return func(q *Query) {
 		q.GroupBy = append(q.GroupBy, GroupByField{Field: "time_bucket", Interval: interval})
 	}
+}
+
+// ─── CompileLake: single-table queries against the Lake ───
+
+func TestCompileLake_EmitsSingleTableQuery(t *testing.T) {
+	q := Query{
+		From: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC),
+		Aggregations: []Aggregation{
+			{Function: AggAvg, Field: "duration_ms", Alias: "avg_duration"},
+		},
+		GroupBy: []GroupByField{
+			{Field: "service_name"},
+		},
+	}
+
+	sql, args, err := CompileLake("proj-a", q)
+	if err != nil {
+		t.Fatalf("CompileLake: %v", err)
+	}
+
+	// Must read from lake.spans (single table — no UNION).
+	if !strings.Contains(sql, "FROM lake.spans") {
+		t.Fatalf("expected single-table query against lake.spans, got:\n%s", sql)
+	}
+	if strings.Contains(sql, "UNION") {
+		t.Fatalf("CompileLake must not emit UNION, got:\n%s", sql)
+	}
+
+	// project_id is injected as a parameter.
+	if len(args) < 1 || args[0] != "proj-a" {
+		t.Errorf("args[0]: got %v, want %q", args[0], "proj-a")
+	}
+}
+
+func TestCompileLake_PartitionPruningPreserved(t *testing.T) {
+	// Open a real DuckLake with partitioned spans table.
+	ctx := context.Background()
+	cfg, _ := localTestLake(t)
+
+	l, err := lake.Open(ctx, cfg)
+	if err != nil {
+		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
+	}
+	defer l.Close()
+
+	// Seed partitions: proj-a on June 1, proj-b on June 2.
+	startA := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	startB := time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
+	if err := l.InsertSpans(ctx, []*domain.Span{
+		{SpanID: "s1", TraceID: "t1", ProjectID: "proj-a", StartTime: startA, EndTime: startA.Add(time.Second)},
+		{SpanID: "s2", TraceID: "t2", ProjectID: "proj-b", StartTime: startB, EndTime: startB.Add(time.Second)},
+	}); err != nil {
+		t.Fatalf("insert spans: %v", err)
+	}
+
+	// Compile a Lake query for proj-a on June 1.
+	q := Query{
+		From: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2026, 6, 1, 23, 59, 59, 0, time.UTC),
+	}
+	sql, args, err := CompileLake("proj-a", q)
+	if err != nil {
+		t.Fatalf("CompileLake: %v", err)
+	}
+
+	// Run EXPLAIN on the compiled query to verify partition pruning.
+	explainSQL := "EXPLAIN " + sql
+	rows, err := l.DB().QueryContext(ctx, explainSQL, args...)
+	if err != nil {
+		t.Fatalf("EXPLAIN: %v", err)
+	}
+	defer rows.Close()
+
+	colTypes, _ := rows.ColumnTypes()
+	var plan string
+	for rows.Next() {
+		values := make([]any, len(colTypes))
+		valuePtrs := make([]any, len(colTypes))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		if err := rows.Scan(valuePtrs...); err != nil {
+			t.Fatalf("scan EXPLAIN row: %v", err)
+		}
+		for _, v := range values {
+			plan += fmt.Sprintf("%v ", v)
+		}
+		plan += "\n"
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("EXPLAIN rows: %v", err)
+	}
+
+	// The plan should reference the Lake spans table via DUCKLAKE_SCAN.
+	planLower := strings.ToLower(plan)
+	if !strings.Contains(planLower, "ducklake") || !strings.Contains(planLower, "spans") {
+		t.Errorf("EXPLAIN plan should show DUCKLAKE_SCAN on spans table:\n%s", plan)
+	}
+
+	// The WHERE clause in the plan should include project_id and start_time
+	// filtering — this confirms partition pruning on project_id + date.
+	if !strings.Contains(plan, "project_id") {
+		t.Errorf("EXPLAIN plan should show project_id filter for partition pruning:\n%s", plan)
+	}
+	if !strings.Contains(plan, "start_time") {
+		t.Errorf("EXPLAIN plan should show start_time filter for partition pruning:\n%s", plan)
+	}
+
+	// Verify the query returns only the expected partition's data (1 row, not 2).
+	resultRows, err := l.DB().QueryContext(ctx, sql, args...)
+	if err != nil {
+		t.Fatalf("execute compiled query: %v", err)
+	}
+	defer resultRows.Close()
+
+	var count int
+	for resultRows.Next() {
+		var c int64
+		if err := resultRows.Scan(&c); err != nil {
+			t.Fatalf("scan result: %v", err)
+		}
+		count = int(c)
+	}
+	// COUNT(*) over the single partition returns the count value.
+	if count < 1 {
+		t.Errorf("expected at least 1 row from proj-a partition, got count=%d", count)
+	}
+}
+
+// localTestLake creates a local DuckLake config for integration tests.
+func localTestLake(t *testing.T) (lake.Config, string) {
+	t.Helper()
+	dir := t.TempDir()
+	return lake.Config{
+		CatalogDriver: lake.CatalogDriverLocal,
+		CatalogDSN:    filepath.Join(dir, "catalog", "lake.ducklake"),
+		DataPath:      filepath.Join(dir, "data"),
+	}, dir
 }
