@@ -249,3 +249,23 @@ If the PVC is Pending, check the events:
 ```bash
 kubectl describe pvc data-writer-0-restore -n omneval
 ```
+
+## Backfill the legacy stores into the Lake (ADR-0004)
+
+The DuckLake migration replaces the hot/snapshot/cold tiers with the Lake. The data-migration half of the cutover is the `backfill` subcommand on the writer binary:
+
+```bash
+# inside the writer pod / with the writer's config available
+writer backfill
+# or with explicit sources:
+writer backfill -hot-db /data/omneval.db -archive s3://omneval/archive
+```
+
+It reads both legacy tiers — the hot DuckDB file (`writer.duckdb_path`) and the Hive-partitioned cold Parquet archive (`s3://<storage.bucket>/archive`) — and inserts their spans and scores into the Lake, preserving the `(project_id, span-date)` partitioning. Scores partition next to their span (the span's `start_time` date), falling back to the score's `created_at` when the span is unknown.
+
+Properties:
+
+- **Idempotent.** Each partition is delete-and-rewritten in one Lake transaction; re-running the command produces identical Lake row counts. Pre-existing duplicate rows in a Lake partition (residual ledger-crash duplicates) are healed by the rewrite.
+- **Hot-window overlap is deduplicated.** A span present in both the hot store and the archive lands exactly once, keyed on `(trace_id, span_id)`.
+- **Verifiable.** On completion the command prints a per-`(project, date)` table of source vs Lake row counts for spans and scores, and exits nonzero if any partition mismatches. Run it (and verify) before flipping `query.lake.enabled` in production, and keep the legacy stores until the report is clean.
+- **Read-only on the sources.** The hot DuckDB file is attached `READ_ONLY`; the archive is only read.
