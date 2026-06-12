@@ -2,79 +2,30 @@ package handler
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	_ "github.com/marcboeker/go-duckdb/v2"
+	"github.com/omneval/omneval/internal/fake"
 )
 
-const bookmarkTestSchema = `
-	CREATE TABLE spans (
-		span_id        VARCHAR      NOT NULL,
-		trace_id       VARCHAR      NOT NULL,
-		parent_id        VARCHAR,
-		conversation_id  VARCHAR,
-		project_id     VARCHAR      NOT NULL,
-		service_name   VARCHAR,
-		name           VARCHAR,
-		kind           VARCHAR,
-		start_time     TIMESTAMPTZ  NOT NULL,
-		end_time       TIMESTAMPTZ,
-		model          VARCHAR,
-		input          JSON,
-		output         JSON,
-		input_tokens   BIGINT,
-		output_tokens  BIGINT,
-		cost_usd       DOUBLE,
-		prompt_name    VARCHAR,
-		prompt_version BIGINT,
-		status_code    VARCHAR,
-		status_message VARCHAR,
-		attributes     JSON,
-		PRIMARY KEY (trace_id, span_id)
-	);
-
-	CREATE TABLE bookmarks (
-		trace_id       VARCHAR      NOT NULL,
-		project_id     VARCHAR      NOT NULL,
-		created_at     TIMESTAMPTZ  NOT NULL,
-		PRIMARY KEY (trace_id, project_id)
-	);
-`
-
-func newBookmarkMux(t *testing.T, projectID string) (*http.ServeMux, *sql.DB) {
+func newBookmarkMux(t *testing.T, projectID string) (*http.ServeMux, *fake.FakeMetadataStore) {
 	t.Helper()
-	db, err := sql.Open("duckdb", ":memory:")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	if _, err := db.Exec(bookmarkTestSchema); err != nil {
-		t.Fatalf("create schema: %v", err)
-	}
+	store := fake.NewFakeMetadataStore()
 
 	mux := http.NewServeMux()
 	bh := &BookmarkHandler{
-		DB:           db,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: projectID},
 	}
 	mux.HandleFunc("POST /api/v1/traces/{traceId}/bookmark", bh.HandleBookmark)
 
-	return mux, db
+	return mux, store
 }
 
 func TestBookmarkHandler_ToggleBookmark(t *testing.T) {
-	mux, db := newBookmarkMux(t, "test-proj")
-
-	// Insert a test span so the trace exists.
-	if _, err := db.Exec(
-		`INSERT INTO spans (span_id, trace_id, project_id, name, kind, start_time) VALUES (?, ?, ?, ?, ?, ?)`,
-		"span-1", "trace-1", "test-proj", "test", "generation", "2024-01-01T00:00:00Z",
-	); err != nil {
-		t.Fatalf("insert span: %v", err)
-	}
+	mux, store := newBookmarkMux(t, "test-proj")
 
 	t.Run("bookmark a trace", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]bool{"bookmarked": true})
@@ -95,13 +46,13 @@ func TestBookmarkHandler_ToggleBookmark(t *testing.T) {
 			t.Error("expected bookmarked=true in response")
 		}
 
-		// Verify bookmark exists in DB.
-		var count int
-		if err := db.QueryRow("SELECT COUNT(*) FROM bookmarks WHERE trace_id = ? AND project_id = ?", "trace-1", "test-proj").Scan(&count); err != nil {
-			t.Fatalf("query bookmarks: %v", err)
+		// Verify bookmark exists in store.
+		bookmarked, err := store.IsBookmarked(req.Context(), "test-proj", "trace-1")
+		if err != nil {
+			t.Fatalf("isBookmarked: %v", err)
 		}
-		if count != 1 {
-			t.Errorf("bookmark count: got %d, want %d", count, 1)
+		if !bookmarked {
+			t.Error("expected trace to be bookmarked")
 		}
 	})
 
@@ -113,16 +64,16 @@ func TestBookmarkHandler_ToggleBookmark(t *testing.T) {
 		mux.ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
-			t.Errorf("status: got %d, want %d", w.Code, http.StatusOK)
+			t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
 		}
 
 		// Verify bookmark was removed.
-		var count int
-		if err := db.QueryRow("SELECT COUNT(*) FROM bookmarks WHERE trace_id = ? AND project_id = ?", "trace-1", "test-proj").Scan(&count); err != nil {
-			t.Fatalf("query bookmarks: %v", err)
+		bookmarked, err := store.IsBookmarked(req.Context(), "test-proj", "trace-1")
+		if err != nil {
+			t.Fatalf("isBookmarked: %v", err)
 		}
-		if count != 0 {
-			t.Errorf("bookmark count after unbookmark: got %d, want %d", count, 0)
+		if bookmarked {
+			t.Error("expected trace to not be bookmarked")
 		}
 	})
 
@@ -151,15 +102,7 @@ func TestBookmarkHandler_ToggleBookmark(t *testing.T) {
 // TestBookmarkHandler_EmptyBodyToggles verifies that POST with no body
 // treats the endpoint as a pure toggle: first call bookmarks, second unbookmarks.
 func TestBookmarkHandler_EmptyBodyToggles(t *testing.T) {
-	mux, db := newBookmarkMux(t, "test-proj")
-
-	// Insert a test span.
-	if _, err := db.Exec(
-		`INSERT INTO spans (span_id, trace_id, project_id, name, kind, start_time) VALUES (?, ?, ?, ?, ?, ?)`,
-		"span-toggle", "trace-toggle", "test-proj", "test", "generation", "2024-01-01T00:00:00Z",
-	); err != nil {
-		t.Fatalf("insert span: %v", err)
-	}
+	mux, store := newBookmarkMux(t, "test-proj")
 
 	// First POST with no body — should bookmark (insert).
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/traces/trace-toggle/bookmark", http.NoBody)
@@ -170,12 +113,12 @@ func TestBookmarkHandler_EmptyBodyToggles(t *testing.T) {
 		t.Errorf("first toggle status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 
-	var count int
-	if err := db.QueryRow("SELECT COUNT(*) FROM bookmarks WHERE trace_id = ? AND project_id = ?", "trace-toggle", "test-proj").Scan(&count); err != nil {
-		t.Fatalf("query bookmarks after first toggle: %v", err)
+	bookmarked, err := store.IsBookmarked(req.Context(), "test-proj", "trace-toggle")
+	if err != nil {
+		t.Fatalf("isBookmarked after first toggle: %v", err)
 	}
-	if count != 1 {
-		t.Errorf("after first toggle bookmark count: got %d, want 1", count)
+	if !bookmarked {
+		t.Error("after first toggle: expected trace to be bookmarked")
 	}
 
 	// Second POST with no body — should unbookmark (delete).
@@ -187,11 +130,12 @@ func TestBookmarkHandler_EmptyBodyToggles(t *testing.T) {
 		t.Errorf("second toggle status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 
-	if err := db.QueryRow("SELECT COUNT(*) FROM bookmarks WHERE trace_id = ? AND project_id = ?", "trace-toggle", "test-proj").Scan(&count); err != nil {
-		t.Fatalf("query bookmarks after second toggle: %v", err)
+	bookmarked, err = store.IsBookmarked(req.Context(), "test-proj", "trace-toggle")
+	if err != nil {
+		t.Fatalf("isBookmarked after second toggle: %v", err)
 	}
-	if count != 0 {
-		t.Errorf("after second toggle bookmark count: got %d, want 0", count)
+	if bookmarked {
+		t.Error("after second toggle: expected trace to not be bookmarked")
 	}
 }
 

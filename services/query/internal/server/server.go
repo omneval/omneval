@@ -199,7 +199,7 @@ func Run() error {
 
 	// Bookmark handler (toggle trace bookmarks).
 	bookmarkHandler := &handler.BookmarkHandler{
-		DB:           sdb,
+		Store:        store,
 		SessionStore: h,
 	}
 
