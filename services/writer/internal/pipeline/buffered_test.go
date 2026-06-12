@@ -15,13 +15,17 @@ import (
 	"github.com/omneval/omneval/internal/queue"
 )
 
-// fakeReliableQueue records Ack/Requeue calls.
+// fakeReliableQueue records Ack/Requeue/EnqueueRef calls.
 type fakeReliableQueue struct {
 	acked    []*queue.IngestEntry
 	requeued []*queue.IngestEntry
+	refs     []queue.BatchRef
 }
 
-func (f *fakeReliableQueue) EnqueueRef(context.Context, queue.BatchRef) error { return nil }
+func (f *fakeReliableQueue) EnqueueRef(_ context.Context, ref queue.BatchRef) error {
+	f.refs = append(f.refs, ref)
+	return nil
+}
 func (f *fakeReliableQueue) DequeueEntry(context.Context) (*queue.IngestEntry, error) {
 	return nil, nil
 }

@@ -118,6 +118,47 @@ type WriterConfig struct {
 	Retention RetentionConfig `mapstructure:"retention"`
 	// Lake controls dual-writing to the Lake (ADR-0004).
 	Lake WriterLakeConfig `mapstructure:"lake"`
+	// Reconciliation controls the Ingest Buffer reconciliation sweep
+	// (ADR-0004, #88).
+	Reconciliation ReconciliationConfig `mapstructure:"reconciliation"`
+}
+
+// ReconciliationConfig holds settings for the Ingest Buffer reconciliation
+// sweep: a leader-elected job that recovers buffered batches whose queue
+// reference was lost and garbage-collects committed buffer objects past
+// their retention window.
+type ReconciliationConfig struct {
+	// Enabled starts the reconciliation ticker when true. Requires S3
+	// (storage) to be configured.
+	Enabled bool `mapstructure:"enabled"`
+	// IntervalMinutes is how often the sweep runs. Default 5.
+	IntervalMinutes int `mapstructure:"interval_minutes"`
+	// GracePeriodMinutes is the minimum age of a buffer object before the
+	// sweep will act on it, giving an in-flight writer time to commit and
+	// ack normally. Default 10.
+	GracePeriodMinutes int `mapstructure:"grace_period_minutes"`
+	// RetentionHours is how long a *committed* buffer object is kept before
+	// the sweep deletes it. Uncommitted objects are never deleted. Default
+	// 168 (7 days).
+	RetentionHours int `mapstructure:"retention_hours"`
+}
+
+// Validate checks that the reconciliation config is consistent. Disabled
+// reconciliation is always valid (no-op).
+func (rc ReconciliationConfig) Validate() error {
+	if !rc.Enabled {
+		return nil
+	}
+	if rc.IntervalMinutes <= 0 {
+		return fmt.Errorf("reconciliation.interval_minutes must be > 0, got %d", rc.IntervalMinutes)
+	}
+	if rc.GracePeriodMinutes <= 0 {
+		return fmt.Errorf("reconciliation.grace_period_minutes must be > 0, got %d", rc.GracePeriodMinutes)
+	}
+	if rc.RetentionHours <= 0 {
+		return fmt.Errorf("reconciliation.retention_hours must be > 0, got %d", rc.RetentionHours)
+	}
+	return nil
 }
 
 // RetentionConfig holds settings for the S3 trace retention worker.
@@ -292,6 +333,11 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("writer.retention.destination.prefix", "")
 	v.SetDefault("writer.retention.destination.storage_class", "")
 	v.SetDefault("writer.retention.trigger_endpoint_enabled", false)
+	// writer reconciliation (ingest buffer sweep, #88)
+	v.SetDefault("writer.reconciliation.enabled", false)
+	v.SetDefault("writer.reconciliation.interval_minutes", 5)
+	v.SetDefault("writer.reconciliation.grace_period_minutes", 10)
+	v.SetDefault("writer.reconciliation.retention_hours", 168)
 	// query
 	v.SetDefault("query.addr", ":8002")
 	v.SetDefault("query.duckdb_path", "")
@@ -368,6 +414,10 @@ func Load(path string) (*Config, error) {
 	envString(&cfg.Writer.Retention.Destination.Prefix, "OMNEVAL_WRITER_RETENTION_DESTINATION_PREFIX")
 	envString(&cfg.Writer.Retention.Destination.StorageClass, "OMNEVAL_WRITER_RETENTION_DESTINATION_STORAGE_CLASS")
 	envBool(&cfg.Writer.Retention.TriggerEndpointEnabled, "OMNEVAL_WRITER_RETENTION_TRIGGER_ENDPOINT_ENABLED")
+	envBool(&cfg.Writer.Reconciliation.Enabled, "OMNEVAL_WRITER_RECONCILIATION_ENABLED")
+	envInt(&cfg.Writer.Reconciliation.IntervalMinutes, "OMNEVAL_WRITER_RECONCILIATION_INTERVAL_MINUTES")
+	envInt(&cfg.Writer.Reconciliation.GracePeriodMinutes, "OMNEVAL_WRITER_RECONCILIATION_GRACE_PERIOD_MINUTES")
+	envInt(&cfg.Writer.Reconciliation.RetentionHours, "OMNEVAL_WRITER_RECONCILIATION_RETENTION_HOURS")
 	envString(&cfg.Query.Addr, "OMNEVAL_QUERY_ADDR")
 	envString(&cfg.Query.DuckDBPath, "OMNEVAL_QUERY_DUCKDB_PATH")
 	envString(&cfg.Query.SyncInterval, "OMNEVAL_QUERY_SYNC_INTERVAL")

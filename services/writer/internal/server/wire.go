@@ -24,6 +24,7 @@ import (
 	"github.com/omneval/omneval/services/writer/internal/handler"
 	"github.com/omneval/omneval/services/writer/internal/metrics"
 	"github.com/omneval/omneval/services/writer/internal/pipeline"
+	"github.com/omneval/omneval/services/writer/internal/reconcile"
 	"github.com/omneval/omneval/services/writer/internal/retention"
 	syncpkg "github.com/omneval/omneval/services/writer/internal/sync"
 	"github.com/prometheus/client_golang/prometheus"
@@ -39,6 +40,7 @@ type WiredDeps struct {
 	Syncer       *syncpkg.Syncer
 	Flusher      *flush.Flusher
 	Retention    *retention.Worker // nil when retention is disabled or S3 is not configured
+	Reconcile    *reconcile.Worker // nil when reconciliation is disabled or S3 is not configured
 	ScoreHandler http.Handler
 	DB           *sql.DB
 	DBPath       string
@@ -82,6 +84,11 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	// Validate retention config before starting the worker.
 	if err := cfg.Writer.Retention.Validate(); err != nil {
 		return nil, fmt.Errorf("writer: retention config: %w", err)
+	}
+
+	// Validate reconciliation config before starting the worker.
+	if err := cfg.Writer.Reconciliation.Validate(); err != nil {
+		return nil, fmt.Errorf("writer: reconciliation config: %w", err)
 	}
 
 	// Register Prometheus metrics. Tolerate re-registration so WireDeps can
@@ -191,6 +198,9 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	deps.Flusher = flush.NewWithDB(s3store, db, cfg)
 	if s3store != nil && cfg.Writer.Retention.Enabled {
 		deps.Retention = retention.New(s3store, &cfg.Writer.Retention)
+	}
+	if s3store != nil && cfg.Writer.Reconciliation.Enabled {
+		deps.Reconcile = reconcile.New(s3store, meta, ingestQ, metricsHelper, &cfg.Writer.Reconciliation)
 	}
 
 	// Create score handler (handles POST /internal/v1/scores).
