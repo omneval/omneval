@@ -60,6 +60,14 @@ func NewSwappableDB(path string) (*SwappableDB, error) {
 	}, nil
 }
 
+// NewSwappableDBFromDB wraps an existing *sql.DB in a SwappableDB.
+// This is used for the Lake connection, which is already an in-memory
+// DuckDB with DuckLake attached and does not require A/B rotation.
+// Swap is a no-op on such a wrapper.
+func NewSwappableDBFromDB(db *sql.DB) *SwappableDB {
+	return &SwappableDB{db: db}
+}
+
 // Swap atomically replaces the underlying *sql.DB by installing newSnapshotPath
 // into the currently-inactive A/B slot and opening a fresh connection there.
 // The old connection is closed after the pointer swap to avoid file descriptor

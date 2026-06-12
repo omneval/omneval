@@ -738,12 +738,6 @@ func (q *SpanQuery) LakeSQL(dedupe bool) (sql string, args []any, err error) {
 	return baseSQL, args, nil
 }
 
-// LakeCountSQL returns a COUNT(*) query against the Lake table.
-func (q *SpanQuery) LakeCountSQL() (sql string, args []any, err error) {
-	_, where := q.buildWhereClause()
-	return fmt.Sprintf("SELECT COUNT(*) FROM lake.spans%s", where), nil, nil
-}
-
 // LakeTraceSpansSQL returns a SQL query that fetches all spans for a single
 // trace from the Lake table. When dedupe is true, it deduplicates on
 // (trace_id, span_id) keeping the latest row per pair.

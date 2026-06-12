@@ -10,6 +10,7 @@ import (
 	internalauth "github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/probe"
 	s3 "github.com/omneval/omneval/internal/storage/s3"
@@ -224,15 +225,17 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	// Legacy snapshot path remains fully functional when the flag is off
 	// (default off).
 	if cfg.Query.LakeEnabled {
-		lakeDB, err := openLakeDB(cfg)
+		lakeHandle, err := openLakeDB(cfg)
 		if err != nil {
 			deps.Close()
 			return nil, fmt.Errorf("query: open lake: %w", err)
 		}
-		deps.Lake = lakeDB
+		deps.Lake = lakeHandle
+		deps.Span.Lake = lakeHandle
+		deps.Conversation.Lake = lakeHandle
 		p.AddCheck("catalog", &probe.CatalogReachable{
 			Ping: func(ctx context.Context) error {
-				return lakeDB.DB().PingContext(ctx)
+				return lakeHandle.DB().PingContext(ctx)
 			},
 		})
 		slog.Info("query: Lake enabled, routing all span reads to lake.spans")
@@ -248,18 +251,15 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 // via the Postgres Catalog. The connection is configured for read-only access
 // (no writes, no snapshot downloads).
 func openLakeDB(cfg *config.Config) (*SwappableDB, error) {
-	// Use an in-memory DuckDB instance that attaches the Lake.
-	// The Lake tables (lake.spans, lake.scores) are available through the
-	// catalog connection.
-	path := cfg.Query.LakeDBPath
-	if path == "" {
-		path = ":memory:"
-	}
-	sdb, err := NewSwappableDB(path)
+	lc := lake.ConfigFromApp(cfg)
+	lc.ReadOnly = true
+	lk, err := lake.Open(context.Background(), lc)
 	if err != nil {
-		return nil, fmt.Errorf("open lake db: %w", err)
+		return nil, fmt.Errorf("open lake: %w", err)
 	}
-	return sdb, nil
+	// Wrap the Lake's *sql.DB in a SwappableDB so handlers can use it
+	// through the standard DBHandle seam.
+	return NewSwappableDBFromDB(lk.DB()), nil
 }
 
 // migrateBookmarksFromSnapshot copies bookmark rows left in the legacy

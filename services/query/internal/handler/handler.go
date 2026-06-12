@@ -287,7 +287,15 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Build the trace tree (includes score loading).
-	trace := buildTraceTree(spans, h.DB, traceID, projectID)
+	// When Lake is available, read scores from lake.scores; otherwise
+	// fall back to the snapshot scores table.
+	scoresDB := h.DB
+	scoresTable := "scores"
+	if h.Lake != nil {
+		scoresDB = h.Lake
+		scoresTable = "lake.scores"
+	}
+	trace := buildTraceTree(spans, scoresDB, traceID, projectID, scoresTable)
 
 	resp := domain.TraceResponse{
 		TraceID:   trace.TraceID,
@@ -564,7 +572,7 @@ type AnalyticsResponse struct {
 
 // buildTraceTree groups spans by trace_id and links parent-child relationships.
 // It sets Span.Children for proper waterfall rendering.
-func buildTraceTree(spans []*domain.Span, db DBHandle, traceID, projectID string) domain.Trace {
+func buildTraceTree(spans []*domain.Span, db DBHandle, traceID, projectID, scoresTable string) domain.Trace {
 	if len(spans) == 0 {
 		return domain.Trace{}
 	}
@@ -602,18 +610,19 @@ func buildTraceTree(spans []*domain.Span, db DBHandle, traceID, projectID string
 
 	// Load scores for all spans in this trace.
 	if db != nil && traceID != "" && projectID != "" {
-		trace.Spans = withScores(db, trace.Spans, traceID, projectID)
+		trace.Spans = withScores(db, trace.Spans, traceID, projectID, scoresTable)
 	}
 
 	return trace
 }
 
 // withScores loads scores for the given spans and attaches them inline.
-func withScores(db DBHandle, spans []*domain.Span, traceID, projectID string) []*domain.Span {
+// scoresTable should be "scores" for snapshot DB or "lake.scores" for Lake.
+func withScores(db DBHandle, spans []*domain.Span, traceID, projectID, scoresTable string) []*domain.Span {
 	rows, err := db.QueryContext(context.Background(),
-		`SELECT span_id, eval_name, value, reasoning, judge_model,
-		        prompt_name, prompt_version, created_at
-		 FROM scores WHERE trace_id = ? AND project_id = ?`,
+		"SELECT span_id, eval_name, value, reasoning, judge_model, "+
+			"prompt_name, prompt_version, created_at FROM "+scoresTable+
+			" WHERE trace_id = ? AND project_id = ?",
 		traceID, projectID,
 	)
 	if err != nil {
