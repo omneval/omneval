@@ -17,16 +17,12 @@ import (
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/minio/minio-go/v7"
-	internalauth "github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/metadata"
-	"github.com/omneval/omneval/internal/probe"
 	"github.com/omneval/omneval/internal/storage"
 	s3 "github.com/omneval/omneval/internal/storage/s3"
 	"github.com/omneval/omneval/services/query/internal/auth"
 	"github.com/omneval/omneval/services/query/internal/handler"
-	"github.com/omneval/omneval/services/query/internal/metrics"
-	"github.com/omneval/omneval/services/query/internal/playground"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -109,244 +105,149 @@ func Run() error {
 		return fmt.Errorf("query: load config: %w", err)
 	}
 
-	// Register Prometheus metrics.
-	if err := metrics.Register(cfg); err != nil {
-		return fmt.Errorf("query: register metrics: %w", err)
-	}
-
-	queryMetrics := metrics.NewQueryMetrics(cfg)
-
-	// Open metadata store
-	store, err := openMetadataStore(cfg)
+	deps, err := WireDeps(cfg)
 	if err != nil {
-		return fmt.Errorf("query: open metadata store: %w", err)
+		return err
 	}
-	defer store.Close()
+	return RunWired(deps)
+}
 
-	// Resolve DuckDB snapshot path.
-	dbPath := cfg.Query.DuckDBPath
-	if dbPath == "" {
-		dbPath = "/tmp/omneval-snapshot.duckdb"
-	}
+// RunWired runs the Query API with pre-constructed dependencies: it wires
+// routes, starts the snapshot poller, handles signals, and shuts down
+// gracefully.
+func RunWired(deps *WiredDeps) error {
+	cfg := deps.Cfg
+	defer deps.Store.Close()
+	defer deps.SDB.Close()
 
-	// Parse sync interval (default 30s).
-	syncInterval, err := time.ParseDuration(cfg.Query.SyncInterval)
-	if err != nil {
-		syncInterval = 30 * time.Second
-		slog.Warn("query: invalid sync_interval, using default 30s",
-			"raw", cfg.Query.SyncInterval)
-	}
+	router := buildRouter(deps)
 
-	// Parse session TTL
-	sessionTTL, err := time.ParseDuration(cfg.Auth.SessionTTL)
-	if err != nil {
-		sessionTTL = 168 * time.Hour // default 7 days
-		slog.Warn("invalid session_ttl, using default 168h", "given", cfg.Auth.SessionTTL)
-	}
-
-	// Connect to S3 (may be nil if no storage config).
-	var s3Store *s3.Store
-	if cfg.Storage.Bucket != "" || cfg.Storage.Endpoint != "" {
-		s3Store = s3.New(&cfg.Storage)
-	}
-
-	// Download snapshot from S3 (if configured).
-	var snapshotLastModified time.Time
-	if s3Store != nil {
-		if err := downloadSnapshot(context.Background(), s3Store, dbPath); err != nil {
-			return fmt.Errorf("query: download snapshot: %w", err)
-		}
-		// Try to get the last modified time from S3.
-		if stat, err := s3Store.Stat(context.Background(), s3.SnapshotKey()); err == nil && stat != nil {
-			slog.Info("query: snapshot downloaded from S3", "path", dbPath, "last_modified", stat.LastModified)
-			snapshotLastModified = stat.LastModified
+	// Combine the main router with probe routes.
+	combined := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+			deps.Prober.Router().ServeHTTP(w, r)
 		} else {
-			slog.Info("query: snapshot not yet available in S3")
+			router.ServeHTTP(w, r)
 		}
-	} else {
-		slog.Info("query: no S3 configured, skipping snapshot download")
+	})
+
+	// Graceful shutdown on SIGINT/SIGTERM.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// Start S3 snapshot poller (separate goroutine).
+	if deps.S3 != nil {
+		go pollSnapshotLoop(ctx, deps)
 	}
 
-	// Open the snapshot database via SwappableDB so that pollAndDownload can
-	// atomically reopen the connection each time S3 delivers a new snapshot.
-	sdb, err := NewSwappableDB(dbPath)
-	if err != nil {
-		return fmt.Errorf("query: open snapshot: %w", err)
+	// Start the dedicated Prometheus metrics server on cfg.Metrics.Addr (:9090).
+	if err := StartMetricsServer(ctx, cfg.Metrics.Addr); err != nil {
+		return fmt.Errorf("query: start metrics server: %w", err)
 	}
-	defer sdb.Close()
 
-	// Bootstrap admin user if no users exist
-	h := auth.NewHandler(store, cfg.Auth.SecureCookie, sessionTTL, cfg.Auth.AdminEmail, cfg.Auth.AdminPassword)
-	created, err := h.BootstrapAdmin(context.Background())
-	if err != nil {
-		return fmt.Errorf("query: bootstrap admin: %w", err)
+	// Parse query listen address.
+	addr := cfg.Query.Addr
+	if addr == "" {
+		addr = ":8002"
 	}
-	if created {
-		slog.Info("query: admin user bootstrapped", "email", cfg.Auth.AdminEmail)
-	} else {
-		if count, _ := store.CountUsers(context.Background()); count == 0 {
-			slog.Warn("query: no admin configured and no users exist — set OMNEVAL_AUTH_ADMIN_EMAIL and OMNEVAL_AUTH_ADMIN_PASSWORD to create the first admin user")
+	srv := &http.Server{Addr: addr, Handler: combined}
+	go func() {
+		slog.Info("query: listening", "addr", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("query: server error", "error", err)
 		}
+	}()
+
+	<-ctx.Done()
+	slog.Info("query: shutting down...")
+
+	// Graceful shutdown with 30-second drain timeout.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("query: shutdown: %w", err)
 	}
 
-	// Create handlers.
-	spanHandler := &handler.SpanHandler{
-		DB:           sdb,
-		SessionStore: h,
-	}
+	slog.Info("query: stopped")
+	return nil
+}
 
-	// Bookmark handler (toggle trace bookmarks).
-	bookmarkHandler := &handler.BookmarkHandler{
-		DB:           sdb,
-		SessionStore: h,
-	}
+// buildRouter wires every route against the handlers in deps and wraps them
+// in the session/API-key auth middleware.
+func buildRouter(deps *WiredDeps) http.Handler {
+	cfg := deps.Cfg
+	store := deps.Store
+	h := deps.Auth
 
-	// Conversation handler (list conversations and detail view).
-	conversationHandler := &handler.ConversationHandler{
-		DB:           sdb,
-		SessionStore: h,
-	}
-
-	// Prompt registry handler (requires metadata store).
-	// A CachingValidator is wired in so that SDK callers can authenticate
-	// GET prompt endpoints using X-API-Key in addition to session cookies.
-	var promptHandler *handler.PromptHandler
-	var promptCache *handler.PromptCache
-	var apiKeyValidator internalauth.Validator
-	if store != nil {
-		promptCache = handler.NewPromptCache(store)
-		apiKeyValidator = internalauth.NewCachingValidator(store)
-		promptHandler = &handler.PromptHandler{
-			Store:        store,
-			Cache:        promptCache,
-			SessionStore: h,
-			Validator:    apiKeyValidator,
-		}
-	}
-
-	// Eval rules handler (requires metadata store).
-	var evalRuleHandler *handler.EvalRuleHandler
-	if store != nil {
-		evalRuleHandler = &handler.EvalRuleHandler{
-			DB:                sdb,
-			Store:             store,
-			SessionStore:      h,
-			DefaultJudgeModel: cfg.Eval.LLMModel,
-		}
-	}
-
-	// Admin handler (requires DB, metadata store, and session store).
-	adminHandler := &handler.AdminHandler{
-		DB:           sdb,
-		Store:        store,
-		SessionStore: h,
-	}
-
-	// Playground handler (requires metadata store).
-	// Always create the handler so the route is registered even when the LLM
-	// is not configured — the handler itself returns 503 in that case.
-	var playgroundHandler *playground.PlaygroundHandler
-	if store != nil {
-		var llmClient playground.LLMClient
-		if cfg.Query.PlaygroundLLMBaseURL != "" && cfg.Query.PlaygroundLLMAPIKey != "" {
-			llmClient = playground.NewHTTPClient(cfg.Query.PlaygroundLLMBaseURL, cfg.Query.PlaygroundLLMAPIKey)
-		}
-		playgroundHandler = &playground.PlaygroundHandler{
-			Cache:        promptCache,
-			LLMClient:    llmClient,
-			SessionStore: h,
-		}
-	}
-
-	// Build the router.
 	mux := http.NewServeMux()
 
 	// Register auth routes (login, logout, invite, change password).
 	h.Register(mux)
 
 	// Admin routes (require admin session).
-	adminMw := auth.RequireAdmin(store, cfg.Auth.SecureCookie, sessionTTL, cfg.Auth.AdminEmail)
-	mux.HandleFunc("GET /api/v1/admin/api-keys", adminMw(http.HandlerFunc(adminHandler.HandleAdminAPIKeysList)).ServeHTTP)
-	mux.HandleFunc("DELETE /api/v1/admin/api-keys/", adminMw(http.HandlerFunc(adminHandler.HandleAdminAPIKeyDelete)).ServeHTTP)
-	mux.HandleFunc("GET /api/v1/admin/traces/", adminMw(http.HandlerFunc(adminHandler.HandleAdminTracesCount)).ServeHTTP)
-	mux.HandleFunc("DELETE /api/v1/admin/traces/", adminMw(http.HandlerFunc(adminHandler.HandleAdminTracesDelete)).ServeHTTP)
-	mux.HandleFunc("DELETE /api/v1/admin/projects/", adminMw(http.HandlerFunc(adminHandler.HandleAdminProjectsDelete)).ServeHTTP)
+	adminMw := auth.RequireAdmin(store, cfg.Auth.SecureCookie, deps.SessionTTL, cfg.Auth.AdminEmail)
+	mux.HandleFunc("GET /api/v1/admin/api-keys", adminMw(http.HandlerFunc(deps.Admin.HandleAdminAPIKeysList)).ServeHTTP)
+	mux.HandleFunc("DELETE /api/v1/admin/api-keys/", adminMw(http.HandlerFunc(deps.Admin.HandleAdminAPIKeyDelete)).ServeHTTP)
+	mux.HandleFunc("GET /api/v1/admin/traces/", adminMw(http.HandlerFunc(deps.Admin.HandleAdminTracesCount)).ServeHTTP)
+	mux.HandleFunc("DELETE /api/v1/admin/traces/", adminMw(http.HandlerFunc(deps.Admin.HandleAdminTracesDelete)).ServeHTTP)
+	mux.HandleFunc("DELETE /api/v1/admin/projects/", adminMw(http.HandlerFunc(deps.Admin.HandleAdminProjectsDelete)).ServeHTTP)
 
 	// Projects list for the UI project switcher.
-	mux.HandleFunc("GET /api/v1/projects", spanHandler.HandleProjects)
+	mux.HandleFunc("GET /api/v1/projects", deps.Span.HandleProjects)
 
 	// Span list with keyset pagination.
-	mux.HandleFunc("POST /api/v1/spans/query", spanHandler.HandleSpansQuery)
+	mux.HandleFunc("POST /api/v1/spans/query", deps.Span.HandleSpansQuery)
 
 	// Analytics: parameterized SQL compilation from structured DSL queries.
-	mux.HandleFunc("POST /api/v1/analytics/spans", spanHandler.HandleAnalyticsSpans)
+	mux.HandleFunc("POST /api/v1/analytics/spans", deps.Span.HandleAnalyticsSpans)
 
 	// Trace detail waterfall.
-	mux.HandleFunc("GET /api/v1/traces/{traceId}", spanHandler.HandleTraceDetail)
+	mux.HandleFunc("GET /api/v1/traces/{traceId}", deps.Span.HandleTraceDetail)
 
 	// Trace bookmark toggle.
-	mux.HandleFunc("POST /api/v1/traces/{traceId}/bookmark", bookmarkHandler.HandleBookmark)
+	mux.HandleFunc("POST /api/v1/traces/{traceId}/bookmark", deps.Bookmark.HandleBookmark)
 
 	// Conversation list and detail endpoints.
-	mux.HandleFunc("GET /api/v1/conversations", conversationHandler.HandleListConversations)
-	mux.HandleFunc("GET /api/v1/conversations/{conversationId}", conversationHandler.HandleConversationDetail)
+	mux.HandleFunc("GET /api/v1/conversations", deps.Conversation.HandleListConversations)
+	mux.HandleFunc("GET /api/v1/conversations/{conversationId}", deps.Conversation.HandleConversationDetail)
 
-	// Prompt Registry endpoints (require metadata store).
-	if promptHandler != nil {
-		mux.HandleFunc("GET /api/v1/prompts", promptHandler.HandleListPrompts)
-		mux.HandleFunc("POST /api/v1/prompts", promptHandler.HandleCreatePrompt)
-		mux.HandleFunc("GET /api/v1/prompts/{name}", promptHandler.HandleGetPrompt)
-		mux.HandleFunc("GET /api/v1/prompts/{name}/versions", promptHandler.HandleListPromptVersions)
-		mux.HandleFunc("PUT /api/v1/prompts/{name}/labels/{label}", promptHandler.HandleSetLabel)
+	// Prompt Registry endpoints.
+	mux.HandleFunc("GET /api/v1/prompts", deps.Prompt.HandleListPrompts)
+	mux.HandleFunc("POST /api/v1/prompts", deps.Prompt.HandleCreatePrompt)
+	mux.HandleFunc("GET /api/v1/prompts/{name}", deps.Prompt.HandleGetPrompt)
+	mux.HandleFunc("GET /api/v1/prompts/{name}/versions", deps.Prompt.HandleListPromptVersions)
+	mux.HandleFunc("PUT /api/v1/prompts/{name}/labels/{label}", deps.Prompt.HandleSetLabel)
+
+	// Eval rules endpoints.
+	mux.HandleFunc("POST /api/v1/eval-rules", deps.EvalRule.HandleCreate)
+	mux.HandleFunc("GET /api/v1/eval-rules", deps.EvalRule.HandleList)
+	mux.HandleFunc("POST /api/v1/eval-rules/preview", deps.EvalRule.HandlePreview)
+	mux.HandleFunc("DELETE /api/v1/eval-rules/{id}", deps.EvalRule.HandleDelete)
+
+	// Dataset endpoints.
+	mux.HandleFunc("POST /api/v1/datasets", deps.Dataset.HandleCreate)
+	mux.HandleFunc("GET /api/v1/datasets", deps.Dataset.HandleList)
+	mux.HandleFunc("GET /api/v1/datasets/{id}", deps.Dataset.HandleGet)
+	mux.HandleFunc("POST /api/v1/datasets/{id}/items", deps.Dataset.HandleAddItems)
+	mux.HandleFunc("POST /api/v1/datasets/{id}/items/batch", deps.Dataset.HandleAddItemsBatch)
+	mux.HandleFunc("GET /api/v1/datasets/{id}/items", deps.Dataset.HandleListItems)
+	mux.HandleFunc("DELETE /api/v1/datasets/{id}", deps.Dataset.HandleDelete)
+
+	// Dataset run endpoints — read endpoints (list, get, status) are always
+	// available. POST (create run) requires judge LLM config.
+	if deps.DatasetRun.JudgeClient != nil {
+		mux.HandleFunc("POST /api/v1/datasets/{id}/runs", deps.DatasetRun.HandleRun)
 	}
+	mux.HandleFunc("GET /api/v1/datasets/{id}/runs", deps.DatasetRun.HandleListRuns)
+	mux.HandleFunc("GET /api/v1/datasets/{id}/runs/{runId}", deps.DatasetRun.HandleGetRun)
+	mux.HandleFunc("GET /api/v1/datasets/{id}/runs/{runId}/status", deps.DatasetRun.HandleGetRunStatus)
 
-	// Eval rules endpoints (require metadata store).
-	if evalRuleHandler != nil {
-		mux.HandleFunc("POST /api/v1/eval-rules", evalRuleHandler.HandleCreate)
-		mux.HandleFunc("GET /api/v1/eval-rules", evalRuleHandler.HandleList)
-		mux.HandleFunc("POST /api/v1/eval-rules/preview", evalRuleHandler.HandlePreview)
-		mux.HandleFunc("DELETE /api/v1/eval-rules/{id}", evalRuleHandler.HandleDelete)
-	}
-
-	// Dataset endpoints (require metadata store).
-	if store != nil {
-		datasetHandler := &handler.DatasetHandler{
-			Store:        store,
-			SessionStore: h,
-		}
-		mux.HandleFunc("POST /api/v1/datasets", datasetHandler.HandleCreate)
-		mux.HandleFunc("GET /api/v1/datasets", datasetHandler.HandleList)
-		mux.HandleFunc("GET /api/v1/datasets/{id}", datasetHandler.HandleGet)
-		mux.HandleFunc("POST /api/v1/datasets/{id}/items", datasetHandler.HandleAddItems)
-		mux.HandleFunc("POST /api/v1/datasets/{id}/items/batch", datasetHandler.HandleAddItemsBatch)
-		mux.HandleFunc("GET /api/v1/datasets/{id}/items", datasetHandler.HandleListItems)
-		mux.HandleFunc("DELETE /api/v1/datasets/{id}", datasetHandler.HandleDelete)
-
-		// Dataset run endpoints — read endpoints (list, get, status) are
-		// always available. POST (create run) requires judge LLM config.
-		datasetRunHandler := &handler.DatasetRunHandler{
-			Store:        store,
-			SessionStore: h,
-		}
-		if cfg.Query.JudgeLLMBaseURL != "" && cfg.Query.JudgeLLMAPIKey != "" {
-			judgeClient := playground.NewHTTPClient(cfg.Query.JudgeLLMBaseURL, cfg.Query.JudgeLLMAPIKey)
-			datasetRunHandler.JudgeClient = judgeClient
-			datasetRunHandler.Cache = promptCache
-			mux.HandleFunc("POST /api/v1/datasets/{id}/runs", datasetRunHandler.HandleRun)
-		}
-		// Read endpoints don't need a judge LLM client — always register.
-		mux.HandleFunc("GET /api/v1/datasets/{id}/runs", datasetRunHandler.HandleListRuns)
-		mux.HandleFunc("GET /api/v1/datasets/{id}/runs/{runId}", datasetRunHandler.HandleGetRun)
-		mux.HandleFunc("GET /api/v1/datasets/{id}/runs/{runId}/status", datasetRunHandler.HandleGetRunStatus)
-	}
-
-	// Playground endpoint (requires metadata store + LLM config).
-	if playgroundHandler != nil {
-		mux.HandleFunc("POST /api/v1/playground/run", playgroundHandler.HandleRun)
-	}
+	// Playground endpoint (route always registered; the handler returns 503
+	// when the LLM is not configured).
+	mux.HandleFunc("POST /api/v1/playground/run", deps.Playground.HandleRun)
 
 	// Score write endpoint (for eval worker score write-back, no auth required).
-	mux.HandleFunc("POST /api/v1/scores", handler.NewScoreHandler(sdb).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/scores", handler.NewScoreHandler(deps.SDB).ServeHTTP)
 
 	// Prometheus metrics.
 	mux.HandleFunc("GET /metrics", promhttp.Handler().ServeHTTP)
@@ -354,9 +255,9 @@ func Run() error {
 	// Serve embedded UI for all other routes (SPA fallback to index.html).
 	mux.HandleFunc("/", serveUI)
 
-	sessionMw := auth.RequireAuth(store, cfg.Auth.SecureCookie, sessionTTL)
-	promptGetMw := auth.RequireSessionOrAPIKey(store, apiKeyValidator, cfg.Auth.SecureCookie, sessionTTL, handler.APIKeyProjectIDKey)
-	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	sessionMw := auth.RequireAuth(store, cfg.Auth.SecureCookie, deps.SessionTTL)
+	promptGetMw := auth.RequireSessionOrAPIKey(store, deps.APIKeyValidator, cfg.Auth.SecureCookie, deps.SessionTTL, handler.APIKeyProjectIDKey)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
 		// Public routes bypass authentication entirely.
@@ -380,102 +281,44 @@ func Run() error {
 		// SPA fallback and anything else.
 		mux.ServeHTTP(w, r)
 	})
+}
 
-	// Start S3 snapshot poller (separate goroutine).
-	if s3Store != nil {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		go func() {
-			ticker := time.NewTicker(syncInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					downloaded, err := pollAndDownload(ctx, s3Store, dbPath, &snapshotLastModified)
-					if err != nil {
-						slog.Warn("query: snapshot poll/download failed", "err", err)
-					} else if downloaded {
-						if err := sdb.Swap(dbPath); err != nil {
-							slog.Warn("query: snapshot swap failed", "err", err)
-						} else {
-							slog.Info("query: snapshot swapped — new data now visible")
-						}
-					}
-					// Update snapshot age metric.
-					if !snapshotLastModified.IsZero() {
-						age := time.Since(snapshotLastModified).Seconds()
-						queryMetrics.RecordSnapshotAge(age)
-					}
-				case <-ctx.Done():
-					// Trigger one final sync before exit.
-					if downloaded, err := pollAndDownload(ctx, s3Store, dbPath, &snapshotLastModified); err != nil {
-						slog.Warn("query: final sync failed", "err", err)
-					} else if downloaded {
-						if err := sdb.Swap(dbPath); err != nil {
-							slog.Warn("query: snapshot swap on shutdown failed", "err", err)
-						}
-					}
-					return
+// pollSnapshotLoop periodically polls S3 for an updated snapshot, downloads
+// it, and swaps the live DuckDB connection. On shutdown it triggers one
+// final sync.
+func pollSnapshotLoop(ctx context.Context, deps *WiredDeps) {
+	ticker := time.NewTicker(deps.SyncInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			downloaded, err := pollAndDownload(ctx, deps.S3, deps.DBPath, &deps.SnapshotLastModified)
+			if err != nil {
+				slog.Warn("query: snapshot poll/download failed", "err", err)
+			} else if downloaded {
+				if err := deps.SDB.Swap(deps.DBPath); err != nil {
+					slog.Warn("query: snapshot swap failed", "err", err)
+				} else {
+					slog.Info("query: snapshot swapped — new data now visible")
 				}
 			}
-		}()
-	}
-
-	// Set up health and readiness probes.
-	p := probe.New()
-	p.AddCheck("snapshot", &probe.FileExists{Path: dbPath})
-
-	// Combine the main router with probe routes.
-	combined := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
-			p.Router().ServeHTTP(w, r)
-		} else {
-			router.ServeHTTP(w, r)
+			// Update snapshot age metric.
+			if !deps.SnapshotLastModified.IsZero() {
+				age := time.Since(deps.SnapshotLastModified).Seconds()
+				deps.QueryMetrics.RecordSnapshotAge(age)
+			}
+		case <-ctx.Done():
+			// Trigger one final sync before exit.
+			if downloaded, err := pollAndDownload(ctx, deps.S3, deps.DBPath, &deps.SnapshotLastModified); err != nil {
+				slog.Warn("query: final sync failed", "err", err)
+			} else if downloaded {
+				if err := deps.SDB.Swap(deps.DBPath); err != nil {
+					slog.Warn("query: snapshot swap on shutdown failed", "err", err)
+				}
+			}
+			return
 		}
-	})
-
-	// Parse query listen address
-	addr := cfg.Query.Addr
-	if addr == "" {
-		addr = ":8002"
 	}
-
-	// Start server.
-	srv := &http.Server{
-		Addr:    addr,
-		Handler: combined,
-	}
-
-	// Graceful shutdown
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	// Start the dedicated Prometheus metrics server on cfg.Metrics.Addr (:9090).
-	if err := StartMetricsServer(ctx, cfg.Metrics.Addr); err != nil {
-		return fmt.Errorf("query: start metrics server: %w", err)
-	}
-
-	go func() {
-		slog.Info("query: listening", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("query: server error", "error", err)
-		}
-	}()
-
-	<-ctx.Done()
-	slog.Info("query: shutting down...")
-
-	// Graceful shutdown with 30-second drain timeout.
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("query: shutdown: %w", err)
-	}
-
-	slog.Info("query: stopped")
-	return nil
 }
 
 // isS3NotFound checks whether the error indicates that the S3 object
