@@ -4,99 +4,68 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Omneval is a self-hostable LLM/Agent tracing and evaluation platform. Its key differentiator: it uses DuckDB (embedded, no separate server) instead of ClickHouse, making it viable for organizations with strict data residency requirements.
+Omneval is a self-hostable LLM/Agent tracing and evaluation platform. Its key differentiator: it uses DuckDB/DuckLake (embedded engine, Parquet on S3, no ClickHouse cluster) instead of ClickHouse, making it viable for organizations with strict data residency requirements while still targeting high ingest scale.
 
 ## Commands
 
-### Go (workspace root)
+### Go (run from the workspace root — `./...` does NOT work across the workspace)
 ```bash
 go build ./services/ingest/cmd/ingest/
 go build ./services/query/cmd/query/
 go build ./services/writer/cmd/writer/
 go build ./services/eval/cmd/eval/
-go test ./...                          # all services + internal
-go test ./services/ingest/...          # single service
-go vet ./...
+go test ./internal/...                 # shared packages
+go test ./services/ingest/... ./services/writer/... ./services/query/... ./services/eval/...
+go vet ./internal/... ./services/ingest/... ./services/writer/... ./services/query/... ./services/eval/...
 ```
+Some integration tests use testcontainers and skip/fail without a running Docker daemon.
 
 ### UI
 ```bash
 cd ui && npm install
 npm run dev      # dev server
 npm run build    # tsc + vite build
+npm test         # vitest
 ```
 
-### Python SDK
+### SDKs
 ```bash
-pip install -e "sdk/python[dev]"
-pytest sdk/python/
-```
-
-### Sandcastle (autonomous multi-agent orchestration)
-```bash
-npm run sandcastle   # requires llama-server at localhost:8080
+pip install -e "sdk/python[dev]" && pytest sdk/python/   # Python
+cd sdk/ts && npm install && npm test                      # TypeScript
+go test ./sdk/go/...                                      # Go (from workspace root)
 ```
 
 ## Architecture
 
-### Five Independent Services
+Four Go services communicating via Redis, plus shared packages:
 
-The system is split into five Go services that communicate via Redis queues:
+1. **Ingest API** (`services/ingest/`) — Accepts OTLP (proto+JSON at `POST /v1/traces`) and native REST spans (`POST /api/v1/spans`). Validates API keys (60s-TTL cache), translates OTLP to `domain.Span`, enqueues batches to Redis.
 
-1. **Ingest API** (`services/ingest/`) — Accepts OTLP (proto+JSON) and native REST spans. Validates API keys with a 60s-TTL cache, translates OTLP to `domain.Span`, and enqueues JSON batches to Redis key `omneval:ingest:spans`.
+2. **Writer Service** (`services/writer/`) — Dequeues span batches, computes `cost_usd` (LiteLLM pricing + bundled fallback), upserts to DuckDB, syncs a DuckDB snapshot to S3, archives old spans to Hive-partitioned Parquet, matches eval rules (refreshed every 60s) and enqueues eval jobs. Redis SETNX leader election lives in `internal/leader`. Receives score write-backs at `POST /internal/v1/scores`.
 
-2. **Writer Service** (`services/writer/`) — Single-replica StatefulSet (owns the DuckDB PVC). `BLPOP`s from ingest queue, upserts to DuckDB (PK: `trace_id, span_id`), syncs a DuckDB snapshot to S3 every 30s, and enqueues eval jobs for spans matching active rules.
+3. **Query API** (`services/query/`) — Stateless. Downloads the DuckDB snapshot from S3, polls for updates, queries hot+cold UNION (snapshot + S3 Parquet). Serves the embedded React SPA (`embed.FS`), session auth, and all metadata CRUD: projects, API keys, prompts (versioned + labels), eval rules, datasets + dataset runs, conversations, bookmarks, playground runs, admin endpoints, Analytics DSL (`POST /api/v1/analytics/spans`).
 
-3. **Query API** (`services/query/`) — Stateless, horizontally scalable. Downloads the DuckDB snapshot from S3 on startup, polls every 30s for updates. Runs hot+cold UNION queries (DuckDB snapshot + Hive-partitioned Parquet on S3). Also serves the embedded React SPA and manages the metadata store (prompts, eval rules, API keys, sessions).
+4. **Eval Workers** (`services/eval/`) — Dequeue eval jobs, call an OpenAI-compatible judge LLM, write scores back to the Writer with exponential-backoff retry.
 
-4. **Eval Workers** (`services/eval/`) — `BLPOP` eval jobs, call a configurable OpenAI-compatible judge LLM, write scores back via `POST /internal/v1/scores` to the Writer Service. Horizontally scalable; retry with exponential backoff up to 5 minutes.
+5. **Shared** (`internal/`) — domain types, config (Viper, `omneval.yaml` / `OMNEVAL_*`), auth, metadata stores (Postgres prod / SQLite demo), DuckDB schema, OTLP translation, pricing, normalizer, queue, S3, leader election, probes.
 
-5. **Shared packages** (`internal/`) — domain types, config (Viper + `omneval.yaml`/`OMNEVAL_*` env vars), auth (bcrypt + session cookies), metadata SQL (Postgres prod / SQLite demo), DuckDB schema, OTLP translation, pricing, Redis queue abstraction, S3 abstraction.
-
-### Data Flow
-
-```
-SDK → Ingest API → Redis (ingest queue) → Writer → DuckDB (PVC)
-                                                  → S3 snapshot (every 30s)
-                                                  → S3 Parquet archive (every 30m, spans > 2 days old)
-                                                  → Redis (eval queue) → Eval Workers → Writer (scores)
-
-Query API ← S3 snapshot (polled every 30s)
-Query API ← S3 Parquet (queried via DuckDB read_parquet + hive_partitioning)
-```
-
-### Storage Tiers
-
-| Tier | Location | Owner | Latency |
-|------|----------|-------|---------|
-| Hot store | DuckDB file on Writer PVC | Writer (exclusive RW) | < 1s |
-| Snapshot | S3 DuckDB file | Writer writes, Query reads | ≤ 30s stale |
-| Cold archive | S3 Hive-partitioned Parquet | Writer writes, Query reads via `read_parquet` | ≤ 30m stale |
-| Metadata | Postgres (prod) / SQLite (dev) | Query API | transactional |
+**IMPORTANT — target architecture shift:** ADR-0004 (`docs/adr/0004-ducklake-storage-core.md`) replaces the hot-DuckDB/snapshot/cold-Parquet tiers with a single DuckLake table set (Postgres catalog, S3-first ingestion, batch-ledger dedupe, multi-writer). When touching storage, snapshot, or archival code, read that ADR first — the snapshot/UNION/archival subsystems are scheduled for deletion. Until the migration lands, the code still implements the three-tier design.
 
 ### Key Design Constraints
 
-- **Writer is single-replica**: DuckDB cannot be opened RW by two processes simultaneously. The Writer owns the PVC; Query API only reads the S3 snapshot — it never mounts the PVC.
-- **Idempotent upserts**: DuckDB spans table PK is `(trace_id, span_id)`, so duplicate deliveries from Redis are safe.
-- **Cost pre-computed at write time**: `cost_usd` is calculated when spans land in DuckDB using the LiteLLM pricing table (bundled fallback in `internal/pricing/`). No query-time recomputation.
-- **Eval rule cache in Writer**: Rules loaded from metadata store on startup, refreshed every 60s. New rules fire within ~1 minute.
-- **API key format**: `oev_proj_<43 base58>` (project) or `oev_svc_<43 base58>` (service). Only the SHA-256 hash is stored.
-
-### OTLP Translation
-
-`internal/otlp/` translates OTel GenAI semantic conventions:
-- `gen_ai.request.model` → `Span.Model`
-- `gen_ai.usage.{input,output}_tokens` → token counts
-- `gen_ai.prompt.N.{role,content}` → `Span.Input` (JSON array)
-- `gen_ai.completion.N.{role,content}` → `Span.Output`
-- All unmapped attributes → `Span.Attributes` overflow JSON map
+- **Writer is single-replica** (until ADR-0004 lands): DuckDB allows one RW process. The Writer owns the PVC; Query API reads only the S3 snapshot.
+- **Idempotent upserts**: spans PK `(trace_id, span_id)` — duplicate Redis deliveries are safe. (Replaced by the Batch Ledger under ADR-0004.)
+- **Cost pre-computed at write time** — never recomputed at query time. Model names are normalized (provider prefix stripped) before pricing; unknown models store cost 0 and surface as "unpriced".
+- **Traces list = one row per Trace** (root span + rollups), never a flat span list.
+- **API key format**: `oev_proj_<43 base58>` / `oev_svc_<43 base58>`; only SHA-256 hashes stored.
+- **Raw SQL never accepted from clients** — the Analytics DSL compiles to parameterized SQL with allowlisted fields/ops; `project_id` always injected.
 
 ### Go Workspace
 
-`go.work` ties together six modules: `./internal`, `./sdk/go`, and the four services. Each service has its own `go.mod`. Run `go` commands from the workspace root to address all modules at once.
+`go.work` ties together six modules: `./internal`, `./sdk/go`, and the four services. Each has its own `go.mod`.
 
 ## Development Notes
 
-Most service logic is currently stubbed with `panic("not implemented")`. The domain models, config structure, DuckDB schema, and metadata migrations are the completed foundational pieces. Follow the vertical slice order in `CONTEXT.md` when implementing: metadata → ingest→Redis → writer→DuckDB → query → auth → UI → analytics → OTLP → eval → prompts → SDKs → archival.
+The UI (`ui/src/`) is React + Vite + Tailwind v4 with a custom dark theme (see `ui/BRANDING.md`); pages: Dashboard, Traces, TraceDetail, Conversations, Prompts, EvalRules, Datasets, Settings, Admin, Login.
 
-Full bounded-context documentation is in `CONTEXT.md`. Architecture decisions are in `docs/adr/`. The PRD is `omneval-prd.md`.
+Domain language lives in `CONTEXT.md` — follow it exactly (Span, Trace, Conversation, Score, Lake, Catalog, Ingest Buffer, Batch Ledger, End User vs User). Architecture decisions are in `docs/adr/`. The PRD is `omneval-prd.md`; progress tracking in `ROADMAP.md`. Coding standards in `.devloop/CODING_STANDARDS.md`.

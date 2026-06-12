@@ -138,43 +138,58 @@ Phase 1 implementation progress. All Phase 1 slices are complete. Work is organi
 - [x] Docker Compose for local development (Postgres + Redis + MinIO)
 - [x] Docker Compose startup fixes (health checks, dependency ordering)
 
-## Phase 2
+## Phase 2 (complete except Playground UI)
 
-### Eval rules UI
-- [ ] Eval rules CRUD in UI
-- [ ] Rule matching preview
+- [x] Eval rules CRUD UI + rule matching preview
+- [x] Prompt Registry UI (version management, label assignment, diff view)
+- [x] Dataset curation UI (creation, items, runs with status)
+- [x] TypeScript SDK (tracer, OTel exporter, client)
+- [x] Helm chart + Kustomize base
+- [x] Eval filter enhancements (OR / NOT, regex attribute filters, nested `attributes.key.subkey` access)
+- [x] Conversations (grouping, list + detail UI)
+- [x] Playground API (`POST /api/v1/playground/run`)
+- [ ] Playground UI (prompt-and-test interface, edit-and-replay) — carried to Phase 3
+- ~~Cross-node Writer HA / PVC fencing / VolumeSnapshot backup~~ — superseded by ADR-0004 (DuckLake removes the PVC and the single-writer constraint)
 
-### Prompt Registry UI
-- [ ] Prompt version management UI
-- [ ] Label assignment UI
-- [ ] Prompt diff/comparison view
+## Phase 3 — DuckLake migration (ADR-0004)
 
-### Playground
-- [ ] Prompt-and-test interface
-- [ ] Span output inspection with edit-and-replay
+Storage rearchitecture to chase Langfuse-scale ingestion while keeping the no-ClickHouse pitch:
 
-### Dataset curation UI
-- [ ] Dataset creation and versioning
-- [ ] Span/trace selection for evaluation datasets
+- [ ] DuckLake spans/scores tables (Parquet on S3, Postgres catalog sharing the metadata instance, partitioned by `project_id` + span date)
+- [ ] S3-first ingestion: Ingest API stages raw batches in the Ingest Buffer, enqueues Batch ID references
+- [ ] Batch Ledger (`committed_batches`) idempotency + read-time dedupe on trace detail
+- [ ] Writer fleet: stateless Deployment, ~5s/16MB commit cadence, ack after commit
+- [ ] Leader-run Table Maintenance (merge adjacent files, expire snapshots, orphan cleanup)
+- [ ] Query API attaches to DuckLake directly; delete snapshot sync/polling, swappable DB, hot+cold UNION, archival sweep
+- [ ] One-off backfill: existing hot DuckDB + cold Parquet → Lake
 
-### TypeScript SDK
-- [ ] Browser-compatible tracer
-- [ ] Node.js tracer with OTel exporter
+## Phase 3 — Product
 
-### Kubernetes production deployment
-- [ ] Helm chart (production)
-- [ ] Kustomize base for GitOps (Flux CD / ArgoCD)
+### Cost integrity
+- [ ] Model normalization at write time (strip provider prefixes; raw name preserved in attributes)
+- [ ] Per-project Custom Pricing in metadata store + Settings UI (precedence over LiteLLM table)
+- [ ] "Unpriced model" indicator in dashboard (never silent $0.00)
+- [ ] Exclude non-LLM spans from model charts (kills the "unknown" bucket)
 
-### Cross-node Writer Service HA (active-passive)
-- [ ] Leader election for Writer Service
-- [ ] PVC fencing to prevent dual-writer scenarios
-- [ ] Snapshot reconciliation on failover
+### Trace list correctness
+- [ ] Traces page: one row per Trace (root span + rollups: total cost/tokens, span count, end-to-end latency, worst status)
+- [ ] Flat span listing as separate view/filter
+- [ ] Fix Input/Output columns rendering "–" for agent spans
 
-### PVC backup via VolumeSnapshot
-- [ ] CronJob for periodic DuckDB snapshot backups
-- [ ] Restore procedure documentation
+### End User identity
+- [ ] `EndUserID` span field (OTel `user.id` mapping + SDK helpers)
+- [ ] DSL filter/group-by support + per-end-user consumption view
+- [ ] Relabel "User Consumption" widget → "By Service" until then
 
-### Eval filter enhancements
-- [ ] OR / NOT eval filter conditions
-- [ ] Regex-based attribute filters
-- [ ] Nested attribute access (`attributes.key.subkey`)
+### Competitive gaps
+- [ ] Public read API (API-key-authenticated query/export: spans, traces, scores, analytics)
+- [ ] Human annotation: manual score entry in UI + annotation queues
+- [ ] Full-text search over span input/output
+- [ ] Playground UI
+- [ ] Threshold alerts (cost spike, error rate, score drop) via webhook
+- [ ] CSV/Parquet export
+
+### OSS launch
+- [ ] Quickstart docs (docker compose → traced app in 5 minutes)
+- [ ] "Why DuckDB/DuckLake instead of ClickHouse" positioning page
+- [ ] CONTRIBUTING.md + SECURITY.md
