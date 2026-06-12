@@ -24,6 +24,30 @@ type Config struct {
 	Eval     EvalConfig     `mapstructure:"eval"`
 	Pricing  PricingConfig  `mapstructure:"pricing"`
 	Metrics  MetricsConfig  `mapstructure:"metrics"`
+	Lake     LakeConfig     `mapstructure:"lake"`
+}
+
+// LakeConfig holds the shared Lake (DuckLake) connection settings from
+// ADR-0004. Empty values are derived at wiring time: the Catalog follows
+// the metadata-store database (Postgres in prod, a local single-writer
+// catalog file otherwise) and the data path follows the storage bucket
+// (s3://<bucket>/lake).
+type LakeConfig struct {
+	// CatalogDriver is "postgres" or "duckdb" (local single-writer catalog).
+	CatalogDriver string `mapstructure:"catalog_driver"`
+	// CatalogDSN is the Postgres DSN for the Catalog, or the catalog file
+	// path when CatalogDriver is "duckdb".
+	CatalogDSN string `mapstructure:"catalog_dsn"`
+	// DataPath is where Lake Parquet files live: s3://bucket/prefix or a
+	// local directory.
+	DataPath string `mapstructure:"data_path"`
+}
+
+// WriterLakeConfig controls the Writer's Lake participation.
+type WriterLakeConfig struct {
+	// Enabled turns on dual-writing every batch to the Lake alongside the
+	// legacy hot DuckDB store. Default false (legacy behavior unchanged).
+	Enabled bool `mapstructure:"enabled"`
 }
 
 type DatabaseConfig struct {
@@ -81,6 +105,8 @@ type WriterConfig struct {
 	// Retention controls the S3 retention worker that rotates or deletes aged
 	// trace data on a configurable policy.
 	Retention RetentionConfig `mapstructure:"retention"`
+	// Lake controls dual-writing to the Lake (ADR-0004).
+	Lake WriterLakeConfig `mapstructure:"lake"`
 }
 
 // RetentionConfig holds settings for the S3 trace retention worker.
@@ -258,6 +284,11 @@ func Load(path string) (*Config, error) {
 	// metrics
 	v.SetDefault("metrics.addr", ":9090")
 	v.SetDefault("metrics.disable_project_labels", false)
+	// lake
+	v.SetDefault("lake.catalog_driver", "")
+	v.SetDefault("lake.catalog_dsn", "")
+	v.SetDefault("lake.data_path", "")
+	v.SetDefault("writer.lake.enabled", false)
 
 	if path != "" {
 		v.SetConfigFile(path)
@@ -325,6 +356,10 @@ func Load(path string) (*Config, error) {
 	envInt(&cfg.Eval.RetryCount, "OMNEVAL_EVAL_RETRY_COUNT")
 	envString(&cfg.Metrics.Addr, "OMNEVAL_METRICS_ADDR")
 	envBool(&cfg.Metrics.DisableProjectLabels, "OMNEVAL_METRICS_DISABLE_PROJECT_LABELS")
+	envString(&cfg.Lake.CatalogDriver, "OMNEVAL_LAKE_CATALOG_DRIVER")
+	envString(&cfg.Lake.CatalogDSN, "OMNEVAL_LAKE_CATALOG_DSN")
+	envString(&cfg.Lake.DataPath, "OMNEVAL_LAKE_DATA_PATH")
+	envBool(&cfg.Writer.Lake.Enabled, "OMNEVAL_WRITER_LAKE_ENABLED")
 
 	return &cfg, nil
 }

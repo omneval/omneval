@@ -12,6 +12,7 @@ import (
 
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/duckdb"
+	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/leader"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/pricing"
@@ -40,6 +41,7 @@ type WiredDeps struct {
 	ScoreHandler http.Handler
 	DB           *sql.DB
 	DBPath       string
+	Lake         *lake.Lake // nil unless writer.lake.enabled
 	Meta         metadata.Store
 	Redis        *redisgo.Client
 	Election     *leader.LeaderElection // nil when leader election is disabled
@@ -54,6 +56,9 @@ type WiredDeps struct {
 func (d *WiredDeps) Close() {
 	if d.DB != nil {
 		d.DB.Close()
+	}
+	if d.Lake != nil {
+		d.Lake.Close()
 	}
 	if d.Meta != nil {
 		d.Meta.Close()
@@ -146,10 +151,23 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		return nil, fmt.Errorf("writer: load pricing: %w", err)
 	}
 
+	// Attach the Lake when dual-writing is enabled (ADR-0004).
+	if cfg.Writer.Lake.Enabled {
+		lk, err := lake.Open(context.Background(), lake.ConfigFromApp(cfg))
+		if err != nil {
+			deps.Close()
+			return nil, fmt.Errorf("writer: open lake: %w", err)
+		}
+		deps.Lake = lk
+	}
+
 	// Create queue clients and the span pipeline.
 	ingestQ := qredis.NewIngestQueue(rc)
 	evalQ := qredis.NewEvalQueue(rc)
 	deps.Pipeline = pipeline.New(ingestQ, db, pricingTable, meta, evalQ, metricsHelper)
+	if deps.Lake != nil {
+		deps.Pipeline.WithLake(deps.Lake)
+	}
 
 	// Create S3 store (nil if no S3 config) and the components that need it.
 	var s3store *s3pkg.Store
@@ -170,7 +188,11 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	}
 
 	// Create score handler (handles POST /internal/v1/scores).
-	deps.ScoreHandler = handler.New(db)
+	var scoreLake handler.ScoreLakeWriter
+	if deps.Lake != nil {
+		scoreLake = deps.Lake
+	}
+	deps.ScoreHandler = handler.New(db, scoreLake)
 
 	// Set up health and readiness probes.
 	p := probe.New()
