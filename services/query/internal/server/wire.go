@@ -9,6 +9,7 @@ import (
 
 	internalauth "github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/probe"
 	s3 "github.com/omneval/omneval/internal/storage/s3"
@@ -154,9 +155,14 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	}
 	deps.Auth = h
 
+	// One-time carry-over: bookmarks created before the move to the
+	// Metadata Store (ADR-0004 / #84) still live in the DuckDB snapshot's
+	// bookmarks table. Copy them across idempotently before serving.
+	migrateBookmarksFromSnapshot(context.Background(), sdb, store)
+
 	// Create handlers.
-	deps.Span = &handler.SpanHandler{DB: sdb, SessionStore: h}
-	deps.Bookmark = &handler.BookmarkHandler{DB: sdb, SessionStore: h}
+	deps.Span = &handler.SpanHandler{DB: sdb, SessionStore: h, Meta: store}
+	deps.Bookmark = &handler.BookmarkHandler{Store: store, SessionStore: h}
 	deps.Conversation = &handler.ConversationHandler{DB: sdb, SessionStore: h}
 
 	// Prompt registry handler. A CachingValidator is wired in so that SDK
@@ -208,4 +214,33 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	deps.Prober = p
 
 	return deps, nil
+}
+
+// migrateBookmarksFromSnapshot copies bookmark rows left in the legacy
+// DuckDB snapshot into the Metadata Store (one-time carry-over for #84).
+// Idempotent — SetBookmark ignores rows that already exist — and
+// best-effort: a snapshot without a bookmarks table is not an error.
+func migrateBookmarksFromSnapshot(ctx context.Context, sdb *SwappableDB, store metadata.Store) {
+	rows, err := sdb.QueryContext(ctx, "SELECT project_id, trace_id, created_at FROM bookmarks")
+	if err != nil {
+		return // no bookmarks table in this snapshot — nothing to carry over
+	}
+	defer rows.Close()
+
+	var carried int
+	for rows.Next() {
+		var b domain.Bookmark
+		if err := rows.Scan(&b.ProjectID, &b.TraceID, &b.CreatedAt); err != nil {
+			slog.Warn("query: scan legacy bookmark", "err", err)
+			continue
+		}
+		if err := store.SetBookmark(ctx, &b); err != nil {
+			slog.Warn("query: carry over bookmark", "trace_id", b.TraceID, "err", err)
+			continue
+		}
+		carried++
+	}
+	if carried > 0 {
+		slog.Info("query: carried over legacy bookmarks to metadata store", "count", carried)
+	}
 }

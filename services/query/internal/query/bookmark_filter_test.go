@@ -10,42 +10,62 @@ import (
 )
 
 func TestCompileSpecialFilter_Bookmarked(t *testing.T) {
-	q := &SpanQuery{projectID: "test-project"}
-
 	cases := []struct {
-		name     string
-		filter   SpanQueryFilter
-		wantSQL  string
-		wantArgs []any
+		name      string
+		bookmarks []string
+		filter    SpanQueryFilter
+		wantSQL   string
+		wantArgs  []any
 	}{
 		{
-			name:     "bookmarked true",
-			filter:   SpanQueryFilter{Field: "bookmarked", Op: "eq", Value: true},
-			wantSQL:  "EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)",
-			wantArgs: []any{"test-project"},
+			name:      "bookmarked true with starred traces",
+			bookmarks: []string{"t1", "t2"},
+			filter:    SpanQueryFilter{Field: "bookmarked", Op: "eq", Value: true},
+			wantSQL:   "spans.trace_id IN (?, ?)",
+			wantArgs:  []any{"t1", "t2"},
 		},
 		{
-			name:     "bookmarked false",
-			filter:   SpanQueryFilter{Field: "bookmarked", Op: "eq", Value: false},
-			wantSQL:  "NOT EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)",
-			wantArgs: []any{"test-project"},
+			name:      "bookmarked false with starred traces",
+			bookmarks: []string{"t1"},
+			filter:    SpanQueryFilter{Field: "bookmarked", Op: "eq", Value: false},
+			wantSQL:   "spans.trace_id NOT IN (?)",
+			wantArgs:  []any{"t1"},
 		},
 		{
-			name:     "unsupported operator",
-			filter:   SpanQueryFilter{Field: "bookmarked", Op: "neq", Value: true},
-			wantSQL:  "",
-			wantArgs: nil,
+			name:      "bookmarked true with no starred traces matches nothing",
+			bookmarks: nil,
+			filter:    SpanQueryFilter{Field: "bookmarked", Op: "eq", Value: true},
+			wantSQL:   "FALSE",
+			wantArgs:  nil,
 		},
 		{
-			name:     "non-bool value",
-			filter:   SpanQueryFilter{Field: "bookmarked", Op: "eq", Value: "yes"},
-			wantSQL:  "",
-			wantArgs: nil,
+			name:      "bookmarked false with no starred traces matches everything",
+			bookmarks: nil,
+			filter:    SpanQueryFilter{Field: "bookmarked", Op: "eq", Value: false},
+			wantSQL:   "TRUE",
+			wantArgs:  nil,
+		},
+		{
+			name:      "unsupported operator",
+			bookmarks: []string{"t1"},
+			filter:    SpanQueryFilter{Field: "bookmarked", Op: "neq", Value: true},
+			wantSQL:   "",
+			wantArgs:  nil,
+		},
+		{
+			name:      "non-bool value",
+			bookmarks: []string{"t1"},
+			filter:    SpanQueryFilter{Field: "bookmarked", Op: "eq", Value: "yes"},
+			wantSQL:   "",
+			wantArgs:  nil,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			q := &SpanQuery{projectID: "test-project"}
+			q.SetBookmarkedTraceIDs(tc.bookmarks)
+
 			gotSQL, gotArgs := q.compileSpecialFilter(tc.filter)
 			if gotSQL != tc.wantSQL {
 				t.Errorf("SQL: got %q, want %q", gotSQL, tc.wantSQL)
@@ -84,22 +104,39 @@ func TestNewSpanQuery_BookmarkedFilter(t *testing.T) {
 	if q == nil {
 		t.Fatal("expected non-nil query")
 	}
+	if !q.NeedsBookmarks() {
+		t.Error("NeedsBookmarks: want true for a query with a bookmarked filter")
+	}
+}
+
+func TestNeedsBookmarks_FalseWithoutFilter(t *testing.T) {
+	q, err := NewSpanQuery("test-project", SpanQueryRequest{}, nil, "")
+	if err != nil {
+		t.Fatalf("NewSpanQuery: %v", err)
+	}
+	if q.NeedsBookmarks() {
+		t.Error("NeedsBookmarks: want false for a query without a bookmarked filter")
+	}
 }
 
 func TestSpanQuery_BookmarkedFilterInWhereClause(t *testing.T) {
-	// Build a query with a bookmarked filter and verify the WHERE clause.
 	q := &SpanQuery{
 		projectID: "my-project",
 		filters: []SpanQueryFilter{
 			{Field: "bookmarked", Op: "eq", Value: true},
 		},
 	}
+	q.SetBookmarkedTraceIDs([]string{"trace-a", "trace-b"})
 
-	_, where := q.buildWhereClause()
+	args, where := q.buildWhereClause()
 
-	wantClause := "EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)"
+	wantClause := "spans.trace_id IN (?, ?)"
 	if !strings.Contains(where, wantClause) {
 		t.Errorf("WHERE clause missing bookmark filter.\nGot: %s\nWant substring: %s", where, wantClause)
+	}
+	// project_id arg + the two trace IDs.
+	if len(args) != 3 {
+		t.Errorf("args: got %v, want 3 entries", args)
 	}
 }
 
@@ -110,10 +147,11 @@ func TestSpanQuery_BookmarkedFalseFilterInWhereClause(t *testing.T) {
 			{Field: "bookmarked", Op: "eq", Value: false},
 		},
 	}
+	q.SetBookmarkedTraceIDs([]string{"trace-a"})
 
 	_, where := q.buildWhereClause()
 
-	wantClause := "NOT EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)"
+	wantClause := "spans.trace_id NOT IN (?)"
 	if !strings.Contains(where, wantClause) {
 		t.Errorf("WHERE clause missing unbookmarked filter.\nGot: %s\nWant substring: %s", where, wantClause)
 	}
@@ -138,11 +176,11 @@ var _ storage.ObjectStore = (*testS3Store)(nil)
 
 type testS3Store struct{}
 
-func (m *testS3Store) Put(_ context.Context, _ string, _ io.Reader) error       { return nil }
+func (m *testS3Store) Put(_ context.Context, _ string, _ io.Reader) error              { return nil }
 func (m *testS3Store) PutSized(_ context.Context, _ string, _ io.Reader, _ int64) error { return nil }
-func (m *testS3Store) Get(_ context.Context, _ string) (io.ReadCloser, error)   { return nil, nil }
-func (m *testS3Store) Delete(_ context.Context, _ string) error                 { return nil }
-func (m *testS3Store) ListPrefix(_ context.Context, _ string) ([]string, error) { return nil, nil }
+func (m *testS3Store) Get(_ context.Context, _ string) (io.ReadCloser, error)          { return nil, nil }
+func (m *testS3Store) Delete(_ context.Context, _ string) error                        { return nil }
+func (m *testS3Store) ListPrefix(_ context.Context, _ string) ([]string, error)        { return nil, nil }
 func (m *testS3Store) Stat(_ context.Context, _ string) (*storage.ObjectStat, error) {
 	return nil, nil
 }

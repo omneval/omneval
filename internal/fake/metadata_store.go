@@ -31,6 +31,7 @@ type FakeMetadataStore struct {
 	datasetItems    map[string]*domain.DatasetItem
 	datasetRuns     map[string]*domain.DatasetRun
 	datasetRunItems map[string]*domain.DatasetRunItem
+	bookmarks       map[string]*domain.Bookmark // key: projectID:traceID
 
 	// Counters for testing
 	CreateUserCalls     int
@@ -57,7 +58,56 @@ func NewFakeMetadataStore() *FakeMetadataStore {
 		datasetItems:    make(map[string]*domain.DatasetItem),
 		datasetRuns:     make(map[string]*domain.DatasetRun),
 		datasetRunItems: make(map[string]*domain.DatasetRunItem),
+		bookmarks:       make(map[string]*domain.Bookmark),
 	}
+}
+
+// ---- Bookmarks ----
+
+func (f *FakeMetadataStore) SetBookmark(ctx context.Context, b *domain.Bookmark) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := b.ProjectID + ":" + b.TraceID
+	if _, exists := f.bookmarks[key]; exists {
+		return nil
+	}
+	saved := *b
+	if saved.CreatedAt.IsZero() {
+		saved.CreatedAt = time.Now()
+	}
+	f.bookmarks[key] = &saved
+	return nil
+}
+
+func (f *FakeMetadataStore) RemoveBookmark(ctx context.Context, projectID, traceID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.bookmarks, projectID+":"+traceID)
+	return nil
+}
+
+func (f *FakeMetadataStore) IsBookmarked(ctx context.Context, projectID, traceID string) (bool, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	_, ok := f.bookmarks[projectID+":"+traceID]
+	return ok, nil
+}
+
+func (f *FakeMetadataStore) ListBookmarkedTraceIDs(ctx context.Context, projectID string) ([]string, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	var bs []*domain.Bookmark
+	for _, b := range f.bookmarks {
+		if b.ProjectID == projectID {
+			bs = append(bs, b)
+		}
+	}
+	sort.Slice(bs, func(i, j int) bool { return bs[i].CreatedAt.After(bs[j].CreatedAt) })
+	ids := make([]string, len(bs))
+	for i, b := range bs {
+		ids[i] = b.TraceID
+	}
+	return ids, nil
 }
 
 func (f *FakeMetadataStore) Close() error                      { return nil }

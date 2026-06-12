@@ -96,6 +96,15 @@ type Score struct {
 	SpanStartTime time.Time `json:"span_start_time,omitzero"`
 }
 
+// Bookmark stars a trace within a project. Mutable user state — it lives
+// in the Metadata Store, not the span store (ADR-0004 moves it out of the
+// hot DuckDB tier).
+type Bookmark struct {
+	TraceID   string    `json:"trace_id"`
+	ProjectID string    `json:"project_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // SpanScore is a lightweight score attached inline to a Span for waterfall rendering.
 type SpanScore struct {
 	EvalName  string  `json:"eval_name"`

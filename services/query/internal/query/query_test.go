@@ -1154,8 +1154,9 @@ func TestSQL_ColdSideBookmarkedFilterResolves_WhenS3Configured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
+	q.SetBookmarkedTraceIDs([]string{"trace-starred"})
 
-	sql, _, err := q.SQL()
+	sql, args, err := q.SQL()
 	if err != nil {
 		t.Fatalf("SQL error: %v", err)
 	}
@@ -1163,7 +1164,17 @@ func TestSQL_ColdSideBookmarkedFilterResolves_WhenS3Configured(t *testing.T) {
 	if !strings.Contains(sql, ") AS spans") {
 		t.Errorf("expected cold wrapper aliased AS spans, got:\n%s", sql)
 	}
-	if got := strings.Count(sql, "b.trace_id = spans.trace_id"); got != 2 {
-		t.Errorf("expected bookmarked subquery on both sides (2 occurrences), got %d", got)
+	if got := strings.Count(sql, "spans.trace_id IN (?)"); got != 2 {
+		t.Errorf("expected bookmarked IN-list on both sides (2 occurrences), got %d\n%s", got, sql)
+	}
+	// The starred trace ID must appear as an arg once per side.
+	var idArgs int
+	for _, a := range args {
+		if a == "trace-starred" {
+			idArgs++
+		}
+	}
+	if idArgs != 2 {
+		t.Errorf("expected starred trace ID arg on both sides, got %d occurrences in %v", idArgs, args)
 	}
 }

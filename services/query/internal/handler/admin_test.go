@@ -459,3 +459,12 @@ func setupTestDB(t *testing.T) *sql.DB {
 
 	return db
 }
+
+func (f *fakeAdminStore) SetBookmark(_ context.Context, _ *domain.Bookmark) error { return nil }
+func (f *fakeAdminStore) RemoveBookmark(_ context.Context, _, _ string) error     { return nil }
+func (f *fakeAdminStore) IsBookmarked(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
+}
+func (f *fakeAdminStore) ListBookmarkedTraceIDs(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
