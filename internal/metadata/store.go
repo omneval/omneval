@@ -80,6 +80,12 @@ type Store interface {
 	UpdateDatasetRunItem(ctx context.Context, item *domain.DatasetRunItem) error
 	ListDatasetRunItems(ctx context.Context, runID string) ([]*domain.DatasetRunItem, error)
 
+	// Bookmarks (starred traces)
+	SetBookmark(ctx context.Context, projectID, traceID string) error
+	RemoveBookmark(ctx context.Context, projectID, traceID string) error
+	IsBookmarked(ctx context.Context, projectID, traceID string) (bool, error)
+	ListBookmarkedTraces(ctx context.Context, projectID string) ([]string, error)
+
 	// Migrations
 	Migrate(ctx context.Context) error
 

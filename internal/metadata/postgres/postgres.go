@@ -21,6 +21,9 @@ var migrationSQL string
 //go:embed migrations/0002_add_reset_token.up.sql
 var migrationSQL2 string
 
+//go:embed migrations/0003_bookmarks.up.sql
+var migrationSQL3 string
+
 // Store is the Postgres-backed implementation of metadata.Store.
 type Store struct {
 	db       *sql.DB
@@ -45,7 +48,8 @@ func New(dsn string) (*Store, error) {
 }
 
 // Migrate applies pending SQL migrations.
-// Applies migration 1 (init) and migration 2 (add reset token) if not already applied.
+// Applies migration 1 (init), 2 (add reset token), and 3 (bookmarks) if not
+// already applied.
 func (s *Store) Migrate(ctx context.Context) error {
 	if s.migrated {
 		return nil
@@ -82,6 +86,18 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if count == 0 {
 		// Run migration 2
 		if err := s.applyMigration(ctx, 2, migrationSQL2); err != nil {
+			return err
+		}
+	}
+
+	// Check if migration 3 (bookmarks) is already applied
+	err = s.db.QueryRowContext(ctx, "SELECT count(*) FROM _schema_migrations WHERE version = 3").Scan(&count)
+	if err != nil {
+		return fmt.Errorf("postgres: check migration 3 status: %w", err)
+	}
+	if count == 0 {
+		// Run migration 3
+		if err := s.applyMigration(ctx, 3, migrationSQL3); err != nil {
 			return err
 		}
 	}
