@@ -254,6 +254,13 @@ type EvalJob struct {
 	EnqueuedAt    time.Time
 	PromptName    string
 	PromptVersion int64
+
+	// Span context captured at enqueue time so the judge can render the
+	// prompt template with the span's actual data without a read path.
+	SpanName   string
+	SpanModel  string
+	SpanInput  string
+	SpanOutput string
 }
 
 // Matches checks if a span matches this EvalFilter.

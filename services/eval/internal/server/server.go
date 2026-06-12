@@ -10,12 +10,54 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/metadata"
+	metadatapg "github.com/omneval/omneval/internal/metadata/postgres"
+	metadatasqlite "github.com/omneval/omneval/internal/metadata/sqlite"
 	redisqueue "github.com/omneval/omneval/internal/queue/redis"
 	"github.com/omneval/omneval/services/eval/internal/judge"
 	"github.com/omneval/omneval/services/eval/internal/metrics"
+	"github.com/omneval/omneval/services/eval/internal/prompts"
 	"github.com/omneval/omneval/services/eval/internal/worker"
 	"github.com/redis/go-redis/v9"
 )
+
+// openMetadataStore creates a metadata store from config. It supports
+// "sqlite" (default) and "postgres" drivers, mirroring the other services.
+func openMetadataStore(cfg *config.Config) (metadata.Store, error) {
+	driver := cfg.Database.Driver
+	dsn := cfg.Database.DSN
+
+	switch driver {
+	case "", "sqlite":
+		if dsn == "" {
+			dsn = "omneval.db"
+		}
+		store, err := metadatasqlite.New(dsn)
+		if err != nil {
+			return nil, fmt.Errorf("eval: open sqlite metadata store: %w", err)
+		}
+		if err := store.Migrate(context.Background()); err != nil {
+			store.Close()
+			return nil, fmt.Errorf("eval: migrate: %w", err)
+		}
+		return store, nil
+	case "postgres":
+		if dsn == "" {
+			return nil, fmt.Errorf("eval: postgres driver requires database.dsn")
+		}
+		store, err := metadatapg.New(dsn)
+		if err != nil {
+			return nil, fmt.Errorf("eval: postgres metadata store: %w", err)
+		}
+		if err := store.Migrate(context.Background()); err != nil {
+			store.Close()
+			return nil, fmt.Errorf("eval: migrate: %w", err)
+		}
+		return store, nil
+	default:
+		return nil, fmt.Errorf("eval: unknown database driver: %s", driver)
+	}
+}
 
 const workerShutdownTimeout = 120 * time.Second
 
@@ -60,8 +102,16 @@ func Run() error {
 	// Create queue client.
 	evalQ := redisqueue.NewEvalQueue(rdb)
 
-	// Initialize judge.
-	judgeLLM := judge.New(cfg)
+	// Open the metadata store so the judge can resolve prompt templates
+	// from the Prompt Registry.
+	store, err := openMetadataStore(cfg)
+	if err != nil {
+		return fmt.Errorf("eval: open metadata store: %w", err)
+	}
+	defer store.Close()
+
+	// Initialize judge with the Prompt Registry resolver.
+	judgeLLM := judge.New(cfg, prompts.NewCachingResolver(store))
 
 	// Create worker.
 	w := worker.New(evalQ, judgeLLM, cfg)
