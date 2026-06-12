@@ -66,6 +66,28 @@ var (
 			Help:      "Total number of errors encountered when writing spans to DuckDB.",
 		},
 	)
+
+	// LakeWriteErrors counts Lake (DuckLake) write failures, labeled by
+	// table. Separate from WriteErrors so dual-write dashboards can
+	// distinguish lake-write failures from legacy-write failures.
+	LakeWriteErrors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "omneval_writer",
+			Name:      "lake_write_errors_total",
+			Help:      "Total number of errors encountered when writing to the Lake (DuckLake).",
+		},
+		[]string{"table"},
+	)
+
+	// LakeWriteDuration tracks the duration of Lake commit transactions.
+	LakeWriteDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "omneval_writer",
+			Name:      "lake_write_duration_seconds",
+			Help:      "Duration of Lake (DuckLake) write transactions in seconds.",
+			Buckets:   prometheus.DefBuckets,
+		},
+	)
 )
 
 // Register registers all Prometheus metric families to the global registry.
@@ -87,6 +109,12 @@ func Register(disableProjectLabels bool) error {
 	}
 	if err := prometheus.Register(WriteErrors); err != nil {
 		return fmt.Errorf("register write errors: %w", err)
+	}
+	if err := prometheus.Register(LakeWriteErrors); err != nil {
+		return fmt.Errorf("register lake write errors: %w", err)
+	}
+	if err := prometheus.Register(LakeWriteDuration); err != nil {
+		return fmt.Errorf("register lake write duration: %w", err)
 	}
 	return nil
 }
@@ -141,4 +169,15 @@ func (m *WriterMetrics) RecordDequeueError() {
 // RecordWriteError increments the write error counter.
 func (m *WriterMetrics) RecordWriteError() {
 	WriteErrors.Inc()
+}
+
+// RecordLakeWriteError increments the Lake write error counter for the
+// given table ("spans" or "scores").
+func (m *WriterMetrics) RecordLakeWriteError(table string) {
+	LakeWriteErrors.WithLabelValues(table).Inc()
+}
+
+// RecordLakeWriteDuration records the duration of a Lake write transaction.
+func (m *WriterMetrics) RecordLakeWriteDuration(durationSec float64) {
+	LakeWriteDuration.Observe(durationSec)
 }

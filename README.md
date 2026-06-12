@@ -36,6 +36,8 @@ The React SPA (Vite + Tailwind CSS) is built as static assets and embedded into 
 | **Snapshot** | S3 DuckDB file | Written by Writer every 30s; read by Query API pods |
 | **Cold** | S3 Hive-partitioned Parquet | Aged spans flushed every 30m; queried via `read_parquet` with partition pruning |
 
+> **Migration in progress (ADR-0004):** the three tiers above are being replaced by the **Lake** — a single DuckLake table set (Parquet on S3, ACID via a Postgres **Catalog** shared with the metadata store). Setting `writer.lake.enabled: true` (`OMNEVAL_WRITER_LAKE_ENABLED=true`) makes the Writer dual-write every span batch and score to the Lake alongside the legacy store. Lake connection settings live under `lake.*` (`catalog_driver`, `catalog_dsn`, `data_path`) and default to the metadata-store database and `s3://<storage.bucket>/lake`. The flag is off by default; legacy behavior is unchanged until cutover.
+
 ### Key Design Points
 
 - **Cost pre-computed at write time** — `cost_usd` is calculated when spans land in DuckDB using the LiteLLM pricing table. No query-time recomputation.

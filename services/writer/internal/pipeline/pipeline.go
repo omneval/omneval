@@ -32,6 +32,12 @@ const insertSpansSQL = `
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
+// SpanLakeWriter commits span batches to the Lake (ADR-0004). Implemented
+// by *lake.Lake; an interface so tests can fake lake failures.
+type SpanLakeWriter interface {
+	InsertSpans(ctx context.Context, spans []*domain.Span) error
+}
+
 // Pipeline drains the Redis ingest queue and batches writes into DuckDB.
 type Pipeline struct {
 	ingest  queue.IngestQueue
@@ -40,6 +46,9 @@ type Pipeline struct {
 	store   metadata.Store
 	evalQ   queue.EvalQueue
 	metrics *metrics.WriterMetrics
+	// lake, when non-nil, receives a dual-write of every batch after the
+	// legacy DuckDB write succeeds (writer.lake.enabled).
+	lake SpanLakeWriter
 	// writeErr, if set, causes writeSpans to return this error (test only).
 	writeErr error
 }
@@ -61,6 +70,13 @@ func New(
 		evalQ:   evalQ,
 		metrics: m,
 	}
+}
+
+// WithLake enables dual-writing every batch to the Lake. Returns the
+// pipeline for chaining at wiring time.
+func (p *Pipeline) WithLake(l SpanLakeWriter) *Pipeline {
+	p.lake = l
+	return p
 }
 
 // Run blocks until ctx is canceled. It continuously dequeues spans from Redis,
@@ -207,7 +223,31 @@ func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
 		}
 	}
 
+	p.dualWriteLake(ctx, spans)
+
 	return nil
+}
+
+// dualWriteLake commits the batch to the Lake after a successful legacy
+// write. A lake-write failure must never fail the batch while
+// dual-writing: it is logged and counted, and the legacy write stands.
+func (p *Pipeline) dualWriteLake(ctx context.Context, spans []*domain.Span) {
+	if p.lake == nil {
+		return
+	}
+	start := time.Now()
+	if err := p.lake.InsertSpans(ctx, spans); err != nil {
+		slog.ErrorContext(ctx, "lake write failed, legacy write kept",
+			"span_count", len(spans),
+			"err", err)
+		if p.metrics != nil {
+			p.metrics.RecordLakeWriteError("spans")
+		}
+		return
+	}
+	if p.metrics != nil {
+		p.metrics.RecordLakeWriteDuration(time.Since(start).Seconds())
+	}
 }
 
 // evalSpans checks each eval rule against the span and enqueues matching jobs.

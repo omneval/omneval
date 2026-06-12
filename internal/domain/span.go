@@ -90,6 +90,10 @@ type Score struct {
 	PromptName    string    `json:"prompt_name"`
 	PromptVersion int64     `json:"prompt_version"`
 	CreatedAt     time.Time `json:"created_at"`
+	// SpanStartTime is the start_time of the span this score annotates.
+	// The Lake partitions scores by it so a score lives next to its span
+	// (ADR-0002); zero means unknown and falls back to CreatedAt.
+	SpanStartTime time.Time `json:"span_start_time,omitzero"`
 }
 
 // SpanScore is a lightweight score attached inline to a Span for waterfall rendering.
