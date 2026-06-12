@@ -57,6 +57,13 @@ type Store interface {
 	ListPromptVersions(ctx context.Context, projectID, name string) ([]*domain.PromptVersion, error)
 	SetPromptLabel(ctx context.Context, label *domain.PromptLabel) error
 
+	// Bookmarks (starred traces — mutable user state, moved out of the hot
+	// DuckDB store under ADR-0004)
+	SetBookmark(ctx context.Context, b *domain.Bookmark) error
+	RemoveBookmark(ctx context.Context, projectID, traceID string) error
+	IsBookmarked(ctx context.Context, projectID, traceID string) (bool, error)
+	ListBookmarkedTraceIDs(ctx context.Context, projectID string) ([]string, error)
+
 	// Eval Rules
 	CreateEvalRule(ctx context.Context, rule *domain.EvalRule) error
 	GetEvalRule(ctx context.Context, ruleID string) (*domain.EvalRule, error)

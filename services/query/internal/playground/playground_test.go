@@ -1063,3 +1063,14 @@ func TestHandleRun_ProjectIDFromQuery(t *testing.T) {
 		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 }
+
+func (m *fakePromptStore) SetBookmark(ctx context.Context, b *domain.Bookmark) error { return nil }
+func (m *fakePromptStore) RemoveBookmark(ctx context.Context, projectID, traceID string) error {
+	return nil
+}
+func (m *fakePromptStore) IsBookmarked(ctx context.Context, projectID, traceID string) (bool, error) {
+	return false, nil
+}
+func (m *fakePromptStore) ListBookmarkedTraceIDs(ctx context.Context, projectID string) ([]string, error) {
+	return nil, nil
+}

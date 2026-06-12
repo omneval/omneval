@@ -250,6 +250,29 @@ type SpanQuery struct {
 	limit      int
 	s3Store    storage.ObjectStore // nil when S3 not configured
 	snapshotDB string              // local DuckDB snapshot path
+	// bookmarkedTraceIDs is the project's starred trace IDs, resolved from
+	// the Metadata Store by the handler before SQL compilation. Bookmarks
+	// no longer live in DuckDB (ADR-0004), so "bookmarked" filters compile
+	// to an inline trace_id IN (...) list instead of a join.
+	bookmarkedTraceIDs []string
+}
+
+// NeedsBookmarks reports whether any filter requires the project's
+// bookmarked trace IDs to compile. Callers should resolve them from the
+// Metadata Store and call SetBookmarkedTraceIDs before SQL().
+func (q *SpanQuery) NeedsBookmarks() bool {
+	for _, f := range q.filters {
+		if f.Field == "bookmarked" {
+			return true
+		}
+	}
+	return false
+}
+
+// SetBookmarkedTraceIDs supplies the project's starred trace IDs for
+// "bookmarked" filter compilation.
+func (q *SpanQuery) SetBookmarkedTraceIDs(ids []string) {
+	q.bookmarkedTraceIDs = ids
 }
 
 // EffectiveLimit returns the limit actually used by this query. This is the
@@ -487,8 +510,8 @@ func durationMsExpr() string {
 
 // compileSpecialFilter generates SQL for non-column filters that require
 // custom logic beyond simple column comparisons. Currently supports
-// "bookmarked" (checks the bookmarks table for existence) and
-// "duration_ms" (computed from end_time - start_time).
+// "bookmarked" (an inline trace_id IN list resolved from the Metadata
+// Store) and "duration_ms" (computed from end_time - start_time).
 //
 // The caller (buildWhereClause) guarantees that the filter field is a known
 // special field. This method returns an empty string for unsupported
@@ -506,11 +529,26 @@ func (q *SpanQuery) compileSpecialFilter(f SpanQueryFilter) (string, []any) {
 			return "", nil
 		}
 
-		sqlClause := "EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)"
-		if !bookmarked {
-			sqlClause = "NOT EXISTS (SELECT 1 FROM bookmarks b WHERE b.trace_id = spans.trace_id AND b.project_id = ?)"
+		// Bookmarks live in the Metadata Store, not DuckDB; the handler
+		// resolves the project's starred trace IDs up front and the filter
+		// compiles to an inline IN list. Starred sets are small (manual
+		// user action), so the list stays well under placeholder limits.
+		if len(q.bookmarkedTraceIDs) == 0 {
+			if bookmarked {
+				return "FALSE", nil
+			}
+			return "TRUE", nil
 		}
-		return sqlClause, []any{q.projectID}
+		placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(q.bookmarkedTraceIDs)), ", ")
+		args := make([]any, len(q.bookmarkedTraceIDs))
+		for i, id := range q.bookmarkedTraceIDs {
+			args[i] = id
+		}
+		sqlClause := "spans.trace_id IN (" + placeholders + ")"
+		if !bookmarked {
+			sqlClause = "spans.trace_id NOT IN (" + placeholders + ")"
+		}
+		return sqlClause, args
 
 	case "duration_ms":
 		ops, ok := operatorSQL[FilterOp(f.Op)]

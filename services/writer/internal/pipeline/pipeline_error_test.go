@@ -384,3 +384,14 @@ func TestPipeline_Run_continuesAfterWriteError(t *testing.T) {
 		t.Errorf("span count in DuckDB: got %d, want 0 (writes should have failed)", count)
 	}
 }
+
+func (f *fakeMetaStore) SetBookmark(ctx context.Context, b *domain.Bookmark) error { return nil }
+func (f *fakeMetaStore) RemoveBookmark(ctx context.Context, projectID, traceID string) error {
+	return nil
+}
+func (f *fakeMetaStore) IsBookmarked(ctx context.Context, projectID, traceID string) (bool, error) {
+	return false, nil
+}
+func (f *fakeMetaStore) ListBookmarkedTraceIDs(ctx context.Context, projectID string) ([]string, error) {
+	return nil, nil
+}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/idgen"
+	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/services/query/internal/auth"
 	"github.com/omneval/omneval/services/query/internal/dsl"
 	"github.com/omneval/omneval/services/query/internal/metrics"
@@ -24,6 +25,9 @@ type SpanHandler struct {
 	DB           DBHandle
 	SessionStore SessionStore
 	Metrics      *metrics.QueryMetrics
+	// Meta resolves bookmarked trace IDs for "bookmarked" filters —
+	// bookmarks live in the Metadata Store, not DuckDB (ADR-0004).
+	Meta metadata.Store
 }
 
 // SessionStore abstracts session lookup for project ID extraction.
@@ -169,6 +173,17 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSONError(w, "bad request: "+err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	// "bookmarked" filters need the project's starred trace IDs from the
+	// Metadata Store before SQL compilation.
+	if q.NeedsBookmarks() && h.Meta != nil {
+		ids, err := h.Meta.ListBookmarkedTraceIDs(r.Context(), projectID)
+		if err != nil {
+			writeJSONError(w, "bookmark lookup error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		q.SetBookmarkedTraceIDs(ids)
 	}
 
 	sqlStr, args, err := q.SQL()
