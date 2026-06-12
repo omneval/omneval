@@ -175,6 +175,12 @@ type QueryConfig struct {
 	Addr         string `mapstructure:"addr"`
 	DuckDBPath   string `mapstructure:"duckdb_path"`
 	SyncInterval string `mapstructure:"sync_interval"` // default "30s"
+	// LakeEnabled gates the Lake read path (ADR-0004). When true, the Query
+	// API attaches read-only to the Lake (DuckLake via the Catalog) instead of
+	// downloading the S3 snapshot. All span reads — span list, trace detail
+	// waterfall, conversations, and the Analytics DSL — compile against the
+	// single Lake table set. Default false (legacy snapshot path).
+	LakeEnabled bool `mapstructure:"lake_enabled"`
 	// PlaygroundLLMBaseURL is an OpenAI-compatible base URL for the playground LLM.
 	// Works with OpenAI, LiteLLM proxy, Ollama, or any compatible endpoint.
 	PlaygroundLLMBaseURL string `mapstructure:"playground_llm_base_url"`
@@ -271,6 +277,7 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("query.addr", ":8002")
 	v.SetDefault("query.duckdb_path", "")
 	v.SetDefault("query.sync_interval", "30s")
+	v.SetDefault("query.lake_enabled", false)
 	v.SetDefault("query.playground_llm_base_url", "")
 	v.SetDefault("query.playground_llm_api_key", "")
 	// eval
@@ -344,6 +351,7 @@ func Load(path string) (*Config, error) {
 	envString(&cfg.Query.Addr, "OMNEVAL_QUERY_ADDR")
 	envString(&cfg.Query.DuckDBPath, "OMNEVAL_QUERY_DUCKDB_PATH")
 	envString(&cfg.Query.SyncInterval, "OMNEVAL_QUERY_SYNC_INTERVAL")
+	envBool(&cfg.Query.LakeEnabled, "OMNEVAL_QUERY_LAKE_ENABLED")
 	envString(&cfg.Query.PlaygroundLLMBaseURL, "OMNEVAL_QUERY_PLAYGROUND_LLM_BASE_URL")
 	envString(&cfg.Query.PlaygroundLLMAPIKey, "OMNEVAL_QUERY_PLAYGROUND_LLM_API_KEY")
 	envString(&cfg.Query.JudgeLLMBaseURL, "OMNEVAL_QUERY_JUDGE_LLM_BASE_URL")
