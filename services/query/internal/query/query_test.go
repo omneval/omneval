@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/storage"
 	"github.com/omneval/omneval/services/query/internal/cursor"
 )
@@ -1176,5 +1177,185 @@ func TestSQL_ColdSideBookmarkedFilterResolves_WhenS3Configured(t *testing.T) {
 	}
 	if idArgs != 2 {
 		t.Errorf("expected starred trace ID arg on both sides, got %d occurrences in %v", idArgs, args)
+	}
+}
+
+// ─── Issue #85: Lake single-table reads ───
+
+func TestLakeSQL_FirstPage(t *testing.T) {
+	req := SpanQueryRequest{
+		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Limit: 10,
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, nil, "")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, args, err := q.LakeSQL()
+	if err != nil {
+		t.Fatalf("LakeSQL error: %v", err)
+	}
+
+	if !strings.Contains(sql, "FROM lake.spans") {
+		t.Errorf("expected single-table read from lake.spans, got:\n%s", sql)
+	}
+	if strings.Contains(sql, "UNION") {
+		t.Errorf("Lake reads must not UNION hot+cold, got:\n%s", sql)
+	}
+	if got := strings.Count(sql, "WHERE"); got != 1 {
+		t.Errorf("expected exactly one WHERE clause, got %d:\n%s", got, sql)
+	}
+	// args: project_id, from, to, limit+1.
+	if len(args) != 4 {
+		t.Fatalf("expected 4 args, got %d: %v", len(args), args)
+	}
+	if args[len(args)-1] != 11 {
+		t.Errorf("last arg should be limit+1 (11), got %v", args[len(args)-1])
+	}
+}
+
+func TestLakeSQL_CursorPage(t *testing.T) {
+	req := SpanQueryRequest{
+		From:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:     time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Limit:  10,
+		Cursor: "eyJzdGFydF90aW1lIjoiMjAyNS0wMS0wMVQxMDowMDowMFoiLCJzcGFuX2lkIjoic3BhbjAxIn0",
+	}
+
+	q, err := NewSpanQuery("proj-abc", req, nil, "")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, args, err := q.LakeSQL()
+	if err != nil {
+		t.Fatalf("LakeSQL error: %v", err)
+	}
+
+	// The cursor predicate must join the filter WHERE clause with AND — a
+	// second WHERE is a syntax error on the single-table read.
+	if got := strings.Count(sql, "WHERE"); got != 1 {
+		t.Errorf("expected exactly one WHERE clause, got %d:\n%s", got, sql)
+	}
+	if !strings.Contains(sql, "AND (start_time < ? OR (start_time = ? AND span_id < ?))") {
+		t.Errorf("expected keyset cursor predicate ANDed into WHERE, got:\n%s", sql)
+	}
+	// args: project_id, from, to, cursor start_time x2, cursor span_id, limit+1.
+	if len(args) != 7 {
+		t.Fatalf("expected 7 args, got %d: %v", len(args), args)
+	}
+}
+
+func TestLakeTraceSpansSQL_Dedupes(t *testing.T) {
+	q, err := NewSpanQuery("proj-abc", SpanQueryRequest{}, nil, "")
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, args := q.LakeTraceSpansSQL("trace-1")
+	if !strings.Contains(sql, "ROW_NUMBER() OVER (PARTITION BY trace_id, span_id") {
+		t.Errorf("trace detail must dedupe on (trace_id, span_id), got:\n%s", sql)
+	}
+	if len(args) != 2 || args[0] != "trace-1" || args[1] != "proj-abc" {
+		t.Errorf("args: got %v, want [trace-1 proj-abc]", args)
+	}
+}
+
+// TestLakeSQL_CursorPagination_Integration walks a multi-page span list
+// against a real local Lake and verifies keyset pagination behaves like the
+// legacy path: every span appears exactly once, newest first.
+func TestLakeSQL_CursorPagination_Integration(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	lk, err := lake.Open(ctx, lake.Config{
+		CatalogDriver: lake.CatalogDriverLocal,
+		CatalogDSN:    dir + "/catalog/lake.ducklake",
+		DataPath:      dir + "/data",
+	})
+	if err != nil {
+		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
+	}
+	defer lk.Close()
+
+	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	var spans []*domain.Span
+	for i := 0; i < 5; i++ {
+		spans = append(spans, &domain.Span{
+			SpanID:    fmt.Sprintf("span-%02d", i),
+			TraceID:   fmt.Sprintf("trace-%02d", i),
+			ProjectID: "proj-page",
+			Name:      "op",
+			StartTime: base.Add(time.Duration(i) * time.Minute),
+			EndTime:   base.Add(time.Duration(i)*time.Minute + time.Second),
+		})
+	}
+	if err := lk.InsertSpans(ctx, spans); err != nil {
+		t.Fatalf("insert spans: %v", err)
+	}
+
+	var seen []string
+	cursorStr := ""
+	for page := 0; page < 10; page++ {
+		req := SpanQueryRequest{Limit: 2, Cursor: cursorStr}
+		q, err := NewSpanQuery("proj-page", req, nil, "")
+		if err != nil {
+			t.Fatalf("NewSpanQuery: %v", err)
+		}
+		sqlStr, args, err := q.LakeSQL()
+		if err != nil {
+			t.Fatalf("LakeSQL: %v", err)
+		}
+		rows, err := lk.DB().QueryContext(ctx, sqlStr, args...)
+		if err != nil {
+			t.Fatalf("page %d query: %v\nSQL:\n%s", page, err, sqlStr)
+		}
+		cols, err := rows.Columns()
+		if err != nil {
+			t.Fatalf("columns: %v", err)
+		}
+		var raw [][]any
+		for rows.Next() {
+			vals := make([]any, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			raw = append(raw, vals)
+		}
+		rows.Close()
+
+		pageSpans, err := ScanRows(raw)
+		if err != nil {
+			t.Fatalf("ScanRows: %v", err)
+		}
+
+		next := NextCursor(pageSpans, q.EffectiveLimit())
+		if len(pageSpans) > q.EffectiveLimit() {
+			pageSpans = pageSpans[:q.EffectiveLimit()]
+		}
+		for _, s := range pageSpans {
+			seen = append(seen, s.SpanID)
+		}
+		if next == "" {
+			break
+		}
+		cursorStr = next
+	}
+
+	want := []string{"span-04", "span-03", "span-02", "span-01", "span-00"}
+	if len(seen) != len(want) {
+		t.Fatalf("paginated spans: got %v, want %v", seen, want)
+	}
+	for i := range want {
+		if seen[i] != want[i] {
+			t.Fatalf("paginated spans out of order: got %v, want %v", seen, want)
+		}
 	}
 }

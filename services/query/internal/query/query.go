@@ -689,70 +689,36 @@ func MarshalResponse(r SpanResponse) ([]byte, error) {
 // LakeSQL returns the SQL for listing spans directly from the Lake table
 // (lake.spans) with the provided filters and keyset cursor pagination.
 // Unlike SQL(), it does not use the hot+cold UNION — it reads from the
-// single Lake table.
-//
-// When dedupe is true, the query deduplicates on (trace_id, span_id) keeping
-// the latest row per (trace_id, span_id) pair (per ADR-0004 Batch Ledger
-// residual-duplicate policy).
-func (q *SpanQuery) LakeSQL(dedupe bool) (sql string, args []any, err error) {
+// single Lake table, so the cursor predicate joins the filter WHERE clause
+// directly instead of wrapping a union in an outer query. List reads do not
+// dedupe (ADR-0004 tolerates residual duplicates outside trace detail).
+func (q *SpanQuery) LakeSQL() (sql string, args []any, err error) {
+	// buildWhereClause always emits a WHERE clause — project_id is
+	// unconditionally injected — so the cursor predicate is ANDed onto it.
 	args, where := q.buildWhereClause()
 
-	if dedupe {
-		// Dedupe on (trace_id, span_id), keeping the latest row per group.
-		// Uses a window function to rank rows within each (trace_id, span_id)
-		// group and filters to only the first (latest) row.
-		inner := fmt.Sprintf("SELECT * FROM lake.spans%s ORDER BY start_time DESC, span_id ASC", where)
-
-		if q.cursor.StartTime.IsZero() && q.cursor.SpanID == "" {
-			// First page: wrap the deduped result in outer query for limit.
-			sql = fmt.Sprintf(
-				"SELECT * FROM (%s) AS deduped ORDER BY start_time DESC, span_id ASC LIMIT ?",
-				inner,
-			)
-			args = append(args, q.limit+1)
-		} else {
-			// Cursor page: apply cursor filter on the deduped result.
-			sql = fmt.Sprintf(
-				"SELECT * FROM (%s) AS deduped WHERE (start_time < ? OR (start_time = ? AND span_id < ?)) ORDER BY start_time DESC, span_id ASC LIMIT ?",
-				inner,
-			)
-			args = append(args, q.cursor.StartTime, q.cursor.StartTime, q.cursor.SpanID, q.limit+1)
-		}
-		return sql, args, nil
+	var sb strings.Builder
+	sb.WriteString("SELECT * FROM lake.spans")
+	sb.WriteString(where)
+	if !q.cursor.StartTime.IsZero() || q.cursor.SpanID != "" {
+		sb.WriteString(" AND (start_time < ? OR (start_time = ? AND span_id < ?))")
+		args = append(args, q.cursor.StartTime, q.cursor.StartTime, q.cursor.SpanID)
 	}
+	sb.WriteString("\n  ORDER BY start_time DESC, span_id ASC")
+	sb.WriteString("\n  LIMIT ?")
+	args = append(args, q.limit+1)
 
-	// Non-deduped path: single-table read with cursor pagination.
-	baseSQL := fmt.Sprintf("SELECT * FROM lake.spans%s", where)
-
-	if q.cursor.StartTime.IsZero() && q.cursor.SpanID == "" {
-		baseSQL += "\n  ORDER BY start_time DESC, span_id ASC"
-		baseSQL += "\n  LIMIT ?"
-		args = append(args, q.limit+1)
-	} else {
-		baseSQL += "\n  WHERE (start_time < ? OR (start_time = ? AND span_id < ?))"
-		baseSQL += "\n  ORDER BY start_time DESC, span_id ASC"
-		baseSQL += "\n  LIMIT ?"
-		args = append(args, q.cursor.StartTime, q.cursor.StartTime, q.cursor.SpanID, q.limit+1)
-	}
-
-	return baseSQL, args, nil
+	return sb.String(), args, nil
 }
 
 // LakeTraceSpansSQL returns a SQL query that fetches all spans for a single
-// trace from the Lake table. When dedupe is true, it deduplicates on
-// (trace_id, span_id) keeping the latest row per pair.
-func (q *SpanQuery) LakeTraceSpansSQL(traceID string, dedupe bool) (sql string, args []any) {
-	args = []any{traceID, q.projectID}
-
-	if dedupe {
-		sql = fmt.Sprintf(
-			"SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY trace_id, span_id ORDER BY start_time DESC) AS rn FROM lake.spans WHERE trace_id = ? AND project_id = ?) AS deduped WHERE rn = 1 ORDER BY start_time ASC",
-		)
-		return sql, args
-	}
-
-	sql = fmt.Sprintf(
-		"SELECT * FROM lake.spans WHERE trace_id = ? AND project_id = ? ORDER BY start_time ASC",
-	)
-	return sql, args
+// trace from the Lake table, deduplicated on (trace_id, span_id) keeping one
+// row per pair — the read-time residual-duplicate policy from ADR-0004
+// (duplicates survive only a crash between Lake commit and ledger insert).
+func (q *SpanQuery) LakeTraceSpansSQL(traceID string) (sql string, args []any) {
+	sql = "SELECT * FROM (" +
+		"SELECT *, ROW_NUMBER() OVER (PARTITION BY trace_id, span_id ORDER BY start_time DESC) AS rn" +
+		" FROM lake.spans WHERE trace_id = ? AND project_id = ?" +
+		") AS deduped WHERE rn = 1 ORDER BY start_time ASC"
+	return sql, []any{traceID, q.projectID}
 }

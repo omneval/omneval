@@ -190,13 +190,13 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 		q.SetBookmarkedTraceIDs(ids)
 	}
 
-	sqlStr, args, err := h.compileSpanQuery(q, false)
+	sqlStr, args, err := h.compileSpanQuery(q)
 	if err != nil {
 		writeJSONError(w, "query compilation error", http.StatusInternalServerError)
 		return
 	}
 
-	dbHandle := h.selectDBForSpans(false)
+	dbHandle := h.spanDB()
 	rows, err := dbHandle.Query(sqlStr, args...)
 	if err != nil {
 		writeJSONError(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
@@ -330,7 +330,7 @@ func (h *SpanHandler) querySpansForTrace(projectID, traceID string) ([]*domain.S
 
 	// When Lake is available, use LakeTraceSpansSQL with dedupe on (trace_id, span_id).
 	if h.Lake != nil {
-		sqlStr, args := q.LakeTraceSpansSQL(traceID, true)
+		sqlStr, args := q.LakeTraceSpansSQL(traceID)
 		rows, err := h.Lake.Query(sqlStr, args...)
 		if err != nil {
 			return nil, fmt.Errorf("execute lake trace spans query: %w", err)
@@ -516,7 +516,7 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	dbHandle := h.selectDBForAnalytics()
+	dbHandle := h.spanDB()
 	rows, err := dbHandle.Query(sqlStr, args...)
 	if err != nil {
 		writeJSONError(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
@@ -676,28 +676,18 @@ func writeJSONError(w http.ResponseWriter, message string, status int) {
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
-// compileSpanQuery compiles a SpanQuery to SQL.
-// When Lake is available and dedupe is false (span list), it uses LakeSQL.
-// When Lake is available and dedupe is true (trace detail), it uses LakeSQL with dedupe.
-func (h *SpanHandler) compileSpanQuery(q *query.SpanQuery, dedupe bool) (string, []any, error) {
+// compileSpanQuery compiles a SpanQuery against the Lake when it is
+// available, otherwise against the legacy hot+cold UNION.
+func (h *SpanHandler) compileSpanQuery(q *query.SpanQuery) (string, []any, error) {
 	if h.Lake != nil {
-		return q.LakeSQL(dedupe)
+		return q.LakeSQL()
 	}
 	return q.SQL()
 }
 
-// selectDBForSpans returns the database handle to use for span reads.
-// When Lake is available, it returns the Lake handle; otherwise the snapshot DB.
-func (h *SpanHandler) selectDBForSpans(_ bool) DBHandle {
-	if h.Lake != nil {
-		return h.Lake
-	}
-	return h.DB
-}
-
-// selectDBForAnalytics returns the database handle to use for analytics reads.
-// When Lake is available, it returns the Lake handle; otherwise the snapshot DB.
-func (h *SpanHandler) selectDBForAnalytics() DBHandle {
+// spanDB returns the database handle for span reads: the Lake when it is
+// available, otherwise the snapshot DB.
+func (h *SpanHandler) spanDB() DBHandle {
 	if h.Lake != nil {
 		return h.Lake
 	}
