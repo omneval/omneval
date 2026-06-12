@@ -162,7 +162,7 @@ Ticketed as #83–#92 (dependency graph: #83/#84 unblocked → #85/#86/#87/#91 �
 - [ ] Query API reads from the Lake behind `query.lake.enabled`; single-table DSL, read-time dedupe on trace detail (#85)
 - [ ] S3-first ingestion: Ingest Buffer + Batch Ledger (`committed_batches`) idempotency (#86)
 - [ ] One-off backfill: existing hot DuckDB + cold Parquet → Lake (#87)
-- [ ] Ingest Buffer reconciliation sweep + retention GC (#88)
+- [x] Ingest Buffer reconciliation sweep + retention GC (#88 — leader-elected `services/writer/internal/reconcile.Worker` lists `buffer/` objects older than `grace_period_minutes`; re-enqueues Batch IDs absent from the Batch Ledger (recovery), and deletes committed objects past `retention_hours` (GC), never deleting uncommitted ones; configurable under `writer.reconciliation.*`, documented in `docs/restore-from-snapshot.md`)
 - [ ] Writer fleet: stateless Deployment, ~5s/16MB commit cadence, leader-run Table Maintenance (#89)
 - [x] Durable trace/project deletion against the Lake (#91 — `lake.Lake.DeleteProject` deletes spans+scores and runs `ducklake_expire_snapshots`/`ducklake_delete_orphaned_files`/`ducklake_cleanup_old_files`; the Query API gets a dedicated read-write `AdminLake` attachment so admin deletes are durable and visible immediately, fixing the legacy bug where admin deletes hit the local snapshot copy and resurrected within ~30s)
 - [ ] Lake-native retention enforcement (#92 — fixes latent bug: legacy retention worker scans `parquet/` while the archive lives under `archive/`, so it has never deleted anything)

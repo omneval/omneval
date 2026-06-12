@@ -270,6 +270,52 @@ Properties:
 - **Verifiable.** On completion the command prints a per-`(project, date)` table of source vs Lake row counts for spans and scores, and exits nonzero if any partition mismatches. Run it (and verify) before flipping `query.lake.enabled` in production, and keep the legacy stores until the report is clean.
 - **Read-only on the sources.** The hot DuckDB file is attached `READ_ONLY`; the archive is only read.
 
+## Ingest Buffer reconciliation sweep and retention GC (#88)
+
+S3-first ingestion (#86) stages each batch's spans in the Ingest Buffer
+(`buffer/<batch-id>.json`) before the queue carries only a small reference
+(`{"batch_id": ...}`). If a Writer crashes after staging but before
+enqueueing the reference (or committing the batch to the Batch Ledger), the
+staged object is orphaned: no queue reference exists to deliver it, and it
+would otherwise sit in the buffer forever.
+
+The reconciliation sweep is a leader-elected background job (reusing the
+Writer's existing Redis SETNX leader election, `internal/leader`) that runs
+periodically and:
+
+1. Lists every `buffer/` object older than `grace_period_minutes`.
+2. For each object, looks up its Batch ID in the Batch Ledger
+   (`committed_batches`). If the batch is **not** committed, re-enqueues its
+   reference onto the ingest queue so the normal pipeline picks it up and
+   commits it to the Lake — this is the **recovery** path.
+3. If the batch **is** committed and the object's age exceeds
+   `retention_hours`, deletes the buffer object — this is the **retention
+   GC** path. Uncommitted objects are never deleted, regardless of age.
+
+Only the leader runs the sweep; followers skip each tick.
+
+### Configuration
+
+Configured under `writer.reconciliation` in `omneval.yaml` (or via
+`OMNEVAL_WRITER_RECONCILIATION_*` env vars). Requires S3 storage
+(`writer.storage`) to be configured; the sweep is a no-op (worker is `nil`)
+when disabled or when S3 is not configured.
+
+```yaml
+writer:
+  reconciliation:
+    enabled: true            # OMNEVAL_WRITER_RECONCILIATION_ENABLED
+    interval_minutes: 5      # OMNEVAL_WRITER_RECONCILIATION_INTERVAL_MINUTES — sweep cadence
+    grace_period_minutes: 10 # OMNEVAL_WRITER_RECONCILIATION_GRACE_PERIOD_MINUTES — minimum object age before the sweep acts on it
+    retention_hours: 168     # OMNEVAL_WRITER_RECONCILIATION_RETENTION_HOURS — how long committed objects are kept before GC (default: 1 week)
+```
+
+### Metrics
+
+- `omneval_writer_reconcile_batches_recovered_total` — counter, batches re-enqueued because they were orphaned (uncommitted, past the grace period).
+- `omneval_writer_reconcile_objects_deleted_total` — counter, committed buffer objects deleted by retention GC.
+- `omneval_writer_reconcile_sweep_duration_seconds` — histogram, sweep run duration.
+
 ## Known issue: admin deletes on the legacy snapshot path are cosmetic (fixed by #91 on the Lake path)
 
 On the legacy (pre-ADR-0004) storage tiers, the admin "delete project" and

@@ -100,6 +100,14 @@ func RunWired(deps *WiredDeps) error {
 			}
 		}()
 	}
+	if deps.Reconcile != nil {
+		go func() {
+			slog.Info("writer: reconciliation worker started")
+			if err := deps.Reconcile.RunLoop(ctx, deps.Election); err != nil && err != context.Canceled {
+				slog.Error("writer: reconciliation worker error", "err", err)
+			}
+		}()
+	}
 
 	// Start pipeline (blocks until ctx is canceled).
 	slog.Info("writer: pipeline started")

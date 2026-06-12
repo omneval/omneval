@@ -108,6 +108,36 @@ var (
 			Help:      "Total errors fetching staged batches from the Ingest Buffer.",
 		},
 	)
+
+	// ReconcileBatchesRecovered counts Ingest Buffer batches whose queue
+	// reference was lost and was re-enqueued by the reconciliation sweep (#88).
+	ReconcileBatchesRecovered = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "omneval_writer",
+			Name:      "reconcile_batches_recovered_total",
+			Help:      "Total Ingest Buffer batches recovered by the reconciliation sweep.",
+		},
+	)
+
+	// ReconcileObjectsDeleted counts committed Ingest Buffer objects deleted
+	// by the reconciliation sweep's retention GC (#88).
+	ReconcileObjectsDeleted = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "omneval_writer",
+			Name:      "reconcile_objects_deleted_total",
+			Help:      "Total Ingest Buffer objects deleted by the reconciliation sweep's retention GC.",
+		},
+	)
+
+	// ReconcileSweepDuration tracks the duration of reconciliation sweep runs.
+	ReconcileSweepDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "omneval_writer",
+			Name:      "reconcile_sweep_duration_seconds",
+			Help:      "Duration of Ingest Buffer reconciliation sweep runs in seconds.",
+			Buckets:   prometheus.DefBuckets,
+		},
+	)
 )
 
 // Register registers all Prometheus metric families to the global registry.
@@ -141,6 +171,15 @@ func Register(disableProjectLabels bool) error {
 	}
 	if err := prometheus.Register(BufferFetchErrors); err != nil {
 		return fmt.Errorf("register buffer fetch errors: %w", err)
+	}
+	if err := prometheus.Register(ReconcileBatchesRecovered); err != nil {
+		return fmt.Errorf("register reconcile batches recovered: %w", err)
+	}
+	if err := prometheus.Register(ReconcileObjectsDeleted); err != nil {
+		return fmt.Errorf("register reconcile objects deleted: %w", err)
+	}
+	if err := prometheus.Register(ReconcileSweepDuration); err != nil {
+		return fmt.Errorf("register reconcile sweep duration: %w", err)
 	}
 	return nil
 }
@@ -216,4 +255,22 @@ func (m *WriterMetrics) RecordLedgerSkip() {
 // RecordBufferFetchError increments the Ingest Buffer fetch error counter.
 func (m *WriterMetrics) RecordBufferFetchError() {
 	BufferFetchErrors.Inc()
+}
+
+// RecordReconcileBatchesRecovered adds to the reconciliation sweep's
+// recovered-batch counter.
+func (m *WriterMetrics) RecordReconcileBatchesRecovered(count int) {
+	ReconcileBatchesRecovered.Add(float64(count))
+}
+
+// RecordReconcileObjectsDeleted adds to the reconciliation sweep's
+// deleted-object counter.
+func (m *WriterMetrics) RecordReconcileObjectsDeleted(count int) {
+	ReconcileObjectsDeleted.Add(float64(count))
+}
+
+// RecordReconcileSweepDuration records the duration of a reconciliation
+// sweep run.
+func (m *WriterMetrics) RecordReconcileSweepDuration(durationSec float64) {
+	ReconcileSweepDuration.Observe(durationSec)
 }
