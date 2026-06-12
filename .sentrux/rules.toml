@@ -1,0 +1,73 @@
+# Sentrux architectural rules for Omneval
+# Enforces layered architecture: domain → internal shared packages → service handlers
+
+[constraints]
+# No circular dependencies allowed between modules
+max_cycles = 0
+# Minimum coupling grade (A = lowest coupling, F = highest)
+max_coupling = "B"
+# Maximum cyclomatic complexity per function
+max_cc = 15
+# Flag files exceeding ~300 lines as god-files
+no_god_files = true
+
+# Layer definitions — dependencies must flow downstream (lower order → higher order)
+# Domain models have zero dependencies on application logic
+[[layers]]
+name = "domain"
+paths = ["internal/domain/**"]
+order = 0
+
+# Shared infrastructure — may depend on domain only
+[[layers]]
+name = "infrastructure"
+paths = [
+    "internal/config/**",
+    "internal/auth/**",
+    "internal/metadata/**",
+    "internal/queue/**",
+    "internal/storage/**",
+    "internal/duckdb/**",
+    "internal/otlp/**",
+    "internal/normalizer/**",
+    "internal/pricing/**",
+    "internal/judge/**",
+    "internal/leader/**",
+    "internal/probe/**",
+    "internal/idgen/**",
+]
+order = 1
+
+# HTTP handlers and request-level logic — may depend on domain and infrastructure
+[[layers]]
+name = "handlers"
+paths = ["internal/handlers/**"]
+order = 2
+
+# Service entry points — leaf layer, may depend on everything above
+[[layers]]
+name = "services"
+paths = ["services/**"]
+order = 3
+
+# SDK is independent — should not import internal service code
+[[layers]]
+name = "sdk"
+paths = ["sdk/**"]
+order = 1
+
+# Boundaries: disallowed cross-layer dependencies
+[[boundaries]]
+from = "services/**"
+to = "services/**"
+reason = "Services must not depend on each other; shared logic belongs in internal/"
+
+[[boundaries]]
+from = "sdk/**"
+to = "internal/**"
+reason = "SDK must be self-contained and not import internal packages"
+
+[[boundaries]]
+from = "internal/domain/**"
+to = "internal/**"
+reason = "Domain models must not depend on other internal packages"

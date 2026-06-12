@@ -40,7 +40,7 @@ Phase 1 implementation progress. All Phase 1 slices are complete. Work is organi
 ### Slice 4: Query API → Span List + Trace ✅ (Issues #7, #8, #20)
 
 - [x] S3 snapshot download on startup + S3 polling for updates
-- [x] DuckDB opened read-only for query safety during snapshot swaps
+- [x] ~~DuckDB opened read-only for query safety during snapshot swaps~~ (code drifted: the snapshot is opened read-write, which enables the cosmetic-deletion bug tracked in #91)
 - [x] Span list endpoint (`POST /api/v1/spans/query`) with keyset cursor pagination
 - [x] Field filters validated against allowlisted column names and operators
 - [x] Operator mapping (eq, neq, gt, gte, lt, lte, in) to SQL symbols
@@ -155,15 +155,24 @@ Phase 1 implementation progress. All Phase 1 slices are complete. Work is organi
 
 Storage rearchitecture to chase Langfuse-scale ingestion while keeping the no-ClickHouse pitch:
 
-- [ ] DuckLake spans/scores tables (Parquet on S3, Postgres catalog sharing the metadata instance, partitioned by `project_id` + span date)
-- [ ] S3-first ingestion: Ingest API stages raw batches in the Ingest Buffer, enqueues Batch ID references
-- [ ] Batch Ledger (`committed_batches`) idempotency + read-time dedupe on trace detail
-- [ ] Writer fleet: stateless Deployment, ~5s/16MB commit cadence, ack after commit
-- [ ] Leader-run Table Maintenance (merge adjacent files, expire snapshots, orphan cleanup)
-- [ ] Query API attaches to DuckLake directly; delete snapshot sync/polling, swappable DB, hot+cold UNION, archival sweep
-- [ ] One-off backfill: existing hot DuckDB + cold Parquet → Lake
+Ticketed as #83–#92 (dependency graph: #83/#84 unblocked → #85/#86/#87/#91 → #88/#89 → #92 → #90 cutover):
 
-## Phase 3 — Product
+- [ ] DuckLake spans/scores tables + Writer dual-write behind `writer.lake.enabled` (#83)
+- [ ] Move bookmarks from the hot DuckDB store to the metadata store (#84)
+- [ ] Query API reads from the Lake behind `query.lake.enabled`; single-table DSL, read-time dedupe on trace detail (#85)
+- [ ] S3-first ingestion: Ingest Buffer + Batch Ledger (`committed_batches`) idempotency (#86)
+- [ ] One-off backfill: existing hot DuckDB + cold Parquet → Lake (#87)
+- [ ] Ingest Buffer reconciliation sweep + retention GC (#88)
+- [ ] Writer fleet: stateless Deployment, ~5s/16MB commit cadence, leader-run Table Maintenance (#89)
+- [ ] Durable trace/project deletion against the Lake (#91 — fixes latent bug: admin deletes hit the local snapshot copy and resurrect within ~30s; cold archive never deleted)
+- [ ] Lake-native retention enforcement (#92 — fixes latent bug: legacy retention worker scans `parquet/` while the archive lives under `archive/`, so it has never deleted anything)
+- [ ] Cutover: flip defaults, run prod backfill, delete snapshot sync/polling, swappable DB, hot+cold UNION, archival sweep, PVC/StatefulSet (#90, HITL — last, blocked by all of the above)
+
+## Phase 3 — Product (deferred — not yet ticketed)
+
+Scoped in the 2026-06-11 grilling session but **deliberately not converted to issues yet**: the migration batch (#83–#92) goes first, and several of these are better specced once the Lake query path exists — full-text search and the public read API in particular should be designed against DuckLake, not the snapshot/UNION path that #90 deletes. Run `/to-issues` against this section when the migration is underway.
+
+Suggested pickup order: **Cost integrity first** (writer-localized, independent of the migration, and visibly broken on the live instance today), then trace list correctness, End User identity, the competitive gaps, and OSS launch alongside.
 
 ### Cost integrity
 - [ ] Model normalization at write time (strip provider prefixes; raw name preserved in attributes)

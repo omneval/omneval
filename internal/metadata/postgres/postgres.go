@@ -11,7 +11,6 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/omneval/omneval/internal/domain"
-	"github.com/omneval/omneval/internal/metadata"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -144,7 +143,7 @@ func (s *Store) GetOrganization(ctx context.Context, orgID string) (*domain.Orga
 	).Scan(&org.Name, &createdAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, metadata.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("postgres: get org %s: %w", orgID, err)
 	}
@@ -172,7 +171,7 @@ func (s *Store) GetProject(ctx context.Context, projectID string) (*domain.Proje
 	).Scan(&p.OrgID, &p.Name, &createdAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, metadata.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("postgres: get project %s: %w", projectID, err)
 	}
@@ -235,7 +234,7 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (*domain.User,
 	).Scan(&u.UserID, &u.OrgID, &u.PasswordHash, &createdAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, metadata.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("postgres: get user by email: %w", err)
 	}
@@ -290,7 +289,7 @@ func (s *Store) GetSession(ctx context.Context, sessionID string) (*domain.Sessi
 	).Scan(&userID, &expiresAt, &createdAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, metadata.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("postgres: get session: %w", err)
 	}
@@ -334,7 +333,7 @@ func (s *Store) GetAPIKeyByHash(ctx context.Context, hashedKey string) (*domain.
 	).Scan(&keyID, &projectID, &kindStr, &serviceName, &createdAt, &revokedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, metadata.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("postgres: get api key by hash: %w", err)
 	}
@@ -396,7 +395,7 @@ func (s *Store) GetUserByID(ctx context.Context, userID string) (*domain.User, e
 	).Scan(&u.OrgID, &u.Email, &u.PasswordHash, &createdAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, metadata.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("postgres: get user by id %s: %w", userID, err)
 	}
@@ -445,7 +444,7 @@ func (s *Store) GetUserByResetToken(ctx context.Context, token string) (*domain.
 	).Scan(&u.UserID, &u.OrgID, &u.Email, &u.PasswordHash, &createdAt, &u.PasswordResetToken, &expiryAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, metadata.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("postgres: get user by reset token: %w", err)
 	}
@@ -482,7 +481,7 @@ func (s *Store) GetPromptVersion(ctx context.Context, projectID, name string, ve
 	).Scan(&pv.VersionID, &pv.Template, &model, &temperature, &maxTokens, &createdAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, metadata.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("postgres: get prompt version: %w", err)
 	}
@@ -505,7 +504,7 @@ func (s *Store) GetPromptByLabel(ctx context.Context, projectID, name, label str
 	).Scan(&version, &updatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, metadata.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("postgres: get prompt by label: %w", err)
 	}
@@ -608,7 +607,7 @@ func (s *Store) GetEvalRule(ctx context.Context, ruleID string) (*domain.EvalRul
 		&filterJSON, &rule.SampleRate, &rule.Enabled, &createdAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, metadata.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("postgres: get eval rule: %w", err)
 	}
@@ -719,7 +718,7 @@ func (s *Store) GetDataset(ctx context.Context, datasetID string) (*domain.Datas
 	).Scan(&ds.ProjectID, &ds.Name, &createdAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, metadata.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("postgres: get dataset: %w", err)
 	}
@@ -746,7 +745,7 @@ func (s *Store) DeleteDataset(ctx context.Context, datasetID string) error {
 		return fmt.Errorf("postgres: delete dataset: %w", err)
 	}
 	if rows, _ := result.RowsAffected(); rows == 0 {
-		return metadata.ErrNotFound
+		return domain.ErrNotFound
 	}
 
 	return tx.Commit()
@@ -869,7 +868,7 @@ func (s *Store) GetDatasetRun(ctx context.Context, runID string) (*domain.Datase
 	).Scan(&dr.DatasetID, &dr.EvalRuleID, &dr.PromptVersion, &dr.Status, &createdAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, metadata.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("postgres: get dataset run: %w", err)
 	}
@@ -929,7 +928,7 @@ func (s *Store) GetDatasetRunItem(ctx context.Context, id string) (*domain.Datas
 	).Scan(&item.RunID, &item.ItemID, &item.Score, &item.Reasoning, &createdAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, metadata.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("postgres: get dataset run item: %w", err)
 	}
