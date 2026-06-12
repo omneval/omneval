@@ -5,11 +5,13 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
 	"time"
 
+	"github.com/omneval/omneval/internal/buffer"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/idgen"
 	"github.com/omneval/omneval/internal/metadata"
@@ -38,6 +40,19 @@ type SpanLakeWriter interface {
 	InsertSpans(ctx context.Context, spans []*domain.Span) error
 }
 
+// BatchFetcher reads staged batches from the Ingest Buffer (ADR-0004).
+// Implemented by *buffer.Buffer.
+type BatchFetcher interface {
+	Fetch(ctx context.Context, batchID string) ([]*domain.Span, error)
+}
+
+// BatchLedger is the Batch Ledger (committed_batches): the dedupe record
+// that makes queue redelivery idempotent. Satisfied by metadata.Store.
+type BatchLedger interface {
+	MarkBatchCommitted(ctx context.Context, batchID string, committedAt time.Time) error
+	IsBatchCommitted(ctx context.Context, batchID string) (bool, error)
+}
+
 // Pipeline drains the Redis ingest queue and batches writes into DuckDB.
 type Pipeline struct {
 	ingest  queue.IngestQueue
@@ -49,6 +64,12 @@ type Pipeline struct {
 	// lake, when non-nil, receives a dual-write of every batch after the
 	// legacy DuckDB write succeeds (writer.lake.enabled).
 	lake SpanLakeWriter
+	// reliable + fetcher + ledger, when set via WithBuffer, switch Run to
+	// the S3-first loop: dequeue references, fetch from the Ingest Buffer,
+	// skip ledgered batches, ack only after commit + ledger insert.
+	reliable queue.ReliableIngestQueue
+	fetcher  BatchFetcher
+	ledger   BatchLedger
 	// writeErr, if set, causes writeSpans to return this error (test only).
 	writeErr error
 }
@@ -79,11 +100,25 @@ func (p *Pipeline) WithLake(l SpanLakeWriter) *Pipeline {
 	return p
 }
 
+// WithBuffer switches the pipeline to the S3-first ingest flow (ADR-0004):
+// entries are dequeued with explicit acknowledgement, Batch ID references
+// are resolved through the Ingest Buffer, and the Batch Ledger makes
+// redelivery idempotent. Returns the pipeline for chaining at wiring time.
+func (p *Pipeline) WithBuffer(rq queue.ReliableIngestQueue, fetcher BatchFetcher, ledger BatchLedger) *Pipeline {
+	p.reliable = rq
+	p.fetcher = fetcher
+	p.ledger = ledger
+	return p
+}
+
 // Run blocks until ctx is canceled. It continuously dequeues spans from Redis,
 // writes them to DuckDB, computes cost, matches eval rules, and enqueues eval jobs.
 // On non-fatal errors (dequeue, write, eval rule listing), the pipeline logs
 // the error and continues processing subsequent batches instead of crashing.
 func (p *Pipeline) Run(ctx context.Context) error {
+	if p.reliable != nil {
+		return p.runBuffered(ctx)
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -127,8 +162,157 @@ func (p *Pipeline) Run(ctx context.Context) error {
 	}
 }
 
-// writeSpans writes a batch of spans to DuckDB using INSERT OR REPLACE.
+// runBuffered is the S3-first ingest loop (ADR-0004). Entries are dequeued
+// onto a processing list and acked only after the batch is durably
+// committed; references are resolved through the Ingest Buffer and deduped
+// via the Batch Ledger.
+func (p *Pipeline) runBuffered(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		entry, err := p.reliable.DequeueEntry(ctx)
+		if err != nil {
+			slog.ErrorContext(ctx, "dequeue failed, continuing", "err", err)
+			if p.metrics != nil {
+				p.metrics.RecordDequeueError()
+			}
+			// A malformed entry can never succeed; drop it from the
+			// processing list instead of letting it linger forever.
+			if entry != nil && entry.Raw != "" {
+				_ = p.reliable.Ack(ctx, entry)
+			}
+			continue
+		}
+		if entry == nil {
+			continue
+		}
+		p.processEntry(ctx, entry)
+	}
+}
+
+// processEntry handles one dequeued ingest entry end to end. The entry is
+// acked only after every durable step succeeded; any failure requeues it
+// for another attempt. The staged buffer object is never touched here, so
+// a crash at any point leaves the batch replayable.
+func (p *Pipeline) processEntry(ctx context.Context, entry *queue.IngestEntry) {
+	spans := entry.Spans
+	if entry.Ref != nil {
+		committed, err := p.ledger.IsBatchCommitted(ctx, entry.Ref.BatchID)
+		if err != nil {
+			slog.ErrorContext(ctx, "batch ledger lookup failed, requeueing",
+				"batch_id", entry.Ref.BatchID, "err", err)
+			p.requeue(ctx, entry)
+			return
+		}
+		if committed {
+			// Redelivery of an already-committed batch: ack without
+			// touching the Lake (zero new rows).
+			if p.metrics != nil {
+				p.metrics.RecordLedgerSkip()
+			}
+			p.ack(ctx, entry)
+			return
+		}
+
+		spans, err = p.fetcher.Fetch(ctx, entry.Ref.BatchID)
+		if err != nil {
+			if p.metrics != nil {
+				p.metrics.RecordBufferFetchError()
+			}
+			if errors.Is(err, buffer.ErrNotFound) {
+				// Uncommitted batch with no buffer object: the data is
+				// gone and retrying cannot recover it. Ack so the entry
+				// does not poison the queue.
+				slog.ErrorContext(ctx, "staged batch missing from ingest buffer, dropping",
+					"batch_id", entry.Ref.BatchID, "err", err)
+				p.ack(ctx, entry)
+				return
+			}
+			slog.ErrorContext(ctx, "ingest buffer fetch failed, requeueing",
+				"batch_id", entry.Ref.BatchID, "err", err)
+			p.requeue(ctx, entry)
+			return
+		}
+	}
+
+	if err := p.writeLegacy(ctx, spans); err != nil {
+		slog.ErrorContext(ctx, "write spans failed, requeueing",
+			"span_count", len(spans), "err", err)
+		if p.metrics != nil {
+			p.metrics.RecordWriteError()
+		}
+		p.requeue(ctx, entry)
+		return
+	}
+
+	if entry.Ref != nil {
+		// For buffered batches the Lake commit is authoritative — unlike
+		// dual-write, a failure here must retry, not be swallowed.
+		if p.lake != nil {
+			if err := p.commitLake(ctx, spans); err != nil {
+				slog.ErrorContext(ctx, "lake commit failed, requeueing",
+					"batch_id", entry.Ref.BatchID, "err", err)
+				p.requeue(ctx, entry)
+				return
+			}
+		} else {
+			slog.WarnContext(ctx, "buffered batch without lake enabled — committed to legacy store only; enable writer.lake.enabled",
+				"batch_id", entry.Ref.BatchID)
+		}
+		if err := p.ledger.MarkBatchCommitted(ctx, entry.Ref.BatchID, time.Now()); err != nil {
+			// Crash window: the Lake commit stood but the ledger insert
+			// failed. Requeue — redelivery re-commits and trace-detail
+			// reads dedupe the residual duplicates (ADR-0004).
+			slog.ErrorContext(ctx, "batch ledger insert failed, requeueing",
+				"batch_id", entry.Ref.BatchID, "err", err)
+			p.requeue(ctx, entry)
+			return
+		}
+	} else {
+		// Legacy payload entry: keep dual-write semantics (best effort).
+		p.dualWriteLake(ctx, spans)
+	}
+
+	p.ack(ctx, entry)
+
+	rules, err := p.listEvalRules(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "list eval rules failed, skipping eval", "err", err)
+		return
+	}
+	for _, span := range spans {
+		p.evalSpans(ctx, span, rules)
+	}
+}
+
+func (p *Pipeline) ack(ctx context.Context, entry *queue.IngestEntry) {
+	if err := p.reliable.Ack(ctx, entry); err != nil {
+		slog.ErrorContext(ctx, "ack failed; entry stays on processing list", "err", err)
+	}
+}
+
+func (p *Pipeline) requeue(ctx context.Context, entry *queue.IngestEntry) {
+	if err := p.reliable.Requeue(ctx, entry); err != nil {
+		slog.ErrorContext(ctx, "requeue failed; entry stays on processing list", "err", err)
+	}
+}
+
+// writeSpans writes a batch of spans to DuckDB using INSERT OR REPLACE,
+// then dual-writes the Lake best-effort (legacy flow).
 func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
+	if err := p.writeLegacy(ctx, spans); err != nil {
+		return err
+	}
+	p.dualWriteLake(ctx, spans)
+	return nil
+}
+
+// writeLegacy computes cost and writes a batch to the legacy DuckDB store.
+func (p *Pipeline) writeLegacy(ctx context.Context, spans []*domain.Span) error {
 	if p.writeErr != nil {
 		return p.writeErr
 	}
@@ -223,8 +407,23 @@ func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
 		}
 	}
 
-	p.dualWriteLake(ctx, spans)
+	return nil
+}
 
+// commitLake commits the batch to the Lake, recording commit latency on
+// success and the failure counter on error. The caller decides whether a
+// failure is fatal for the batch (buffered flow) or tolerated (dual-write).
+func (p *Pipeline) commitLake(ctx context.Context, spans []*domain.Span) error {
+	start := time.Now()
+	if err := p.lake.InsertSpans(ctx, spans); err != nil {
+		if p.metrics != nil {
+			p.metrics.RecordLakeWriteError("spans")
+		}
+		return err
+	}
+	if p.metrics != nil {
+		p.metrics.RecordLakeWriteDuration(time.Since(start).Seconds())
+	}
 	return nil
 }
 
@@ -235,18 +434,10 @@ func (p *Pipeline) dualWriteLake(ctx context.Context, spans []*domain.Span) {
 	if p.lake == nil {
 		return
 	}
-	start := time.Now()
-	if err := p.lake.InsertSpans(ctx, spans); err != nil {
+	if err := p.commitLake(ctx, spans); err != nil {
 		slog.ErrorContext(ctx, "lake write failed, legacy write kept",
 			"span_count", len(spans),
 			"err", err)
-		if p.metrics != nil {
-			p.metrics.RecordLakeWriteError("spans")
-		}
-		return
-	}
-	if p.metrics != nil {
-		p.metrics.RecordLakeWriteDuration(time.Since(start).Seconds())
 	}
 }
 

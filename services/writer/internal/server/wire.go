@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/omneval/omneval/internal/buffer"
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/duckdb"
 	"github.com/omneval/omneval/internal/lake"
@@ -178,6 +179,11 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 				slog.Warn("writer: ensure bucket", "err", err)
 			}
 			deps.Reconciler = NewReconciler(s3store, dbPath, s3pkg.SnapshotKey())
+			// With S3 available the pipeline runs the S3-first loop
+			// (ADR-0004): acked-after-commit dequeue, Ingest Buffer
+			// references resolved and deduped via the Batch Ledger.
+			// Legacy payload entries still process unchanged.
+			deps.Pipeline.WithBuffer(ingestQ, buffer.New(s3store), meta)
 		}
 	}
 

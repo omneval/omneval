@@ -15,23 +15,24 @@ import (
 // FakeMetadataStore is an in-memory implementation of metadata.Store suitable
 // for unit tests. It tracks operations and can be inspected by test code.
 type FakeMetadataStore struct {
-	mu              sync.RWMutex
-	organizations   map[string]*domain.Organization
-	projects        map[string]*domain.Project
-	users           map[string]*domain.User
-	emailsToIDs     map[string]string // email -> user_id
-	tokensToIDs     map[string]string // reset token -> user_id
-	sessions        map[string]*domain.Session
-	apiKeys         map[string]*domain.APIKey
-	hashedKeys      map[string]*domain.APIKey
-	promptVersions  map[string]*domain.PromptVersion // key: projectID:name:version
-	promptLabels    map[string]*domain.PromptLabel   // key: projectID:name:label
-	evalRules       map[string]*domain.EvalRule
-	datasets        map[string]*domain.Dataset
-	datasetItems    map[string]*domain.DatasetItem
-	datasetRuns     map[string]*domain.DatasetRun
-	datasetRunItems map[string]*domain.DatasetRunItem
-	bookmarks       map[string]*domain.Bookmark // key: projectID:traceID
+	mu               sync.RWMutex
+	organizations    map[string]*domain.Organization
+	projects         map[string]*domain.Project
+	users            map[string]*domain.User
+	emailsToIDs      map[string]string // email -> user_id
+	tokensToIDs      map[string]string // reset token -> user_id
+	sessions         map[string]*domain.Session
+	apiKeys          map[string]*domain.APIKey
+	hashedKeys       map[string]*domain.APIKey
+	promptVersions   map[string]*domain.PromptVersion // key: projectID:name:version
+	promptLabels     map[string]*domain.PromptLabel   // key: projectID:name:label
+	evalRules        map[string]*domain.EvalRule
+	datasets         map[string]*domain.Dataset
+	datasetItems     map[string]*domain.DatasetItem
+	datasetRuns      map[string]*domain.DatasetRun
+	datasetRunItems  map[string]*domain.DatasetRunItem
+	bookmarks        map[string]*domain.Bookmark // key: projectID:traceID
+	committedBatches map[string]time.Time        // key: batchID (Batch Ledger)
 
 	// Counters for testing
 	CreateUserCalls     int
@@ -43,23 +44,42 @@ type FakeMetadataStore struct {
 
 func NewFakeMetadataStore() *FakeMetadataStore {
 	return &FakeMetadataStore{
-		organizations:   make(map[string]*domain.Organization),
-		projects:        make(map[string]*domain.Project),
-		users:           make(map[string]*domain.User),
-		emailsToIDs:     make(map[string]string),
-		tokensToIDs:     make(map[string]string),
-		sessions:        make(map[string]*domain.Session),
-		apiKeys:         make(map[string]*domain.APIKey),
-		hashedKeys:      make(map[string]*domain.APIKey),
-		promptVersions:  make(map[string]*domain.PromptVersion),
-		promptLabels:    make(map[string]*domain.PromptLabel),
-		evalRules:       make(map[string]*domain.EvalRule),
-		datasets:        make(map[string]*domain.Dataset),
-		datasetItems:    make(map[string]*domain.DatasetItem),
-		datasetRuns:     make(map[string]*domain.DatasetRun),
-		datasetRunItems: make(map[string]*domain.DatasetRunItem),
-		bookmarks:       make(map[string]*domain.Bookmark),
+		organizations:    make(map[string]*domain.Organization),
+		projects:         make(map[string]*domain.Project),
+		users:            make(map[string]*domain.User),
+		emailsToIDs:      make(map[string]string),
+		tokensToIDs:      make(map[string]string),
+		sessions:         make(map[string]*domain.Session),
+		apiKeys:          make(map[string]*domain.APIKey),
+		hashedKeys:       make(map[string]*domain.APIKey),
+		promptVersions:   make(map[string]*domain.PromptVersion),
+		promptLabels:     make(map[string]*domain.PromptLabel),
+		evalRules:        make(map[string]*domain.EvalRule),
+		datasets:         make(map[string]*domain.Dataset),
+		datasetItems:     make(map[string]*domain.DatasetItem),
+		datasetRuns:      make(map[string]*domain.DatasetRun),
+		datasetRunItems:  make(map[string]*domain.DatasetRunItem),
+		bookmarks:        make(map[string]*domain.Bookmark),
+		committedBatches: make(map[string]time.Time),
 	}
+}
+
+// ---- Batch Ledger ----
+
+func (f *FakeMetadataStore) MarkBatchCommitted(ctx context.Context, batchID string, committedAt time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.committedBatches[batchID]; !ok {
+		f.committedBatches[batchID] = committedAt
+	}
+	return nil
+}
+
+func (f *FakeMetadataStore) IsBatchCommitted(ctx context.Context, batchID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.committedBatches[batchID]
+	return ok, nil
 }
 
 // ---- Bookmarks ----

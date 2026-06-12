@@ -37,6 +37,24 @@ var (
 		},
 		[]string{},
 	)
+
+	// BatchesStaged counts batches staged in the Ingest Buffer (ADR-0004).
+	BatchesStaged = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "omneval_ingest",
+			Name:      "buffer_batches_staged_total",
+			Help:      "Total span batches staged in the Ingest Buffer.",
+		},
+	)
+
+	// BufferStageFailures counts failed Ingest Buffer staging attempts.
+	BufferStageFailures = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "omneval_ingest",
+			Name:      "buffer_stage_failures_total",
+			Help:      "Total failures staging span batches in the Ingest Buffer.",
+		},
+	)
 )
 
 // Register registers all Prometheus metric families to the global registry.
@@ -49,6 +67,12 @@ func Register(disableProjectLabels bool) error {
 	}
 	if err := prometheus.Register(RequestDuration); err != nil {
 		return fmt.Errorf("register request duration: %w", err)
+	}
+	if err := prometheus.Register(BatchesStaged); err != nil {
+		return fmt.Errorf("register batches staged: %w", err)
+	}
+	if err := prometheus.Register(BufferStageFailures); err != nil {
+		return fmt.Errorf("register buffer stage failures: %w", err)
 	}
 	return nil
 }
@@ -84,4 +108,14 @@ func (m *IngestMetrics) RecordEnqueueError() {
 // RecordRequestDuration records the duration of a single request.
 func (m *IngestMetrics) RecordRequestDuration(durationSec float64) {
 	RequestDuration.WithLabelValues().Observe(durationSec)
+}
+
+// RecordBatchStaged records a batch staged in the Ingest Buffer.
+func (m *IngestMetrics) RecordBatchStaged(spanCount int) {
+	BatchesStaged.Inc()
+}
+
+// RecordStageFailure increments the Ingest Buffer staging failure counter.
+func (m *IngestMetrics) RecordStageFailure() {
+	BufferStageFailures.Inc()
 }

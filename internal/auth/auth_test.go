@@ -168,6 +168,13 @@ func (f *FakeMetadataStore) ListDatasetRunItems(_ context.Context, _ string) ([]
 	return nil, nil
 }
 func (f *FakeMetadataStore) Migrate(_ context.Context) error        { return nil }
+func (f *FakeMetadataStore) MarkBatchCommitted(ctx context.Context, batchID string, committedAt time.Time) error {
+	return nil
+}
+func (f *FakeMetadataStore) IsBatchCommitted(ctx context.Context, batchID string) (bool, error) {
+	return false, nil
+}
+
 func (f *FakeMetadataStore) Close() error                           { return nil }
 func (f *FakeMetadataStore) CheckPassword(_ string, _ string) error { return nil }
 
