@@ -15,6 +15,9 @@ import (
 type ConversationHandler struct {
 	DB           DBHandle
 	SessionStore SessionStore
+	// Lake is the DuckDB handle attached read-only to the Lake.
+	// When non-nil, conversation reads compile against lake.spans.
+	Lake DBHandle
 }
 
 // ConversationListItem represents a single conversation in the paginated
@@ -115,22 +118,22 @@ func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *
 	}
 	cursor := r.URL.Query().Get("cursor")
 
+	// Use lake.spans when Lake is available; otherwise snapshot spans table.
+	spansTable := "spans"
+	if h.Lake != nil {
+		spansTable = "lake.spans"
+	}
+
 	// Build query.
-	query := `
-		SELECT
-			conversation_id,
-			project_id,
-			COALESCE(MAX(service_name), '') AS service_name,
-			COUNT(DISTINCT trace_id) AS trace_count,
-			COUNT(*) AS span_count,
-			CAST(MIN(start_time) AS VARCHAR) AS start_time,
-			COALESCE(CAST(MAX(end_time) AS VARCHAR), '') AS end_time,
-			ROUND(COALESCE(SUM(cost_usd), 0), 6) AS total_cost_usd,
-			COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
-			COALESCE(SUM(output_tokens), 0) AS total_output_tokens
-		FROM spans
-		WHERE project_id = ? AND conversation_id IS NOT NULL AND conversation_id != ''
-	`
+	query := "SELECT conversation_id, project_id, COALESCE(MAX(service_name), '') AS service_name, " +
+		"COUNT(DISTINCT trace_id) AS trace_count, COUNT(*) AS span_count, " +
+		"CAST(MIN(start_time) AS VARCHAR) AS start_time, " +
+		"COALESCE(CAST(MAX(end_time) AS VARCHAR), '') AS end_time, " +
+		"ROUND(COALESCE(SUM(cost_usd), 0), 6) AS total_cost_usd, " +
+		"COALESCE(SUM(input_tokens), 0) AS total_input_tokens, " +
+		"COALESCE(SUM(output_tokens), 0) AS total_output_tokens " +
+		"FROM " + spansTable + " " +
+		"WHERE project_id = ? AND conversation_id IS NOT NULL AND conversation_id != ''"
 	args := []any{projectID}
 
 	// Optional RFC 3339 time-range bounds (the UI sends the header range).
@@ -166,7 +169,8 @@ func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *
 	`
 	args = append(args, limit+1) // fetch one extra to determine if there's a next page.
 
-	rows, err := h.DB.Query(query, args...)
+	dbHandle := h.selectDB()
+	rows, err := dbHandle.Query(query, args...)
 	if err != nil {
 		writeJSONError(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -219,35 +223,22 @@ func (h *ConversationHandler) HandleConversationDetail(w http.ResponseWriter, r 
 	}
 
 	// Get distinct traces ordered by start_time, with root span info.
-	rows, err := h.DB.Query(`
-		SELECT
-			trace_id,
-			CAST(MIN(start_time) AS VARCHAR) AS start_time,
-			COALESCE(CAST(MAX(end_time) AS VARCHAR), '') AS end_time,
-			COUNT(*) AS span_count,
-			ROUND(COALESCE(SUM(cost_usd), 0), 6) AS cost_usd,
-			COALESCE(SUM(input_tokens), 0) AS input_tokens,
-			COALESCE(SUM(output_tokens), 0) AS output_tokens,
-			(SELECT s2.name FROM spans s2
-			 WHERE s2.trace_id = s.trace_id AND (s2.parent_id IS NULL OR s2.parent_id = '')
-			 ORDER BY s2.start_time ASC
-			 LIMIT 1
-			) AS root_span_name,
-			(SELECT s2.kind FROM spans s2
-			 WHERE s2.trace_id = s.trace_id AND (s2.parent_id IS NULL OR s2.parent_id = '')
-			 ORDER BY s2.start_time ASC
-			 LIMIT 1
-			) AS root_span_kind,
-			(SELECT s2.model FROM spans s2
-			 WHERE s2.trace_id = s.trace_id AND s2.model != ''
-			 ORDER BY s2.start_time ASC
-			 LIMIT 1
-			) AS model
-		FROM spans s
-		WHERE project_id = ? AND conversation_id = ?
-		GROUP BY trace_id
-		ORDER BY start_time ASC
-	`, projectID, conversationID)
+	dbHandle := h.selectDB()
+	spansTable := "spans"
+	if h.Lake != nil {
+		spansTable = "lake.spans"
+	}
+	query := "SELECT trace_id, CAST(MIN(start_time) AS VARCHAR) AS start_time, " +
+		"COALESCE(CAST(MAX(end_time) AS VARCHAR), '') AS end_time, " +
+		"COUNT(*) AS span_count, ROUND(COALESCE(SUM(cost_usd), 0), 6) AS cost_usd, " +
+		"COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(output_tokens), 0) AS output_tokens, " +
+		"(SELECT s2.name FROM " + spansTable + " s2 WHERE s2.trace_id = s.trace_id AND (s2.parent_id IS NULL OR s2.parent_id = '') ORDER BY s2.start_time ASC LIMIT 1) AS root_span_name, " +
+		"(SELECT s2.kind FROM " + spansTable + " s2 WHERE s2.trace_id = s.trace_id AND (s2.parent_id IS NULL OR s2.parent_id = '') ORDER BY s2.start_time ASC LIMIT 1) AS root_span_kind, " +
+		"(SELECT s2.model FROM " + spansTable + " s2 WHERE s2.trace_id = s.trace_id AND s2.model != '' ORDER BY s2.start_time ASC LIMIT 1) AS model " +
+		"FROM " + spansTable + " s " +
+		"WHERE project_id = ? AND conversation_id = ? " +
+		"GROUP BY trace_id ORDER BY start_time ASC"
+	rows, err := dbHandle.Query(query, projectID, conversationID)
 	if err != nil {
 		writeJSONError(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -287,4 +278,13 @@ func (h *ConversationHandler) HandleConversationDetail(w http.ResponseWriter, r 
 		writeJSONError(w, "encode error", http.StatusInternalServerError)
 		return
 	}
+}
+
+// selectDB returns the database handle to use for conversation reads.
+// When Lake is available, it returns the Lake handle; otherwise the snapshot DB.
+func (h *ConversationHandler) selectDB() DBHandle {
+	if h.Lake != nil {
+		return h.Lake
+	}
+	return h.DB
 }

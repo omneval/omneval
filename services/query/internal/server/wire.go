@@ -10,6 +10,7 @@ import (
 	internalauth "github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/probe"
 	s3 "github.com/omneval/omneval/internal/storage/s3"
@@ -33,6 +34,11 @@ type WiredDeps struct {
 	SessionTTL   time.Duration
 	QueryMetrics *metrics.QueryMetrics
 	Prober       *probe.Prober
+
+	// Lake is the DuckDB handle attached read-only to the Lake (DuckLake via
+	// the Postgres Catalog). When query.lake.enabled is true, all span reads
+	// compile against this handle instead of the S3 snapshot.
+	Lake *SwappableDB
 
 	// SnapshotLastModified tracks the S3 snapshot mtime for the poller.
 	SnapshotLastModified time.Time
@@ -58,6 +64,9 @@ type WiredDeps struct {
 func (d *WiredDeps) Close() {
 	if d.SDB != nil {
 		d.SDB.Close()
+	}
+	if d.Lake != nil {
+		d.Lake.Close()
 	}
 	if d.Store != nil {
 		d.Store.Close()
@@ -116,8 +125,10 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		deps.S3 = s3.New(&cfg.Storage)
 	}
 
-	// Download snapshot from S3 (if configured).
-	if deps.S3 != nil {
+	// Download snapshot from S3 (if configured). In Lake mode the snapshot
+	// tier is bypassed entirely — reads come from the Lake (ADR-0004), so
+	// no download happens and the poller never starts.
+	if deps.S3 != nil && !cfg.Query.Lake.Enabled {
 		if err := downloadSnapshot(context.Background(), deps.S3, deps.DBPath); err != nil {
 			deps.Close()
 			return nil, fmt.Errorf("query: download snapshot: %w", err)
@@ -128,6 +139,8 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		} else {
 			slog.Info("query: snapshot not yet available in S3")
 		}
+	} else if cfg.Query.Lake.Enabled {
+		slog.Info("query: Lake enabled, skipping snapshot download")
 	} else {
 		slog.Info("query: no S3 configured, skipping snapshot download")
 	}
@@ -210,10 +223,70 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 
 	// Health and readiness probes.
 	p := probe.New()
-	p.AddCheck("snapshot", &probe.FileExists{Path: deps.DBPath})
+
+	// When the Lake is enabled, attach read-only to the Lake and gate
+	// readiness on Catalog reachability instead of snapshot-file existence.
+	// Legacy snapshot path remains fully functional when the flag is off
+	// (default off).
+	if cfg.Query.Lake.Enabled {
+		lakeHandle, err := openLakeDB(cfg)
+		if err != nil {
+			deps.Close()
+			return nil, fmt.Errorf("query: open lake: %w", err)
+		}
+		deps.Lake = lakeHandle
+		deps.Span.Lake = lakeHandle
+		deps.Conversation.Lake = lakeHandle
+		// Eval-rule preview and the admin trace count read `spans`
+		// unqualified; the views openLakeDB creates resolve them against
+		// the Lake. Admin *deletes* fail loudly on the read-only attach
+		// until durable Lake deletion lands (#91) — the legacy path only
+		// ever deleted from the local snapshot copy anyway.
+		deps.EvalRule.DB = lakeHandle
+		deps.Admin.DB = lakeHandle
+		p.AddCheck("catalog", &probe.CatalogReachable{
+			Ping: func(ctx context.Context) error {
+				// A metadata-only scan of lake.spans forces a round trip
+				// to the Catalog; pinging the in-memory DuckDB would not.
+				var n int64
+				return lakeHandle.DB().
+					QueryRowContext(ctx, "SELECT COUNT(*) FROM lake.spans WHERE 1 = 0").
+					Scan(&n)
+			},
+		})
+		slog.Info("query: Lake enabled, routing all span reads to lake.spans")
+	} else {
+		p.AddCheck("snapshot", &probe.FileExists{Path: deps.DBPath})
+	}
 	deps.Prober = p
 
 	return deps, nil
+}
+
+// openLakeDB attaches read-only to the Lake (DuckLake via the Catalog) and
+// exposes it through the SwappableDB seam the handlers already use (Swap is
+// never called on it — there is no snapshot to rotate).
+func openLakeDB(cfg *config.Config) (*SwappableDB, error) {
+	lc := lake.ConfigFromApp(cfg)
+	lc.ReadOnly = true
+	lk, err := lake.Open(context.Background(), lc)
+	if err != nil {
+		return nil, fmt.Errorf("open lake: %w", err)
+	}
+	// Handlers that predate the Lake reference `spans`/`scores` unqualified
+	// (eval-rule preview, admin counts). The Lake attach is read-only, but
+	// views in the in-memory default catalog are allowed and resolve those
+	// references to the Lake tables.
+	for _, stmt := range []string{
+		"CREATE OR REPLACE VIEW spans AS SELECT * FROM lake.spans",
+		"CREATE OR REPLACE VIEW scores AS SELECT * FROM lake.scores",
+	} {
+		if _, err := lk.DB().ExecContext(context.Background(), stmt); err != nil {
+			lk.Close()
+			return nil, fmt.Errorf("create lake view: %w", err)
+		}
+	}
+	return NewSwappableDBFromDB(lk.DB()), nil
 }
 
 // migrateBookmarksFromSnapshot copies bookmark rows left in the legacy

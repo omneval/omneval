@@ -275,7 +275,7 @@ func TestWithScores_AttachesScoresToSpans(t *testing.T) {
 	}
 
 	// Load scores.
-	loaded := withScores(db, spans, "trace-abc", "test-proj")
+	loaded := withScores(db, spans, "trace-abc", "test-proj", "scores")
 
 	// span-001 should have scores, span-002 should not.
 	if len(loaded[0].Scores) != 1 {

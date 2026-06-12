@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/services/query/internal/auth"
 )
 
@@ -1018,7 +1020,7 @@ func TestHandleTraceDetail_ProjectIsolation(t *testing.T) {
 }
 
 func TestBuildTraceTree_EmptySpans(t *testing.T) {
-	trace := buildTraceTree([]*domain.Span{}, nil, "", "")
+	trace := buildTraceTree([]*domain.Span{}, nil, "", "", "scores")
 	if trace.TraceID != "" {
 		t.Errorf("trace_id: got %q, want empty", trace.TraceID)
 	}
@@ -1033,7 +1035,7 @@ func TestBuildTraceTree_SingleSpan(t *testing.T) {
 		{SpanID: "span-001", TraceID: "trace-1", ParentID: "", Name: "root", StartTime: baseTime},
 	}
 
-	trace := buildTraceTree(spans, nil, "", "")
+	trace := buildTraceTree(spans, nil, "", "", "scores")
 
 	if trace.TraceID != "trace-1" {
 		t.Errorf("trace_id: got %q, want %q", trace.TraceID, "trace-1")
@@ -1058,7 +1060,7 @@ func TestBuildTraceTree_NestedChildren(t *testing.T) {
 		{SpanID: "grandchild", TraceID: "trace-1", ParentID: "child1", Name: "grandchild", StartTime: baseTime.Add(3 * time.Second)},
 	}
 
-	trace := buildTraceTree(spans, nil, "", "")
+	trace := buildTraceTree(spans, nil, "", "", "scores")
 
 	if trace.RootSpan == nil {
 		t.Fatal("root_span is nil")
@@ -1112,7 +1114,7 @@ func TestBuildTraceTree_AllMissingParents(t *testing.T) {
 		{SpanID: "span-b", TraceID: "trace-1", ParentID: "missing-2", Name: "b", StartTime: baseTime.Add(time.Second)},
 	}
 
-	trace := buildTraceTree(spans, nil, "", "")
+	trace := buildTraceTree(spans, nil, "", "", "scores")
 
 	// With no valid root, the first span should be used as root.
 	if trace.RootSpan == nil {
@@ -2041,5 +2043,85 @@ func TestHandleAnalyticsSpans_AuthenticatedButNoProject(t *testing.T) {
 	}
 	if !strings.Contains(resp["error"], "no project found") {
 		t.Errorf("error message should contain 'no project found', got: %q", resp["error"])
+	}
+}
+
+// ── Issue #85: Trace detail dedupes duplicate span rows ──
+
+// TestHandleTraceDetail_DedupeOnLake proves that when the Lake path is used,
+// ingesting the same span twice results in only one row in the waterfall
+// (per ADR-0004 Batch Ledger residual-duplicate policy).
+func TestHandleTraceDetail_DedupeOnLake(t *testing.T) {
+	ctx := context.Background()
+
+	// Set up a real Lake with partitioned spans table.
+	tmpDir := t.TempDir()
+	_, err := os.MkdirTemp(tmpDir, "catalog")
+	if err != nil {
+		t.Fatalf("create catalog dir: %v", err)
+	}
+
+	cfg := lake.Config{
+		CatalogDriver: lake.CatalogDriverLocal,
+		CatalogDSN:    filepath.Join(tmpDir, "catalog", "lake.ducklake"),
+		DataPath:      filepath.Join(tmpDir, "data"),
+	}
+
+	lk, err := lake.Open(ctx, cfg)
+	if err != nil {
+		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
+	}
+	defer lk.Close()
+
+	// Insert the same span twice (simulating Batch Ledger residual duplicates).
+	baseTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	span := &domain.Span{
+		SpanID:      "span-001",
+		TraceID:     "trace-dedupe",
+		ProjectID:   "proj-dedupe",
+		ServiceName: "svc",
+		Name:        "llm-call",
+		Kind:        domain.SpanKind("llm"),
+		StartTime:   baseTime,
+		EndTime:     baseTime.Add(time.Second),
+		Model:       "gpt-4o",
+	}
+	if err := lk.InsertSpans(ctx, []*domain.Span{span}); err != nil {
+		t.Fatalf("insert span (1st): %v", err)
+	}
+	// Insert the same span again (duplicate).
+	if err := lk.InsertSpans(ctx, []*domain.Span{span}); err != nil {
+		t.Fatalf("insert span (2nd): %v", err)
+	}
+
+	// Verify raw Lake has 2 rows.
+	var rawCount int
+	if err := lk.DB().QueryRowContext(ctx, "SELECT count(*) FROM lake.spans WHERE span_id = ?", "span-001").Scan(&rawCount); err != nil {
+		t.Fatalf("count raw spans: %v", err)
+	}
+	if rawCount != 2 {
+		t.Fatalf("raw Lake should have 2 duplicate rows, got %d", rawCount)
+	}
+
+	// Set up handler with Lake attached.
+	h := &SpanHandler{
+		Lake:         lk.DB(),
+		SessionStore: &FakeSessionStore{projectID: "proj-dedupe"},
+	}
+
+	// Query the trace detail via LakeTraceSpansSQL with dedupe=true.
+	spans, err := h.querySpansForTrace("proj-dedupe", "trace-dedupe")
+	if err != nil {
+		t.Fatalf("querySpansForTrace: %v", err)
+	}
+
+	// After dedup, only 1 row should appear in the waterfall.
+	if len(spans) != 1 {
+		t.Fatalf("trace detail span count: got %d, want 1 (dedupe should remove duplicate)", len(spans))
+	}
+
+	// Verify the returned span has the correct ID.
+	if spans[0].SpanID != "span-001" {
+		t.Errorf("span_id: got %q, want %q", spans[0].SpanID, "span-001")
 	}
 }

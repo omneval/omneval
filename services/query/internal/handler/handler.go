@@ -25,6 +25,10 @@ type SpanHandler struct {
 	DB           DBHandle
 	SessionStore SessionStore
 	Metrics      *metrics.QueryMetrics
+	// Lake is the DuckDB handle attached read-only to the Lake.
+	// When non-nil, all span reads compile against lake.spans instead
+	// of the S3 snapshot path (ADR-0004).
+	Lake DBHandle
 	// Meta resolves bookmarked trace IDs for "bookmarked" filters —
 	// bookmarks live in the Metadata Store, not DuckDB (ADR-0004).
 	Meta metadata.Store
@@ -186,13 +190,14 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 		q.SetBookmarkedTraceIDs(ids)
 	}
 
-	sqlStr, args, err := q.SQL()
+	sqlStr, args, err := h.compileSpanQuery(q)
 	if err != nil {
 		writeJSONError(w, "query compilation error", http.StatusInternalServerError)
 		return
 	}
 
-	rows, err := h.DB.Query(sqlStr, args...)
+	dbHandle := h.spanDB()
+	rows, err := dbHandle.Query(sqlStr, args...)
 	if err != nil {
 		writeJSONError(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -282,7 +287,15 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Build the trace tree (includes score loading).
-	trace := buildTraceTree(spans, h.DB, traceID, projectID)
+	// When Lake is available, read scores from lake.scores; otherwise
+	// fall back to the snapshot scores table.
+	scoresDB := h.DB
+	scoresTable := "scores"
+	if h.Lake != nil {
+		scoresDB = h.Lake
+		scoresTable = "lake.scores"
+	}
+	trace := buildTraceTree(spans, scoresDB, traceID, projectID, scoresTable)
 
 	resp := domain.TraceResponse{
 		TraceID:   trace.TraceID,
@@ -299,6 +312,7 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 }
 
 // querySpansForTrace fetches all spans for a given trace_id and project_id.
+// When Lake is available, it uses LakeTraceSpansSQL with dedupe (per ADR-0004).
 func (h *SpanHandler) querySpansForTrace(projectID, traceID string) ([]*domain.Span, error) {
 	req := query.SpanQueryRequest{
 		From: time.Time{},
@@ -312,6 +326,28 @@ func (h *SpanHandler) querySpansForTrace(projectID, traceID string) ([]*domain.S
 	q, err := query.NewSpanQuery(projectID, req, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("build span query: %w", err)
+	}
+
+	// When Lake is available, use LakeTraceSpansSQL with dedupe on (trace_id, span_id).
+	if h.Lake != nil {
+		sqlStr, args := q.LakeTraceSpansSQL(traceID)
+		rows, err := h.Lake.Query(sqlStr, args...)
+		if err != nil {
+			return nil, fmt.Errorf("execute lake trace spans query: %w", err)
+		}
+		defer rows.Close()
+
+		spanRows, err := scanAllRows(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan span rows: %w", err)
+		}
+
+		spans, err := query.ScanRows(spanRows)
+		if err != nil {
+			return nil, fmt.Errorf("convert span rows: %w", err)
+		}
+
+		return spans, nil
 	}
 
 	sqlStr, args, err := q.SQL()
@@ -466,13 +502,22 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Compile the query — all fields are validated against allowlists.
-	sqlStr, args, err := dsl.Compile(projectID, req)
+	// When Lake is available, compile against the single Lake table set.
+	var sqlStr string
+	var args []any
+	var err error
+	if h.Lake != nil {
+		sqlStr, args, err = dsl.CompileLake(projectID, req)
+	} else {
+		sqlStr, args, err = dsl.Compile(projectID, req)
+	}
 	if err != nil {
 		writeJSONError(w, "query compilation error: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	rows, err := h.DB.Query(sqlStr, args...)
+	dbHandle := h.spanDB()
+	rows, err := dbHandle.Query(sqlStr, args...)
 	if err != nil {
 		writeJSONError(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -527,7 +572,7 @@ type AnalyticsResponse struct {
 
 // buildTraceTree groups spans by trace_id and links parent-child relationships.
 // It sets Span.Children for proper waterfall rendering.
-func buildTraceTree(spans []*domain.Span, db DBHandle, traceID, projectID string) domain.Trace {
+func buildTraceTree(spans []*domain.Span, db DBHandle, traceID, projectID, scoresTable string) domain.Trace {
 	if len(spans) == 0 {
 		return domain.Trace{}
 	}
@@ -565,18 +610,19 @@ func buildTraceTree(spans []*domain.Span, db DBHandle, traceID, projectID string
 
 	// Load scores for all spans in this trace.
 	if db != nil && traceID != "" && projectID != "" {
-		trace.Spans = withScores(db, trace.Spans, traceID, projectID)
+		trace.Spans = withScores(db, trace.Spans, traceID, projectID, scoresTable)
 	}
 
 	return trace
 }
 
 // withScores loads scores for the given spans and attaches them inline.
-func withScores(db DBHandle, spans []*domain.Span, traceID, projectID string) []*domain.Span {
+// scoresTable should be "scores" for snapshot DB or "lake.scores" for Lake.
+func withScores(db DBHandle, spans []*domain.Span, traceID, projectID, scoresTable string) []*domain.Span {
 	rows, err := db.QueryContext(context.Background(),
-		`SELECT span_id, eval_name, value, reasoning, judge_model,
-		        prompt_name, prompt_version, created_at
-		 FROM scores WHERE trace_id = ? AND project_id = ?`,
+		"SELECT span_id, eval_name, value, reasoning, judge_model, "+
+			"prompt_name, prompt_version, created_at FROM "+scoresTable+
+			" WHERE trace_id = ? AND project_id = ?",
 		traceID, projectID,
 	)
 	if err != nil {
@@ -628,6 +674,24 @@ func writeJSONError(w http.ResponseWriter, message string, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+// compileSpanQuery compiles a SpanQuery against the Lake when it is
+// available, otherwise against the legacy hot+cold UNION.
+func (h *SpanHandler) compileSpanQuery(q *query.SpanQuery) (string, []any, error) {
+	if h.Lake != nil {
+		return q.LakeSQL()
+	}
+	return q.SQL()
+}
+
+// spanDB returns the database handle for span reads: the Lake when it is
+// available, otherwise the snapshot DB.
+func (h *SpanHandler) spanDB() DBHandle {
+	if h.Lake != nil {
+		return h.Lake
+	}
+	return h.DB
 }
 
 // ScoreHandler handles POST /api/v1/scores — the public-facing endpoint

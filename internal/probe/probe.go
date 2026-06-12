@@ -182,6 +182,20 @@ func (m *MetadataStoreReachable) Check(ctx context.Context) error {
 	return nil
 }
 
+// CatalogReachable checks that the Lake Catalog is reachable by executing
+// a lightweight read query against the attached Lake. The Ping function is
+// injected so tests can supply a real or mock DB handle.
+type CatalogReachable struct {
+	Ping func(ctx context.Context) error
+}
+
+func (c *CatalogReachable) Check(ctx context.Context) error {
+	if err := c.Ping(ctx); err != nil {
+		return &ProbeError{Op: "catalog_reachable", Err: err}
+	}
+	return nil
+}
+
 // ProbeError wraps an error with an operation name for logging.
 type ProbeError struct {
 	Op   string
