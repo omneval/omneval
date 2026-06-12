@@ -20,8 +20,6 @@ import (
 	internalauth "github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/metadata"
-	metadatapg "github.com/omneval/omneval/internal/metadata/postgres"
-	"github.com/omneval/omneval/internal/metadata/sqlite"
 	"github.com/omneval/omneval/internal/probe"
 	"github.com/omneval/omneval/internal/storage"
 	s3 "github.com/omneval/omneval/internal/storage/s3"
@@ -686,38 +684,8 @@ func openDuckDB(dsn string) (*sql.DB, error) {
 	return db, nil
 }
 
-// openMetadataStore creates a metadata store from config.
+// openMetadataStore opens the configured metadata store via the shared
+// factory. The factory applies the default SQLite path when no DSN is set.
 func openMetadataStore(cfg *config.Config) (metadata.Store, error) {
-	driver := cfg.Database.Driver
-	dsn := cfg.Database.DSN
-
-	switch driver {
-	case "", "sqlite":
-		if dsn == "" {
-			dsn = "omneval.db"
-		}
-		slog.Info("query: opening SQLite metadata store", "path", dsn)
-		store, err := sqlite.New(dsn)
-		if err != nil {
-			return nil, fmt.Errorf("query: open sqlite metadata store: %w", err)
-		}
-		if err := store.Migrate(context.Background()); err != nil {
-			store.Close()
-			return nil, fmt.Errorf("query: migrate: %w", err)
-		}
-		return store, nil
-	case "postgres":
-		store, err := metadatapg.New(dsn)
-		if err != nil {
-			return nil, fmt.Errorf("query: postgres metadata store: %w", err)
-		}
-		if err := store.Migrate(context.Background()); err != nil {
-			store.Close()
-			return nil, fmt.Errorf("query: migrate: %w", err)
-		}
-		slog.Info("query: opening Postgres metadata store", "dsn", dsn)
-		return store, nil
-	default:
-		return nil, fmt.Errorf("query: unknown database driver: %s", driver)
-	}
+	return metadata.Open(cfg.Database.Driver, cfg.Database.DSN)
 }
