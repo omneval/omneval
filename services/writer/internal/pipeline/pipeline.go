@@ -233,6 +233,10 @@ func (p *Pipeline) evalSpans(ctx context.Context, span *domain.Span, rules []dom
 				EnqueuedAt:    time.Now(),
 				PromptName:    rule.PromptName,
 				PromptVersion: rule.PromptVersion,
+				SpanName:      span.Name,
+				SpanModel:     span.Model,
+				SpanInput:     span.Input,
+				SpanOutput:    span.Output,
 			}
 			if err := p.evalQ.Enqueue(ctx, job); err != nil {
 				slog.WarnContext(ctx, "failed to enqueue eval job",
