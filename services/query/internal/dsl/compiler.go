@@ -275,6 +275,18 @@ func resolveOrderByField(field string, groupBy []GroupByField) string {
 // Raw SQL is never accepted from clients; all field and operator references
 // are validated against allowlists before emission.
 func Compile(projectID string, q Query) (sql string, args []any, err error) {
+	return compile(projectID, q, false)
+}
+
+// CompileLake compiles the query against the single Lake table set
+// (ADR-0004): one SELECT over spans (resolving to lake.spans through the
+// Lake's view) with no hot+cold UNION wrapper. Filters on project_id and
+// start_time push down to the Lake's partition layout unchanged.
+func CompileLake(projectID string, q Query) (sql string, args []any, err error) {
+	return compile(projectID, q, true)
+}
+
+func compile(projectID string, q Query, singleTable bool) (sql string, args []any, err error) {
 	// Validate and build the SELECT clause (aggregations).
 	selectClauses := make([]string, 0, len(q.Aggregations)+len(q.GroupBy))
 	for _, agg := range q.Aggregations {
@@ -428,20 +440,29 @@ func Compile(projectID string, q Query) (sql string, args []any, err error) {
 		selectSQL, whereSQL, groupSQL,
 	)
 
-	// Cold side: no-op stub (zero rows) that mirrors the column aliases.
-	coldSide := buildColdSide(selectClauses)
-
-	// Outer query wraps the UNION and projects the inner results.
+	// Outer query projects the inner results.
 	outerSelects := make([]string, len(selectClauses))
 	for i, sc := range selectClauses {
 		outerSelects[i] = aliasFor(sc)
 	}
-	outerSQL := fmt.Sprintf(
-		"SELECT %s FROM (\n%s\nUNION ALL\n%s\n) AS _unioned",
-		strings.Join(outerSelects, ", "),
-		hotSide,
-		coldSide,
-	)
+	var outerSQL string
+	if singleTable {
+		// Lake mode: the single Lake table set needs no cold side.
+		outerSQL = fmt.Sprintf(
+			"SELECT %s FROM (\n%s\n) AS _unioned",
+			strings.Join(outerSelects, ", "),
+			hotSide,
+		)
+	} else {
+		// Legacy: hot snapshot + no-op cold stub UNION.
+		coldSide := buildColdSide(selectClauses)
+		outerSQL = fmt.Sprintf(
+			"SELECT %s FROM (\n%s\nUNION ALL\n%s\n) AS _unioned",
+			strings.Join(outerSelects, ", "),
+			hotSide,
+			coldSide,
+		)
+	}
 
 	if len(orderParts) > 0 {
 		outerSQL += "\n  ORDER BY " + strings.Join(orderParts, ", ")

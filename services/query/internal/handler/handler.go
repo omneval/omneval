@@ -24,6 +24,10 @@ type SpanHandler struct {
 	DB           DBHandle
 	SessionStore SessionStore
 	Metrics      *metrics.QueryMetrics
+	// LakeMode serves reads from the single Lake table set (ADR-0004):
+	// span queries compile without the hot+cold UNION and trace detail
+	// dedupes residual duplicate rows.
+	LakeMode bool
 }
 
 // SessionStore abstracts session lookup for project ID extraction.
@@ -170,6 +174,9 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, "bad request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	if h.LakeMode {
+		q.EnableLakeMode()
+	}
 
 	sqlStr, args, err := q.SQL()
 	if err != nil {
@@ -297,6 +304,12 @@ func (h *SpanHandler) querySpansForTrace(projectID, traceID string) ([]*domain.S
 	q, err := query.NewSpanQuery(projectID, req, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("build span query: %w", err)
+	}
+	if h.LakeMode {
+		// Trace detail dedupes residual duplicates on (trace_id, span_id)
+		// per the Batch Ledger policy (ADR-0004).
+		q.EnableLakeMode()
+		q.EnableTraceDedupe()
 	}
 
 	sqlStr, args, err := q.SQL()
@@ -451,7 +464,11 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Compile the query — all fields are validated against allowlists.
-	sqlStr, args, err := dsl.Compile(projectID, req)
+	compileDSL := dsl.Compile
+	if h.LakeMode {
+		compileDSL = dsl.CompileLake
+	}
+	sqlStr, args, err := compileDSL(projectID, req)
 	if err != nil {
 		writeJSONError(w, "query compilation error: "+err.Error(), http.StatusBadRequest)
 		return

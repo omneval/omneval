@@ -50,6 +50,14 @@ type WriterLakeConfig struct {
 	Enabled bool `mapstructure:"enabled"`
 }
 
+// QueryLakeConfig controls the Query API's Lake participation.
+type QueryLakeConfig struct {
+	// Enabled serves all span/score reads from the Lake (read-only attach
+	// via the Catalog) instead of the S3 snapshot. Default false (legacy
+	// snapshot path unchanged).
+	Enabled bool `mapstructure:"enabled"`
+}
+
 type DatabaseConfig struct {
 	Driver string `mapstructure:"driver"` // "postgres" or "sqlite"
 	DSN    string `mapstructure:"dsn"`
@@ -184,6 +192,8 @@ type QueryConfig struct {
 	JudgeLLMBaseURL string `mapstructure:"judge_llm_base_url"`
 	// JudgeLLMAPIKey is the API key for the dataset run judge LLM.
 	JudgeLLMAPIKey string `mapstructure:"judge_llm_api_key"`
+	// Lake controls serving reads from the Lake (ADR-0004).
+	Lake QueryLakeConfig `mapstructure:"lake"`
 }
 
 type EvalConfig struct {
@@ -289,6 +299,7 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("lake.catalog_dsn", "")
 	v.SetDefault("lake.data_path", "")
 	v.SetDefault("writer.lake.enabled", false)
+	v.SetDefault("query.lake.enabled", false)
 
 	if path != "" {
 		v.SetConfigFile(path)
@@ -360,6 +371,7 @@ func Load(path string) (*Config, error) {
 	envString(&cfg.Lake.CatalogDSN, "OMNEVAL_LAKE_CATALOG_DSN")
 	envString(&cfg.Lake.DataPath, "OMNEVAL_LAKE_DATA_PATH")
 	envBool(&cfg.Writer.Lake.Enabled, "OMNEVAL_WRITER_LAKE_ENABLED")
+	envBool(&cfg.Query.Lake.Enabled, "OMNEVAL_QUERY_LAKE_ENABLED")
 
 	return &cfg, nil
 }

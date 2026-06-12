@@ -250,12 +250,33 @@ type SpanQuery struct {
 	limit      int
 	s3Store    storage.ObjectStore // nil when S3 not configured
 	snapshotDB string              // local DuckDB snapshot path
+	// lakeMode compiles against the single Lake table set: no hot+cold
+	// UNION, no read_parquet (ADR-0004).
+	lakeMode bool
+	// dedupe keeps one row per (trace_id, span_id) for trace-detail reads.
+	dedupe bool
 }
 
 // EffectiveLimit returns the limit actually used by this query. This is the
 // validated, bounded value — not the raw client input.
 func (q *SpanQuery) EffectiveLimit() int {
 	return q.limit
+}
+
+// EnableLakeMode compiles the query against the single Lake table set
+// (ADR-0004): one SELECT over spans (resolving to lake.spans through the
+// Lake's view), no hot+cold UNION, no read_parquet. Cursor predicates,
+// ordering, and limits are identical to the legacy path.
+func (q *SpanQuery) EnableLakeMode() {
+	q.lakeMode = true
+}
+
+// EnableTraceDedupe makes the compiled query keep one row per
+// (trace_id, span_id) — the Batch Ledger's residual-duplicate policy for
+// trace-detail reads. Aggregates do not pay this cost; only the trace
+// detail waterfall enables it.
+func (q *SpanQuery) EnableTraceDedupe() {
+	q.dedupe = true
 }
 
 // SQL returns the compiled SQL string and positional arguments.
@@ -267,6 +288,19 @@ func (q *SpanQuery) SQL() (sql string, args []any, err error) {
 	hotSQL, hotArgs, err := q.hotSQL()
 	if err != nil {
 		return "", nil, err
+	}
+
+	// Lake mode: the hot SELECT already reads the Lake (the spans view
+	// resolves to lake.spans); skip the UNION and cold side entirely.
+	if q.lakeMode {
+		outerSQL := q.outerSQL(hotSQL)
+		args = hotArgs
+		if q.cursor.StartTime.IsZero() && q.cursor.SpanID == "" {
+			args = append(args, q.limit+1)
+		} else {
+			args = append(args, q.cursor.StartTime, q.cursor.StartTime, q.cursor.SpanID, q.limit+1)
+		}
+		return outerSQL, args, nil
 	}
 
 	// --- Cold side: Parquet on S3 via read_parquet ---
@@ -315,6 +349,13 @@ func (q *SpanQuery) hotSQL() (string, []any, error) {
 
 	args, where := q.buildWhereClause()
 	sb.WriteString(where)
+
+	// Residual-duplicate dedupe for trace-detail reads (ADR-0004): keep
+	// one row per (trace_id, span_id), preferring the latest-completing
+	// row when redelivered batches differ.
+	if q.dedupe {
+		sb.WriteString("\n  QUALIFY row_number() OVER (PARTITION BY trace_id, span_id ORDER BY end_time DESC NULLS LAST) = 1")
+	}
 
 	return sb.String(), args, nil
 }

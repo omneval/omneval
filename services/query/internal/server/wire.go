@@ -9,6 +9,7 @@ import (
 
 	internalauth "github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/probe"
 	s3 "github.com/omneval/omneval/internal/storage/s3"
@@ -26,6 +27,7 @@ type WiredDeps struct {
 	Cfg          *config.Config
 	Store        metadata.Store
 	SDB          *SwappableDB
+	Lake         *lake.Lake // nil unless query.lake.enabled
 	DBPath       string
 	S3           *s3.Store // nil when storage is not configured
 	SyncInterval time.Duration
@@ -57,6 +59,9 @@ type WiredDeps struct {
 func (d *WiredDeps) Close() {
 	if d.SDB != nil {
 		d.SDB.Close()
+	}
+	if d.Lake != nil {
+		d.Lake.Close()
 	}
 	if d.Store != nil {
 		d.Store.Close()
@@ -115,8 +120,11 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		deps.S3 = s3.New(&cfg.Storage)
 	}
 
-	// Download snapshot from S3 (if configured).
-	if deps.S3 != nil {
+	lakeEnabled := cfg.Query.Lake.Enabled
+
+	// Download snapshot from S3 (if configured). Lake mode reads committed
+	// data straight from the Lake — no snapshot download, no polling.
+	if deps.S3 != nil && !lakeEnabled {
 		if err := downloadSnapshot(context.Background(), deps.S3, deps.DBPath); err != nil {
 			deps.Close()
 			return nil, fmt.Errorf("query: download snapshot: %w", err)
@@ -127,6 +135,8 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		} else {
 			slog.Info("query: snapshot not yet available in S3")
 		}
+	} else if lakeEnabled {
+		slog.Info("query: lake mode enabled, skipping snapshot download")
 	} else {
 		slog.Info("query: no S3 configured, skipping snapshot download")
 	}
@@ -139,6 +149,20 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		return nil, fmt.Errorf("query: open snapshot: %w", err)
 	}
 	deps.SDB = sdb
+
+	// Attach the Lake read-only when enabled (ADR-0004). All span/score
+	// reads — span list, trace detail, conversations, Analytics DSL —
+	// are served from it through the Lake's main-schema views.
+	if lakeEnabled {
+		lakeCfg := lake.ConfigFromApp(cfg)
+		lakeCfg.ReadOnly = true
+		lk, err := lake.Open(context.Background(), lakeCfg)
+		if err != nil {
+			deps.Close()
+			return nil, fmt.Errorf("query: open lake: %w", err)
+		}
+		deps.Lake = lk
+	}
 
 	// Bootstrap admin user if no users exist.
 	h := auth.NewHandler(store, cfg.Auth.SecureCookie, deps.SessionTTL, cfg.Auth.AdminEmail, cfg.Auth.AdminPassword)
@@ -154,10 +178,17 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	}
 	deps.Auth = h
 
-	// Create handlers.
-	deps.Span = &handler.SpanHandler{DB: sdb, SessionStore: h}
+	// Create handlers. In lake mode, span/score readers query the Lake
+	// (through its main-schema views); the bookmark toggle and admin
+	// endpoints stay on the legacy snapshot until #84/#91 land their
+	// metadata-store and Lake-write moves.
+	var readDB handler.DBHandle = sdb
+	if deps.Lake != nil {
+		readDB = deps.Lake.DB()
+	}
+	deps.Span = &handler.SpanHandler{DB: readDB, SessionStore: h, LakeMode: lakeEnabled}
 	deps.Bookmark = &handler.BookmarkHandler{DB: sdb, SessionStore: h}
-	deps.Conversation = &handler.ConversationHandler{DB: sdb, SessionStore: h}
+	deps.Conversation = &handler.ConversationHandler{DB: readDB, SessionStore: h}
 
 	// Prompt registry handler. A CachingValidator is wired in so that SDK
 	// callers can authenticate GET prompt endpoints using X-API-Key in
@@ -172,7 +203,7 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	}
 
 	deps.EvalRule = &handler.EvalRuleHandler{
-		DB:                sdb,
+		DB:                readDB,
 		Store:             store,
 		SessionStore:      h,
 		DefaultJudgeModel: cfg.Eval.LLMModel,
@@ -202,10 +233,20 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		SessionStore: h,
 	}
 
-	// Health and readiness probes.
+	// Health and readiness probes. Lake mode gates on Catalog
+	// reachability; the legacy path gates on the snapshot file.
 	p := probe.New()
-	p.AddCheck("snapshot", &probe.FileExists{Path: deps.DBPath})
+	if deps.Lake != nil {
+		p.AddCheck("lake-catalog", checkFunc(deps.Lake.CheckCatalog))
+	} else {
+		p.AddCheck("snapshot", &probe.FileExists{Path: deps.DBPath})
+	}
 	deps.Prober = p
 
 	return deps, nil
 }
+
+// checkFunc adapts a plain function to the probe.Check interface.
+type checkFunc func(ctx context.Context) error
+
+func (f checkFunc) Check(ctx context.Context) error { return f(ctx) }

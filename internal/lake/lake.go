@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,7 +122,49 @@ func Open(ctx context.Context, cfg Config) (*Lake, error) {
 			return nil, err
 		}
 	}
+	if err := l.EnsureViews(ctx); err != nil {
+		// A read-only attachment may race the first writer: the Lake's
+		// tables may not exist yet, so the views cannot resolve. Callers
+		// gate readiness on CheckCatalog, which retries view creation.
+		if !cfg.ReadOnly {
+			db.Close()
+			return nil, err
+		}
+		slog.Warn("lake: views not available yet (no tables in catalog?)", "err", err)
+	}
 	return l, nil
+}
+
+// EnsureViews creates main-schema views (spans, scores) over the Lake's
+// tables so SQL written against bare table names — the span list, trace
+// detail, conversations, scores joins, and the Analytics DSL — resolves
+// against the Lake without rewriting. Idempotent.
+func (l *Lake) EnsureViews(ctx context.Context) error {
+	stmts := []string{
+		`CREATE VIEW IF NOT EXISTS main.spans AS SELECT * FROM lake.spans`,
+		`CREATE VIEW IF NOT EXISTS main.scores AS SELECT * FROM lake.scores`,
+	}
+	for _, stmt := range stmts {
+		if _, err := l.db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("lake: %s: %w", firstWords(stmt, 6), err)
+		}
+	}
+	return nil
+}
+
+// CheckCatalog reports whether the Catalog is reachable and the Lake's
+// tables are queryable. It retries view creation first so a Query API
+// that started before the first writer becomes ready as soon as the
+// tables appear. Suitable as a /readyz gate.
+func (l *Lake) CheckCatalog(ctx context.Context) error {
+	if err := l.EnsureViews(ctx); err != nil {
+		return err
+	}
+	var n int
+	if err := l.db.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM lake.spans LIMIT 1)").Scan(&n); err != nil {
+		return fmt.Errorf("lake: catalog check: %w", err)
+	}
+	return nil
 }
 
 // attach loads the required extensions, registers S3 credentials, and

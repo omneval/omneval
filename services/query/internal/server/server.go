@@ -135,8 +135,9 @@ func RunWired(deps *WiredDeps) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Start S3 snapshot poller (separate goroutine).
-	if deps.S3 != nil {
+	// Start S3 snapshot poller (separate goroutine). Lake mode reads
+	// committed data straight from the Lake — no snapshot polling.
+	if deps.S3 != nil && !cfg.Query.Lake.Enabled {
 		go pollSnapshotLoop(ctx, deps)
 	}
 
