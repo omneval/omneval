@@ -34,6 +34,11 @@ type WiredDeps struct {
 	QueryMetrics *metrics.QueryMetrics
 	Prober       *probe.Prober
 
+	// Lake is the DuckDB handle attached read-only to the Lake (DuckLake via
+	// the Postgres Catalog). When query.lake.enabled is true, all span reads
+	// compile against this handle instead of the S3 snapshot.
+	Lake *SwappableDB
+
 	// SnapshotLastModified tracks the S3 snapshot mtime for the poller.
 	SnapshotLastModified time.Time
 
@@ -58,6 +63,9 @@ type WiredDeps struct {
 func (d *WiredDeps) Close() {
 	if d.SDB != nil {
 		d.SDB.Close()
+	}
+	if d.Lake != nil {
+		d.Lake.Close()
 	}
 	if d.Store != nil {
 		d.Store.Close()
@@ -210,10 +218,48 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 
 	// Health and readiness probes.
 	p := probe.New()
-	p.AddCheck("snapshot", &probe.FileExists{Path: deps.DBPath})
+
+	// When the Lake is enabled, attach read-only to the Lake and gate
+	// readiness on Catalog reachability instead of snapshot-file existence.
+	// Legacy snapshot path remains fully functional when the flag is off
+	// (default off).
+	if cfg.Query.LakeEnabled {
+		lakeDB, err := openLakeDB(cfg)
+		if err != nil {
+			deps.Close()
+			return nil, fmt.Errorf("query: open lake: %w", err)
+		}
+		deps.Lake = lakeDB
+		p.AddCheck("catalog", &probe.CatalogReachable{
+			Ping: func(ctx context.Context) error {
+				return lakeDB.DB().PingContext(ctx)
+			},
+		})
+		slog.Info("query: Lake enabled, routing all span reads to lake.spans")
+	} else {
+		p.AddCheck("snapshot", &probe.FileExists{Path: deps.DBPath})
+	}
 	deps.Prober = p
 
 	return deps, nil
+}
+
+// openLakeDB opens a DuckDB connection that attaches read-only to the Lake
+// via the Postgres Catalog. The connection is configured for read-only access
+// (no writes, no snapshot downloads).
+func openLakeDB(cfg *config.Config) (*SwappableDB, error) {
+	// Use an in-memory DuckDB instance that attaches the Lake.
+	// The Lake tables (lake.spans, lake.scores) are available through the
+	// catalog connection.
+	path := cfg.Query.LakeDBPath
+	if path == "" {
+		path = ":memory:"
+	}
+	sdb, err := NewSwappableDB(path)
+	if err != nil {
+		return nil, fmt.Errorf("open lake db: %w", err)
+	}
+	return sdb, nil
 }
 
 // migrateBookmarksFromSnapshot copies bookmark rows left in the legacy

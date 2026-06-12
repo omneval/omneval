@@ -25,6 +25,10 @@ type SpanHandler struct {
 	DB           DBHandle
 	SessionStore SessionStore
 	Metrics      *metrics.QueryMetrics
+	// Lake is the DuckDB handle attached read-only to the Lake.
+	// When non-nil, all span reads compile against lake.spans instead
+	// of the S3 snapshot path (ADR-0004).
+	Lake DBHandle
 	// Meta resolves bookmarked trace IDs for "bookmarked" filters —
 	// bookmarks live in the Metadata Store, not DuckDB (ADR-0004).
 	Meta metadata.Store
@@ -186,13 +190,14 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 		q.SetBookmarkedTraceIDs(ids)
 	}
 
-	sqlStr, args, err := q.SQL()
+	sqlStr, args, err := h.compileSpanQuery(q, false)
 	if err != nil {
 		writeJSONError(w, "query compilation error", http.StatusInternalServerError)
 		return
 	}
 
-	rows, err := h.DB.Query(sqlStr, args...)
+	dbHandle := h.selectDBForSpans(false)
+	rows, err := dbHandle.Query(sqlStr, args...)
 	if err != nil {
 		writeJSONError(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -299,6 +304,7 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 }
 
 // querySpansForTrace fetches all spans for a given trace_id and project_id.
+// When Lake is available, it uses LakeTraceSpansSQL with dedupe (per ADR-0004).
 func (h *SpanHandler) querySpansForTrace(projectID, traceID string) ([]*domain.Span, error) {
 	req := query.SpanQueryRequest{
 		From: time.Time{},
@@ -312,6 +318,28 @@ func (h *SpanHandler) querySpansForTrace(projectID, traceID string) ([]*domain.S
 	q, err := query.NewSpanQuery(projectID, req, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("build span query: %w", err)
+	}
+
+	// When Lake is available, use LakeTraceSpansSQL with dedupe on (trace_id, span_id).
+	if h.Lake != nil {
+		sqlStr, args := q.LakeTraceSpansSQL(traceID, true)
+		rows, err := h.Lake.Query(sqlStr, args...)
+		if err != nil {
+			return nil, fmt.Errorf("execute lake trace spans query: %w", err)
+		}
+		defer rows.Close()
+
+		spanRows, err := scanAllRows(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan span rows: %w", err)
+		}
+
+		spans, err := query.ScanRows(spanRows)
+		if err != nil {
+			return nil, fmt.Errorf("convert span rows: %w", err)
+		}
+
+		return spans, nil
 	}
 
 	sqlStr, args, err := q.SQL()
@@ -466,13 +494,22 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Compile the query — all fields are validated against allowlists.
-	sqlStr, args, err := dsl.Compile(projectID, req)
+	// When Lake is available, compile against the single Lake table set.
+	var sqlStr string
+	var args []any
+	var err error
+	if h.Lake != nil {
+		sqlStr, args, err = dsl.CompileLake(projectID, req)
+	} else {
+		sqlStr, args, err = dsl.Compile(projectID, req)
+	}
 	if err != nil {
 		writeJSONError(w, "query compilation error: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	rows, err := h.DB.Query(sqlStr, args...)
+	dbHandle := h.selectDBForAnalytics()
+	rows, err := dbHandle.Query(sqlStr, args...)
 	if err != nil {
 		writeJSONError(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -628,6 +665,34 @@ func writeJSONError(w http.ResponseWriter, message string, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+// compileSpanQuery compiles a SpanQuery to SQL.
+// When Lake is available and dedupe is false (span list), it uses LakeSQL.
+// When Lake is available and dedupe is true (trace detail), it uses LakeSQL with dedupe.
+func (h *SpanHandler) compileSpanQuery(q *query.SpanQuery, dedupe bool) (string, []any, error) {
+	if h.Lake != nil {
+		return q.LakeSQL(dedupe)
+	}
+	return q.SQL()
+}
+
+// selectDBForSpans returns the database handle to use for span reads.
+// When Lake is available, it returns the Lake handle; otherwise the snapshot DB.
+func (h *SpanHandler) selectDBForSpans(_ bool) DBHandle {
+	if h.Lake != nil {
+		return h.Lake
+	}
+	return h.DB
+}
+
+// selectDBForAnalytics returns the database handle to use for analytics reads.
+// When Lake is available, it returns the Lake handle; otherwise the snapshot DB.
+func (h *SpanHandler) selectDBForAnalytics() DBHandle {
+	if h.Lake != nil {
+		return h.Lake
+	}
+	return h.DB
 }
 
 // ScoreHandler handles POST /api/v1/scores — the public-facing endpoint

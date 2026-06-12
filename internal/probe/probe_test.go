@@ -220,3 +220,25 @@ func TestProbeError_Unwrap(t *testing.T) {
 		t.Errorf("unwrap: got %v, want %v", err.Unwrap(), want)
 	}
 }
+
+func TestCatalogReachable_CheckPasses(t *testing.T) {
+	ch := &probe.CatalogReachable{
+		Ping: func(ctx context.Context) error { return nil },
+	}
+	if err := ch.Check(context.Background()); err != nil {
+		t.Errorf("check: got err %v, want nil", err)
+	}
+}
+
+func TestCatalogReachable_CheckFailsWhenUnreachable(t *testing.T) {
+	ch := &probe.CatalogReachable{
+		Ping: func(ctx context.Context) error { return os.ErrNotExist },
+	}
+	err := ch.Check(context.Background())
+	if err == nil {
+		t.Fatal("expected error for unreachable catalog, got nil")
+	}
+	if !strings.Contains(err.Error(), "catalog_reachable") {
+		t.Errorf("error message: got %q, want it to contain %q", err.Error(), "catalog_reachable")
+	}
+}

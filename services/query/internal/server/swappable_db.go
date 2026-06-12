@@ -115,6 +115,14 @@ func (s *SwappableDB) Close() error {
 	return nil
 }
 
+// DB returns the underlying *sql.DB for use with PingContext and similar
+// operations that are not part of the DBHandle interface.
+func (s *SwappableDB) DB() *sql.DB {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.db
+}
+
 // Query executes a query that returns rows.
 func (s *SwappableDB) Query(query string, args ...any) (*sql.Rows, error) {
 	s.mu.RLock()

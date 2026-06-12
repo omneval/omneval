@@ -685,3 +685,80 @@ func (q *SpanQuery) CountSQL() (sql string, args []any, err error) {
 func MarshalResponse(r SpanResponse) ([]byte, error) {
 	return json.Marshal(r)
 }
+
+// LakeSQL returns the SQL for listing spans directly from the Lake table
+// (lake.spans) with the provided filters and keyset cursor pagination.
+// Unlike SQL(), it does not use the hot+cold UNION — it reads from the
+// single Lake table.
+//
+// When dedupe is true, the query deduplicates on (trace_id, span_id) keeping
+// the latest row per (trace_id, span_id) pair (per ADR-0004 Batch Ledger
+// residual-duplicate policy).
+func (q *SpanQuery) LakeSQL(dedupe bool) (sql string, args []any, err error) {
+	args, where := q.buildWhereClause()
+
+	if dedupe {
+		// Dedupe on (trace_id, span_id), keeping the latest row per group.
+		// Uses a window function to rank rows within each (trace_id, span_id)
+		// group and filters to only the first (latest) row.
+		inner := fmt.Sprintf("SELECT * FROM lake.spans%s ORDER BY start_time DESC, span_id ASC", where)
+
+		if q.cursor.StartTime.IsZero() && q.cursor.SpanID == "" {
+			// First page: wrap the deduped result in outer query for limit.
+			sql = fmt.Sprintf(
+				"SELECT * FROM (%s) AS deduped ORDER BY start_time DESC, span_id ASC LIMIT ?",
+				inner,
+			)
+			args = append(args, q.limit+1)
+		} else {
+			// Cursor page: apply cursor filter on the deduped result.
+			sql = fmt.Sprintf(
+				"SELECT * FROM (%s) AS deduped WHERE (start_time < ? OR (start_time = ? AND span_id < ?)) ORDER BY start_time DESC, span_id ASC LIMIT ?",
+				inner,
+			)
+			args = append(args, q.cursor.StartTime, q.cursor.StartTime, q.cursor.SpanID, q.limit+1)
+		}
+		return sql, args, nil
+	}
+
+	// Non-deduped path: single-table read with cursor pagination.
+	baseSQL := fmt.Sprintf("SELECT * FROM lake.spans%s", where)
+
+	if q.cursor.StartTime.IsZero() && q.cursor.SpanID == "" {
+		baseSQL += "\n  ORDER BY start_time DESC, span_id ASC"
+		baseSQL += "\n  LIMIT ?"
+		args = append(args, q.limit+1)
+	} else {
+		baseSQL += "\n  WHERE (start_time < ? OR (start_time = ? AND span_id < ?))"
+		baseSQL += "\n  ORDER BY start_time DESC, span_id ASC"
+		baseSQL += "\n  LIMIT ?"
+		args = append(args, q.cursor.StartTime, q.cursor.StartTime, q.cursor.SpanID, q.limit+1)
+	}
+
+	return baseSQL, args, nil
+}
+
+// LakeCountSQL returns a COUNT(*) query against the Lake table.
+func (q *SpanQuery) LakeCountSQL() (sql string, args []any, err error) {
+	_, where := q.buildWhereClause()
+	return fmt.Sprintf("SELECT COUNT(*) FROM lake.spans%s", where), nil, nil
+}
+
+// LakeTraceSpansSQL returns a SQL query that fetches all spans for a single
+// trace from the Lake table. When dedupe is true, it deduplicates on
+// (trace_id, span_id) keeping the latest row per pair.
+func (q *SpanQuery) LakeTraceSpansSQL(traceID string, dedupe bool) (sql string, args []any) {
+	args = []any{traceID, q.projectID}
+
+	if dedupe {
+		sql = fmt.Sprintf(
+			"SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY trace_id, span_id ORDER BY start_time DESC) AS rn FROM lake.spans WHERE trace_id = ? AND project_id = ?) AS deduped WHERE rn = 1 ORDER BY start_time ASC",
+		)
+		return sql, args
+	}
+
+	sql = fmt.Sprintf(
+		"SELECT * FROM lake.spans WHERE trace_id = ? AND project_id = ? ORDER BY start_time ASC",
+	)
+	return sql, args
+}

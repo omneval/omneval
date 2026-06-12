@@ -15,6 +15,9 @@ import (
 type ConversationHandler struct {
 	DB           DBHandle
 	SessionStore SessionStore
+	// Lake is the DuckDB handle attached read-only to the Lake.
+	// When non-nil, conversation reads compile against lake.spans.
+	Lake DBHandle
 }
 
 // ConversationListItem represents a single conversation in the paginated
@@ -166,7 +169,8 @@ func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *
 	`
 	args = append(args, limit+1) // fetch one extra to determine if there's a next page.
 
-	rows, err := h.DB.Query(query, args...)
+	dbHandle := h.selectDB()
+	rows, err := dbHandle.Query(query, args...)
 	if err != nil {
 		writeJSONError(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -219,7 +223,8 @@ func (h *ConversationHandler) HandleConversationDetail(w http.ResponseWriter, r 
 	}
 
 	// Get distinct traces ordered by start_time, with root span info.
-	rows, err := h.DB.Query(`
+	dbHandle := h.selectDB()
+	rows, err := dbHandle.Query(`
 		SELECT
 			trace_id,
 			CAST(MIN(start_time) AS VARCHAR) AS start_time,
@@ -287,4 +292,13 @@ func (h *ConversationHandler) HandleConversationDetail(w http.ResponseWriter, r 
 		writeJSONError(w, "encode error", http.StatusInternalServerError)
 		return
 	}
+}
+
+// selectDB returns the database handle to use for conversation reads.
+// When Lake is available, it returns the Lake handle; otherwise the snapshot DB.
+func (h *ConversationHandler) selectDB() DBHandle {
+	if h.Lake != nil {
+		return h.Lake
+	}
+	return h.DB
 }

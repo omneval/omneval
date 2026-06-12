@@ -181,6 +181,9 @@ type QueryConfig struct {
 	// waterfall, conversations, and the Analytics DSL — compile against the
 	// single Lake table set. Default false (legacy snapshot path).
 	LakeEnabled bool `mapstructure:"lake_enabled"`
+	// LakeDBPath is the DuckDB file path used for the Lake read connection.
+	// Defaults to :memory: (in-memory DuckDB with attached Lake).
+	LakeDBPath string `mapstructure:"lake_db_path"`
 	// PlaygroundLLMBaseURL is an OpenAI-compatible base URL for the playground LLM.
 	// Works with OpenAI, LiteLLM proxy, Ollama, or any compatible endpoint.
 	PlaygroundLLMBaseURL string `mapstructure:"playground_llm_base_url"`

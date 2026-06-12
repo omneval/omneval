@@ -493,6 +493,171 @@ func buildColdSide(selectClauses []string) string {
 	)
 }
 
+// CompileLake translates a Query into a parameterized DuckDB SQL string that
+// reads from the single Lake table (lake.spans) instead of the hot+cold UNION.
+// Unlike Compile, it emits a simple single-table SELECT: no UNION, no snapshot,
+// no cold Parquet reads. Aggregate analytics do not pay a dedupe cost because
+// the Lake is the single source of truth. Partition pruning on project_id +
+// date is preserved by the WHERE clause (project_id, start_time filters).
+//
+// projectID is always injected as a mandatory filter. Raw SQL is never
+// accepted from clients; all field and operator references are validated
+// against allowlists before emission.
+func CompileLake(projectID string, q Query) (sql string, args []any, err error) {
+	// Validate and build the SELECT clause (aggregations).
+	selectClauses := make([]string, 0, len(q.Aggregations)+len(q.GroupBy))
+	for _, agg := range q.Aggregations {
+		expr, err := aggExprForField(agg.Function, agg.Field)
+		if err != nil {
+			return "", nil, err
+		}
+		if agg.Alias != "" {
+			selectClauses = append(selectClauses, fmt.Sprintf("%s AS %s", expr, agg.Alias))
+		} else {
+			selectClauses = append(selectClauses, expr)
+		}
+	}
+
+	// Group-by columns must appear in the SELECT clause for SQL validity.
+	for _, gb := range q.GroupBy {
+		var expr string
+
+		if isTimeBucket(gb.Field) {
+			if _, ok := spanColumns[gb.Field]; !ok {
+				return "", nil, fmt.Errorf("dsl: unknown group-by field %q", gb.Field)
+			}
+			if gb.Interval == "" {
+				return "", nil, fmt.Errorf("dsl: time_bucket group-by requires an interval (e.g. 1m, 5m, 1h, 1d)")
+			}
+			if _, ok := validTimeBucketIntervals[gb.Interval]; !ok {
+				return "", nil, fmt.Errorf("dsl: unknown time_bucket interval %q; accepted intervals: 1m, 5m, 1h, 1d", gb.Interval)
+			}
+			expr = groupByFieldExpr(gb.Field, "", gb.Interval)
+		} else {
+			if _, ok := spanColumns[gb.Field]; !ok {
+				return "", nil, fmt.Errorf("dsl: unknown group-by field %q", gb.Field)
+			}
+			if _, ok := validTruncUnits[gb.Truncate]; !ok && gb.Truncate != "" {
+				return "", nil, fmt.Errorf("dsl: unknown truncation unit %q", gb.Truncate)
+			}
+			expr = groupByFieldExpr(gb.Field, gb.Truncate, gb.Interval)
+		}
+		selectClauses = append(selectClauses, fmt.Sprintf("%s AS %s", expr, aliasFor(expr)))
+	}
+
+	// Default: SELECT COUNT(*) if no aggregations and no group-by.
+	if len(selectClauses) == 0 {
+		selectClauses = append(selectClauses, "COUNT(*) AS count")
+	}
+
+	// Validate order-by fields.
+	for _, ob := range q.OrderBy {
+		isAlias := false
+		for _, agg := range q.Aggregations {
+			if agg.Alias == ob.Field {
+				isAlias = true
+				break
+			}
+		}
+		if !isAlias && !isValidOrderByField(ob.Field, q.GroupBy) {
+			return "", nil, fmt.Errorf("dsl: unknown order-by field %q", ob.Field)
+		}
+	}
+
+	// Build the WHERE clause — project_id is always injected from the session.
+	whereClauses := []string{"project_id = ?"}
+	args = []any{projectID}
+
+	if !q.From.IsZero() && !q.To.IsZero() {
+		whereClauses = append(whereClauses, "start_time >= ? AND start_time <= ?")
+		args = append(args, q.From, q.To)
+	}
+
+	for _, f := range q.Filters {
+		expr, err := filterExprForField(f.Field)
+		if err != nil {
+			return "", nil, err
+		}
+		if _, ok := validFilterOps[f.Op]; !ok {
+			return "", nil, fmt.Errorf("dsl: unknown operator %q", f.Op)
+		}
+		if f.Value == nil {
+			return "", nil, fmt.Errorf("dsl: filter value must not be nil")
+		}
+
+		if f.Op == OpIn {
+			slice, ok := f.Value.([]any)
+			if !ok {
+				return "", nil, fmt.Errorf("dsl: in operator requires a []any value")
+			}
+			if len(slice) == 0 {
+				whereClauses = append(whereClauses, fmt.Sprintf("%s IS NULL", expr))
+			} else {
+				placeholders := make([]string, len(slice))
+				for i := range slice {
+					placeholders[i] = "?"
+					args = append(args, slice[i])
+				}
+				whereClauses = append(whereClauses, fmt.Sprintf("%s IN (%s)", expr, strings.Join(placeholders, ", ")))
+			}
+		} else if f.Op == OpContains {
+			whereClauses = append(whereClauses, fmt.Sprintf("%s LIKE ?", expr))
+			args = append(args, "%"+fmt.Sprint(f.Value)+"%")
+		} else {
+			opSymbol := filterOpSQL[f.Op]
+			whereClauses = append(whereClauses, fmt.Sprintf("%s %s ?", expr, opSymbol))
+			args = append(args, f.Value)
+		}
+	}
+
+	whereSQL := ""
+	if len(whereClauses) > 0 {
+		whereSQL = "\n  WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	// Build the GROUP BY clause.
+	groupSQL := ""
+	if len(q.GroupBy) > 0 {
+		groupParts := make([]string, len(q.GroupBy))
+		for i, gb := range q.GroupBy {
+			groupParts[i] = groupByFieldExpr(gb.Field, gb.Truncate, gb.Interval)
+		}
+		groupSQL = "\n  GROUP BY " + strings.Join(groupParts, ", ")
+	}
+
+	// Build the ORDER BY clause.
+	orderParts := make([]string, 0, len(q.OrderBy))
+	for _, ob := range q.OrderBy {
+		dir := "ASC"
+		if ob.Desc {
+			dir = "DESC"
+		}
+		orderExpr := resolveOrderByField(ob.Field, q.GroupBy)
+		orderParts = append(orderParts, fmt.Sprintf("%s %s", orderExpr, dir))
+	}
+
+	limitClause := ""
+	if q.Limit > 0 {
+		limitClause = fmt.Sprintf("\n  LIMIT %d", q.Limit)
+	}
+
+	// Single-table query against lake.spans — no UNION, no cold side.
+	selectSQL := strings.Join(selectClauses, ", ")
+	singleTableSQL := fmt.Sprintf(
+		"SELECT %s FROM lake.spans%s%s",
+		selectSQL, whereSQL, groupSQL,
+	)
+
+	if len(orderParts) > 0 {
+		singleTableSQL += "\n  ORDER BY " + strings.Join(orderParts, ", ")
+	} else if len(q.GroupBy) > 0 {
+		singleTableSQL += "\n  ORDER BY " + aliasFor(groupByFieldExpr(q.GroupBy[0].Field, q.GroupBy[0].Truncate, q.GroupBy[0].Interval)) + " ASC"
+	}
+	singleTableSQL += limitClause
+
+	return singleTableSQL, args, nil
+}
+
 // Filter is a single predicate in the analytics DSL.
 type Filter struct {
 	Field string   `json:"field"`
