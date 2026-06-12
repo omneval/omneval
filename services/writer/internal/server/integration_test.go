@@ -279,7 +279,7 @@ func TestIntegrationWriterFailoverSnapshotReconciliation(t *testing.T) {
 
 	// Instance 2 reconciles — should download the S3 snapshot.
 	reconciler := NewReconciler(s3Store, dbPath, snapshotKey)
-	reconStatus := &reconciliationStatus{}
+	reconStatus := &ReconciliationStatus{}
 	reconStatus.SetError(fmt.Errorf("reconciliation in progress"))
 
 	if err := reconciler.Reconcile(context.Background()); err != nil {
@@ -342,7 +342,7 @@ func TestIntegrationWriterFailoverSnapshotReconciliation(t *testing.T) {
 // TestReconciliationStatus_ReadinessGate verifies the readiness probe returns
 // 503 until reconciliation completes.
 func TestReconciliationStatus_ReadinessGate(t *testing.T) {
-	reconStatus := &reconciliationStatus{}
+	reconStatus := &ReconciliationStatus{}
 
 	// Before reconciliation, Check should return error (503).
 	ctx := context.Background()
@@ -368,7 +368,7 @@ func TestReconciliationStatus_ReadinessGate(t *testing.T) {
 
 // TestReconciliationStatus_ConcurrentAccess verifies thread-safe access.
 func TestReconciliationStatus_ConcurrentAccess(t *testing.T) {
-	reconStatus := &reconciliationStatus{}
+	reconStatus := &ReconciliationStatus{}
 	var wg sync.WaitGroup
 
 	// Goroutine 1: sets complete.
@@ -591,7 +591,7 @@ func TestReconciler_NoS3Store_NoOp(t *testing.T) {
 // TestReconciliationStatus_ErrorReset verifies SetError after SetComplete
 // correctly resets the state, and vice versa.
 func TestReconciliationStatus_ErrorReset(t *testing.T) {
-	reconStatus := &reconciliationStatus{}
+	reconStatus := &ReconciliationStatus{}
 
 	// Set complete, then error.
 	reconStatus.SetComplete()
