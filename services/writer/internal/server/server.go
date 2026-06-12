@@ -18,8 +18,6 @@ import (
 	"github.com/omneval/omneval/internal/duckdb"
 	"github.com/omneval/omneval/internal/leader"
 	"github.com/omneval/omneval/internal/metadata"
-	"github.com/omneval/omneval/internal/metadata/postgres"
-	"github.com/omneval/omneval/internal/metadata/sqlite"
 	"github.com/omneval/omneval/internal/pricing"
 	"github.com/omneval/omneval/internal/probe"
 	qredis "github.com/omneval/omneval/internal/queue/redis"
@@ -486,54 +484,12 @@ func releaseLeaderLock(ctx context.Context, election *leader.LeaderElection) err
 	return nil
 }
 
-// openMetadataStore creates a metadata store from config.
-// It supports "sqlite" and "postgres" drivers. When driver is empty or "sqlite", it uses SQLite.
+// openMetadataStore opens the configured metadata store via the shared
+// factory, applying the writer's default SQLite path when no DSN is set.
 func openMetadataStore(cfg *config.Config) (metadata.Store, error) {
-	driver := cfg.Database.Driver
 	dsn := cfg.Database.DSN
-
-	switch driver {
-	case "", "sqlite":
-		return openSQLiteStore(dsn, "omneval_meta.db")
-	case "postgres":
-		return openPostgresStore(dsn)
-	default:
-		return nil, fmt.Errorf("writer: unknown database driver: %s", driver)
+	if dsn == "" && (cfg.Database.Driver == "" || cfg.Database.Driver == "sqlite") {
+		dsn = "omneval_meta.db"
 	}
-}
-
-// openSQLiteStore creates and migrates a SQLite metadata store, resolving the
-// default DSN when none is configured.
-func openSQLiteStore(dsn, defaultDSN string) (metadata.Store, error) {
-	if dsn == "" {
-		dsn = defaultDSN
-	}
-	slog.Info("writer: opening SQLite metadata store", "path", dsn)
-	store, err := sqlite.New(dsn)
-	if err != nil {
-		return nil, err
-	}
-	if err := store.Migrate(context.Background()); err != nil {
-		store.Close()
-		return nil, fmt.Errorf("writer: migrate: %w", err)
-	}
-	return store, nil
-}
-
-// openPostgresStore creates and migrates a Postgres metadata store.
-// It requires a non-empty DSN.
-func openPostgresStore(dsn string) (metadata.Store, error) {
-	if dsn == "" {
-		return nil, fmt.Errorf("writer: postgres driver requires database.dsn")
-	}
-	slog.Info("writer: opening Postgres metadata store", "dsn", dsn)
-	store, err := postgres.New(dsn)
-	if err != nil {
-		return nil, fmt.Errorf("writer: postgres metadata store: %w", err)
-	}
-	if err := store.Migrate(context.Background()); err != nil {
-		store.Close()
-		return nil, fmt.Errorf("writer: migrate: %w", err)
-	}
-	return store, nil
+	return metadata.Open(cfg.Database.Driver, dsn)
 }

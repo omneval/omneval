@@ -2,14 +2,15 @@ package metadata
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
 )
 
 // ErrNotFound is returned when a requested entity does not exist.
-var ErrNotFound = errors.New("metadata: not found")
+// The sentinel value lives in the domain package so store implementations can
+// reference it without importing this package (which imports them via Open).
+var ErrNotFound = domain.ErrNotFound
 
 // Store is the interface all metadata backends must satisfy. Implementations
 // exist for Postgres (production) and SQLite (demo / docker-compose).
