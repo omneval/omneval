@@ -15,23 +15,12 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/config"
-	"github.com/omneval/omneval/internal/duckdb"
 	"github.com/omneval/omneval/internal/leader"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/metadata/postgres"
 	"github.com/omneval/omneval/internal/metadata/sqlite"
-	"github.com/omneval/omneval/internal/pricing"
-	"github.com/omneval/omneval/internal/probe"
-	qredis "github.com/omneval/omneval/internal/queue/redis"
-	s3pkg "github.com/omneval/omneval/internal/storage/s3"
-	"github.com/omneval/omneval/services/writer/internal/flush"
-	"github.com/omneval/omneval/services/writer/internal/handler"
-	"github.com/omneval/omneval/services/writer/internal/metrics"
 	"github.com/omneval/omneval/services/writer/internal/pipeline"
-	"github.com/omneval/omneval/services/writer/internal/retention"
-	syncpkg "github.com/omneval/omneval/services/writer/internal/sync"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	redisgo "github.com/redis/go-redis/v9"
 )
 
 // Run starts the Writer Service: drains the Redis ingest queue, writes to
@@ -48,162 +37,18 @@ func Run() error {
 		return fmt.Errorf("writer: load config: %w", err)
 	}
 
-	// Default fencing_enabled to true when leader election is enabled.
-	if cfg.Writer.LeaderElection.Enabled && !cfg.Writer.LeaderElection.FencingEnabled {
-		cfg.Writer.LeaderElection.FencingEnabled = true
-	}
-
-	// Validate retention config before starting the worker.
-	if err := cfg.Writer.Retention.Validate(); err != nil {
-		return fmt.Errorf("writer: retention config: %w", err)
-	}
-
-	// Register Prometheus metrics.
-	if err := metrics.Register(cfg.Metrics.DisableProjectLabels); err != nil {
-		return fmt.Errorf("writer: register metrics: %w", err)
-	}
-
-	metricsHelper := metrics.NewWriterMetrics(cfg)
-
-	// Initialize bundled pricing (runs once, lazy).
-	pricing.InitBundledPricing()
-
-	// Load pricing table (live fetch, fallback to bundled).
-	overrides := make(map[string]pricing.ModelOverride)
-	for model, ov := range cfg.Pricing.ModelOverrides {
-		overrides[model] = pricing.ModelOverride{
-			InputPerMillion:  ov.InputPerMillion,
-			OutputPerMillion: ov.OutputPerMillion,
-		}
-	}
-	pricingTable, err := pricing.Fetch(overrides)
+	deps, err := WireDeps(cfg)
 	if err != nil {
-		return fmt.Errorf("writer: load pricing: %w", err)
+		return err
 	}
+	return RunWired(deps)
+}
 
-	// Open DuckDB.
-	dbPath := cfg.Writer.DuckDBPath
-	if dbPath == "" {
-		dbPath = "omneval.db"
-	}
-	db, err := duckdb.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("writer: open duckdb: %w", err)
-	}
-
-	// Open metadata store based on configured database driver.
-	meta, err := openMetadataStore(cfg)
-	if err != nil {
-		db.Close()
-		return fmt.Errorf("writer: open metadata: %w", err)
-	}
-
-	// Connect to Redis.
-	rc := redisgo.NewClient(&redisgo.Options{
-		Addr:     cfg.Redis.Addr,
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
-	})
-	if err := rc.Ping(context.Background()).Err(); err != nil {
-		db.Close()
-		meta.Close()
-		return fmt.Errorf("writer: redis ping: %w", err)
-	}
-
-	// Resolve hostname for leader election instance ID.
-	hostname, _ := os.Hostname()
-
-	// Create queue clients.
-	ingestQ := qredis.NewIngestQueue(rc)
-	evalQ := qredis.NewEvalQueue(rc)
-
-	// Create leader election (if enabled).
-	var election *leader.LeaderElection
-	if cfg.Writer.LeaderElection.Enabled {
-		lockTTL := time.Duration(cfg.Writer.LeaderElection.LockTTL) * time.Second
-		ops := leader.NewOpsFromRedis(rc)
-		election, err = leader.NewLeaderElection(
-			ops,
-			"omneval:writer:leader",
-			fmt.Sprintf("writer-%s-%d", hostname, os.Getpid()),
-			lockTTL,
-		)
-		if err != nil {
-			db.Close()
-			meta.Close()
-			return fmt.Errorf("writer: leader election: %w", err)
-		}
-
-		// Acquire the leader lock.
-		acquired, err := election.Acquire(context.Background())
-		if err != nil {
-			db.Close()
-			meta.Close()
-			return fmt.Errorf("writer: acquire leader lock: %w", err)
-		}
-		if acquired {
-			slog.Info("writer: elected leader")
-		} else {
-			slog.Info("writer: not leader, waiting for lock",
-				"current_leader", election.LeaderID())
-		}
-	}
-
-	// Create pipeline.
-	pl := pipeline.New(ingestQ, db, pricingTable, meta, evalQ, metricsHelper)
-
-	// Create S3 store (nil if no S3 config).
-	var s3store *s3pkg.Store
-	var snapshotKey string
-	if cfg.Storage.Bucket != "" || cfg.Storage.Endpoint != "" {
-		s3store = s3pkg.New(&cfg.Storage)
-		if s3store != nil {
-			if err := s3store.EnsureBucket(context.Background()); err != nil {
-				slog.Warn("writer: ensure bucket", "err", err)
-			}
-		}
-		snapshotKey = s3pkg.SnapshotKey()
-	}
-
-	// Create reconciler (uses S3 store and snapshot key).
-	var reconciler *Reconciler
-	if s3store != nil {
-		reconciler = NewReconciler(s3store, dbPath, snapshotKey)
-	}
-
-	// Create syncer (S3 snapshot sync).
-	syncer := syncpkg.New(s3store, db, dbPath, cfg, metricsHelper)
-
-	// Create flusher (aged partition flush to Parquet on S3).
-	flusher := flush.NewWithDB(s3store, db, cfg)
-
-	// Create retention worker (rotates/deletes aged S3 spans).
-	var retentionWorker *retention.Worker
-	if s3store != nil && cfg.Writer.Retention.Enabled {
-		retentionWorker = retention.New(s3store, &cfg.Writer.Retention)
-	}
-
-	// Create score handler (handles POST /internal/v1/scores).
-	scoreHandler := handler.New(db)
-
-	// Set up health and readiness probes.
-	p := probe.New()
-	p.AddCheck("duckdb", &probe.DuckDBWritable{
-		Open: func(path string) (probe.WritableView, error) {
-			return duckdb.Open(path)
-		},
-		Path: dbPath,
-	})
-	p.AddCheck("redis", &probe.RedisPing{Pinger: func(ctx context.Context) error {
-		return rc.Ping(ctx).Err()
-	}})
-
-	// Add reconciliation readiness gate if fencing is enabled.
-	var reconStatus *reconciliationStatus
-	if election != nil && cfg.Writer.LeaderElection.FencingEnabled {
-		reconStatus = &reconciliationStatus{}
-		p.AddCheck("reconciliation", reconStatus)
-	}
+// RunWired runs the writer with pre-constructed dependencies: it wires
+// routes, starts the background goroutines, runs the pipeline until a
+// signal or fatal error, then shuts everything down gracefully.
+func RunWired(deps *WiredDeps) error {
+	cfg := deps.Cfg
 
 	// Set up signal handling.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -220,22 +65,16 @@ func Run() error {
 	// Build the full router: /metrics + /internal/v1/scores + probes.
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
-	mux.Handle("/internal/v1/scores", scoreHandler)
-
-	// Combine with probe routes.
+	mux.Handle("/internal/v1/scores", deps.ScoreHandler)
 	combined := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
-			p.Router().ServeHTTP(w, r)
+			deps.Prober.Router().ServeHTTP(w, r)
 		} else {
 			mux.ServeHTTP(w, r)
 		}
 	})
 
-	// Start server.
-	scoreServer := &http.Server{
-		Addr:    cfg.Writer.Addr,
-		Handler: combined,
-	}
+	scoreServer := &http.Server{Addr: cfg.Writer.Addr, Handler: combined}
 	go func() {
 		slog.Info("writer: score handler listening", "addr", cfg.Writer.Addr)
 		if err := scoreServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -243,26 +82,22 @@ func Run() error {
 		}
 	}()
 
-	// Start syncer (separate goroutine).
+	// Start background workers.
 	go func() {
-		if err := syncer.Run(ctx); err != nil {
+		if err := deps.Syncer.Run(ctx); err != nil {
 			slog.Error("writer: syncer error", "err", err)
 		}
 	}()
-
-	// Start flusher (separate goroutine).
 	go func() {
 		slog.Info("writer: flusher started")
-		if err := flusher.Run(ctx); err != nil && err != context.Canceled {
+		if err := deps.Flusher.Run(ctx); err != nil && err != context.Canceled {
 			slog.Error("writer: flusher error", "err", err)
 		}
 	}()
-
-	// Start retention worker (separate goroutine).
-	if retentionWorker != nil {
+	if deps.Retention != nil {
 		go func() {
 			slog.Info("writer: retention worker started")
-			if err := retentionWorker.RunLoop(ctx); err != nil && err != context.Canceled {
+			if err := deps.Retention.RunLoop(ctx); err != nil && err != context.Canceled {
 				slog.Error("writer: retention worker error", "err", err)
 			}
 		}()
@@ -270,28 +105,23 @@ func Run() error {
 
 	// Start pipeline (blocks until ctx is canceled).
 	slog.Info("writer: pipeline started")
-
 	var pipelineErr error
-	if election != nil {
-		pipelineErr = runWithLeaderElection(ctx, election, pl, reconciler, reconStatus, db, cfg)
+	if deps.Election != nil {
+		pipelineErr = runWithLeaderElection(ctx, deps.Election, deps.Pipeline,
+			deps.Reconciler, deps.ReconStatus, deps.DB, cfg)
 	} else {
-		pipelineErr = pl.Run(ctx)
+		pipelineErr = deps.Pipeline.Run(ctx)
 	}
 
 	// Graceful shutdown.
 	cancel()
-
-	// Close DuckDB on shutdown.
-	db.Close()
-	meta.Close()
-
-	// Release leader lock on shutdown.
-	if election != nil {
-		if err := releaseLeaderLock(ctx, election); err != nil {
+	deps.DB.Close()
+	deps.Meta.Close()
+	if deps.Election != nil {
+		if err := releaseLeaderLock(ctx, deps.Election); err != nil {
 			slog.Warn("writer: failed to release leader lock", "err", err)
 		}
 	}
-
 	if err := gracefulShutdown(scoreServer, 30*time.Second); err != nil {
 		return fmt.Errorf("writer: shutdown: %w", err)
 	}
@@ -299,17 +129,17 @@ func Run() error {
 	return pipelineErr
 }
 
-// reconciliationStatus tracks the reconciliation state after a leader transition.
+// ReconciliationStatus tracks the reconciliation state after a leader transition.
 // It implements the probe.Check interface to gate readiness until reconciliation
 // completes.
-type reconciliationStatus struct {
+type ReconciliationStatus struct {
 	mu         sync.Mutex
 	reconciled bool // true after successful reconciliation
 	err        error
 }
 
 // SetComplete marks reconciliation as successfully completed.
-func (r *reconciliationStatus) SetComplete() {
+func (r *ReconciliationStatus) SetComplete() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.reconciled = true
@@ -317,7 +147,7 @@ func (r *reconciliationStatus) SetComplete() {
 }
 
 // SetError marks reconciliation as failed or in-progress.
-func (r *reconciliationStatus) SetError(err error) {
+func (r *ReconciliationStatus) SetError(err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.reconciled = false
@@ -325,7 +155,7 @@ func (r *reconciliationStatus) SetError(err error) {
 }
 
 // Check implements probe.Check: returns error until reconciliation completes.
-func (r *reconciliationStatus) Check(_ context.Context) error {
+func (r *ReconciliationStatus) Check(_ context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.reconciled {
@@ -356,7 +186,7 @@ func runWithLeaderElection(
 	election *leader.LeaderElection,
 	pl *pipeline.Pipeline,
 	reconciler *Reconciler,
-	reconStatus *reconciliationStatus,
+	reconStatus *ReconciliationStatus,
 	db *sql.DB,
 	cfg *config.Config,
 ) error {
@@ -452,7 +282,7 @@ func waitForLeadership(ctx context.Context, election *leader.LeaderElection, rng
 func reconcileLeaderSnapshot(
 	ctx context.Context,
 	reconciler *Reconciler,
-	reconStatus *reconciliationStatus,
+	reconStatus *ReconciliationStatus,
 ) error {
 	if reconciler == nil {
 		return nil
