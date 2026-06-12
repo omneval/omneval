@@ -432,6 +432,13 @@ func (m *fakePromptStore) UpdateDatasetRunItem(ctx context.Context, i *domain.Da
 func (m *fakePromptStore) ListDatasetRunItems(ctx context.Context, runID string) ([]*domain.DatasetRunItem, error) {
 	return nil, nil
 }
+func (m *fakePromptStore) MarkBatchCommitted(ctx context.Context, batchID string, committedAt time.Time) error {
+	return nil
+}
+func (m *fakePromptStore) IsBatchCommitted(ctx context.Context, batchID string) (bool, error) {
+	return false, nil
+}
+
 func (m *fakePromptStore) Migrate(ctx context.Context) error { return nil }
 func (m *fakePromptStore) Close() error                      { return nil }
 

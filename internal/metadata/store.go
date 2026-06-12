@@ -64,6 +64,13 @@ type Store interface {
 	IsBookmarked(ctx context.Context, projectID, traceID string) (bool, error)
 	ListBookmarkedTraceIDs(ctx context.Context, projectID string) ([]string, error)
 
+	// Batch Ledger (committed_batches, ADR-0004) — Batch IDs already
+	// committed to the Lake. Writers consult it to skip redelivered
+	// batches; the reconciliation sweep consults it to avoid re-enqueueing
+	// committed buffer objects.
+	MarkBatchCommitted(ctx context.Context, batchID string, committedAt time.Time) error
+	IsBatchCommitted(ctx context.Context, batchID string) (bool, error)
+
 	// Eval Rules
 	CreateEvalRule(ctx context.Context, rule *domain.EvalRule) error
 	GetEvalRule(ctx context.Context, ruleID string) (*domain.EvalRule, error)

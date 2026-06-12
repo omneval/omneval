@@ -279,6 +279,13 @@ func (f *fakeAdminStore) RevokeAPIKey(_ context.Context, keyID string) error {
 
 // ---- metadata.Store stubs (not exercised by these tests) ----
 
+func (f *fakeAdminStore) MarkBatchCommitted(ctx context.Context, batchID string, committedAt time.Time) error {
+	return nil
+}
+func (f *fakeAdminStore) IsBatchCommitted(ctx context.Context, batchID string) (bool, error) {
+	return false, nil
+}
+
 func (f *fakeAdminStore) CreateOrganization(_ context.Context, _ *domain.Organization) error {
 	return nil
 }

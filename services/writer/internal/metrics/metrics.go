@@ -88,6 +88,26 @@ var (
 			Buckets:   prometheus.DefBuckets,
 		},
 	)
+
+	// LedgerSkips counts redelivered batches skipped because their Batch ID
+	// was already in the Batch Ledger (ADR-0004).
+	LedgerSkips = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "omneval_writer",
+			Name:      "ledger_skips_total",
+			Help:      "Total redelivered batches skipped via the Batch Ledger.",
+		},
+	)
+
+	// BufferFetchErrors counts failures fetching staged batches from the
+	// Ingest Buffer.
+	BufferFetchErrors = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "omneval_writer",
+			Name:      "buffer_fetch_errors_total",
+			Help:      "Total errors fetching staged batches from the Ingest Buffer.",
+		},
+	)
 )
 
 // Register registers all Prometheus metric families to the global registry.
@@ -115,6 +135,12 @@ func Register(disableProjectLabels bool) error {
 	}
 	if err := prometheus.Register(LakeWriteDuration); err != nil {
 		return fmt.Errorf("register lake write duration: %w", err)
+	}
+	if err := prometheus.Register(LedgerSkips); err != nil {
+		return fmt.Errorf("register ledger skips: %w", err)
+	}
+	if err := prometheus.Register(BufferFetchErrors); err != nil {
+		return fmt.Errorf("register buffer fetch errors: %w", err)
 	}
 	return nil
 }
@@ -180,4 +206,14 @@ func (m *WriterMetrics) RecordLakeWriteError(table string) {
 // RecordLakeWriteDuration records the duration of a Lake write transaction.
 func (m *WriterMetrics) RecordLakeWriteDuration(durationSec float64) {
 	LakeWriteDuration.Observe(durationSec)
+}
+
+// RecordLedgerSkip increments the Batch Ledger skip counter.
+func (m *WriterMetrics) RecordLedgerSkip() {
+	LedgerSkips.Inc()
+}
+
+// RecordBufferFetchError increments the Ingest Buffer fetch error counter.
+func (m *WriterMetrics) RecordBufferFetchError() {
+	BufferFetchErrors.Inc()
 }

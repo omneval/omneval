@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/omneval/omneval/internal/buffer"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/queue"
 	"github.com/omneval/omneval/services/ingest/internal/handler"
@@ -1026,4 +1028,47 @@ func TestNativeHandler_LogsEnqueueFailure(t *testing.T) {
 	if !strings.Contains(buf.String(), "enqueue failed") {
 		t.Errorf("expected log with 'enqueue failed', got:\n%s", buf.String())
 	}
+}
+
+// TestNativeHandler_503WhenIngestBufferUnreachable proves the S3-first
+// path mirrors the legacy Redis-down behavior: a failed Ingest Buffer
+// stage surfaces as 503 Service Unavailable (ADR-0004 / #86).
+func TestNativeHandler_503WhenIngestBufferUnreachable(t *testing.T) {
+	staged := buffer.NewStagedQueue(buffer.New(unreachableObjectStore{}), nil, nil)
+	h := handler.NewNativeHandler(staged, &fakeValidator{}, nil, nil)
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	spans := []*handler.NativeSpan{
+		{
+			TraceID: "0123456789abcdef0123456789abcdef",
+			SpanID:  "0123456789abcdef",
+			Name:    "test-span",
+		},
+	}
+	payload, _ := json.Marshal(map[string][]*handler.NativeSpan{"spans": spans})
+
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/spans", bytes.NewReader(payload))
+	req.Header.Set("X-API-Key", "valid_project_key")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+// unreachableObjectStore simulates S3 being down.
+type unreachableObjectStore struct{}
+
+func (unreachableObjectStore) PutSized(context.Context, string, io.Reader, int64) error {
+	return errors.New("s3 unreachable")
+}
+
+func (unreachableObjectStore) Get(context.Context, string) (io.ReadCloser, error) {
+	return nil, errors.New("s3 unreachable")
 }

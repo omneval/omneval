@@ -215,6 +215,13 @@ func (m *FakePromptStore) ListDatasetRunItems(ctx context.Context, runID string)
 func (m *FakePromptStore) Migrate(ctx context.Context) error { return nil }
 func (m *FakePromptStore) Close() error                      { return nil }
 
+func (m *FakePromptStore) MarkBatchCommitted(ctx context.Context, batchID string, committedAt time.Time) error {
+	return nil
+}
+func (m *FakePromptStore) IsBatchCommitted(ctx context.Context, batchID string) (bool, error) {
+	return false, nil
+}
+
 // ---- Tests ----
 
 func TestPromptHandler_CreatePrompt(t *testing.T) {

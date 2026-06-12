@@ -187,3 +187,19 @@ The `service_name` from the validated key takes priority over any `OTEL_SERVICE_
 | `401 Unauthorized` | Missing or invalid API key |
 | `405 Method Not Allowed` | Non-POST request to ingest endpoints |
 | `503 Service Unavailable` | Redis enqueue failure |
+
+## Ingest Buffer (S3-First Ingestion)
+
+With `ingest.buffer.enabled: true` (`OMNEVAL_INGEST_BUFFER_ENABLED=true`), the Ingest API stages every translated span batch in the **Ingest Buffer** — an S3 prefix (`buffer/<batch-id>.json`) in the configured storage bucket — and enqueues only the Batch ID reference in Redis (ADR-0004). Writers dequeue the reference, fetch the batch from the buffer, skip it if the Batch ID is already in the **Batch Ledger** (the `committed_batches` table in the metadata store), commit it to the Lake, record the ledger row, and only then ack.
+
+Consequences:
+
+- **Redis loss is non-fatal.** The staged object is the durable copy; lost queue references are recovered by the reconciliation sweep.
+- **Redelivery is idempotent.** A redelivered Batch ID already in the ledger adds zero new rows.
+- **503 semantics are unchanged.** If staging fails (S3 unreachable) or the reference enqueue fails, ingest returns `503 Service Unavailable`, exactly as when Redis is down on the legacy path. Clients should retry; a retry after a stage-success/enqueue-failure leaves an orphaned buffer object that the sweep later replays, producing residual duplicates that trace-detail reads dedupe.
+
+### Data-handling note
+
+Buffered batches contain **raw prompt and completion payloads** in plaintext JSON. The buffer inherits the storage bucket's encryption settings — if you need encryption at rest for span content, configure it on the bucket (SSE-S3/SSE-KMS or the provider equivalent). The buffer's retention window (see the reconciliation sweep configuration) bounds how long staged plaintext lives; committed objects are garbage-collected after that window.
+
+Requires `storage.*` (S3) to be configured; the Ingest API fails to start if the buffer is enabled without storage.

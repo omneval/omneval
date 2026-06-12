@@ -179,6 +179,13 @@ func (f *fakeMetaStore) UpdateDatasetRunItem(ctx context.Context, item *domain.D
 func (f *fakeMetaStore) ListDatasetRunItems(ctx context.Context, runID string) ([]*domain.DatasetRunItem, error) {
 	return nil, nil
 }
+func (f *fakeMetaStore) MarkBatchCommitted(ctx context.Context, batchID string, committedAt time.Time) error {
+	return nil
+}
+func (f *fakeMetaStore) IsBatchCommitted(ctx context.Context, batchID string) (bool, error) {
+	return false, nil
+}
+
 func (f *fakeMetaStore) Migrate(ctx context.Context) error { return nil }
 func (f *fakeMetaStore) Close() error                      { return nil }
 func (f *fakeMetaStore) UpdateUserResetToken(ctx context.Context, userID, token string, expiry time.Time) error {

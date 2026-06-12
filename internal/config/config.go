@@ -82,8 +82,19 @@ type AuthConfig struct {
 	AdminPassword string `mapstructure:"admin_password"`
 }
 
+// IngestBufferConfig controls S3-first ingestion (ADR-0004).
+type IngestBufferConfig struct {
+	// Enabled stages every translated span batch in the Ingest Buffer (an
+	// S3 prefix keyed by Batch ID) and enqueues only the Batch ID reference.
+	// Requires storage (S3) to be configured. Default false: batches are
+	// enqueued as full payloads in Redis (legacy flow).
+	Enabled bool `mapstructure:"enabled"`
+}
+
 type IngestConfig struct {
 	Addr string `mapstructure:"addr"`
+	// Buffer controls S3-first ingestion via the Ingest Buffer (ADR-0004).
+	Buffer IngestBufferConfig `mapstructure:"buffer"`
 	// LogSystemPrompt controls whether the system prompt is included as the
 	// first element of a span's Input array. Defaults to true.
 	// Override via OMNEVAL_INGEST_LOG_SYSTEM_PROMPT=false.
@@ -249,6 +260,7 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("ingest.addr", ":8000")
 	v.SetDefault("ingest.log_system_prompt", true)
 	v.SetDefault("ingest.cors_allowed_origins", []string{"*"})
+	v.SetDefault("ingest.buffer.enabled", false)
 	// writer
 	v.SetDefault("writer.addr", ":8001")
 	v.SetDefault("writer.duckdb_path", "")
@@ -322,6 +334,7 @@ func Load(path string) (*Config, error) {
 	envString(&cfg.Auth.AdminPassword, "OMNEVAL_AUTH_ADMIN_PASSWORD")
 	envString(&cfg.Ingest.Addr, "OMNEVAL_INGEST_ADDR")
 	envBool(&cfg.Ingest.LogSystemPrompt, "OMNEVAL_INGEST_LOG_SYSTEM_PROMPT")
+	envBool(&cfg.Ingest.Buffer.Enabled, "OMNEVAL_INGEST_BUFFER_ENABLED")
 	if v := os.Getenv("OMNEVAL_INGEST_CORS_ALLOWED_ORIGINS"); v != "" {
 		cfg.Ingest.CORSAllowedOrigins = strings.Split(v, ",")
 	}
