@@ -181,6 +181,18 @@ func (f *fakeMetaStore) ListDatasetRunItems(ctx context.Context, runID string) (
 }
 func (f *fakeMetaStore) Migrate(ctx context.Context) error { return nil }
 func (f *fakeMetaStore) Close() error                      { return nil }
+func (f *fakeMetaStore) SetBookmark(ctx context.Context, projectID, traceID string) error {
+	return nil
+}
+func (f *fakeMetaStore) RemoveBookmark(ctx context.Context, projectID, traceID string) error {
+	return nil
+}
+func (f *fakeMetaStore) IsBookmarked(ctx context.Context, projectID, traceID string) (bool, error) {
+	return false, nil
+}
+func (f *fakeMetaStore) ListBookmarkedTraces(ctx context.Context, projectID string) ([]string, error) {
+	return nil, nil
+}
 func (f *fakeMetaStore) UpdateUserResetToken(ctx context.Context, userID, token string, expiry time.Time) error {
 	return nil
 }

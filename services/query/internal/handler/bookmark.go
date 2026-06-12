@@ -7,13 +7,22 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 )
 
+// BookmarkStore is the subset of the metadata store the bookmark endpoints
+// need. Bookmarks are mutable user state and live in the transactional
+// metadata store, not the span storage tier.
+type BookmarkStore interface {
+	SetBookmark(ctx context.Context, projectID, traceID string) error
+	RemoveBookmark(ctx context.Context, projectID, traceID string) error
+	IsBookmarked(ctx context.Context, projectID, traceID string) (bool, error)
+	ListBookmarkedTraces(ctx context.Context, projectID string) ([]string, error)
+}
+
 // BookmarkHandler handles POST /api/v1/traces/{traceId}/bookmark.
-// It toggles bookmark state by inserting or deleting from the bookmarks table.
+// It toggles bookmark state in the metadata store.
 type BookmarkHandler struct {
-	DB           DBHandle
+	Store        BookmarkStore
 	SessionStore SessionStore
 }
 
@@ -55,7 +64,7 @@ func (h *BookmarkHandler) HandleBookmark(w http.ResponseWriter, r *http.Request)
 		wantBookmarked = *req.Bookmarked
 	} else {
 		// No body → toggle: check current state.
-		currently, err := h.isBookmarked(r.Context(), projectID, traceID)
+		currently, err := h.Store.IsBookmarked(r.Context(), projectID, traceID)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("bookmark check error: %v", err), http.StatusInternalServerError)
 			return
@@ -64,12 +73,12 @@ func (h *BookmarkHandler) HandleBookmark(w http.ResponseWriter, r *http.Request)
 	}
 
 	if wantBookmarked {
-		if err := h.bookmark(r.Context(), projectID, traceID); err != nil {
+		if err := h.Store.SetBookmark(r.Context(), projectID, traceID); err != nil {
 			http.Error(w, fmt.Sprintf("bookmark error: %v", err), http.StatusInternalServerError)
 			return
 		}
 	} else {
-		if err := h.unbookmark(r.Context(), projectID, traceID); err != nil {
+		if err := h.Store.RemoveBookmark(r.Context(), projectID, traceID); err != nil {
 			http.Error(w, fmt.Sprintf("unbookmark error: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -77,39 +86,4 @@ func (h *BookmarkHandler) HandleBookmark(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"bookmarked": wantBookmarked})
-}
-
-// isBookmarked reports whether a bookmark record exists for the given trace_id and project_id.
-func (h *BookmarkHandler) isBookmarked(ctx context.Context, projectID, traceID string) (bool, error) {
-	rows, err := h.DB.QueryContext(ctx, `
-		SELECT COUNT(*) FROM bookmarks WHERE trace_id = ? AND project_id = ?
-	`, traceID, projectID)
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	var count int
-	if rows.Next() {
-		if err := rows.Scan(&count); err != nil {
-			return false, err
-		}
-	}
-	return count > 0, nil
-}
-
-// bookmark inserts a bookmark record for the given trace_id and project_id.
-func (h *BookmarkHandler) bookmark(ctx context.Context, projectID, traceID string) error {
-	_, err := h.DB.ExecContext(ctx, `
-		INSERT OR REPLACE INTO bookmarks (trace_id, project_id, created_at)
-		VALUES (?, ?, ?)
-	`, traceID, projectID, time.Now())
-	return err
-}
-
-// unbookmark removes a bookmark record for the given trace_id and project_id.
-func (h *BookmarkHandler) unbookmark(ctx context.Context, projectID, traceID string) error {
-	_, err := h.DB.ExecContext(ctx, `
-		DELETE FROM bookmarks WHERE trace_id = ? AND project_id = ?
-	`, traceID, projectID)
-	return err
 }

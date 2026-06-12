@@ -1966,3 +1966,16 @@ func TestPromptHandler_ListPromptVersions_ReturnsBareArray(t *testing.T) {
 		t.Errorf("count: got %d, want 2", len(result))
 	}
 }
+
+func (m *FakePromptStore) SetBookmark(_ context.Context, projectID, traceID string) error {
+	return nil
+}
+func (m *FakePromptStore) RemoveBookmark(_ context.Context, projectID, traceID string) error {
+	return nil
+}
+func (m *FakePromptStore) IsBookmarked(_ context.Context, projectID, traceID string) (bool, error) {
+	return false, nil
+}
+func (m *FakePromptStore) ListBookmarkedTraces(_ context.Context, projectID string) ([]string, error) {
+	return nil, nil
+}

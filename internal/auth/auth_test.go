@@ -411,3 +411,16 @@ func TestCachingValidator_CacheHitDoesNotQueryStore(t *testing.T) {
 		t.Fatalf("Second Validate should succeed from cache: %v", err)
 	}
 }
+
+func (f *FakeMetadataStore) SetBookmark(_ context.Context, projectID, traceID string) error {
+	return nil
+}
+func (f *FakeMetadataStore) RemoveBookmark(_ context.Context, projectID, traceID string) error {
+	return nil
+}
+func (f *FakeMetadataStore) IsBookmarked(_ context.Context, projectID, traceID string) (bool, error) {
+	return false, nil
+}
+func (f *FakeMetadataStore) ListBookmarkedTraces(_ context.Context, projectID string) ([]string, error) {
+	return nil, nil
+}

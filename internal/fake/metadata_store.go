@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +32,7 @@ type FakeMetadataStore struct {
 	datasetItems    map[string]*domain.DatasetItem
 	datasetRuns     map[string]*domain.DatasetRun
 	datasetRunItems map[string]*domain.DatasetRunItem
+	bookmarks       map[string]bool // key: projectID:traceID
 
 	// Counters for testing
 	CreateUserCalls     int
@@ -61,6 +63,47 @@ func NewFakeMetadataStore() *FakeMetadataStore {
 }
 
 func (f *FakeMetadataStore) Close() error                      { return nil }
+
+// SetBookmark stars a trace for the given project.
+func (f *FakeMetadataStore) SetBookmark(_ context.Context, projectID, traceID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.bookmarks == nil {
+		f.bookmarks = make(map[string]bool)
+	}
+	f.bookmarks[projectID+":"+traceID] = true
+	return nil
+}
+
+// RemoveBookmark unstars a trace for the given project.
+func (f *FakeMetadataStore) RemoveBookmark(_ context.Context, projectID, traceID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.bookmarks, projectID+":"+traceID)
+	return nil
+}
+
+// IsBookmarked reports whether a trace is starred for the given project.
+func (f *FakeMetadataStore) IsBookmarked(_ context.Context, projectID, traceID string) (bool, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.bookmarks[projectID+":"+traceID], nil
+}
+
+// ListBookmarkedTraces returns the trace IDs starred for the given project.
+func (f *FakeMetadataStore) ListBookmarkedTraces(_ context.Context, projectID string) ([]string, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	var ids []string
+	prefix := projectID + ":"
+	for key, ok := range f.bookmarks {
+		if ok && strings.HasPrefix(key, prefix) {
+			ids = append(ids, strings.TrimPrefix(key, prefix))
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
 func (f *FakeMetadataStore) Migrate(ctx context.Context) error { return nil }
 
 func (f *FakeMetadataStore) CreateOrganization(ctx context.Context, o *domain.Organization) error {
