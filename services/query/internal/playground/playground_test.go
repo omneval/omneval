@@ -1075,6 +1075,9 @@ func (m *fakePromptStore) SetBookmark(ctx context.Context, b *domain.Bookmark) e
 func (m *fakePromptStore) RemoveBookmark(ctx context.Context, projectID, traceID string) error {
 	return nil
 }
+func (m *fakePromptStore) RemoveBookmarksForProject(ctx context.Context, projectID string) error {
+	return nil
+}
 func (m *fakePromptStore) IsBookmarked(ctx context.Context, projectID, traceID string) (bool, error) {
 	return false, nil
 }

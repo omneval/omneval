@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/services/query/internal/auth"
 )
@@ -63,6 +64,134 @@ func TestAdminHandler_ProjectsDelete(t *testing.T) {
 
 	if w.Code != http.StatusNoContent {
 		t.Errorf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// setupTestLake opens a local-catalog Lake and seeds it with one span and
+// one score per project for "proj-1" and "proj-2".
+func setupTestLake(t *testing.T) *lake.Lake {
+	t.Helper()
+	dir := t.TempDir()
+	lk, err := lake.Open(context.Background(), lake.Config{
+		CatalogDriver: lake.CatalogDriverLocal,
+		CatalogDSN:    dir + "/catalog/lake.ducklake",
+		DataPath:      dir + "/data",
+	})
+	if err != nil {
+		t.Fatalf("open lake: %v", err)
+	}
+	t.Cleanup(func() { lk.Close() })
+
+	start := time.Now().UTC()
+	for _, projectID := range []string{"proj-1", "proj-2"} {
+		span := &domain.Span{
+			SpanID:    "span-" + projectID,
+			TraceID:   "trace-" + projectID,
+			ProjectID: projectID,
+			Name:      "llm-call",
+			Kind:      domain.SpanKind("llm"),
+			StartTime: start,
+			EndTime:   start.Add(time.Second),
+		}
+		if err := lk.InsertSpans(context.Background(), []*domain.Span{span}); err != nil {
+			t.Fatalf("insert span: %v", err)
+		}
+		score := &domain.Score{
+			ScoreID: "score-" + projectID, SpanID: span.SpanID, TraceID: span.TraceID,
+			ProjectID: projectID, EvalName: "e", Value: 1, CreatedAt: start, SpanStartTime: start,
+		}
+		if err := lk.InsertScores(context.Background(), []*domain.Score{score}); err != nil {
+			t.Fatalf("insert score: %v", err)
+		}
+	}
+	return lk
+}
+
+// TestAdminHandler_TracesDelete_Lake proves that deleting a project's traces
+// through the Lake path removes its spans, scores, and bookmarks durably and
+// leaves other projects untouched (#91).
+func TestAdminHandler_TracesDelete_Lake(t *testing.T) {
+	lk := setupTestLake(t)
+	store := newFakeAdminStore()
+	handler := &AdminHandler{DB: lk.DB(), Store: store, LakeRW: lk, SessionStore: &FakeSessionStore{projectID: "proj-1"}}
+
+	req := httptest.NewRequest("DELETE", "/api/v1/admin/traces/proj-1", nil)
+	req = withAdminContext(req, "admin@test.com")
+
+	w := httptest.NewRecorder()
+	handler.HandleAdminTracesDelete(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var n int
+	if err := lk.DB().QueryRowContext(context.Background(),
+		"SELECT count(*) FROM lake.spans WHERE project_id = 'proj-1'").Scan(&n); err != nil {
+		t.Fatalf("count proj-1 spans: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("proj-1 spans after delete: got %d, want 0", n)
+	}
+	if err := lk.DB().QueryRowContext(context.Background(),
+		"SELECT count(*) FROM lake.scores WHERE project_id = 'proj-1'").Scan(&n); err != nil {
+		t.Fatalf("count proj-1 scores: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("proj-1 scores after delete: got %d, want 0", n)
+	}
+
+	// proj-2 is untouched.
+	if err := lk.DB().QueryRowContext(context.Background(),
+		"SELECT count(*) FROM lake.spans WHERE project_id = 'proj-2'").Scan(&n); err != nil {
+		t.Fatalf("count proj-2 spans: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("proj-2 spans after delete: got %d, want 1", n)
+	}
+
+	if store.removeBookmarksForProjectCalls != 1 {
+		t.Errorf("RemoveBookmarksForProject calls: got %d, want 1", store.removeBookmarksForProjectCalls)
+	}
+}
+
+// TestAdminHandler_TracesCount_Lake proves the trace-count endpoint reflects
+// a Lake-path deletion immediately, on the same admin connection (#91).
+func TestAdminHandler_TracesCount_Lake(t *testing.T) {
+	lk := setupTestLake(t)
+	if _, err := lk.DB().ExecContext(context.Background(),
+		"CREATE OR REPLACE VIEW spans AS SELECT * FROM lake.spans"); err != nil {
+		t.Fatalf("create spans view: %v", err)
+	}
+	store := newFakeAdminStore()
+	handler := &AdminHandler{DB: lk.DB(), Store: store, LakeRW: lk, SessionStore: &FakeSessionStore{projectID: "proj-1"}}
+
+	countProj1 := func() int {
+		req := httptest.NewRequest("GET", "/api/v1/admin/traces/proj-1/count", nil)
+		req = withAdminContext(req, "admin@test.com")
+		w := httptest.NewRecorder()
+		handler.HandleAdminTracesCount(w, req)
+		var resp map[string]int
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return resp["count"]
+	}
+
+	if got := countProj1(); got != 1 {
+		t.Fatalf("count before delete: got %d, want 1", got)
+	}
+
+	deleteReq := httptest.NewRequest("DELETE", "/api/v1/admin/traces/proj-1", nil)
+	deleteReq = withAdminContext(deleteReq, "admin@test.com")
+	w := httptest.NewRecorder()
+	handler.HandleAdminTracesDelete(w, deleteReq)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if got := countProj1(); got != 0 {
+		t.Errorf("count after delete: got %d, want 0", got)
 	}
 }
 
@@ -249,7 +378,8 @@ func TestAdminHandler_APIKeysList_EmptyWhenNoKeys(t *testing.T) {
 // fakeAdminStore is a minimal metadata.Store fake for AdminHandler tests.
 // It supports ListAPIKeys and RevokeAPIKey; all other methods are stubs.
 type fakeAdminStore struct {
-	keys []*domain.APIKey
+	keys                            []*domain.APIKey
+	removeBookmarksForProjectCalls int
 }
 
 func newFakeAdminStore() *fakeAdminStore {
@@ -469,6 +599,10 @@ func setupTestDB(t *testing.T) *sql.DB {
 
 func (f *fakeAdminStore) SetBookmark(_ context.Context, _ *domain.Bookmark) error { return nil }
 func (f *fakeAdminStore) RemoveBookmark(_ context.Context, _, _ string) error     { return nil }
+func (f *fakeAdminStore) RemoveBookmarksForProject(_ context.Context, _ string) error {
+	f.removeBookmarksForProjectCalls++
+	return nil
+}
 func (f *fakeAdminStore) IsBookmarked(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }

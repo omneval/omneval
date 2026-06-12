@@ -106,6 +106,17 @@ func (f *FakeMetadataStore) RemoveBookmark(ctx context.Context, projectID, trace
 	return nil
 }
 
+func (f *FakeMetadataStore) RemoveBookmarksForProject(ctx context.Context, projectID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for key, b := range f.bookmarks {
+		if b.ProjectID == projectID {
+			delete(f.bookmarks, key)
+		}
+	}
+	return nil
+}
+
 func (f *FakeMetadataStore) IsBookmarked(ctx context.Context, projectID, traceID string) (bool, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()

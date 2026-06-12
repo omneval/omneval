@@ -54,6 +54,18 @@ func (s *Store) IsBookmarked(ctx context.Context, projectID, traceID string) (bo
 	return count > 0, nil
 }
 
+// RemoveBookmarksForProject deletes every bookmark in the project.
+func (s *Store) RemoveBookmarksForProject(ctx context.Context, projectID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM bookmarks WHERE project_id = $1`,
+		projectID,
+	)
+	if err != nil {
+		return fmt.Errorf("postgres: remove bookmarks for project: %w", err)
+	}
+	return nil
+}
+
 // ListBookmarkedTraceIDs returns every starred trace ID in the project.
 func (s *Store) ListBookmarkedTraceIDs(ctx context.Context, projectID string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx,

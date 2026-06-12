@@ -40,7 +40,7 @@ Phase 1 implementation progress. All Phase 1 slices are complete. Work is organi
 ### Slice 4: Query API → Span List + Trace ✅ (Issues #7, #8, #20)
 
 - [x] S3 snapshot download on startup + S3 polling for updates
-- [x] ~~DuckDB opened read-only for query safety during snapshot swaps~~ (code drifted: the snapshot is opened read-write, which enables the cosmetic-deletion bug tracked in #91)
+- [x] ~~DuckDB opened read-only for query safety during snapshot swaps~~ (code drifted on the legacy snapshot path: the snapshot is opened read-write, which made admin deletes cosmetic — fixed on the Lake path by #91, which gives the Query API a dedicated read-write Lake attachment for durable admin deletes alongside its read-only attachment for span reads; the legacy snapshot path remains broken until cutover, #90)
 - [x] Span list endpoint (`POST /api/v1/spans/query`) with keyset cursor pagination
 - [x] Field filters validated against allowlisted column names and operators
 - [x] Operator mapping (eq, neq, gt, gte, lt, lte, in) to SQL symbols
@@ -164,7 +164,7 @@ Ticketed as #83–#92 (dependency graph: #83/#84 unblocked → #85/#86/#87/#91 �
 - [ ] One-off backfill: existing hot DuckDB + cold Parquet → Lake (#87)
 - [ ] Ingest Buffer reconciliation sweep + retention GC (#88)
 - [ ] Writer fleet: stateless Deployment, ~5s/16MB commit cadence, leader-run Table Maintenance (#89)
-- [ ] Durable trace/project deletion against the Lake (#91 — fixes latent bug: admin deletes hit the local snapshot copy and resurrect within ~30s; cold archive never deleted)
+- [x] Durable trace/project deletion against the Lake (#91 — `lake.Lake.DeleteProject` deletes spans+scores and runs `ducklake_expire_snapshots`/`ducklake_delete_orphaned_files`/`ducklake_cleanup_old_files`; the Query API gets a dedicated read-write `AdminLake` attachment so admin deletes are durable and visible immediately, fixing the legacy bug where admin deletes hit the local snapshot copy and resurrected within ~30s)
 - [ ] Lake-native retention enforcement (#92 — fixes latent bug: legacy retention worker scans `parquet/` while the archive lives under `archive/`, so it has never deleted anything)
 - [ ] Cutover: flip defaults, run prod backfill, delete snapshot sync/polling, swappable DB, hot+cold UNION, archival sweep, PVC/StatefulSet (#90, HITL — last, blocked by all of the above)
 

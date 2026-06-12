@@ -421,6 +421,9 @@ func TestCachingValidator_CacheHitDoesNotQueryStore(t *testing.T) {
 
 func (f *FakeMetadataStore) SetBookmark(_ context.Context, _ *domain.Bookmark) error { return nil }
 func (f *FakeMetadataStore) RemoveBookmark(_ context.Context, _, _ string) error     { return nil }
+func (f *FakeMetadataStore) RemoveBookmarksForProject(_ context.Context, _ string) error {
+	return nil
+}
 func (f *FakeMetadataStore) IsBookmarked(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }
