@@ -1976,6 +1976,9 @@ func TestPromptHandler_ListPromptVersions_ReturnsBareArray(t *testing.T) {
 
 func (f *FakePromptStore) SetBookmark(_ context.Context, _ *domain.Bookmark) error { return nil }
 func (f *FakePromptStore) RemoveBookmark(_ context.Context, _, _ string) error     { return nil }
+func (f *FakePromptStore) RemoveBookmarksForProject(_ context.Context, _ string) error {
+	return nil
+}
 func (f *FakePromptStore) IsBookmarked(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }

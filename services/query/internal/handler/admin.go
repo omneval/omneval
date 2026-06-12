@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/services/query/internal/auth"
 )
@@ -33,6 +34,11 @@ type AdminHandler struct {
 	DB           DBHandle
 	Store        metadata.Store
 	SessionStore SessionStore
+
+	// LakeRW is a read-write Lake attachment used for durable admin deletes
+	// (ADR-0004 / #91). When nil, deletes fall back to the legacy
+	// snapshot-local DELETE, which does not persist (see HandleAdminTracesDelete).
+	LakeRW *lake.Lake
 }
 
 // HandleAdminAPIKeysList handles GET /api/v1/admin/api-keys.
@@ -146,7 +152,14 @@ func (h *AdminHandler) HandleAdminTracesCount(w http.ResponseWriter, r *http.Req
 }
 
 // HandleAdminTracesDelete handles DELETE /api/v1/admin/traces/:projectID.
-// Deletes all spans (traces) for a project.
+// Deletes all spans, scores, and bookmarks (traces) for a project.
+//
+// On the Lake path (LakeRW set), this commits through the Catalog: the
+// rows are gone from every reader's next query and do not resurrect on the
+// next snapshot cycle. Without LakeRW, this falls back to the legacy
+// snapshot-local DELETE, which is cosmetic — the Writer's authoritative
+// store is untouched and the deleted rows reappear on the next snapshot
+// poll (~30s). See docs/restore-from-snapshot.md.
 func (h *AdminHandler) HandleAdminTracesDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -164,9 +177,20 @@ func (h *AdminHandler) HandleAdminTracesDelete(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	_, err := h.DB.Exec(`DELETE FROM spans WHERE project_id = ?`, projectID)
-	if err != nil {
-		writeJSONError(w, "failed to delete traces", http.StatusInternalServerError)
+	if h.LakeRW != nil {
+		if err := h.LakeRW.DeleteProject(r.Context(), projectID); err != nil {
+			writeJSONError(w, "failed to delete traces", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		if _, err := h.DB.Exec(`DELETE FROM spans WHERE project_id = ?`, projectID); err != nil {
+			writeJSONError(w, "failed to delete traces", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err := h.Store.RemoveBookmarksForProject(r.Context(), projectID); err != nil {
+		writeJSONError(w, "failed to delete bookmarks", http.StatusInternalServerError)
 		return
 	}
 
@@ -192,10 +216,21 @@ func (h *AdminHandler) HandleAdminProjectsDelete(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Delete all spans for this project.
-	_, err := h.DB.Exec(`DELETE FROM spans WHERE project_id = ?`, projectID)
-	if err != nil {
-		writeJSONError(w, "failed to delete traces", http.StatusInternalServerError)
+	// Delete all spans, scores, and bookmarks for this project. See
+	// HandleAdminTracesDelete for the Lake vs. legacy distinction.
+	if h.LakeRW != nil {
+		if err := h.LakeRW.DeleteProject(r.Context(), projectID); err != nil {
+			writeJSONError(w, "failed to delete traces", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		if _, err := h.DB.Exec(`DELETE FROM spans WHERE project_id = ?`, projectID); err != nil {
+			writeJSONError(w, "failed to delete traces", http.StatusInternalServerError)
+			return
+		}
+	}
+	if err := h.Store.RemoveBookmarksForProject(r.Context(), projectID); err != nil {
+		writeJSONError(w, "failed to delete bookmarks", http.StatusInternalServerError)
 		return
 	}
 

@@ -63,6 +63,9 @@ type Store interface {
 	RemoveBookmark(ctx context.Context, projectID, traceID string) error
 	IsBookmarked(ctx context.Context, projectID, traceID string) (bool, error)
 	ListBookmarkedTraceIDs(ctx context.Context, projectID string) ([]string, error)
+	// RemoveBookmarksForProject deletes every bookmark in the project
+	// (admin/compliance project deletion, #91).
+	RemoveBookmarksForProject(ctx context.Context, projectID string) error
 
 	// Batch Ledger (committed_batches, ADR-0004) — Batch IDs already
 	// committed to the Lake. Writers consult it to skip redelivered

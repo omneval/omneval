@@ -40,6 +40,10 @@ type WiredDeps struct {
 	// compile against this handle instead of the S3 snapshot.
 	Lake *SwappableDB
 
+	// AdminLake is a separate read-write Lake attachment used for durable
+	// admin deletes (#91). nil unless query.lake.enabled is true.
+	AdminLake *lake.Lake
+
 	// SnapshotLastModified tracks the S3 snapshot mtime for the poller.
 	SnapshotLastModified time.Time
 
@@ -67,6 +71,9 @@ func (d *WiredDeps) Close() {
 	}
 	if d.Lake != nil {
 		d.Lake.Close()
+	}
+	if d.AdminLake != nil {
+		d.AdminLake.Close()
 	}
 	if d.Store != nil {
 		d.Store.Close()
@@ -237,13 +244,31 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		deps.Lake = lakeHandle
 		deps.Span.Lake = lakeHandle
 		deps.Conversation.Lake = lakeHandle
-		// Eval-rule preview and the admin trace count read `spans`
-		// unqualified; the views openLakeDB creates resolve them against
-		// the Lake. Admin *deletes* fail loudly on the read-only attach
-		// until durable Lake deletion lands (#91) — the legacy path only
-		// ever deleted from the local snapshot copy anyway.
+		// Eval-rule preview reads `spans` unqualified; the views
+		// openLakeDB creates resolve that against the Lake.
 		deps.EvalRule.DB = lakeHandle
-		deps.Admin.DB = lakeHandle
+
+		// Admin gets its own read-write Lake attachment (#91): DuckLake's
+		// catalog transactions make a second writer safe, and durable
+		// deletes must commit through the Catalog rather than the
+		// read-only snapshot copy (which never persisted — see
+		// docs/restore-from-snapshot.md). Admin counts also read through
+		// this attachment so a delete is reflected immediately, without
+		// waiting on the read-only attachment's cached catalog snapshot.
+		adminLake, err := lake.Open(context.Background(), lake.ConfigFromApp(cfg))
+		if err != nil {
+			deps.Close()
+			return nil, fmt.Errorf("query: open admin lake: %w", err)
+		}
+		deps.AdminLake = adminLake
+		if _, err := adminLake.DB().ExecContext(context.Background(),
+			"CREATE OR REPLACE VIEW spans AS SELECT * FROM lake.spans"); err != nil {
+			deps.Close()
+			return nil, fmt.Errorf("query: create admin lake view: %w", err)
+		}
+		deps.Admin.DB = NewSwappableDBFromDB(adminLake.DB())
+		deps.Admin.LakeRW = adminLake
+
 		p.AddCheck("catalog", &probe.CatalogReachable{
 			Ping: func(ctx context.Context) error {
 				// A metadata-only scan of lake.spans forces a round trip

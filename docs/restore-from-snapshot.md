@@ -269,3 +269,29 @@ Properties:
 - **Hot-window overlap is deduplicated.** A span present in both the hot store and the archive lands exactly once, keyed on `(trace_id, span_id)`.
 - **Verifiable.** On completion the command prints a per-`(project, date)` table of source vs Lake row counts for spans and scores, and exits nonzero if any partition mismatches. Run it (and verify) before flipping `query.lake.enabled` in production, and keep the legacy stores until the report is clean.
 - **Read-only on the sources.** The hot DuckDB file is attached `READ_ONLY`; the archive is only read.
+
+## Known issue: admin deletes on the legacy snapshot path are cosmetic (fixed by #91 on the Lake path)
+
+On the legacy (pre-ADR-0004) storage tiers, the admin "delete project" and
+"delete trace" endpoints (`DELETE /api/v1/admin/projects/:id`,
+`DELETE /api/v1/admin/projects/:id/traces`) run `DELETE FROM spans ...`
+against the Query API's *local copy* of the Writer's DuckDB snapshot. That
+copy is overwritten by the next snapshot poll (within ~30s), so the deleted
+rows resurrect, and the cold Parquet archive is never touched at all —
+deletion never durably happens on this path.
+
+With `query.lake.enabled` (#91), the Query API instead opens a second,
+dedicated **read-write Lake attachment** (`AdminLake` in
+`services/query/internal/server/wire.go`) used only for admin deletes.
+`lake.Lake.DeleteProject` (`internal/lake/lake.go`) deletes the project's
+rows from `lake.spans` and `lake.scores` and runs the DuckLake maintenance
+calls (`ducklake_expire_snapshots`, `ducklake_delete_orphaned_files`,
+`ducklake_cleanup_old_files`) to reclaim the backing Parquet files. Because
+the Lake catalog (Postgres in production) gives immediate cross-attach
+consistency, the deletion is visible right away to the read-only attachment
+the rest of the Query API uses for span reads — no resurrection, no poll
+delay.
+
+The legacy snapshot-local DELETE remains in place as a fallback only when
+the Lake is not enabled, and remains subject to the resurrection bug above
+until the ADR-0004 cutover (#90) removes the snapshot tiers entirely.

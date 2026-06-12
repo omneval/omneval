@@ -233,6 +233,108 @@ func TestScoreFallsBackToCreatedAt(t *testing.T) {
 	}
 }
 
+// TestDeleteProject proves DeleteProject removes a project's spans and
+// scores durably, leaves other projects untouched, and reclaims the
+// deleted project's Parquet files (#91).
+func TestDeleteProject(t *testing.T) {
+	ctx := context.Background()
+	cfg, _ := localConfig(t)
+
+	l, err := Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer l.Close()
+
+	start := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	if err := l.InsertSpans(ctx, []*domain.Span{
+		testSpan("proj-a", "s1", start),
+		testSpan("proj-b", "s2", start),
+	}); err != nil {
+		t.Fatalf("insert spans: %v", err)
+	}
+	if err := l.InsertScores(ctx, []*domain.Score{
+		{ScoreID: "score-1", SpanID: "s1", TraceID: "trace-s1", ProjectID: "proj-a",
+			EvalName: "e", Value: 1, CreatedAt: start, SpanStartTime: start},
+		{ScoreID: "score-2", SpanID: "s2", TraceID: "trace-s2", ProjectID: "proj-b",
+			EvalName: "e", Value: 1, CreatedAt: start, SpanStartTime: start},
+	}); err != nil {
+		t.Fatalf("insert scores: %v", err)
+	}
+
+	if err := l.DeleteProject(ctx, "proj-a"); err != nil {
+		t.Fatalf("delete project: %v", err)
+	}
+
+	var n int
+	if err := l.DB().QueryRowContext(ctx, "SELECT count(*) FROM lake.spans WHERE project_id = 'proj-a'").Scan(&n); err != nil {
+		t.Fatalf("count proj-a spans: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("proj-a spans: got %d, want 0", n)
+	}
+	if err := l.DB().QueryRowContext(ctx, "SELECT count(*) FROM lake.scores WHERE project_id = 'proj-a'").Scan(&n); err != nil {
+		t.Fatalf("count proj-a scores: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("proj-a scores: got %d, want 0", n)
+	}
+
+	// proj-b is untouched.
+	if err := l.DB().QueryRowContext(ctx, "SELECT count(*) FROM lake.spans WHERE project_id = 'proj-b'").Scan(&n); err != nil {
+		t.Fatalf("count proj-b spans: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("proj-b spans: got %d, want 1", n)
+	}
+
+	// The reclaim pass deletes the Parquet files that backed proj-a's rows.
+	var found bool
+	err = filepath.WalkDir(cfg.DataPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".parquet") && strings.Contains(path, "project_id=proj-a") {
+			found = true
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk data path: %v", err)
+	}
+	if found {
+		t.Error("proj-a Parquet file still present after DeleteProject")
+	}
+}
+
+// TestDeleteProjectReadOnlyRejected proves a read-only attachment cannot
+// run DeleteProject.
+func TestDeleteProjectReadOnlyRejected(t *testing.T) {
+	ctx := context.Background()
+	cfg, _ := localConfig(t)
+
+	l, err := Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open rw: %v", err)
+	}
+	if err := l.InsertSpans(ctx, []*domain.Span{testSpan("proj-a", "s1", time.Now())}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	l.Close()
+
+	roCfg := cfg
+	roCfg.ReadOnly = true
+	ro, err := Open(ctx, roCfg)
+	if err != nil {
+		t.Fatalf("open ro: %v", err)
+	}
+	defer ro.Close()
+
+	if err := ro.DeleteProject(ctx, "proj-a"); err == nil {
+		t.Error("DeleteProject on read-only attachment succeeded, want error")
+	}
+}
+
 func TestConfigFromApp(t *testing.T) {
 	t.Run("postgres prod defaults", func(t *testing.T) {
 		app := &config.Config{

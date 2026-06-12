@@ -403,6 +403,45 @@ func (l *Lake) InsertScores(ctx context.Context, scores []*domain.Score) error {
 	return nil
 }
 
+// DeleteProject permanently deletes all of a project's spans and scores
+// from the Lake (admin/compliance deletion, ADR-0004 / #91). Unlike the
+// legacy snapshot path, this commits through the Catalog: the rows
+// disappear from every reader's next query, with no resurrection on the
+// next snapshot cycle. It then runs DuckLake's snapshot expiry and
+// orphan/old-file cleanup so the deleted rows' physical Parquet files are
+// reclaimed immediately rather than waiting for the next scheduled Table
+// Maintenance pass (#89).
+func (l *Lake) DeleteProject(ctx context.Context, projectID string) error {
+	if l.readOnly {
+		return fmt.Errorf("lake: cannot delete from a read-only attachment")
+	}
+	if _, err := l.db.ExecContext(ctx, "DELETE FROM lake.spans WHERE project_id = ?", projectID); err != nil {
+		return fmt.Errorf("lake: delete spans for project %s: %w", projectID, err)
+	}
+	if _, err := l.db.ExecContext(ctx, "DELETE FROM lake.scores WHERE project_id = ?", projectID); err != nil {
+		return fmt.Errorf("lake: delete scores for project %s: %w", projectID, err)
+	}
+	return l.reclaim(ctx)
+}
+
+// reclaim expires snapshots that are no longer the latest and deletes the
+// Parquet files that backed them, so deleted rows stop occupying space
+// immediately instead of lingering until the next leader-run Table
+// Maintenance pass.
+func (l *Lake) reclaim(ctx context.Context) error {
+	stmts := []string{
+		"CALL ducklake_expire_snapshots('lake', older_than => now())",
+		"CALL ducklake_delete_orphaned_files('lake', cleanup_all => true)",
+		"CALL ducklake_cleanup_old_files('lake', cleanup_all => true)",
+	}
+	for _, stmt := range stmts {
+		if _, err := l.db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("lake: %s: %w", firstWords(stmt, 2), err)
+		}
+	}
+	return nil
+}
+
 func attributesJSON(attrs map[string]any) string {
 	if len(attrs) == 0 {
 		return "null"

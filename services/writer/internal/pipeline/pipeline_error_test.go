@@ -396,6 +396,9 @@ func (f *fakeMetaStore) SetBookmark(ctx context.Context, b *domain.Bookmark) err
 func (f *fakeMetaStore) RemoveBookmark(ctx context.Context, projectID, traceID string) error {
 	return nil
 }
+func (f *fakeMetaStore) RemoveBookmarksForProject(ctx context.Context, projectID string) error {
+	return nil
+}
 func (f *fakeMetaStore) IsBookmarked(ctx context.Context, projectID, traceID string) (bool, error) {
 	return false, nil
 }
