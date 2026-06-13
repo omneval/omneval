@@ -32,8 +32,8 @@ type Config struct {
 	// QuackAddr is the Quack Server's host:port (no scheme), e.g.
 	// "quack-server.omneval:9494".
 	QuackAddr string
-	// QuackToken authenticates this client via
-	// `CREATE SECRET ... TYPE quack`. Must match the Quack Server's
+	// QuackToken authenticates this client via the META_TOKEN DuckLake
+	// ATTACH option (see attachSQL). Must match the Quack Server's
 	// configured token.
 	QuackToken string
 	// DataPath is where the Lake's Parquet files live: an s3://bucket/prefix
@@ -138,9 +138,6 @@ func (l *Lake) attach(ctx context.Context, cfg Config) error {
 			steps = append(steps, s3SecretSQL(cfg.Storage))
 		}
 	}
-	if cfg.QuackToken != "" {
-		steps = append(steps, quackSecretSQL(cfg.QuackToken))
-	}
 	steps = append(steps, attachSQL(cfg))
 
 	for _, stmt := range steps {
@@ -151,29 +148,34 @@ func (l *Lake) attach(ctx context.Context, cfg Config) error {
 	return nil
 }
 
-// quackSecretSQL builds the CREATE SECRET statement authenticating this
-// client to the Quack Server (the spike's required pattern: TOKEN is passed
-// via CREATE SECRET, not query-string or ATTACH options).
-func quackSecretSQL(token string) string {
-	return fmt.Sprintf("CREATE OR REPLACE SECRET quack_auth (TYPE quack, TOKEN %s)", sqlQuote(token))
-}
-
 // attachSQL builds the ATTACH statement for the Lake via the Quack Server's
 // `ducklake:quack:<host>:<port>` catalog driver (ADR-0005). DATA_PATH is
 // still read directly by this client; only catalog metadata flows through
 // Quack.
 //
-// The quack extension defaults to HTTPS for any host other than
-// localhost/127.0.0.1/::1 (https://duckdb.org/docs/current/quack/overview).
-// The Quack Server (services/quack) never terminates TLS — it's plain HTTP,
-// with TLS expected to be handled by a reverse proxy if ever exposed — so
-// disable_ssl=true is appended to the quack URI to avoid HTTPS attempts
-// against in-cluster Service DNS names like "omneval-quack-server:9494".
-// DISABLE_SSL cannot be passed as a DuckLake ATTACH option ("Unsupported
-// option disable_ssl for DuckLake") — it must be part of the quack URI.
+// DuckLake's ATTACH option parser rejects unknown options outright
+// ("Unsupported option ... for DuckLake"), but forwards any option prefixed
+// with "meta_" to the underlying metadata-catalog attach (quack_storage.cpp)
+// after stripping the prefix. We use that to pass TOKEN and DISABLE_SSL
+// through to the quack catalog attach:
+//   - META_TOKEN authenticates this client (quack_storage.cpp reads
+//     attach_options.options["token"]); CREATE SECRET TYPE quack does not
+//     support DISABLE_SSL, so a secret-based approach can't combine both.
+//   - META_DISABLE_SSL is always set to true. The quack extension defaults
+//     to HTTPS for any host other than localhost/127.0.0.1/::1
+//     (https://duckdb.org/docs/current/quack/overview), but the Quack Server
+//     (services/quack) never terminates TLS — it's plain HTTP, with TLS
+//     expected to be handled by a reverse proxy if ever exposed. Forcing
+//     META_DISABLE_SSL true avoids HTTPS attempts against in-cluster Service
+//     DNS names like "omneval-quack-server:9494"; it's a no-op for
+//     localhost addresses, which already default to no SSL.
 func attachSQL(cfg Config) string {
-	target := "ducklake:quack:" + cfg.QuackAddr + "?disable_ssl=true"
+	target := "ducklake:quack:" + cfg.QuackAddr
 	options := []string{fmt.Sprintf("DATA_PATH %s", sqlQuote(cfg.DataPath))}
+	if cfg.QuackToken != "" {
+		options = append(options, fmt.Sprintf("META_TOKEN %s", sqlQuote(cfg.QuackToken)))
+	}
+	options = append(options, "META_DISABLE_SSL true")
 	if cfg.ReadOnly {
 		options = append(options, "READ_ONLY")
 	}
