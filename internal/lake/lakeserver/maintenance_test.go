@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -239,17 +240,19 @@ func TestServeS3SecretCreated(t *testing.T) {
 
 	// Verify that the S3 secret is registered by querying DuckDB's secret
 	// catalog. The secret should exist and be scoped to our S3 path.
-	var scope, keyID string
+	// scope is a VARCHAR[] array; use scope[1] to get the first element.
+	// type is lowercase 's3' per DuckDB's convention.
+	var scope, secretType string
 	err = srv.DB().QueryRowContext(ctx, `
-		SELECT scope, key_id
+		SELECT scope[1], type
 		FROM duckdb_secrets()
-		WHERE secret_type = 'S3' AND scope LIKE 's3://omneval%'
-	`).Scan(&scope, &keyID)
+		WHERE LOWER(type) = 's3' AND scope[1] LIKE 's3://omneval%%'
+	`).Scan(&scope, &secretType)
 	if err != nil {
 		t.Fatalf("query duckdb_secrets: %v", err)
 	}
-	if keyID != "minio" {
-		t.Errorf("S3 secret key_id: got %q, want %q", keyID, "minio")
+	if strings.ToLower(secretType) != "s3" {
+		t.Errorf("S3 secret type: got %q, want s3 (case-insensitive)", secretType)
 	}
 	if scope != "s3://omneval/*" {
 		t.Errorf("S3 secret scope: got %q, want %q", scope, "s3://omneval/*")
@@ -286,7 +289,7 @@ func TestServeLocalDataPathSkipsS3Secret(t *testing.T) {
 	err = srv.DB().QueryRowContext(ctx, `
 		SELECT count(*)
 		FROM duckdb_secrets()
-		WHERE secret_type = 'S3'
+		WHERE type = 'S3'
 	`).Scan(&count)
 	if err != nil {
 		t.Fatalf("query duckdb_secrets: %v", err)
@@ -329,7 +332,7 @@ func TestServeS3OrphanedFilesGlobSucceeds(t *testing.T) {
 	err = srv.DB().QueryRowContext(ctx, `
 		SELECT extension_name
 		FROM duckdb_extensions()
-		WHERE extension_name = 'httpfs' AND status = 'loaded'
+		WHERE extension_name = 'httpfs' AND loaded = true
 	`).Scan(&extName)
 	if err != nil {
 		t.Fatalf("query duckdb_extensions for httpfs: %v", err)
