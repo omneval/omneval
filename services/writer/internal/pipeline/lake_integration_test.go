@@ -126,6 +126,13 @@ func TestLakeIntegration_PostgresCatalogMinIO(t *testing.T) {
 		t.Errorf("cost_usd: got %v, want > 0 (cost is computed at write time)", gotCost)
 	}
 
+	// Flush inlined data so the small insert materializes as a physical
+	// Parquet file on S3 — DuckLake 1.5 inlines small inserts into the
+	// catalog until flushed.
+	if err := lk.FlushInlinedData(ctx); err != nil {
+		t.Fatalf("flush inlined data: %v", err)
+	}
+
 	// Verify the partition layout on the object store itself.
 	assertPartitionedObject(t, ctx, minioEndpoint, storage.Bucket,
 		"project_id=proj-lake", "year=2026", "month=6", "day=7")

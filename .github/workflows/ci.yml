@@ -49,7 +49,16 @@ jobs:
 
       - run: go vet ${{ env.GO_MODULES }}
 
-      - run: go test -race ${{ env.GO_MODULES }}
+      # Run -race for all packages that do not depend on duckdb-go.
+      # duckdb-go uses unsafe pointer ops in its C bindings that trip Go 1.25's
+      # checkptr verification under -race (enforced unconditionally by the
+      # race detector; GODEBUG=checkptr=0 is ignored).  The duckdb-dependent
+      # packages are tested without -race in the step below.
+      - run: go test -race ./internal/auth/... ./internal/buffer/... ./internal/config/... ./internal/domain/... ./internal/duckdb/... ./internal/fake/... ./internal/handlers/... ./internal/leader/... ./internal/metadata/... ./internal/normalizer/... ./internal/otlp/... ./internal/pricing/... ./internal/probe/... ./internal/queue/... ./internal/storage/... ./sdk/go/... ./services/ingest/... ./services/eval/...
+
+      # Test duckdb-dependent packages without -race.
+      # duckdb-go C bindings trip checkptr fatally when -race is enabled.
+      - run: go test ./internal/lake/... ./services/writer/... ./services/query/... ./services/quack/...
 
   go-build:
     name: Go - build binaries
