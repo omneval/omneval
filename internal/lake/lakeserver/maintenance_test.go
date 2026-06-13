@@ -220,18 +220,30 @@ func TestServeS3SecretCreated(t *testing.T) {
 	dir := t.TempDir()
 	port := findFreePort(t)
 
+	storageCfg := config.StorageConfig{
+		AccessKey: "minio",
+		SecretKey: "minio123",
+		Region:    "us-east-1",
+		Endpoint:  "omneval-minio:9000",
+		Bucket:    "omneval",
+	}
+
+	// Verify Region and Endpoint are configured; the original bug (#120) was
+	// caused by Region being empty, so these must be non-empty for the secret
+	// to work against MinIO.
+	if storageCfg.Region == "" {
+		t.Fatal("test config: Region must be non-empty")
+	}
+	if storageCfg.Endpoint == "" {
+		t.Fatal("test config: Endpoint must be non-empty")
+	}
+
 	srv, err := lakeserver.Serve(ctx, lakeserver.Config{
 		ListenAddr:    fmt.Sprintf(":%d", port),
 		CatalogDriver: lakeserver.CatalogDriverLocal,
 		CatalogDSN:    filepath.Join(dir, "catalog", "lake.ducklake"),
 		DataPath:      "s3://omneval/lake",
-		Storage: config.StorageConfig{
-			AccessKey: "minio",
-			SecretKey: "minio123",
-			Region:    "us-east-1",
-			Endpoint:  "omneval-minio:9000",
-			Bucket:    "omneval",
-		},
+		Storage:       storageCfg,
 	})
 	if err != nil {
 		t.Fatalf("serve: %v", err)
@@ -289,7 +301,7 @@ func TestServeLocalDataPathSkipsS3Secret(t *testing.T) {
 	err = srv.DB().QueryRowContext(ctx, `
 		SELECT count(*)
 		FROM duckdb_secrets()
-		WHERE type = 'S3'
+		WHERE LOWER(type) = 's3'
 	`).Scan(&count)
 	if err != nil {
 		t.Fatalf("query duckdb_secrets: %v", err)
@@ -299,11 +311,56 @@ func TestServeLocalDataPathSkipsS3Secret(t *testing.T) {
 	}
 }
 
-// TestServeS3OrphanedFilesGlobSucceeds verifies that DuckLake's internal
-// read_blob glob (used by ducklake_delete_orphaned_files) succeeds when the
-// S3 secret is properly created. Without the fix for #120, this glob fails
-// with NoSuchBucket because read_blob runs unauthenticated.
-func TestServeS3OrphanedFilesGlobSucceeds(t *testing.T) {
+// TestServeS3SecretSkippedWhenNoCredentials verifies that when DataPath is
+// s3:// but Storage credentials are empty, Serve() does not create an S3
+// secret (createS3Secret's early-return path). httpfs is still installed.
+func TestServeS3SecretSkippedWhenNoCredentials(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	port := findFreePort(t)
+
+	srv, err := lakeserver.Serve(ctx, lakeserver.Config{
+		ListenAddr:    fmt.Sprintf(":%d", port),
+		CatalogDriver: lakeserver.CatalogDriverLocal,
+		CatalogDSN:    filepath.Join(dir, "catalog", "lake.ducklake"),
+		DataPath:      "s3://omneval/lake",
+		// Storage is empty — no credentials.
+	})
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	defer srv.Close()
+
+	// No S3 secrets should exist when credentials are empty
+	var count int
+	err = srv.DB().QueryRowContext(ctx, `
+		SELECT count(*)
+		FROM duckdb_secrets()
+		WHERE LOWER(type) = 's3'
+	`).Scan(&count)
+	if err != nil {
+		t.Fatalf("query duckdb_secrets: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("S3 secrets with empty credentials: got %d, want 0", count)
+	}
+
+	// httpfs should still be installed (required for any S3 access)
+	var extName string
+	err = srv.DB().QueryRowContext(ctx, `
+		SELECT extension_name
+		FROM duckdb_extensions()
+		WHERE extension_name = 'httpfs' AND loaded = true
+	`).Scan(&extName)
+	if err != nil {
+		t.Fatalf("query duckdb_extensions for httpfs: %v", err)
+	}
+}
+
+// TestServeS3HttpfsLoaded verifies that when DataPath is s3://, Serve()
+// installs and loads the httpfs extension. httpfs is a prerequisite for
+// read_blob (used by ducklake_delete_orphaned_files) to access S3 paths.
+func TestServeS3HttpfsLoaded(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	port := findFreePort(t)
@@ -326,8 +383,8 @@ func TestServeS3OrphanedFilesGlobSucceeds(t *testing.T) {
 	}
 	defer srv.Close()
 
-	// Verify that the httpfs extension is loaded (required for read_blob
-	// to work with S3 paths)
+	// Verify that the httpfs extension is loaded. Without httpfs, read_blob
+	// calls on S3 paths fail.
 	var extName string
 	err = srv.DB().QueryRowContext(ctx, `
 		SELECT extension_name
