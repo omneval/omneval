@@ -18,6 +18,7 @@ import (
 
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/domain"
+	_ "github.com/omneval/omneval/internal/duckdbfix"
 )
 
 // CatalogDriverPostgres uses the shared Postgres instance as the Catalog —
@@ -403,6 +404,20 @@ func (l *Lake) InsertScores(ctx context.Context, scores []*domain.Score) error {
 	return nil
 }
 
+// FlushInlinedData forces any rows DuckLake 1.5 has inlined into the
+// Catalog (rather than written to Parquet immediately, for small inserts —
+// see InsertSpans/InsertScores) out to physical Parquet files. lake.spans
+// and lake.scores read inlined rows transparently, so query correctness
+// does not depend on this; it exists for callers that inspect the physical
+// data layout directly (partition-layout tests, Table Maintenance, #91
+// reclaim).
+func (l *Lake) FlushInlinedData(ctx context.Context) error {
+	if _, err := l.db.ExecContext(ctx, "CALL ducklake_flush_inlined_data('lake')"); err != nil {
+		return fmt.Errorf("lake: flush inlined data: %w", err)
+	}
+	return nil
+}
+
 // DeleteProject permanently deletes all of a project's spans and scores
 // from the Lake (admin/compliance deletion, ADR-0004 / #91). Unlike the
 // legacy snapshot path, this commits through the Catalog: the rows
@@ -428,6 +443,41 @@ func (l *Lake) DeleteProject(ctx context.Context, projectID string) error {
 // Parquet files that backed them, so deleted rows stop occupying space
 // immediately instead of lingering until the next leader-run Table
 // Maintenance pass.
+//
+// DuckLake 1.5 records DELETE as an inlined delete vector against the
+// existing Parquet files rather than rewriting them immediately, so in
+// principle a preceding ducklake_rewrite_data_files pass is needed for
+// ducklake_delete_orphaned_files/ducklake_cleanup_old_files to find a
+// deleted project's data files: without a rewrite, those files are still
+// "live" as far as the Catalog is concerned, just filtered by the delete
+// vector at read time (query correctness is unaffected; lake.spans/scores
+// already exclude the deleted rows).
+//
+// KNOWN LIMITATION (#111): ducklake_rewrite_data_files cannot currently be
+// sequenced around a preceding DELETE without hitting DuckDB 1.5.3's
+// "Not implemented Error: Scanning a DuckLake table after the transaction
+// has ended" — this was reproduced for every combination tried:
+//   - same *sql.Conn, separate implicit transactions (delete autocommits,
+//     then rewrite): fails.
+//   - same *sql.Conn, explicit transaction wrapping both DELETE and rewrite
+//     (rewrite before commit): does not fail, but ducklake_rewrite_data_files
+//     copies the file's rows verbatim — it does not yet see the delete
+//     vector from the uncommitted DELETE in the same transaction, so the
+//     "rewritten" file still contains the deleted rows.
+//   - a brand-new *sql.DB with a fresh ATTACH to the same catalog/data path,
+//     after the DELETE's transaction committed: fails with the same error.
+//
+// So a deleted project's physical Parquet files are NOT immediately
+// reclaimed by this function today; they are filtered out at query time by
+// the delete vector and will be compacted away by a future Table
+// Maintenance pass once DuckDB lifts this restriction (or once #105's Quack
+// Server can run ducklake_rewrite_data_files from its own long-lived
+// session — see the quack:// spike in internal/lake/quack_spike, which
+// found the quack extension doesn't yet expose attached DuckLake tables for
+// querying at all, so this couldn't be validated end-to-end either).
+// ducklake_expire_snapshots/ducklake_delete_orphaned_files/
+// ducklake_cleanup_old_files below remain useful for snapshot/orphan
+// cleanup that doesn't depend on rewriting live data files.
 func (l *Lake) reclaim(ctx context.Context) error {
 	stmts := []string{
 		"CALL ducklake_expire_snapshots('lake', older_than => now())",
