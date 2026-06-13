@@ -8,15 +8,17 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/lake/lakeserver"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
-// TestDeleteProjectNoResurrection proves that, against the Postgres Catalog
-// (the production configuration), an admin delete through a dedicated
-// read-write Lake attachment is visible immediately to an independent
-// read-only attachment — and stays gone after a poll interval and a Table
-// Maintenance pass (#91). This is the durability guarantee the legacy
-// snapshot-local DELETE never had: deleted rows do not resurrect.
+// TestDeleteProjectNoResurrection proves that, against a Quack Server backed
+// by a Postgres Catalog (the production configuration, ADR-0005), an admin
+// delete through a dedicated read-write Quack client attachment is visible
+// immediately to an independent read-only Quack client attachment — and
+// stays gone after a poll interval and a Table Maintenance pass (#91,
+// #105). This is the durability guarantee the legacy snapshot-local DELETE
+// never had: deleted rows do not resurrect.
 func TestDeleteProjectNoResurrection(t *testing.T) {
 	if _, err := os.Stat("/var/run/docker.sock"); os.IsNotExist(err) {
 		t.Skip("Docker not available, skipping integration test")
@@ -43,14 +45,26 @@ func TestDeleteProjectNoResurrection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("postgres port: %v", err)
 	}
-	catalogDSN := fmt.Sprintf("dbname=lakecatalog host=%s port=%s user=postgres password=postgres",
-		host, port.Port())
+	catalogDSN := "host=" + host + " port=" + port.Port() + " user=postgres password=postgres dbname=lakecatalog"
 
 	dataDir := t.TempDir()
-	cfg := Config{
-		CatalogDriver: CatalogDriverPostgres,
+
+	quackPort := freePort(t)
+	srv, err := lakeserver.Serve(ctx, lakeserver.Config{
+		ListenAddr:    fmt.Sprintf(":%d", quackPort),
+		CatalogDriver: lakeserver.CatalogDriverPostgres,
 		CatalogDSN:    catalogDSN,
-		DataPath:      dataDir,
+	})
+	if err != nil {
+		t.Fatalf("start quack server: %v", err)
+	}
+	defer srv.Close()
+
+	addr := serverAddr(t, srv)
+	cfg := Config{
+		QuackAddr:  addr,
+		QuackToken: srv.Token(),
+		DataPath:   dataDir,
 	}
 
 	// adminLake is the dedicated read-write attachment used for admin
@@ -101,11 +115,16 @@ func TestDeleteProjectNoResurrection(t *testing.T) {
 	}
 
 	// Simulate a poll interval / Table Maintenance pass: re-query after a
-	// short delay and after a second snapshot-expiry pass on the admin
-	// connection. proj-a must still be gone.
+	// short delay and after a Table Maintenance pass on a fresh Quack
+	// client (the Quack Server's own maintenance attachment in production).
 	time.Sleep(100 * time.Millisecond)
-	if err := adminLake.reclaim(ctx); err != nil {
-		t.Fatalf("second reclaim pass: %v", err)
+	maintLake, err := Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open maintenance lake: %v", err)
+	}
+	defer maintLake.Close()
+	if err := lakeserver.RunMaintenance(ctx, maintLake.DB(), lakeserver.MaintenanceTables); err != nil {
+		t.Fatalf("table maintenance pass: %v", err)
 	}
 	if err := queryLake.DB().QueryRowContext(ctx, "SELECT count(*) FROM lake.spans WHERE project_id = 'proj-a'").Scan(&n); err != nil {
 		t.Fatalf("count proj-a after maintenance: %v", err)
