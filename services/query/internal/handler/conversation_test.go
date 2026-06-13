@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	_ "github.com/duckdb/duckdb-go/v2"
+	_ "github.com/omneval/omneval/internal/duckdbfix"
 )
 
 const conversationTestSchema = `

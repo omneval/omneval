@@ -18,6 +18,7 @@ import (
 	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/minio/minio-go/v7"
 	"github.com/omneval/omneval/internal/config"
+	_ "github.com/omneval/omneval/internal/duckdbfix"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/storage"
 	s3 "github.com/omneval/omneval/internal/storage/s3"

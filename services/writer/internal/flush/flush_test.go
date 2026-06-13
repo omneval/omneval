@@ -15,6 +15,7 @@ import (
 
 	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/omneval/omneval/internal/config"
+	_ "github.com/omneval/omneval/internal/duckdbfix"
 	"github.com/omneval/omneval/internal/storage"
 )
 
