@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/marcboeker/go-duckdb/v2"
+	_ "github.com/duckdb/duckdb-go/v2"
 )
 
 // TestIntegration_QueryWithDuckDB tests the full query flow with a real DuckDB database.

@@ -359,8 +359,8 @@ func TestRetentionConfig_Validate(t *testing.T) {
 		{
 			name: "invalid action value",
 			cfg: config.RetentionConfig{
-				Enabled:  true,
-				Action:   "archive",
+				Enabled:    true,
+				Action:     "archive",
 				MaxAgeDays: 30,
 			},
 			wantErr: true,

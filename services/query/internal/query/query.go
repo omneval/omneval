@@ -64,21 +64,21 @@ func acceptedOperatorsMessage() string {
 type spanField string
 
 const (
-	fieldProjectID       spanField = "project_id"
-	fieldTraceID         spanField = "trace_id"
-	fieldSpanID          spanField = "span_id"
-	fieldConversationID  spanField = "conversation_id"
-	fieldServiceName     spanField = "service_name"
-	fieldName            spanField = "name"
-	fieldKind            spanField = "kind"
-	fieldModel           spanField = "model"
-	fieldStartTime       spanField = "start_time"
-	fieldEndTime         spanField = "end_time"
-	fieldInputTokens     spanField = "input_tokens"
-	fieldOutputTokens    spanField = "output_tokens"
-	fieldCostUSD         spanField = "cost_usd"
-	fieldPromptName      spanField = "prompt_name"
-	fieldStatusCode      spanField = "status_code"
+	fieldProjectID      spanField = "project_id"
+	fieldTraceID        spanField = "trace_id"
+	fieldSpanID         spanField = "span_id"
+	fieldConversationID spanField = "conversation_id"
+	fieldServiceName    spanField = "service_name"
+	fieldName           spanField = "name"
+	fieldKind           spanField = "kind"
+	fieldModel          spanField = "model"
+	fieldStartTime      spanField = "start_time"
+	fieldEndTime        spanField = "end_time"
+	fieldInputTokens    spanField = "input_tokens"
+	fieldOutputTokens   spanField = "output_tokens"
+	fieldCostUSD        spanField = "cost_usd"
+	fieldPromptName     spanField = "prompt_name"
+	fieldStatusCode     spanField = "status_code"
 )
 
 // specialFilterFields are filter fields handled specially (not simple column comparisons).

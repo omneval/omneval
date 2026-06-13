@@ -67,9 +67,9 @@ func (d ArchiveDestination) AzureURI() string {
 
 // RotationResult records the outcome of a single retention run.
 type RotationResult struct {
-	ObjectsScanned int       `json:"objects_scanned"`
-	ObjectsActedOn int       `json:"objects_acted_on"`
-	BytesActedOn   int64     `json:"bytes_acted_on"`
-	Errors         []error   `json:"errors,omitempty"`
+	ObjectsScanned int           `json:"objects_scanned"`
+	ObjectsActedOn int           `json:"objects_acted_on"`
+	BytesActedOn   int64         `json:"bytes_acted_on"`
+	Errors         []error       `json:"errors,omitempty"`
 	Duration       time.Duration `json:"duration_seconds"`
 }

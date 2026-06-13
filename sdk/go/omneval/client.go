@@ -157,10 +157,10 @@ type PromptListItem struct {
 
 // CreatePromptRequest is the body sent to POST /api/v1/prompts.
 type CreatePromptRequest struct {
-	Name        string                      `json:"name"`
-	Template    string                      `json:"template"`
-	ModelConfig *domain.PromptModelConfig   `json:"model_config,omitempty"`
-	Label       string                      `json:"label,omitempty"`
+	Name        string                    `json:"name"`
+	Template    string                    `json:"template"`
+	ModelConfig *domain.PromptModelConfig `json:"model_config,omitempty"`
+	Label       string                    `json:"label,omitempty"`
 }
 
 // EvalRuleSummary is an eval rule returned by the API.

@@ -24,12 +24,12 @@ const (
 
 // Span is the central fact type stored in DuckDB.
 type Span struct {
-	SpanID          string `json:"span_id"`
-	TraceID         string `json:"trace_id"`
-	ParentID        string `json:"parent_id"`
-	ConversationID  string `json:"conversation_id"`
-	ProjectID       string `json:"project_id"`
-	ServiceName     string `json:"service_name"`
+	SpanID         string `json:"span_id"`
+	TraceID        string `json:"trace_id"`
+	ParentID       string `json:"parent_id"`
+	ConversationID string `json:"conversation_id"`
+	ProjectID      string `json:"project_id"`
+	ServiceName    string `json:"service_name"`
 
 	Name      string    `json:"name"`
 	Kind      SpanKind  `json:"kind"`

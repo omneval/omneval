@@ -794,13 +794,13 @@ func TestDatasetRun_CreateAndGet(t *testing.T) {
 	}
 	s.CreateDataset(ctx, &domain.Dataset{DatasetID: "ds-1", ProjectID: "proj-1", Name: "Set", CreatedAt: now})
 	if err := s.CreateEvalRule(ctx, &domain.EvalRule{
-		RuleID:    "rule-1",
-		ProjectID: "proj-1",
-		Name:      "test rule",
+		RuleID:     "rule-1",
+		ProjectID:  "proj-1",
+		Name:       "test rule",
 		JudgeModel: "gpt-4",
 		SampleRate: 1.0,
-		Enabled:   true,
-		CreatedAt: now,
+		Enabled:    true,
+		CreatedAt:  now,
 	}); err != nil {
 		t.Fatalf("create eval rule: %v", err)
 	}

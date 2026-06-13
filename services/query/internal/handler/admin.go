@@ -258,4 +258,3 @@ func (h *AdminHandler) RegisterAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/admin/traces/", h.HandleAdminTracesDelete)
 	mux.HandleFunc("DELETE /api/v1/admin/projects/", h.HandleAdminProjectsDelete)
 }
-

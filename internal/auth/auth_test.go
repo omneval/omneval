@@ -167,7 +167,7 @@ func (f *FakeMetadataStore) UpdateDatasetRunItem(_ context.Context, _ *domain.Da
 func (f *FakeMetadataStore) ListDatasetRunItems(_ context.Context, _ string) ([]*domain.DatasetRunItem, error) {
 	return nil, nil
 }
-func (f *FakeMetadataStore) Migrate(_ context.Context) error        { return nil }
+func (f *FakeMetadataStore) Migrate(_ context.Context) error { return nil }
 func (f *FakeMetadataStore) MarkBatchCommitted(ctx context.Context, batchID string, committedAt time.Time) error {
 	return nil
 }
