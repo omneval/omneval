@@ -34,3 +34,13 @@ tests:
       - matchRegex:
           path: spec.serviceName
           pattern: 'RELEASE-NAME-writer'
+  - it: should read the quack client token from the shared secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNEVAL_QUACK_CLIENT_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-secret
+                key: quack-token

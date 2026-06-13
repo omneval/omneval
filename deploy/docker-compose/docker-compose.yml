@@ -84,6 +84,43 @@ services:
 
   # --- Omneval application services ---
 
+  # Quack Server: sole Lake gateway (ADR-0005). The only process holding a
+  # direct DuckLake Catalog/data-path connection; Writer, Query, and Eval
+  # attach to it as thin Quack clients via OMNEVAL_QUACK_CLIENT_*.
+  omneval-quack:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: omneval-quack
+    command: omneval-quack
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - "9494:9494"
+      - "9094:9090"
+    environment:
+      OMNEVAL_DATABASE_DRIVER: postgres
+      OMNEVAL_DATABASE_DSN: postgres://${POSTGRES_USER:-omneval}:${POSTGRES_PASSWORD:-omneval}@postgres:5432/${POSTGRES_DB:-omneval}?sslmode=disable
+      OMNEVAL_STORAGE_ENDPOINT: http://minio:9000
+      OMNEVAL_STORAGE_BUCKET: omneval
+      OMNEVAL_STORAGE_REGION: us-east-1
+      OMNEVAL_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_s3_access_key}
+      OMNEVAL_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key}
+      OMNEVAL_QUACK_SERVER_LISTEN_ADDR: ":9494"
+      OMNEVAL_QUACK_SERVER_TOKEN: ${QUACK_TOKEN:-quack_dev_token}
+      OMNEVAL_QUACK_SERVER_CATALOG_DRIVER: postgres
+      OMNEVAL_QUACK_SERVER_DATA_PATH: s3://omneval/lake
+      OMNEVAL_QUACK_SERVER_MAINTENANCE_INTERVAL: 5m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   omneval-ingest:
     build:
       context: ../..
@@ -125,6 +162,8 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      omneval-quack:
+        condition: service_healthy
     ports:
       - "8001:8001"
       - "9091:9090"
@@ -141,6 +180,9 @@ services:
       OMNEVAL_WRITER_SYNC_INTERVAL: 30s
       OMNEVAL_WRITER_FLUSH_INTERVAL: 30m
       OMNEVAL_WRITER_FLUSH_AGE_DAYS: 2
+      OMNEVAL_QUACK_CLIENT_URL: omneval-quack:9494
+      OMNEVAL_QUACK_CLIENT_TOKEN: ${QUACK_TOKEN:-quack_dev_token}
+      OMNEVAL_QUACK_CLIENT_DATA_PATH: s3://omneval/lake
     volumes:
       - writer-data:/data
 
@@ -155,6 +197,8 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      omneval-quack:
+        condition: service_healthy
     ports:
       - "8002:8002"
       - "9092:9090"
@@ -171,6 +215,9 @@ services:
       OMNEVAL_AUTH_ADMIN_PASSWORD: admin
       OMNEVAL_QUERY_DUCKDB_PATH: /tmp/omneval-snapshot.duckdb
       OMNEVAL_QUERY_SYNC_INTERVAL: 30s
+      OMNEVAL_QUACK_CLIENT_URL: omneval-quack:9494
+      OMNEVAL_QUACK_CLIENT_TOKEN: ${QUACK_TOKEN:-quack_dev_token}
+      OMNEVAL_QUACK_CLIENT_DATA_PATH: s3://omneval/lake
 
   omneval-eval:
     build:
@@ -200,6 +247,9 @@ services:
       OMNEVAL_EVAL_CONCURRENCY: 4
       OMNEVAL_EVAL_LLM_BASE_URL: ""
       OMNEVAL_EVAL_LLM_API_KEY: ""
+      OMNEVAL_QUACK_CLIENT_URL: omneval-quack:9494
+      OMNEVAL_QUACK_CLIENT_TOKEN: ${QUACK_TOKEN:-quack_dev_token}
+      OMNEVAL_QUACK_CLIENT_DATA_PATH: s3://omneval/lake
 
 volumes:
   redis-data:

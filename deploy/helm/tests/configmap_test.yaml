@@ -44,3 +44,24 @@ tests:
       - matchRegex:
           path: data["omneval.yaml"]
           pattern: 'session_ttl:'
+
+  - it: should include quack server and client config
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'quack:'
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'listen_addr:'
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'RELEASE-NAME-quack-server:9494'
+
+  - it: should derive an s3 quack data path when storage is configured
+    set:
+      storage.bucket: omneval
+      storage.endpoint: "http://minio:9000"
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 's3://omneval/lake'

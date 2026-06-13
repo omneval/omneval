@@ -1,0 +1,110 @@
+---
+suite: quack-server
+templates:
+  - quack-server-statefulset.yaml
+tests:
+  - it: should create StatefulSet and Service
+    asserts:
+      - hasDocuments:
+          count: 2
+      - documentIndex: 0
+        isKind:
+          of: StatefulSet
+      - documentIndex: 1
+        isKind:
+          of: Service
+      - documentIndex: 0
+        matchRegex:
+            path: metadata.name
+            pattern: 'RELEASE-NAME-quack-server'
+      - documentIndex: 0
+        equal:
+          path: spec.replicas
+          value: 1
+
+  - it: should have a single replica (sole Catalog connection, ADR-0005)
+    asserts:
+      - documentIndex: 0
+        equal:
+          path: spec.replicas
+          value: 1
+
+  - it: should expose the quack and metrics ports
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.ports
+          content:
+            name: quack
+            port: 9494
+            targetPort: 9494
+            protocol: TCP
+      - documentIndex: 0
+        contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: quack
+            containerPort: 9494
+            protocol: TCP
+
+  - it: should have liveness and readiness probes
+    asserts:
+      - documentIndex: 0
+        isNotEmpty:
+          path: spec.template.spec.containers[0].livenessProbe
+      - documentIndex: 0
+        isNotEmpty:
+          path: spec.template.spec.containers[0].readinessProbe
+
+  - it: should have resource limits
+    asserts:
+      - documentIndex: 0
+        isNotEmpty:
+          path: spec.template.spec.containers[0].resources
+
+  - it: should read the quack token from the shared secret
+    asserts:
+      - documentIndex: 0
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNEVAL_QUACK_SERVER_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-secret
+                key: quack-token
+
+  - it: should have a serviceName for the StatefulSet
+    asserts:
+      - documentIndex: 0
+        matchRegex:
+          path: spec.serviceName
+          pattern: 'RELEASE-NAME-quack-server'
+
+  - it: should provision a PVC for the local catalog driver
+    set:
+      quack.server.catalogDriver: duckdb
+    asserts:
+      - documentIndex: 0
+        isNotEmpty:
+          path: spec.volumeClaimTemplates
+
+  - it: should not provision a PVC when the data path is s3 and catalog is postgres
+    set:
+      storage.bucket: omneval
+      storage.endpoint: "http://minio:9000"
+      quack.server.catalogDriver: postgres
+    asserts:
+      - documentIndex: 0
+        notExists:
+          path: spec.volumeClaimTemplates
+
+  - it: should create a ServiceAccount when serviceAccount.create is true
+    set:
+      quack.server.serviceAccount.create: true
+    asserts:
+      - hasDocuments:
+          count: 3
+      - documentIndex: 2
+        isKind:
+          of: ServiceAccount
