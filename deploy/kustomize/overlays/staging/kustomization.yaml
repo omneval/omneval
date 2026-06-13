@@ -68,9 +68,9 @@ patches:
             cpu: 500m
             memory: 256Mi
 
-  # Writer: higher resources (DuckDB operations), single replica
+  # Writer: higher resources (DuckLake operations via Quack), single replica
   - target:
-      kind: StatefulSet
+      kind: Deployment
       name: writer
     patch: |
       - op: replace

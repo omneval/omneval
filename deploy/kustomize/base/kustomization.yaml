@@ -1,7 +1,7 @@
 # Kustomize base for Omneval
 #
 # This base defines all Omneval services (ingest, writer, query, eval)
-# as Kubernetes Deployments, a StatefulSet (writer), Services, a ConfigMap,
+# as Kubernetes Deployments, Services, a ConfigMap,
 # and a Secret. It is designed to be layered with overlays for different
 # environments (production, dev, etc.) via GitOps tools like Flux CD or ArgoCD.
 #
@@ -26,10 +26,7 @@ resources:
   - postgresql-statefulset.yaml
   - minio-deployment.yaml
   - ingest-deployment.yaml
-  - writer-statefulset.yaml
-  - writer-snapshot-cronjob.yaml
-  - volume-snapshot-configmap.yaml
-  - volume-snapshot-rbac.yaml
+  - writer-deployment.yaml
   - query-deployment.yaml
   - eval-deployment.yaml
   - ingest-service.yaml

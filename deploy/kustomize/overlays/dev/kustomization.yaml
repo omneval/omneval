@@ -1,8 +1,7 @@
 # Development overlay for Omneval
 #
-# Applies reduced resource requests, single replica, and emptyDir
-# storage (instead of PVC) for the Writer Service. Designed for
-# local development, minikube, kind, or small dev clusters.
+# Applies reduced resource requests and single replica per service.
+# Designed for local development, minikube, kind, or small dev clusters.
 #
 # Usage:
 #   kustomize build deploy/kustomize/overlays/dev
@@ -85,7 +84,7 @@ patches:
 
   # Reduce Writer resource limits for dev clusters
   - target:
-      kind: StatefulSet
+      kind: Deployment
       name: writer
     patch: |
       - op: replace
@@ -127,24 +126,6 @@ patches:
           limits:
             cpu: 200m
             memory: 128Mi
-
-  # Replace the Writer PVC with emptyDir (no persistent storage in dev)
-  - target:
-      kind: StatefulSet
-      name: writer
-    patch: |
-      - op: replace
-        path: /spec/volumeClaimTemplates
-        value:
-          - metadata:
-              name: data
-            spec:
-              accessModes:
-                - ReadWriteOnce
-              storageClassName: ""
-              resources:
-                requests:
-                  storage: 1Gi
 
   # Override ConfigMap for dev (SQLite, no S3)
   - target:

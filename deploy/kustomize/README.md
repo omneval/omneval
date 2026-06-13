@@ -15,10 +15,7 @@ deploy/kustomize/
 │   ├── postgresql-statefulset.yaml # PostgreSQL StatefulSet + Service + ConfigMap
 │   ├── minio-deployment.yaml      # MinIO Deployment + Service + PVC + init Job
 │   ├── ingest-deployment.yaml     # Ingest API Deployment (port 8000)
-│   ├── writer-statefulset.yaml    # Writer StatefulSet with PVC (port 8001)
-│   ├── writer-snapshot-cronjob.yaml  # CronJob: PVC VolumeSnapshot (daily at 02:00 UTC)
-│   ├── volume-snapshot-configmap.yaml # ConfigMap: snapshot class configuration
-│   ├── volume-snapshot-rbac.yaml      # RBAC: ServiceAccount + ClusterRole for snapshots
+│   ├── writer-deployment.yaml     # Writer Deployment, stateless (port 8001)
 │   ├── query-deployment.yaml      # Query API Deployment (port 8002)
 │   ├── eval-deployment.yaml       # Eval Workers Deployment (no HTTP port)
 │   ├── ingest-service.yaml        # Ingest ClusterIP Service
@@ -289,51 +286,6 @@ images:
     newTag: v1.2.3
 ```
 
-### PVC storage class
-
-Override the storage class for the Writer PVC in your overlay:
-
-```yaml
-patches:
-  - target:
-      kind: StatefulSet
-      name: writer
-    patch: |
-      - op: replace
-        path: /spec/volumeClaimTemplates/0/spec/storageClassName
-        value: fast-ssd
-```
-
-### PVC snapshot configuration
-
-The `omneval-volume-snapshot-config` ConfigMap holds the `VolumeSnapshotClass`
-name. Override this in your overlay to match your cloud provider's snapshot
-class:
-
-```yaml
-# overlays/production/kustomization.yaml
-patches:
-  - target:
-      kind: ConfigMap
-      name: omneval-volume-snapshot-config
-    patch: |-
-      - op: replace
-        path: /data/omneval.yaml
-        value: |
-          snapshot-class: "ebs-csi-gp3"
-```
-
-Common snapshot class names by cloud provider:
-| Provider | Snapshot Class |
-|----------|---------------|
-| AWS EBS (gp3) | `ebs-csi-gp3` |
-| AWS EBS (io2) | `ebs-csi-io2` |
-| GCE PD | `pd.csi.storage.gke.io` |
-| Azure Disk | `disk.csi.azure.com` |
-| OpenStack Cinder | `cinder.csi.openstack.org` |
-
-See `docs/restore-from-snapshot.md` for full restore procedures.
-
 ## Horizontal Pod Autoscalers
 
 The production overlay includes HPAs for stateless services:
@@ -344,13 +296,16 @@ The production overlay includes HPAs for stateless services:
 | Query | 2 | 10 | 70% |
 | Eval | 2 | 10 | 70% |
 
-The Writer Service uses a StatefulSet with a single replica (DuckDB does not
-support concurrent writes) and does not have an HPA.
+The Writer Service is a stateless Deployment (single replica by default) and
+does not have an HPA.
 
 ## Architecture Notes
 
-- **Writer** is a StatefulSet with a `ReadWriteOnce` PVC for the DuckDB file. It must remain single-replica (DuckDB does not support concurrent writes).
-- **Query API** is fully stateless — reads its DuckDB snapshot from S3, never mounts the PVC.
+- **Writer** is a stateless Deployment with no PVC. It drains the Redis ingest
+  queue and commits batches to the Lake (DuckLake via the Quack Server). It
+  is horizontally scalable; replica count defaults to 1.
+- **Query API** is fully stateless — queries the Lake (DuckLake via the Quack
+  Server) directly, never mounts a local volume.
 - **Eval Workers** have no HTTP port (queue consumers). Their Service only exposes the metrics endpoint (9090) for Prometheus scraping.
 - **Leader election** for Writer is disabled by default. Enable it in `omneval.yaml` for multi-replica HA (`writer.leader_election.enabled: true`).
 - **Redis** is deployed as a single-instance Deployment with a PVC. For production, consider using a managed Redis service and disabling the internal deployment.
