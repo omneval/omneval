@@ -93,6 +93,14 @@ type Config struct {
 	// CatalogDSN is the Postgres DSN for the Catalog, or the local catalog
 	// file path when CatalogDriver is "duckdb".
 	CatalogDSN string
+	// DataPath is where the Lake's Parquet files live: an s3://bucket/prefix
+	// URL or a local directory. When S3, Serve installs httpfs and creates
+	// an S3 secret so DuckLake's internal read_blob calls (orphaned-file
+	// cleanup, #120) can authenticate.
+	DataPath string
+	// Storage holds S3 credentials for the DATA_PATH. Only used when
+	// DataPath is an S3 URL; ignored otherwise.
+	Storage config.StorageConfig
 }
 
 // ConfigFromApp derives the Quack Server's catalog settings from the
@@ -104,6 +112,8 @@ func ConfigFromApp(cfg *config.Config) Config {
 		Token:         cfg.Quack.Server.Token,
 		CatalogDriver: cfg.Quack.Server.CatalogDriver,
 		CatalogDSN:    cfg.Quack.Server.CatalogDSN,
+		DataPath:      cfg.Quack.Server.DataPath,
+		Storage:       cfg.Storage,
 	}
 	if sc.ListenAddr == "" {
 		sc.ListenAddr = ":9494"
@@ -164,6 +174,23 @@ func Serve(ctx context.Context, cfg Config) (*Server, error) {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("lakeserver: %s: %w", stmt, err)
+		}
+	}
+
+	// When DATA_PATH is S3, install httpfs and create an S3 secret so that
+	// DuckLake's internal read_blob calls (e.g. orphaned-file cleanup in
+	// ducklake_delete_orphaned_files, #120) can authenticate to S3. Without
+	// this, read_blob runs unauthenticated and MinIO rejects with NoSuchBucket.
+	if strings.HasPrefix(cfg.DataPath, "s3://") {
+		for _, stmt := range []string{"INSTALL httpfs", "LOAD httpfs"} {
+			if _, err := db.ExecContext(ctx, stmt); err != nil {
+				db.Close()
+				return nil, fmt.Errorf("lakeserver: %s: %w", stmt, err)
+			}
+		}
+		if err := createS3Secret(ctx, db, cfg); err != nil {
+			db.Close()
+			return nil, err
 		}
 	}
 
@@ -329,4 +356,53 @@ func firstWords(s string, n int) string {
 		fields = fields[:n]
 	}
 	return strings.Join(fields, " ")
+}
+
+// createS3Secret creates a DuckDB S3 secret for the configured storage
+// credentials, scoped to the DATA_PATH bucket. This ensures DuckLake's
+// internal read_blob calls (orphaned-file cleanup, #120) can authenticate
+// to S3/MinIO instead of failing with NoSuchBucket.
+func createS3Secret(ctx context.Context, db *sql.DB, cfg Config) error {
+	sc := cfg.Storage
+	if sc.AccessKey == "" && sc.SecretKey == "" {
+		// No credentials configured — skip secret creation. read_blob will
+		// use anonymous/default credentials (works for public buckets or
+		// environments with instance profiles).
+		return nil
+	}
+
+	scope := sc.Bucket
+	if scope != "" {
+		scope = "s3://" + scope + "/*"
+	}
+
+	keyID := sc.AccessKey
+	if keyID == "" {
+		keyID = "default"
+	}
+
+	args := []string{
+		fmt.Sprintf("TYPE s3"),
+		fmt.Sprintf("KEY_ID %s", sqlQuote(keyID)),
+		fmt.Sprintf("SECRET %s", sqlQuote(sc.SecretKey)),
+	}
+	if sc.Region != "" {
+		args = append(args, fmt.Sprintf("REGION %s", sqlQuote(sc.Region)))
+	} else {
+		args = append(args, "REGION 'us-east-1'")
+	}
+	if sc.Endpoint != "" {
+		args = append(args, fmt.Sprintf("ENDPOINT %s", sqlQuote(sc.Endpoint)))
+		args = append(args, "URL_STYLE 'path'")
+		args = append(args, "USE_SSL false")
+	}
+	if scope != "" {
+		args = append(args, fmt.Sprintf("SCOPE %s", sqlQuote(scope)))
+	}
+
+	query := fmt.Sprintf("CREATE SECRET (%s)", strings.Join(args, ", "))
+	if _, err := db.ExecContext(ctx, query); err != nil {
+		return fmt.Errorf("lakeserver: CREATE SECRET s3: %w", err)
+	}
+	return nil
 }

@@ -2,11 +2,14 @@ package lakeserver_test
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
+	"net"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/lake/lakeserver"
@@ -193,5 +196,145 @@ func TestRunMaintenanceFlushOrderingPreserved(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("spans after maintenance: got %d, want 1", n)
+	}
+}
+
+// findFreePort finds an available TCP port for a test Quack Server.
+func findFreePort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("find free port: %v", err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
+}
+
+// TestServeS3SecretCreated verifies that when DataPath is an s3:// URL and
+// Storage credentials are configured, Serve() creates an S3 secret in the
+// DuckDB session. This is the fix for #120: DuckLake's internal read_blob
+// calls (orphaned-file cleanup) need S3 credentials in the server's session.
+func TestServeS3SecretCreated(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	port := findFreePort(t)
+
+	srv, err := lakeserver.Serve(ctx, lakeserver.Config{
+		ListenAddr:    fmt.Sprintf(":%d", port),
+		CatalogDriver: lakeserver.CatalogDriverLocal,
+		CatalogDSN:    filepath.Join(dir, "catalog", "lake.ducklake"),
+		DataPath:      "s3://omneval/lake",
+		Storage: config.StorageConfig{
+			AccessKey: "minio",
+			SecretKey: "minio123",
+			Region:    "us-east-1",
+			Endpoint:  "omneval-minio:9000",
+			Bucket:    "omneval",
+		},
+	})
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	defer srv.Close()
+
+	// Verify that the S3 secret is registered by querying DuckDB's secret
+	// catalog. The secret should exist and be scoped to our S3 path.
+	var scope, keyID string
+	err = srv.DB().QueryRowContext(ctx, `
+		SELECT scope, key_id
+		FROM duckdb_secrets()
+		WHERE secret_type = 'S3' AND scope LIKE 's3://omneval%'
+	`).Scan(&scope, &keyID)
+	if err != nil {
+		t.Fatalf("query duckdb_secrets: %v", err)
+	}
+	if keyID != "minio" {
+		t.Errorf("S3 secret key_id: got %q, want %q", keyID, "minio")
+	}
+	if scope != "s3://omneval/*" {
+		t.Errorf("S3 secret scope: got %q, want %q", scope, "s3://omneval/*")
+	}
+}
+
+// TestServeLocalDataPathSkipsS3Secret verifies that when DataPath is a local
+// path (not s3://), no S3 secret is created.
+func TestServeLocalDataPathSkipsS3Secret(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	port := findFreePort(t)
+
+	srv, err := lakeserver.Serve(ctx, lakeserver.Config{
+		ListenAddr:    fmt.Sprintf(":%d", port),
+		CatalogDriver: lakeserver.CatalogDriverLocal,
+		CatalogDSN:    filepath.Join(dir, "catalog", "lake.ducklake"),
+		DataPath:      filepath.Join(dir, "data"),
+		Storage: config.StorageConfig{
+			AccessKey: "minio",
+			SecretKey: "minio123",
+			Region:    "us-east-1",
+			Endpoint:  "omneval-minio:9000",
+			Bucket:    "omneval",
+		},
+	})
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	defer srv.Close()
+
+	// No S3 secrets should exist
+	var count int
+	err = srv.DB().QueryRowContext(ctx, `
+		SELECT count(*)
+		FROM duckdb_secrets()
+		WHERE secret_type = 'S3'
+	`).Scan(&count)
+	if err != nil {
+		t.Fatalf("query duckdb_secrets: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("S3 secrets for local data path: got %d, want 0", count)
+	}
+}
+
+// TestServeS3OrphanedFilesGlobSucceeds verifies that DuckLake's internal
+// read_blob glob (used by ducklake_delete_orphaned_files) succeeds when the
+// S3 secret is properly created. Without the fix for #120, this glob fails
+// with NoSuchBucket because read_blob runs unauthenticated.
+func TestServeS3OrphanedFilesGlobSucceeds(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	port := findFreePort(t)
+
+	srv, err := lakeserver.Serve(ctx, lakeserver.Config{
+		ListenAddr:    fmt.Sprintf(":%d", port),
+		CatalogDriver: lakeserver.CatalogDriverLocal,
+		CatalogDSN:    filepath.Join(dir, "catalog", "lake.ducklake"),
+		DataPath:      "s3://omneval/lake",
+		Storage: config.StorageConfig{
+			AccessKey: "minio",
+			SecretKey: "minio123",
+			Region:    "us-east-1",
+			Endpoint:  "omneval-minio:9000",
+			Bucket:    "omneval",
+		},
+	})
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	defer srv.Close()
+
+	// Verify that the httpfs extension is loaded (required for read_blob
+	// to work with S3 paths)
+	var extName string
+	err = srv.DB().QueryRowContext(ctx, `
+		SELECT extension_name
+		FROM duckdb_extensions()
+		WHERE extension_name = 'httpfs' AND status = 'loaded'
+	`).Scan(&extName)
+	if err != nil {
+		t.Fatalf("query duckdb_extensions for httpfs: %v", err)
+	}
+	if extName != "httpfs" {
+		t.Errorf("httpfs extension: got %q, want %q", extName, "httpfs")
 	}
 }
