@@ -13,6 +13,7 @@ import (
 
 	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/omneval/omneval/internal/domain"
+	_ "github.com/omneval/omneval/internal/duckdbfix"
 )
 
 func TestHandleScores_AuthRequired(t *testing.T) {

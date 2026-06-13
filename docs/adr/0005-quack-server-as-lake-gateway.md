@@ -1,0 +1,22 @@
+# Quack Server is the sole gateway to the Lake
+
+Status: accepted (amends ADR-0004)
+
+ADR-0004 gave every Writer and Query API pod a direct DuckLake Catalog (Postgres) attachment, planning to bridge to a horizontally-scalable Writer fleet later via Quack (#89) and cut over in a final phase (#90). Investigating #105 surfaced DuckDB's Quack remote protocol (beta as of DuckDB 1.5.3, requiring a driver bump from the currently-pinned `duckdb-go/v2 v2.5.0`/DuckDB 1.4.1 to `v2.10503.1`/DuckDB 1.5.3) as a client-server RPC layer purpose-built for this. We decided to make it the foundation from day one rather than a later migration step: a new standalone **Quack Server** service (`services/quack/`) becomes the *only* process holding a direct DuckLake Catalog/data-path connection. Every other service — Writer, Query API, the backfill tool, and eventually Eval if it needs Lake reads — attaches via `ATTACH 'quack://...'` as a thin Quack client. `internal/lake`'s direct Postgres-Catalog and local-file-Catalog attach modes are removed entirely, including for the demo profile, in favor of a single `quack://` code path everywhere.
+
+Table Maintenance (`ducklake_merge_adjacent_files`, `ducklake_expire_snapshots`, `ducklake_flush_inlined_data`, orphan-file cleanup) moves into the Quack Server's own scheduler, since it's the one process with a persistent Catalog connection. This retires `internal/leader`'s Redis SETNX election (added for the #88/#89 reconciliation/retention work) — there is no longer a "leader Writer" to elect.
+
+## Considered Options
+
+- **Embed Quack Server in the Writer process** (the original #105 draft: "no new binary needed, flag-gated in Writer"). Rejected: with Quack as the *only* Catalog path, Query API's Lake access would then depend on the Writer pod's liveness — a new availability coupling that doesn't exist today, and conflicts with #90's own AC of a separate Quack Server StatefulSet.
+- **Keep direct-Postgres attach as a fallback alongside `quack://`** (hybrid). Rejected in favor of one uniform code path: `internal/lake` would otherwise permanently carry two attach modes and two sets of integration tests. ADR-0004 already accepted a performance/complexity trade-off (DuckDB over ClickHouse); the same tolerance covers routing all Lake traffic through Quack.
+- **Demo profile keeps its local-file Catalog without Quack** (single process, no network hop needed). Rejected for the same uniformity reason — the demo profile runs a local Quack Server too, keeping `internal/lake`'s client code identical across profiles.
+
+## Consequences
+
+- `internal/lake` splits: the client-attach path (`ATTACH 'quack://...'`, `InsertSpans`/`InsertScores`/queries) is the shared library imported by Writer, Query API, and the backfill tool. Server-side logic — Postgres/local Catalog `ATTACH`, `ensureTables`, `DeleteProject`/`reclaim`, and the Table Maintenance scheduler — moves to a new package imported only by `services/quack`.
+- `internal/leader` is retired; no service performs Redis SETNX election after this lands.
+- #89 (multi-writer fleet via Quack) is superseded — its guarantees (stateless Writer replicas, commit-cadence batching through Quack) are now inherent to this design rather than a separate milestone. Closed as superseded by this ADR / restructured #105.
+- #90 (cutover)'s blocked-by list drops #89 and keeps #105; "Writer becomes stateless" is satisfied here, not in #90.
+- A driver bump to `duckdb-go/v2 v2.10503.1` (DuckDB 1.5.3) is a prerequisite, plus validation that DuckLake 1.5's inlined-insert/inlined-delete semantics work correctly over a `quack://` session (tracked as a separate issue before #105's rewrite proceeds).
+- **Residual risk**: Quack is beta. Every Lake operation in the entire platform now depends on it; if it proves unstable, every deployment is affected (not just multi-writer ones). Accepted per explicit direction — revisit this ADR if Quack instability becomes a recurring operational problem.

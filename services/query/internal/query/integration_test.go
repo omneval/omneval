@@ -9,6 +9,7 @@ import (
 	"time"
 
 	_ "github.com/duckdb/duckdb-go/v2"
+	_ "github.com/omneval/omneval/internal/duckdbfix"
 )
 
 // TestIntegration_QueryWithDuckDB tests the full query flow with a real DuckDB database.
