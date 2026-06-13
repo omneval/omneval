@@ -26,20 +26,6 @@ func wireTestConfig(t *testing.T) *config.Config {
 	return cfg
 }
 
-func TestWireDeps_InvalidRetentionConfig(t *testing.T) {
-	cfg := wireTestConfig(t)
-	cfg.Writer.Retention.Enabled = true
-	cfg.Writer.Retention.MaxAgeDays = -1
-
-	_, err := WireDeps(cfg)
-	if err == nil {
-		t.Fatal("expected error for invalid retention config, got nil")
-	}
-	if !strings.Contains(err.Error(), "retention config") {
-		t.Errorf("error %q should mention retention config", err)
-	}
-}
-
 func TestWireDeps_DuckDBOpenFailure(t *testing.T) {
 	cfg := wireTestConfig(t)
 	// A directory is not a valid DuckDB file path.

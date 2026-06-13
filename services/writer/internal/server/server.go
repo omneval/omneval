@@ -92,14 +92,6 @@ func RunWired(deps *WiredDeps) error {
 			slog.Error("writer: flusher error", "err", err)
 		}
 	}()
-	if deps.Retention != nil {
-		go func() {
-			slog.Info("writer: retention worker started")
-			if err := deps.Retention.RunLoop(ctx); err != nil && err != context.Canceled {
-				slog.Error("writer: retention worker error", "err", err)
-			}
-		}()
-	}
 	if deps.Reconcile != nil {
 		go func() {
 			slog.Info("writer: reconciliation worker started")

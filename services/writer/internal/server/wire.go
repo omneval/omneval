@@ -25,7 +25,6 @@ import (
 	"github.com/omneval/omneval/services/writer/internal/metrics"
 	"github.com/omneval/omneval/services/writer/internal/pipeline"
 	"github.com/omneval/omneval/services/writer/internal/reconcile"
-	"github.com/omneval/omneval/services/writer/internal/retention"
 	syncpkg "github.com/omneval/omneval/services/writer/internal/sync"
 	"github.com/prometheus/client_golang/prometheus"
 	redisgo "github.com/redis/go-redis/v9"
@@ -39,7 +38,6 @@ type WiredDeps struct {
 	Pipeline     *pipeline.Pipeline
 	Syncer       *syncpkg.Syncer
 	Flusher      *flush.Flusher
-	Retention    *retention.Worker // nil when retention is disabled or S3 is not configured
 	Reconcile    *reconcile.Worker // nil when reconciliation is disabled or S3 is not configured
 	ScoreHandler http.Handler
 	DB           *sql.DB
@@ -79,11 +77,6 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	// Default fencing_enabled to true when leader election is enabled.
 	if cfg.Writer.LeaderElection.Enabled && !cfg.Writer.LeaderElection.FencingEnabled {
 		cfg.Writer.LeaderElection.FencingEnabled = true
-	}
-
-	// Validate retention config before starting the worker.
-	if err := cfg.Writer.Retention.Validate(); err != nil {
-		return nil, fmt.Errorf("writer: retention config: %w", err)
 	}
 
 	// Validate reconciliation config before starting the worker.
@@ -196,9 +189,6 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 
 	deps.Syncer = syncpkg.New(s3store, db, dbPath, cfg, metricsHelper)
 	deps.Flusher = flush.NewWithDB(s3store, db, cfg)
-	if s3store != nil && cfg.Writer.Retention.Enabled {
-		deps.Retention = retention.New(s3store, &cfg.Writer.Retention)
-	}
 	if s3store != nil && cfg.Writer.Reconciliation.Enabled {
 		deps.Reconcile = reconcile.New(s3store, meta, ingestQ, metricsHelper, &cfg.Writer.Reconciliation)
 	}

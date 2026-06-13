@@ -249,7 +249,14 @@ func buildRouter(deps *WiredDeps) http.Handler {
 	mux.HandleFunc("POST /api/v1/playground/run", deps.Playground.HandleRun)
 
 	// Score write endpoint (for eval worker score write-back, no auth required).
-	mux.HandleFunc("POST /api/v1/scores", handler.NewScoreHandler(deps.SDB).ServeHTTP)
+	// Scores are committed directly to the Lake via the AdminLake attachment
+	// (ADR-0004/#91); SpanDB resolves span_start_time for partitioning.
+	if deps.AdminLake != nil {
+		var spanDB handler.DBHandle = deps.AdminLake.DB()
+		mux.HandleFunc("POST /api/v1/scores", handler.NewScoreHandler(deps.AdminLake, spanDB).ServeHTTP)
+	} else {
+		mux.HandleFunc("POST /api/v1/scores", handler.NewScoreHandler(nil, deps.SDB).ServeHTTP)
+	}
 
 	// Prometheus metrics.
 	mux.HandleFunc("GET /metrics", promhttp.Handler().ServeHTTP)

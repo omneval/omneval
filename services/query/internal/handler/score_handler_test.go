@@ -23,7 +23,7 @@ func TestHandleScores_AuthRequired(t *testing.T) {
 	// ScoreHandler doesn't check auth in this handler — it's a public endpoint
 	// that accepts scores from the UI/API. This test verifies the request
 	// doesn't get rejected for missing auth.
-	h := NewScoreHandler(nil)
+	h := NewScoreHandler(nil, nil)
 	h.ServeHTTP(w, req)
 
 	// It should proceed to validation (missing required fields).
@@ -37,7 +37,7 @@ func TestHandleScores_MissingFields(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/scores", body)
 	w := httptest.NewRecorder()
 
-	h := NewScoreHandler(nil)
+	h := NewScoreHandler(nil, nil)
 	h.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
@@ -50,7 +50,7 @@ func TestHandleScores_InvalidJSON(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/scores", body)
 	w := httptest.NewRecorder()
 
-	h := NewScoreHandler(nil)
+	h := NewScoreHandler(nil, nil)
 	h.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
@@ -59,76 +59,22 @@ func TestHandleScores_InvalidJSON(t *testing.T) {
 }
 
 func TestHandleScores_WritesToDB(t *testing.T) {
-	// Create a temp DuckDB file.
-	tmpDir, err := os.MkdirTemp("", "omneval-score-test")
-	if err != nil {
-		t.Fatalf("create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-	tmpPath := tmpDir + "/test.duckdb"
+	lk := setupTestLake(t)
 
-	db, err := sql.Open("duckdb", tmpPath)
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	defer db.Close()
+	h := NewScoreHandler(lk, lk.DB())
 
-	// Create the scores table.
-	if _, err := db.ExecContext(context.Background(), `
-		CREATE TABLE IF NOT EXISTS scores (
-			score_id   VARCHAR NOT NULL PRIMARY KEY,
-			span_id    VARCHAR NOT NULL,
-			trace_id   VARCHAR NOT NULL,
-			project_id VARCHAR NOT NULL,
-			eval_name  VARCHAR,
-			value      DOUBLE,
-			reasoning  VARCHAR,
-			judge_model VARCHAR,
-			prompt_name VARCHAR,
-			prompt_version BIGINT,
-			created_at TIMESTAMPTZ NOT NULL
-		);
-	`); err != nil {
-		t.Fatalf("create table: %v", err)
-	}
-
-	// Also create the spans table for the withScores test.
-	if _, err := db.ExecContext(context.Background(), `
-		CREATE TABLE IF NOT EXISTS spans (
-			span_id        VARCHAR NOT NULL,
-			trace_id       VARCHAR NOT NULL,
-			parent_id      VARCHAR,
-			project_id     VARCHAR NOT NULL,
-			service_name   VARCHAR,
-			name           VARCHAR,
-			kind           VARCHAR,
-			start_time     TIMESTAMPTZ NOT NULL,
-			end_time       TIMESTAMPTZ,
-			model          VARCHAR,
-			input          JSON,
-			output         JSON,
-			input_tokens   BIGINT,
-			output_tokens  BIGINT,
-			cost_usd       DOUBLE,
-			prompt_name    VARCHAR,
-			prompt_version BIGINT,
-			status_code    VARCHAR,
-			status_message VARCHAR,
-			attributes     JSON,
-			PRIMARY KEY (trace_id, span_id)
-		);
-	`); err != nil {
-		t.Fatalf("create spans table: %v", err)
-	}
-
-	h := NewScoreHandler(db)
-
-	// Insert a test span.
+	// Insert a test span (proj-1/trace-1 already seeded by setupTestLake;
+	// add a dedicated span for this test's project).
 	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
-	if _, err := db.ExecContext(context.Background(),
-		`INSERT INTO spans (span_id, trace_id, project_id, model, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
-		"span-001", "trace-abc", "test-proj", "gpt-4",
-		baseTime, baseTime.Add(10*time.Second)); err != nil {
+	span := &domain.Span{
+		SpanID:    "span-001",
+		TraceID:   "trace-abc",
+		ProjectID: "test-proj",
+		Model:     "gpt-4",
+		StartTime: baseTime,
+		EndTime:   baseTime.Add(10 * time.Second),
+	}
+	if err := lk.InsertSpans(context.Background(), []*domain.Span{span}); err != nil {
 		t.Fatalf("insert span: %v", err)
 	}
 
@@ -167,9 +113,9 @@ func TestHandleScores_WritesToDB(t *testing.T) {
 
 	// Verify the score was written to the database.
 	var stored domain.Score
-	if err := db.QueryRowContext(context.Background(),
+	if err := lk.DB().QueryRowContext(context.Background(),
 		`SELECT score_id, span_id, eval_name, value, reasoning, judge_model
-		 FROM scores WHERE score_id = ?`, scoreID).Scan(
+		 FROM lake.scores WHERE score_id = ?`, scoreID).Scan(
 		&stored.ScoreID, &stored.SpanID, &stored.EvalName, &stored.Value, &stored.Reasoning, &stored.JudgeModel,
 	); err != nil {
 		t.Fatalf("query score: %v", err)

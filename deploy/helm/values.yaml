@@ -107,14 +107,6 @@ writer:
   leaderElection:
     enabled: false
     lockTTL: 15
-  # VolumeSnapshot-based PVC backup (CronJob that creates Kubernetes VolumeSnapshots)
-  volumeSnapshot:
-    enabled: false
-    # CronJob schedule (default: daily at 02:00 UTC)
-    schedule: "0 2 * * *"
-    # Snapshot class name (from pre-provisioned VolumeSnapshotClass in the cluster)
-    # Must match your cloud provider's CSI snapshot class (e.g., ebs-csi-gp3, pd.csi.storage.gke.io)
-    snapshotClass: ""
   # Resource limits and requests
   resources:
     limits:
@@ -133,15 +125,6 @@ writer:
   serviceAccount:
     create: false
     name: ""
-
-# Writer PVC configuration
-pvc:
-  # Size of the DuckDB volume
-  size: 10Gi
-  # Storage class (empty string uses the cluster default)
-  storageClass: ""
-  # Access mode — must be ReadWriteOnce for DuckDB
-  accessMode: ReadWriteOnce
 
 # ============================================================================
 # Query API (port 8002)

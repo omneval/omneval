@@ -1,12 +1,12 @@
 ---
 suite: writer
 templates:
-  - writer-statefulset.yaml
+  - writer-deployment.yaml
 tests:
-  - it: should create StatefulSet
+  - it: should create Deployment
     asserts:
       - isKind:
-          of: StatefulSet
+          of: Deployment
       - hasDocuments:
           count: 1
       - matchRegex:
@@ -25,15 +25,6 @@ tests:
     asserts:
       - isNotEmpty:
           path: spec.template.spec.containers.resources
-  - it: should have volumeClaimTemplate
-    asserts:
-      - isNotEmpty:
-          path: spec.volumeClaimTemplates
-  - it: should have serviceName
-    asserts:
-      - matchRegex:
-          path: spec.serviceName
-          pattern: 'RELEASE-NAME-writer'
   - it: should read the quack client token from the shared secret
     asserts:
       - contains:

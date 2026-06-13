@@ -22,4 +22,7 @@ type DBHandle interface {
 
 	// ExecContext executes a query without returning rows, with context.
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+
+	// QueryRowContext executes a query expected to return at most one row, with context.
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }

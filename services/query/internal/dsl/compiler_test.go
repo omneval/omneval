@@ -33,9 +33,9 @@ func makeQuery(opts ...func(*Query)) Query {
 
 func TestCompile_WithoutAggregation(t *testing.T) {
 	q := makeQuery()
-	sql, args, err := Compile("proj-abc", q)
+	sql, args, err := CompileLake("proj-abc", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if sql == "" {
 		t.Fatal("expected non-empty SQL")
@@ -58,9 +58,12 @@ func TestCompile_WithoutAggregation(t *testing.T) {
 		t.Error("expected start_time <= ?")
 	}
 
-	// Always emits UNION ALL
-	if !strings.Contains(sql, "UNION ALL") {
-		t.Error("expected UNION ALL in SQL")
+	// Single-table query against the Lake — no UNION.
+	if !strings.Contains(sql, "FROM lake.spans") {
+		t.Error("expected FROM lake.spans in SQL")
+	}
+	if strings.Contains(sql, "UNION") {
+		t.Error("expected no UNION in SQL")
 	}
 }
 
@@ -68,9 +71,9 @@ func TestCompile_ProjectIDInjectedRegardlessOfClientInput(t *testing.T) {
 	q := makeQuery(
 		withFilter(Filter{Field: "project_id", Op: OpEq, Value: "hacker-proj"}),
 	)
-	sql, args, err := Compile("real-proj", q)
+	sql, args, err := CompileLake("real-proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 
 	// The compiler MUST inject the real project_id.
@@ -83,26 +86,13 @@ func TestCompile_ProjectIDInjectedRegardlessOfClientInput(t *testing.T) {
 	}
 }
 
-func TestCompile_ColdSideStub(t *testing.T) {
-	q := makeQuery()
-	sql, _, err := Compile("proj-abc", q)
-	if err != nil {
-		t.Fatalf("Compile error: %v", err)
-	}
-
-	// Cold side must use CAST(NULL ...) pattern.
-	if !strings.Contains(sql, "CAST(NULL AS") {
-		t.Error("expected cold side stub with CAST(NULL AS...)")
-	}
-}
-
 // --- Filters ---
 
 func TestCompile_FilterModelEq(t *testing.T) {
 	q := makeQuery(withFilter(Filter{Field: "model", Op: OpEq, Value: "gpt-4"}))
-	sql, args, err := Compile("proj", q)
+	sql, args, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "model = ?") {
 		t.Error("expected model = ?")
@@ -115,9 +105,9 @@ func TestCompile_FilterModelEq(t *testing.T) {
 
 func TestCompile_FilterModelIn(t *testing.T) {
 	q := makeQuery(withFilter(Filter{Field: "model", Op: OpIn, Value: []any{"gpt-4", "claude"}}))
-	sql, args, err := Compile("proj", q)
+	sql, args, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "model IN") {
 		t.Error("expected model IN")
@@ -129,7 +119,7 @@ func TestCompile_FilterModelIn(t *testing.T) {
 
 func TestCompile_FilterUnknownFieldRejected(t *testing.T) {
 	q := makeQuery(withFilter(Filter{Field: "nonexistent", Op: OpEq, Value: "x"}))
-	_, _, err := Compile("proj", q)
+	_, _, err := CompileLake("proj", q)
 	if err == nil {
 		t.Error("expected error for unknown field")
 	}
@@ -137,7 +127,7 @@ func TestCompile_FilterUnknownFieldRejected(t *testing.T) {
 
 func TestCompile_FilterUnknownOpRejected(t *testing.T) {
 	q := makeQuery(withFilter(Filter{Field: "model", Op: FilterOp("regex"), Value: ".*"}))
-	_, _, err := Compile("proj", q)
+	_, _, err := CompileLake("proj", q)
 	if err == nil {
 		t.Error("expected error for unknown operator")
 	}
@@ -147,14 +137,14 @@ func TestCompile_AllFilterOperators(t *testing.T) {
 	// Non-IN operators use a single value.
 	for _, op := range []FilterOp{OpEq, OpNeq, OpGt, OpGte, OpLt, OpLte} {
 		q := makeQuery(withFilter(Filter{Field: "model", Op: op, Value: "x"}))
-		_, _, err := Compile("proj", q)
+		_, _, err := CompileLake("proj", q)
 		if err != nil {
 			t.Errorf("operator %q should be valid: %v", op, err)
 		}
 	}
 	// IN operator requires a slice value.
 	q := makeQuery(withFilter(Filter{Field: "model", Op: OpIn, Value: []any{"x"}}))
-	_, _, err := Compile("proj", q)
+	_, _, err := CompileLake("proj", q)
 	if err != nil {
 		t.Errorf("operator %q should be valid: %v", OpIn, err)
 	}
@@ -162,7 +152,7 @@ func TestCompile_AllFilterOperators(t *testing.T) {
 
 func TestCompile_FilterValueNil(t *testing.T) {
 	q := makeQuery(withFilter(Filter{Field: "model", Op: OpEq, Value: nil}))
-	_, _, err := Compile("proj", q)
+	_, _, err := CompileLake("proj", q)
 	if err == nil {
 		t.Error("expected error for nil filter value")
 	}
@@ -174,9 +164,9 @@ func TestCompile_AggSum(t *testing.T) {
 	q := makeQuery(
 		withAgg(AggSum, "cost_usd", "total_cost"),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "SUM(cost_usd)") {
 		t.Error("expected SUM(cost_usd)")
@@ -190,9 +180,9 @@ func TestCompile_AggCount(t *testing.T) {
 	q := makeQuery(
 		withAgg(AggCount, "*", "span_count"),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "COUNT(*)") {
 		t.Error("expected COUNT(*)")
@@ -204,9 +194,9 @@ func TestCompile_AggCount(t *testing.T) {
 
 func TestCompile_AggAvg(t *testing.T) {
 	q := makeQuery(withAgg(AggAvg, "input_tokens", "avg_input"))
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "AVG(input_tokens)") {
 		t.Error("expected AVG(input_tokens)")
@@ -215,9 +205,9 @@ func TestCompile_AggAvg(t *testing.T) {
 
 func TestCompile_AggMin(t *testing.T) {
 	q := makeQuery(withAgg(AggMin, "output_tokens", "min_output"))
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "MIN(output_tokens)") {
 		t.Error("expected MIN(output_tokens)")
@@ -226,9 +216,9 @@ func TestCompile_AggMin(t *testing.T) {
 
 func TestCompile_AggMax(t *testing.T) {
 	q := makeQuery(withAgg(AggMax, "cost_usd", "max_cost"))
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "MAX(cost_usd)") {
 		t.Error("expected MAX(cost_usd)")
@@ -237,7 +227,7 @@ func TestCompile_AggMax(t *testing.T) {
 
 func TestCompile_AggUnknownFuncRejected(t *testing.T) {
 	q := makeQuery(withAgg(AggFunc("median"), "cost_usd", "m"))
-	_, _, err := Compile("proj", q)
+	_, _, err := CompileLake("proj", q)
 	if err == nil {
 		t.Error("expected error for unknown aggregation function")
 	}
@@ -248,7 +238,7 @@ func TestCompile_AggUnknownFuncRejected(t *testing.T) {
 // and hints about the "fn" vs "function" field name.
 func TestCompile_AggUnknownFuncErrorMessage(t *testing.T) {
 	q := makeQuery(withAgg(AggFunc("median"), "cost_usd", "m"))
-	_, _, err := Compile("proj", q)
+	_, _, err := CompileLake("proj", q)
 	if err == nil {
 		t.Fatal("expected error for unknown aggregation function")
 	}
@@ -290,9 +280,9 @@ func TestCompile_AggFnAliasEndToEnd(t *testing.T) {
 	if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
 		t.Fatalf("unexpected unmarshal error: %v", err)
 	}
-	sql, _, err := Compile("proj", req)
+	sql, _, err := CompileLake("proj", req)
 	if err != nil {
-		t.Fatalf("unexpected compile error: %v", err)
+		t.Fatalf("unexpected CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "COUNT(*)") {
 		t.Errorf("expected COUNT(*) in SQL, got:\n%s", sql)
@@ -314,7 +304,7 @@ func TestCompile_AggFunctionPreferredOverFn(t *testing.T) {
 
 func TestCompile_AggUnknownFieldRejected(t *testing.T) {
 	q := makeQuery(withAgg(AggSum, "nonexistent", "m"))
-	_, _, err := Compile("proj", q)
+	_, _, err := CompileLake("proj", q)
 	if err == nil {
 		t.Error("expected error for unknown aggregation field")
 	}
@@ -324,9 +314,9 @@ func TestCompile_AggUnknownFieldRejected(t *testing.T) {
 
 func TestCompile_AggDurationMs(t *testing.T) {
 	q := makeQuery(withAgg(AggSum, "duration_ms", "total_duration"))
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	expected := "EPOCH_MS(end_time) - EPOCH_MS(start_time)"
 	if !strings.Contains(sql, expected) {
@@ -336,9 +326,9 @@ func TestCompile_AggDurationMs(t *testing.T) {
 
 func TestCompile_AggAvgDurationMs(t *testing.T) {
 	q := makeQuery(withAgg(AggAvg, "duration_ms", "avg_duration"))
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	expected := "AVG(EPOCH_MS(end_time) - EPOCH_MS(start_time))"
 	if !strings.Contains(sql, expected) {
@@ -349,9 +339,9 @@ func TestCompile_AggAvgDurationMs(t *testing.T) {
 func TestCompile_FilterDurationMs(t *testing.T) {
 	// duration_ms can also appear in filters — should compile to the expression.
 	q := makeQuery(withFilter(Filter{Field: "duration_ms", Op: OpGt, Value: 1000}))
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	expected := "EPOCH_MS(end_time) - EPOCH_MS(start_time) > ?"
 	if !strings.Contains(sql, expected) {
@@ -363,9 +353,9 @@ func TestCompile_FilterDurationMs(t *testing.T) {
 
 func TestCompile_AggP50(t *testing.T) {
 	q := makeQuery(withAgg(AggP50, "duration_ms", "p50_duration"))
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	expected := "APPROX_QUANTILE(EPOCH_MS(end_time) - EPOCH_MS(start_time), 0.50)"
 	if !strings.Contains(sql, expected) {
@@ -375,9 +365,9 @@ func TestCompile_AggP50(t *testing.T) {
 
 func TestCompile_AggP95(t *testing.T) {
 	q := makeQuery(withAgg(AggP95, "cost_usd", "p95_cost"))
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	expected := "APPROX_QUANTILE(cost_usd, 0.95)"
 	if !strings.Contains(sql, expected) {
@@ -387,9 +377,9 @@ func TestCompile_AggP95(t *testing.T) {
 
 func TestCompile_AggP99(t *testing.T) {
 	q := makeQuery(withAgg(AggP99, "input_tokens", "p99_input"))
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	expected := "APPROX_QUANTILE(input_tokens, 0.99)"
 	if !strings.Contains(sql, expected) {
@@ -404,9 +394,9 @@ func TestCompile_GroupByHour(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withGroupBy("start_time", TruncHour),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "date_trunc") {
 		t.Error("expected date_trunc for group_by")
@@ -421,9 +411,9 @@ func TestCompile_GroupByDay(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withGroupBy("start_time", TruncDay),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "'day'") {
 		t.Error("expected 'day' in date_trunc")
@@ -435,9 +425,9 @@ func TestCompile_GroupByWeek(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withGroupBy("start_time", TruncWeek),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "'week'") {
 		t.Error("expected 'week' in date_trunc")
@@ -449,9 +439,9 @@ func TestCompile_GroupByMonth(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withGroupBy("start_time", TruncMonth),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "'month'") {
 		t.Error("expected 'month' in date_trunc")
@@ -463,9 +453,9 @@ func TestCompile_GroupByRawField(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withGroupBy("model", ""),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	// Should reference model column directly (no date_trunc).
 	// The select should contain model as a raw field in GROUP BY.
@@ -479,7 +469,7 @@ func TestCompile_GroupByUnknownFieldRejected(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withGroupBy("nonexistent", ""),
 	)
-	_, _, err := Compile("proj", q)
+	_, _, err := CompileLake("proj", q)
 	if err == nil {
 		t.Error("expected error for unknown group-by field")
 	}
@@ -490,7 +480,7 @@ func TestCompile_GroupByUnknownTruncRejected(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withGroupBy("start_time", TruncUnit("year")),
 	)
-	_, _, err := Compile("proj", q)
+	_, _, err := CompileLake("proj", q)
 	if err == nil {
 		t.Error("expected error for unknown trunc unit")
 	}
@@ -503,9 +493,9 @@ func TestCompile_OrderByField(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withOrderBy("count", false),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "count ASC") {
 		t.Error("expected count ASC in ORDER BY")
@@ -517,9 +507,9 @@ func TestCompile_OrderByDesc(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withOrderBy("count", true),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "count DESC") {
 		t.Error("expected count DESC in ORDER BY")
@@ -531,7 +521,7 @@ func TestCompile_OrderByUnknownFieldRejected(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withOrderBy("nonexistent", false),
 	)
-	_, _, err := Compile("proj", q)
+	_, _, err := CompileLake("proj", q)
 	if err == nil {
 		t.Error("expected error for unknown order-by field")
 	}
@@ -542,9 +532,9 @@ func TestCompile_OrderByAggAlias(t *testing.T) {
 		withAgg(AggCount, "*", "span_count"),
 		withOrderBy("span_count", true),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	// Order by should reference the alias.
 	if !strings.Contains(sql, "span_count DESC") {
@@ -559,9 +549,9 @@ func TestCompile_Limit(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withLimit(10),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "LIMIT 10") {
 		t.Error("expected LIMIT 10")
@@ -576,9 +566,9 @@ func TestCompile_MultipleAggregations(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withAgg(AggAvg, "input_tokens", "avg_input"),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "SUM(cost_usd)") || !strings.Contains(sql, "COUNT(*)") || !strings.Contains(sql, "AVG(input_tokens)") {
 		t.Error("expected all three aggregation functions")
@@ -593,9 +583,9 @@ func TestCompile_IsParameterized(t *testing.T) {
 		withAgg(AggSum, "cost_usd", "total"),
 		withLimit(42),
 	)
-	sql, args, err := Compile("proj", q)
+	sql, args, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	// Should use ? placeholders, not literal values.
 	if strings.Contains(sql, "gpt-4") {
@@ -659,9 +649,9 @@ func TestCompile_GroupByTruncOrderByRawField(t *testing.T) {
 		withGroupBy("start_time", TruncHour),
 		withOrderBy("start_time", false),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 
 	// The outer ORDER BY references the alias "start_time" (which is the
@@ -679,9 +669,9 @@ func TestCompile_GroupByOrderByAggAlias(t *testing.T) {
 		withGroupBy("model", ""),
 		withOrderBy("total_cost", true),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 
 	// The ORDER BY should reference the alias "total_cost".
@@ -699,9 +689,9 @@ func TestCompile_GroupByOrderByGroupByFieldNoTrunc(t *testing.T) {
 		withGroupBy("model", ""),
 		withOrderBy("model", true),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 
 	// The ORDER BY should reference the model column directly.
@@ -800,9 +790,9 @@ func TestQueryValidate_FromSetToZero_PreservesSingleBound(t *testing.T) {
 
 func TestCompile_FilterContains(t *testing.T) {
 	q := makeQuery(withFilter(Filter{Field: "name", Op: OpContains, Value: "qa-"}))
-	sql, args, err := Compile("proj", q)
+	sql, args, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "name LIKE ?") {
 		t.Errorf("expected name LIKE ? in SQL, got:\n%s", sql)
@@ -825,9 +815,9 @@ func TestCompile_FilterContains(t *testing.T) {
 
 func TestCompile_FilterContainsOnInput(t *testing.T) {
 	q := makeQuery(withFilter(Filter{Field: "input", Op: OpContains, Value: "error"}))
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "input LIKE ?") {
 		t.Errorf("expected input LIKE ? in SQL, got:\n%s", sql)
@@ -836,9 +826,9 @@ func TestCompile_FilterContainsOnInput(t *testing.T) {
 
 func TestCompile_FilterContainsOnOutput(t *testing.T) {
 	q := makeQuery(withFilter(Filter{Field: "output", Op: OpContains, Value: "fail"}))
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "output LIKE ?") {
 		t.Errorf("expected output LIKE ? in SQL, got:\n%s", sql)
@@ -847,9 +837,9 @@ func TestCompile_FilterContainsOnOutput(t *testing.T) {
 
 func TestCompile_FilterContainsOnModel(t *testing.T) {
 	q := makeQuery(withFilter(Filter{Field: "model", Op: OpContains, Value: "gpt"}))
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "model LIKE ?") {
 		t.Errorf("expected model LIKE ? in SQL, got:\n%s", sql)
@@ -859,9 +849,9 @@ func TestCompile_FilterContainsOnModel(t *testing.T) {
 func TestCompile_FilterContainsEmptyValue(t *testing.T) {
 	// Empty string should still work — matches everything with LIKE '%%'
 	q := makeQuery(withFilter(Filter{Field: "name", Op: OpContains, Value: ""}))
-	sql, args, err := Compile("proj", q)
+	sql, args, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "name LIKE ?") {
 		t.Errorf("expected name LIKE ? in SQL, got:\n%s", sql)
@@ -886,9 +876,9 @@ func TestCompile_GroupByTimeBucketHour(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withGroupByTimeBucket("1h"),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	// Should use date_trunc('hour', start_time).
 	if !strings.Contains(sql, "date_trunc('hour', start_time)") {
@@ -901,9 +891,9 @@ func TestCompile_GroupByTimeBucketDay(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withGroupByTimeBucket("1d"),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "date_trunc('day', start_time)") {
 		t.Errorf("expected date_trunc('day', start_time) in SQL, got:\n%s", sql)
@@ -915,9 +905,9 @@ func TestCompile_GroupByTimeBucket5Min(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withGroupByTimeBucket("5m"),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "date_trunc('minute', start_time)") {
 		t.Errorf("expected date_trunc('minute', start_time) in SQL, got:\n%s", sql)
@@ -929,9 +919,9 @@ func TestCompile_GroupByTimeBucket1Min(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withGroupByTimeBucket("1m"),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "date_trunc('minute', start_time)") {
 		t.Errorf("expected date_trunc('minute', start_time) in SQL, got:\n%s", sql)
@@ -943,7 +933,7 @@ func TestCompile_GroupByTimeBucketInvalidInterval(t *testing.T) {
 		withAgg(AggCount, "*", "count"),
 		withGroupByTimeBucket("1y"),
 	)
-	_, _, err := Compile("proj", q)
+	_, _, err := CompileLake("proj", q)
 	if err == nil {
 		t.Fatal("expected error for invalid time_bucket interval")
 	}
@@ -957,9 +947,9 @@ func TestCompile_GroupByTimeBucketSum(t *testing.T) {
 		withAgg(AggSum, "cost_usd", "total_cost"),
 		withGroupByTimeBucket("1h"),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	if !strings.Contains(sql, "SUM(cost_usd)") {
 		t.Error("expected SUM(cost_usd) in SQL")
@@ -975,9 +965,9 @@ func TestCompile_GroupByTimeBucketWithOrderBy(t *testing.T) {
 		withGroupByTimeBucket("1h"),
 		withOrderBy("start_time", false),
 	)
-	sql, _, err := Compile("proj", q)
+	sql, _, err := CompileLake("proj", q)
 	if err != nil {
-		t.Fatalf("Compile error: %v", err)
+		t.Fatalf("CompileLake error: %v", err)
 	}
 	// Order by should resolve time_bucket -> alias "start_time".
 	// The inner query has date_trunc('hour', start_time) AS start_time,
@@ -991,7 +981,7 @@ func TestCompile_GroupByTimeBucketWithOrderBy(t *testing.T) {
 
 func TestCompile_TimeBucketAsFilterRejected(t *testing.T) {
 	q := makeQuery(withFilter(Filter{Field: "time_bucket", Op: OpEq, Value: "1h"}))
-	_, _, err := Compile("proj", q)
+	_, _, err := CompileLake("proj", q)
 	if err == nil {
 		t.Fatal("expected error when using time_bucket as a filter field")
 	}
@@ -1002,7 +992,7 @@ func TestCompile_TimeBucketAsFilterRejected(t *testing.T) {
 
 func TestCompile_TimeBucketAsAggregationFieldRejected(t *testing.T) {
 	q := makeQuery(withAgg(AggCount, "time_bucket", "count"))
-	_, _, err := Compile("proj", q)
+	_, _, err := CompileLake("proj", q)
 	if err == nil {
 		t.Fatal("expected error when using time_bucket as an aggregation field")
 	}
