@@ -25,11 +25,18 @@ A human who authenticates to the Omneval UI (email + password, session cookie). 
 An evaluation result attached to a specific Span. Has a numeric `Value`, a `Reasoning` string, and metadata about which judge model and prompt version produced it. Scores may be written by Eval Workers (LLM-as-a-Judge) or by humans/rule-based systems via the REST API.
 
 ### Lake
-The single authoritative span/score store: DuckLake tables (`spans`, `scores`) stored as Parquet on S3 with ACID transactions through the Catalog. Partitioned by `project_id` and the **span's** `start_time` date, so a score always lives next to the span it annotates. Replaces the former Hot Store / Snapshot / Cold Store three-tier design (see ADR-0004). Writers commit batches on the Commit Cadence; Query API pods attach read-only and see committed data immediately.
+The single authoritative span/score store: DuckLake tables (`spans`, `scores`) stored as Parquet on S3 with ACID transactions through the Catalog. Partitioned by `project_id` and the **span's** `start_time` date, so a score always lives next to the span it annotates. Replaces the former Hot Store / Snapshot / Cold Store three-tier design (see ADR-0004). Writers commit batches on the Commit Cadence via the Quack Server; Query API pods attach read-only through the Quack Server and see committed data immediately.
 _Avoid_: hot store, cold store, snapshot, archive
 
 ### Catalog
-The Postgres database holding DuckLake table metadata and transaction state — the serialization point that makes multiple concurrent writers safe. Shares the Postgres instance with the Metadata Store. The demo profile may use a local single-writer catalog instead.
+The Postgres database holding DuckLake table metadata and transaction state — the serialization point that makes multiple concurrent writers safe. Shares the Postgres instance with the Metadata Store. The demo profile may use a local single-writer catalog instead. Only the Quack Server holds a direct Catalog connection (see ADR-0005); every other service reaches the Lake through it.
+
+### Quack Server
+The standalone service (`services/quack/`) that is the sole holder of a direct DuckLake Catalog and data-path connection, running `quack_serve()`. Every other service — Writer, Query API, the backfill tool — attaches to the Lake as a Quack client via `ATTACH 'quack://...'`, never directly. Also owns Table Maintenance. See ADR-0005.
+_Avoid_: lake server, catalog server
+
+### Quack Client
+Any service (Writer, Query API, backfill tool, demo-profile processes) that reaches the Lake via `ATTACH 'quack://<quack-server-host>:9494' AS lake`, configured via `quack.client.url` / `quack.client.token`. `internal/lake`'s client-attach code is shared by all Quack Clients; none of them hold a direct Catalog connection.
 
 ### Ingest Buffer
 S3-first staging for raw span batches. The Ingest API writes each batch to S3 under a unique Batch ID and enqueues a reference; writers fetch the batch, commit it to the Lake, then ack. Buffered batches are retained for a bounded window, making ingestion replayable — Redis loss is non-fatal.
@@ -41,7 +48,8 @@ The `committed_batches` table in Postgres recording every Batch ID already commi
 How often a writer commits its accumulated batch to the Lake: up to ~5 seconds or ~16MB, whichever comes first. This is the user-visible freshness bound for new spans.
 
 ### Table Maintenance
-The scheduled compaction duty of the leader-elected writer: merge adjacent small Parquet files, expire old DuckLake snapshots, and clean orphaned files. Required because frequent small commits fragment the Lake.
+The scheduled compaction duty of the Quack Server (ADR-0005): flush inlined data (`ducklake_flush_inlined_data`), merge adjacent small Parquet files, expire old DuckLake snapshots, and clean orphaned/rewritten files. Required because frequent small commits fragment the Lake and DuckLake 1.5 inlines small writes/deletes into Catalog metadata until flushed. Replaces the former leader-elected-Writer duty — there is no leader election after ADR-0005 (`internal/leader` retired).
+_Avoid_: leader-elected writer, leader writer
 
 ### Phase 1 UI Routes
 `/login` (email+password), `/traces` (paginated filterable list), `/traces/:traceId` (span waterfall + detail panel with inline scores), `/dashboard` (cost/token/latency/error-rate charts), `/settings/project` (API key create/revoke), `/settings/team` (user invite). A project switcher dropdown in the nav covers multi-project deployments. Eval rules UI, Prompt Registry UI, Playground, and Dataset UI are Phase 2+.
