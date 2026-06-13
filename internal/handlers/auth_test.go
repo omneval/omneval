@@ -31,8 +31,8 @@ func TestExtractAPIKey(t *testing.T) {
 			wantKey:       "oev_proj_primary",
 		},
 		{
-			name:          "neither present",
-			wantKey:       "",
+			name:    "neither present",
+			wantKey: "",
 		},
 		{
 			name:          "malformed Authorization — no Bearer prefix",

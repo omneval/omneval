@@ -29,9 +29,9 @@ type SwappableDB struct {
 
 	// A/B rotation: two fixed paths that we alternate between on each Swap.
 	// pathA and pathB are determined from the directory of the initial path.
-	pathA  string
-	pathB  string
-	useA   bool // true when pathA is currently active
+	pathA string
+	pathB string
+	useA  bool // true when pathA is currently active
 }
 
 // NewSwappableDB opens a DuckDB database at path and returns a SwappableDB

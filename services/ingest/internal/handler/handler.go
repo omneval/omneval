@@ -10,8 +10,8 @@ import (
 
 	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
-	"github.com/omneval/omneval/internal/normalizer"
 	handlers "github.com/omneval/omneval/internal/handlers"
+	"github.com/omneval/omneval/internal/normalizer"
 	"github.com/omneval/omneval/services/ingest/internal/metrics"
 )
 
@@ -22,20 +22,20 @@ type ValidatedKey = auth.ValidatedKey
 
 // NativeSpan is the REST API request body for a single span.
 type NativeSpan struct {
-	SpanID          string         `json:"span_id,omitempty"`
-	TraceID         string         `json:"trace_id,omitempty"`
-	ParentID        string         `json:"parent_id,omitempty"`
-	ConversationID  string         `json:"conversation_id,omitempty"`
-	Name            string         `json:"name,omitempty"`
-	Kind            string         `json:"kind,omitempty"`
-	Model           string         `json:"model,omitempty"`
-	Input           any            `json:"input,omitempty"`  // string or JSON array
-	Output          any            `json:"output,omitempty"` // string or JSON array
-	InputTokens     int64          `json:"input_tokens,omitempty"`
-	OutputTokens    int64          `json:"output_tokens,omitempty"`
-	PromptName      string         `json:"prompt_name,omitempty"`
-	PromptVersion   int64          `json:"prompt_version,omitempty"`
-	Attributes      map[string]any `json:"attributes,omitempty"`
+	SpanID         string         `json:"span_id,omitempty"`
+	TraceID        string         `json:"trace_id,omitempty"`
+	ParentID       string         `json:"parent_id,omitempty"`
+	ConversationID string         `json:"conversation_id,omitempty"`
+	Name           string         `json:"name,omitempty"`
+	Kind           string         `json:"kind,omitempty"`
+	Model          string         `json:"model,omitempty"`
+	Input          any            `json:"input,omitempty"`  // string or JSON array
+	Output         any            `json:"output,omitempty"` // string or JSON array
+	InputTokens    int64          `json:"input_tokens,omitempty"`
+	OutputTokens   int64          `json:"output_tokens,omitempty"`
+	PromptName     string         `json:"prompt_name,omitempty"`
+	PromptVersion  int64          `json:"prompt_version,omitempty"`
+	Attributes     map[string]any `json:"attributes,omitempty"`
 }
 
 // IngestRequest is the JSON body of POST /api/v1/spans.
@@ -185,16 +185,16 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 // injecting project_id and service_name from the validated key.
 func toRawMap(ns *NativeSpan, vk *auth.ValidatedKey) map[string]any {
 	raw := map[string]any{
-		"span_id":         ns.SpanID,
-		"trace_id":        ns.TraceID,
-		"project_id":      vk.ProjectID,
-		"service_name":    vk.ServiceName,
-		"name":            ns.Name,
-		"model":           ns.Model,
-		"input_tokens":    ns.InputTokens,
-		"output_tokens":   ns.OutputTokens,
-		"prompt_name":     ns.PromptName,
-		"prompt_version":  ns.PromptVersion,
+		"span_id":        ns.SpanID,
+		"trace_id":       ns.TraceID,
+		"project_id":     vk.ProjectID,
+		"service_name":   vk.ServiceName,
+		"name":           ns.Name,
+		"model":          ns.Model,
+		"input_tokens":   ns.InputTokens,
+		"output_tokens":  ns.OutputTokens,
+		"prompt_name":    ns.PromptName,
+		"prompt_version": ns.PromptVersion,
 	}
 	if ns.ParentID != "" {
 		raw["parent_id"] = ns.ParentID

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/marcboeker/go-duckdb/v2"
+	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/storage"
 	"github.com/omneval/omneval/services/writer/internal/metrics"

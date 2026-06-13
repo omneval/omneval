@@ -378,7 +378,7 @@ func TestAdminHandler_APIKeysList_EmptyWhenNoKeys(t *testing.T) {
 // fakeAdminStore is a minimal metadata.Store fake for AdminHandler tests.
 // It supports ListAPIKeys and RevokeAPIKey; all other methods are stubs.
 type fakeAdminStore struct {
-	keys                            []*domain.APIKey
+	keys                           []*domain.APIKey
 	removeBookmarksForProjectCalls int
 }
 

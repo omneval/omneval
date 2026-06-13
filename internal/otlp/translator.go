@@ -122,19 +122,19 @@ func toRawMap(projectID string, resource Resource, span Span, opts Options) map[
 	}
 
 	raw := map[string]any{
-		"span_id":         span.SpanID,
-		"trace_id":        span.TraceID,
-		"name":            span.Name,
-		"project_id":      projectID,
-		"service_name":    serviceName,
-		"model":           model,
-		"input":           input,
-		"output":          output,
-		"input_tokens":    inputTokens,
-		"output_tokens":   outputTokens,
-		"prompt_name":     promptName,
-		"prompt_version":  promptVersion,
-		"kind":            kind,
+		"span_id":        span.SpanID,
+		"trace_id":       span.TraceID,
+		"name":           span.Name,
+		"project_id":     projectID,
+		"service_name":   serviceName,
+		"model":          model,
+		"input":          input,
+		"output":         output,
+		"input_tokens":   inputTokens,
+		"output_tokens":  outputTokens,
+		"prompt_name":    promptName,
+		"prompt_version": promptVersion,
+		"kind":           kind,
 	}
 	if span.ParentID != "" {
 		raw["parent_id"] = span.ParentID
@@ -167,8 +167,6 @@ func totalSpanCount(rss []ResourceSpans) int {
 	}
 	return total
 }
-
-
 
 // resolvePromptInfo extracts prompt linkage from omneval.* attributes.
 func resolvePromptInfo(attrs map[string]any) (string, int64) {
