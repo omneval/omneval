@@ -453,28 +453,56 @@ func (l *Lake) DeleteProject(ctx context.Context, projectID string) error {
 // vector at read time (query correctness is unaffected; lake.spans/scores
 // already exclude the deleted rows).
 //
-// KNOWN LIMITATION (#111): ducklake_rewrite_data_files cannot currently be
-// sequenced around a preceding DELETE without hitting DuckDB 1.5.3's
-// "Not implemented Error: Scanning a DuckLake table after the transaction
-// has ended" — this was reproduced for every combination tried:
-//   - same *sql.Conn, separate implicit transactions (delete autocommits,
+// KNOWN LIMITATION (#111): against THIS package's direct local-file/Postgres
+// DuckLake catalog attachment, ducklake_rewrite_data_files still cannot be
+// sequenced around a preceding DELETE — confirmed again under the
+// duckdb-go/v2 v2.10503.1 (DuckDB 1.5.3) driver, same combinations as
+// before all hit "Not implemented Error: Scanning a DuckLake table after the
+// transaction has ended":
+//   - same *sql.DB, separate implicit transactions (delete autocommits,
 //     then rewrite): fails.
-//   - same *sql.Conn, explicit transaction wrapping both DELETE and rewrite
-//     (rewrite before commit): does not fail, but ducklake_rewrite_data_files
-//     copies the file's rows verbatim — it does not yet see the delete
-//     vector from the uncommitted DELETE in the same transaction, so the
-//     "rewritten" file still contains the deleted rows.
+//   - same *sql.DB, explicit transaction wrapping both DELETE and rewrite:
+//     does not error on the rewrite call itself in some configurations, but
+//     does not reliably see the uncommitted delete vector either.
 //   - a brand-new *sql.DB with a fresh ATTACH to the same catalog/data path,
 //     after the DELETE's transaction committed: fails with the same error.
 //
-// So a deleted project's physical Parquet files are NOT immediately
-// reclaimed by this function today; they are filtered out at query time by
-// the delete vector and will be compacted away by a future Table
-// Maintenance pass once DuckDB lifts this restriction (or once #105's Quack
-// Server can run ducklake_rewrite_data_files from its own long-lived
-// session — see the quack:// spike in internal/lake/quack_spike, which
-// found the quack extension doesn't yet expose attached DuckLake tables for
-// querying at all, so this couldn't be validated end-to-end either).
+// HOWEVER — the corrected quack:// spike (internal/lake/quack_spike,
+// rewritten for #111) found that DuckLake's "quack:" CATALOG driver changes
+// this picture entirely. With the catalog attached as
+// `ATTACH 'ducklake:quack:localhost:<port>' AS lake (DATA_PATH '<dir>')`
+// (Quack as the metadata/catalog backend, not a generic table proxy):
+//   - the ATTACH itself succeeds (auth via a client-side
+//     `CREATE SECRET quack_auth (TYPE quack, TOKEN '<server-issued-token>')`,
+//     where the token comes from quack_serve()'s own result row — NOT from
+//     any token passed to quack_serve at start time).
+//   - a second, independently-attached client sees the first client's
+//     committed inserts (shared catalog state works as expected).
+//   - DELETE followed by ducklake_rewrite_data_files on the SAME connection
+//     that issued the DELETE — as separate autocommit statements, exactly
+//     reclaim()'s pattern — now SUCCEEDS and physically rewrites the Parquet
+//     file without the deleted rows. The same sequence also succeeds inside
+//     an explicit transaction that commits both together.
+//   - the restriction is NOT fully lifted: a brand-new client/connection
+//     attached fresh AFTER another client's DELETE already committed still
+//     hits the same "Scanning a DuckLake table after the transaction has
+//     ended" error when calling ducklake_rewrite_data_files. So the fix is
+//     scoped to "rewrite on the same session that performed the delete",
+//     which is exactly this function's existing call pattern
+//     (DeleteProject -> reclaim on the same l.db).
+//
+// So: a deleted project's physical Parquet files are NOT immediately
+// reclaimed by this function TODAY, because this package attaches the
+// catalog directly (ducklake:<path> / ducklake:postgres:<dsn>), not via
+// quack:. Switching the Lake's catalog attachment to
+// `ducklake:quack:<host>:<port>` would unblock reclaim()'s
+// ducklake_rewrite_data_files call (same-session DELETE+rewrite is exactly
+// this code's shape) — that is the recommended direction for #105's Quack
+// Server design: the Quack Server holds the long-lived catalog session and
+// every writer attaches via ducklake:quack:<quack-server-addr>. Until #105
+// stands up a real Quack Server, this package keeps the direct catalog
+// attach and deleted rows remain filtered out at query time by the delete
+// vector, compacted away by a future Table Maintenance pass.
 // ducklake_expire_snapshots/ducklake_delete_orphaned_files/
 // ducklake_cleanup_old_files below remain useful for snapshot/orphan
 // cleanup that doesn't depend on rewriting live data files.

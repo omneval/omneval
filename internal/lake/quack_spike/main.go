@@ -1,10 +1,28 @@
-// Command quack_spike is a throwaway program for issue #111: it spins up a
-// quack_serve() instance attached to a local DuckLake catalog, attaches to
-// it as a quack:// client, and tests whether DELETE followed by
-// ducklake_rewrite_data_files over the SAME quack:// client session avoids
-// the "Not implemented Error: Scanning a DuckLake table after the
-// transaction has ended" error that a fresh database/sql connection hits
-// against a direct ducklake: attachment.
+// Command quack_spike is a throwaway program for issue #111: it tests
+// whether DuckLake can use a Quack server as its CATALOG backend — i.e.
+// `ATTACH 'ducklake:quack:<host>:<port>' AS lake (DATA_PATH '<dir>')` —
+// rather than treating quack:// as a generic remote-table proxy (which the
+// earlier version of this spike found does not expose DuckLake tables at
+// all: SHOW TABLES FROM lake returned nothing, lake.spans errored "Table
+// with name spans does not exist", and PRAGMA database_list errored
+// "Not implemented Error: InMemory not implemented yet").
+//
+// Per DuckDB's 1.5.3 announcement and the Quack docs, the correct pattern
+// is: the Quack server just serves a plain DuckDB session (it does NOT
+// itself ATTACH the DuckLake catalog as "lake" — it acts as the metadata
+// store that DuckLake's "quack:" catalog driver talks to). Clients then run
+//
+//	ATTACH 'ducklake:quack:<host>:<port>' AS lake (DATA_PATH '<dir>')
+//
+// analogous to today's `ducklake:postgres:<dsn>`. DATA_PATH is still read
+// directly by each client; Quack only carries catalog metadata.
+//
+// This spike also re-tests the other open #111 blocker: does
+// DELETE FROM lake.<table> ... followed by
+// CALL ducklake_rewrite_data_files('lake', '<table>') now work when the
+// catalog is Quack-backed (vs. the "Not implemented Error: Scanning a
+// DuckLake table after the transaction has ended" seen with a direct local
+// catalog)?
 //
 // Run with: go run ./internal/lake/quack_spike
 package main
@@ -40,6 +58,32 @@ func tryExec(label string, db *sql.DB, ctx context.Context, stmt string) error {
 	return nil
 }
 
+func showRows(label string, db *sql.DB, ctx context.Context, query string) {
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		fmt.Printf("%s %s: ERROR: %v\n", label, query, err)
+		return
+	}
+	defer rows.Close()
+	cols, _ := rows.Columns()
+	fmt.Printf("%s %s cols: %v\n", label, query, cols)
+	for rows.Next() {
+		vals := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			fmt.Printf("%s scan error: %v\n", label, err)
+			return
+		}
+		fmt.Printf("%s row: %v\n", label, vals)
+	}
+	if err := rows.Err(); err != nil {
+		fmt.Printf("%s rows error: %v\n", label, err)
+	}
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -48,51 +92,51 @@ func main() {
 		log.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	catalog := filepath.Join(dir, "catalog", "lake.ducklake")
-	if err := os.MkdirAll(filepath.Dir(catalog), 0755); err != nil {
+	data := filepath.Join(dir, "data")
+	if err := os.MkdirAll(data, 0755); err != nil {
 		log.Fatal(err)
 	}
-	data := filepath.Join(dir, "data")
 
-	// --- Server side: open a db, attach ducklake, start quack_serve. ---
+	const port = "9495"
+	token := "spike-token"
+
+	// --- Server side: a PLAIN DuckDB session serving quack_serve(). It does
+	// NOT attach DuckLake itself — it is only the catalog metadata store. ---
 	serverDB, err := sql.Open("duckdb", "")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer serverDB.Close()
 
-	must("SERVER", serverDB, ctx, "INSTALL ducklake")
-	must("SERVER", serverDB, ctx, "LOAD ducklake")
 	must("SERVER", serverDB, ctx, "INSTALL quack")
 	must("SERVER", serverDB, ctx, "LOAD quack")
-	must("SERVER", serverDB, ctx,
-		fmt.Sprintf("ATTACH 'ducklake:%s' AS lake (DATA_PATH '%s')", catalog, data))
-	must("SERVER", serverDB, ctx,
-		"CREATE TABLE IF NOT EXISTS lake.spans (id INT, project_id VARCHAR)")
-	must("SERVER", serverDB, ctx,
-		"ALTER TABLE lake.spans SET PARTITIONED BY (project_id)")
-	must("SERVER", serverDB, ctx,
-		"INSERT INTO lake.spans VALUES (1, 'proj-a'), (2, 'proj-b')")
-	must("SERVER", serverDB, ctx, "CALL ducklake_flush_inlined_data('lake')")
 
 	tokenCh := make(chan string, 1)
 	go func() {
-		rows, err := serverDB.QueryContext(ctx, "SELECT * FROM quack_serve('quack://127.0.0.1:9494')")
+		rows, err := serverDB.QueryContext(ctx,
+			fmt.Sprintf("SELECT * FROM quack_serve('quack://localhost:%s')", port))
 		if err != nil {
 			fmt.Printf("quack_serve query error: %v\n", err)
 			tokenCh <- ""
 			return
 		}
 		defer rows.Close()
+		cols, _ := rows.Columns()
+		fmt.Printf("quack_serve cols: %v\n", cols)
 		for rows.Next() {
-			var a, b, c sql.NullString
-			if err := rows.Scan(&a, &b, &c); err != nil {
-				fmt.Printf("quack_serve scan error: %v\n", err)
-				tokenCh <- ""
-				return
+			vals := make([]interface{}, len(cols))
+			ptrs := make([]interface{}, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
 			}
-			fmt.Printf("quack_serve row: %v %v %v\n", a, b, c)
-			tokenCh <- c.String
+			rows.Scan(ptrs...)
+			fmt.Printf("quack_serve row: %v\n", vals)
+			if len(vals) >= 3 {
+				if s, ok := vals[2].(string); ok {
+					tokenCh <- s
+					continue
+				}
+			}
 		}
 		if err := rows.Err(); err != nil {
 			fmt.Printf("quack_serve rows error: %v\n", err)
@@ -100,126 +144,165 @@ func main() {
 		fmt.Println("quack_serve goroutine done")
 	}()
 
-	// give the server a moment to bind
-	time.Sleep(500 * time.Millisecond)
-	token := <-tokenCh
-	fmt.Printf("CLIENT using token: %s\n", token)
+	// give the server a moment to bind and report its auth token
+	time.Sleep(750 * time.Millisecond)
+	select {
+	case t := <-tokenCh:
+		if t != "" {
+			token = t
+		}
+	default:
+	}
+	fmt.Printf("CLIENT using server-issued token: %s\n", token)
 
-	// --- Client side: a SEPARATE *sql.DB attaching over quack://. ---
-	clientDB, err := sql.Open("duckdb", "")
+	// --- Client A: attach DuckLake using Quack as the CATALOG backend. ---
+	clientA, err := sql.Open("duckdb", "")
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer clientDB.Close()
+	defer clientA.Close()
 
-	must("CLIENT", clientDB, ctx, "INSTALL quack")
-	must("CLIENT", clientDB, ctx, "LOAD quack")
-	// Try several plausible ways of supplying the Quack auth token before
-	// the bare ATTACH. Record which (if any) works.
-	candidates := []string{
-		fmt.Sprintf("CREATE SECRET quack_auth (TYPE quack, TOKEN '%s')", token),
-		fmt.Sprintf("SET quack_token='%s'", token),
-		fmt.Sprintf("ATTACH 'quack:127.0.0.1:9494' AS lake (TOKEN '%s')", token),
-	}
-	attached := false
-	for _, c := range candidates {
-		if err := tryExec("CLIENT", clientDB, ctx, c); err != nil {
-			continue
-		}
-		// if this was a secret/set, still need a bare ATTACH
-		if !attached {
-			if err := tryExec("CLIENT", clientDB, ctx, "ATTACH 'quack:127.0.0.1:9494' AS lake"); err == nil {
-				attached = true
-				break
+	must("CLIENT-A", clientA, ctx, "INSTALL ducklake")
+	must("CLIENT-A", clientA, ctx, "LOAD ducklake")
+	must("CLIENT-A", clientA, ctx, "INSTALL quack")
+	must("CLIENT-A", clientA, ctx, "LOAD quack")
+
+	// The bare "ducklake:quack:host:port?token=..." and TOKEN '...' attach
+	// options both failed (see history). Try registering a quack secret on
+	// the client first, matching the server's CREATE SECRET ... TYPE quack,
+	// then a bare ducklake:quack:host:port ATTACH.
+	must("CLIENT-A", clientA, ctx,
+		fmt.Sprintf("CREATE SECRET quack_auth (TYPE quack, TOKEN '%s')", token))
+
+	attachStmt := fmt.Sprintf(
+		"ATTACH 'ducklake:quack:localhost:%s' AS lake (DATA_PATH '%s')",
+		port, data)
+	if err := tryExec("CLIENT-A", clientA, ctx, attachStmt); err != nil {
+		// try alternate syntaxes if the first form errors
+		alt1 := fmt.Sprintf(
+			"ATTACH 'ducklake:quack:127.0.0.1:%s' AS lake (DATA_PATH '%s')",
+			port, data)
+		if err2 := tryExec("CLIENT-A", clientA, ctx, alt1); err2 != nil {
+			alt2 := fmt.Sprintf(
+				"ATTACH 'ducklake:quack://localhost:%s' AS lake (DATA_PATH '%s')",
+				port, data)
+			if err3 := tryExec("CLIENT-A", clientA, ctx, alt2); err3 != nil {
+				fmt.Println("RESULT: ATTACH 'ducklake:quack:...' failed under all attempted syntaxes")
+				return
 			}
+			attachStmt = alt2
 		} else {
-			attached = true
-			break
+			attachStmt = alt1
 		}
-	}
-	if !attached {
-		fmt.Println("RESULT: ATTACH quack:// failed via all candidate auth methods, cannot proceed with spike")
-		return
 	}
 
-	// Debug: what schemas/tables does the quack:// attachment expose?
-	if rows, err := clientDB.QueryContext(ctx, "SHOW ALL TABLES"); err == nil {
-		cols, _ := rows.Columns()
-		fmt.Printf("CLIENT SHOW ALL TABLES cols: %v\n", cols)
-		for rows.Next() {
-			vals := make([]interface{}, len(cols))
-			ptrs := make([]interface{}, len(cols))
-			for i := range vals {
-				ptrs[i] = &vals[i]
-			}
-			rows.Scan(ptrs...)
-			fmt.Printf("CLIENT table row: %v\n", vals)
-		}
-		rows.Close()
-	} else {
-		fmt.Printf("CLIENT SHOW ALL TABLES: ERROR: %v\n", err)
-	}
+	// Create a minimal test table and insert rows.
+	must("CLIENT-A", clientA, ctx, "CREATE TABLE IF NOT EXISTS lake.spans (id INT, project_id VARCHAR)")
+	tryExec("CLIENT-A", clientA, ctx, "ALTER TABLE lake.spans SET PARTITIONED BY (project_id)")
+	must("CLIENT-A", clientA, ctx, "INSERT INTO lake.spans VALUES (1, 'proj-a'), (2, 'proj-b'), (3, 'proj-a')")
 
-	// Try PRAGMA database_list and SHOW TABLES FROM lake / pure attached-DB queries.
-	if rows, err := clientDB.QueryContext(ctx, "PRAGMA database_list"); err == nil {
-		cols, _ := rows.Columns()
-		fmt.Printf("CLIENT database_list cols: %v\n", cols)
-		for rows.Next() {
-			vals := make([]interface{}, len(cols))
-			ptrs := make([]interface{}, len(cols))
-			for i := range vals {
-				ptrs[i] = &vals[i]
-			}
-			rows.Scan(ptrs...)
-			fmt.Printf("CLIENT database_list row: %v\n", vals)
-		}
-		rows.Close()
-	} else {
-		fmt.Printf("CLIENT database_list: ERROR: %v\n", err)
-	}
+	showRows("CLIENT-A", clientA, ctx, "PRAGMA database_list")
+	showRows("CLIENT-A", clientA, ctx, "SHOW TABLES FROM lake")
+	showRows("CLIENT-A", clientA, ctx, "SELECT * FROM lake.spans ORDER BY id")
 
-	if rows, err := clientDB.QueryContext(ctx, "SHOW TABLES FROM lake"); err == nil {
-		cols, _ := rows.Columns()
-		fmt.Printf("CLIENT SHOW TABLES FROM lake cols: %v\n", cols)
-		for rows.Next() {
-			vals := make([]interface{}, len(cols))
-			ptrs := make([]interface{}, len(cols))
-			for i := range vals {
-				ptrs[i] = &vals[i]
-			}
-			rows.Scan(ptrs...)
-			fmt.Printf("CLIENT SHOW TABLES FROM lake row: %v\n", vals)
-		}
-		rows.Close()
-	} else {
-		fmt.Printf("CLIENT SHOW TABLES FROM lake: ERROR: %v\n", err)
+	// --- Client B: a SEPARATE connection, attaching the SAME way, to
+	// confirm it sees Client A's committed data via the shared Quack
+	// catalog. ---
+	clientB, err := sql.Open("duckdb", "")
+	if err != nil {
+		log.Fatal(err)
 	}
+	defer clientB.Close()
+
+	must("CLIENT-B", clientB, ctx, "INSTALL ducklake")
+	must("CLIENT-B", clientB, ctx, "LOAD ducklake")
+	must("CLIENT-B", clientB, ctx, "INSTALL quack")
+	must("CLIENT-B", clientB, ctx, "LOAD quack")
+	must("CLIENT-B", clientB, ctx,
+		fmt.Sprintf("CREATE SECRET quack_auth (TYPE quack, TOKEN '%s')", token))
+	must("CLIENT-B", clientB, ctx, attachStmt)
+
+	showRows("CLIENT-B", clientB, ctx, "SHOW TABLES FROM lake")
+	showRows("CLIENT-B", clientB, ctx, "SELECT * FROM lake.spans ORDER BY id")
 
 	var n int
-	if err := clientDB.QueryRowContext(ctx, "SELECT count(*) FROM lake.main.spans").Scan(&n); err != nil {
-		fmt.Printf("CLIENT count before delete (lake.main.spans): ERROR: %v\n", err)
-		return
-	}
-	fmt.Printf("CLIENT count before delete: %d\n", n)
-
-	// THE KEY TEST: DELETE then ducklake_rewrite_data_files over the SAME
-	// quack:// client session (same *sql.DB / same underlying connection).
-	if err := tryExec("CLIENT", clientDB, ctx, "DELETE FROM lake.main.spans WHERE project_id = 'proj-a'"); err != nil {
-		return
+	if err := clientB.QueryRowContext(ctx, "SELECT count(*) FROM lake.spans").Scan(&n); err != nil {
+		fmt.Printf("CLIENT-B count: ERROR: %v\n", err)
+	} else if n == 3 {
+		fmt.Println("RESULT: CLIENT-B sees CLIENT-A's committed rows via shared ducklake:quack: catalog (3 rows)")
+	} else {
+		fmt.Printf("RESULT: CLIENT-B sees %d rows (expected 3) via shared ducklake:quack: catalog\n", n)
 	}
 
-	rewriteErr := tryExec("CLIENT", clientDB, ctx, "CALL ducklake_rewrite_data_files('lake', 'spans')")
+	// --- THE KEY TEST: DELETE then ducklake_rewrite_data_files. ---
+	// Attempt 1: separate auto-committed statements on CLIENT-A.
+	fmt.Println("--- Attempt 1: DELETE then rewrite as separate autocommit statements (CLIENT-A) ---")
+	if err := tryExec("CLIENT-A", clientA, ctx, "DELETE FROM lake.spans WHERE project_id = 'proj-a'"); err == nil {
+		rewriteErr := tryExec("CLIENT-A", clientA, ctx, "CALL ducklake_rewrite_data_files('lake', 'spans')")
+		if rewriteErr == nil {
+			fmt.Println("RESULT (separate statements): DELETE -> ducklake_rewrite_data_files SUCCEEDED")
+		} else {
+			fmt.Println("RESULT (separate statements): DELETE -> ducklake_rewrite_data_files FAILED")
+		}
+	}
 
+	showRows("CLIENT-A", clientA, ctx, "SELECT * FROM lake.spans ORDER BY id")
+
+	// Attempt 2: explicit transaction wrapping both DELETE and rewrite, on a
+	// fresh table, using CLIENT-B.
+	fmt.Println("--- Attempt 2: DELETE then rewrite inside an explicit transaction (CLIENT-B) ---")
+	must("CLIENT-B", clientB, ctx, "CREATE TABLE IF NOT EXISTS lake.spans2 (id INT, project_id VARCHAR)")
+	tryExec("CLIENT-B", clientB, ctx, "ALTER TABLE lake.spans2 SET PARTITIONED BY (project_id)")
+	must("CLIENT-B", clientB, ctx, "INSERT INTO lake.spans2 VALUES (1, 'proj-a'), (2, 'proj-b'), (3, 'proj-a')")
+	tryExec("CLIENT-B", clientB, ctx, "CALL ducklake_flush_inlined_data('lake')")
+
+	tx, err := clientB.BeginTx(ctx, nil)
+	if err != nil {
+		fmt.Printf("CLIENT-B begin tx: ERROR: %v\n", err)
+	} else {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM lake.spans2 WHERE project_id = 'proj-a'"); err != nil {
+			fmt.Printf("CLIENT-B tx DELETE: ERROR: %v\n", err)
+			tx.Rollback()
+		} else {
+			fmt.Println("CLIENT-B tx DELETE: OK")
+			if _, err := tx.ExecContext(ctx, "CALL ducklake_rewrite_data_files('lake', 'spans2')"); err != nil {
+				fmt.Printf("CLIENT-B tx rewrite: ERROR: %v\n", err)
+				tx.Rollback()
+			} else {
+				fmt.Println("CLIENT-B tx rewrite: OK")
+				if err := tx.Commit(); err != nil {
+					fmt.Printf("CLIENT-B tx commit: ERROR: %v\n", err)
+				} else {
+					fmt.Println("RESULT (explicit transaction): DELETE -> ducklake_rewrite_data_files -> COMMIT SUCCEEDED")
+				}
+			}
+		}
+	}
+
+	showRows("CLIENT-B", clientB, ctx, "SELECT * FROM lake.spans2 ORDER BY id")
+
+	// Attempt 3: fresh client (CLIENT-C), new ATTACH, after CLIENT-A's
+	// committed DELETE — does a brand-new session hit the "Scanning a
+	// DuckLake table after the transaction has ended" error?
+	fmt.Println("--- Attempt 3: fresh client + ducklake_rewrite_data_files after a prior committed DELETE ---")
+	clientC, err := sql.Open("duckdb", "")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer clientC.Close()
+	must("CLIENT-C", clientC, ctx, "INSTALL ducklake")
+	must("CLIENT-C", clientC, ctx, "LOAD ducklake")
+	must("CLIENT-C", clientC, ctx, "INSTALL quack")
+	must("CLIENT-C", clientC, ctx, "LOAD quack")
+	must("CLIENT-C", clientC, ctx,
+		fmt.Sprintf("CREATE SECRET quack_auth (TYPE quack, TOKEN '%s')", token))
+	must("CLIENT-C", clientC, ctx, attachStmt)
+	rewriteErr := tryExec("CLIENT-C", clientC, ctx, "CALL ducklake_rewrite_data_files('lake', 'spans')")
 	if rewriteErr == nil {
-		fmt.Println("RESULT: DELETE -> ducklake_rewrite_data_files over the SAME quack:// session SUCCEEDED")
+		fmt.Println("RESULT (fresh client after committed delete): ducklake_rewrite_data_files SUCCEEDED")
 	} else {
-		fmt.Println("RESULT: DELETE -> ducklake_rewrite_data_files over the SAME quack:// session FAILED with the same/similar error as a fresh database/sql connection")
+		fmt.Println("RESULT (fresh client after committed delete): ducklake_rewrite_data_files FAILED")
 	}
 
-	// Verify final state.
-	if err := clientDB.QueryRowContext(ctx, "SELECT count(*) FROM lake.main.spans WHERE project_id = 'proj-a'").Scan(&n); err != nil {
-		fmt.Printf("CLIENT count proj-a after delete: ERROR: %v\n", err)
-	} else {
-		fmt.Printf("CLIENT count proj-a after delete: %d\n", n)
-	}
+	fmt.Println("spike done")
 }
