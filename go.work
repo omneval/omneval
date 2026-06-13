@@ -6,5 +6,6 @@ use (
 	./services/eval
 	./services/ingest
 	./services/query
+	./services/quack
 	./services/writer
 )
