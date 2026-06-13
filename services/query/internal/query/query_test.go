@@ -10,6 +10,7 @@ import (
 
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/lake"
+	"github.com/omneval/omneval/internal/lake/lakeservertest"
 	"github.com/omneval/omneval/internal/storage"
 	"github.com/omneval/omneval/services/query/internal/cursor"
 )
@@ -1269,13 +1270,9 @@ func TestLakeTraceSpansSQL_Dedupes(t *testing.T) {
 // legacy path: every span appears exactly once, newest first.
 func TestLakeSQL_CursorPagination_Integration(t *testing.T) {
 	ctx := context.Background()
-	dir := t.TempDir()
 
-	lk, err := lake.Open(ctx, lake.Config{
-		CatalogDriver: lake.CatalogDriverLocal,
-		CatalogDSN:    dir + "/catalog/lake.ducklake",
-		DataPath:      dir + "/data",
-	})
+	cfg, _ := lakeservertest.NewLocal(t)
+	lk, err := lake.Open(ctx, cfg)
 	if err != nil {
 		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
 	}

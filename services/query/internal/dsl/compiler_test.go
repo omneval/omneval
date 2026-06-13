@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/lake"
+	"github.com/omneval/omneval/internal/lake/lakeservertest"
 )
 
 func makeQuery(opts ...func(*Query)) Query {
@@ -1186,13 +1186,9 @@ func TestCompileLake_PartitionPruningPreserved(t *testing.T) {
 	}
 }
 
-// localTestLake creates a local DuckLake config for integration tests.
+// localTestLake creates a local DuckLake config (via a Quack Server,
+// ADR-0005) for integration tests.
 func localTestLake(t *testing.T) (lake.Config, string) {
 	t.Helper()
-	dir := t.TempDir()
-	return lake.Config{
-		CatalogDriver: lake.CatalogDriverLocal,
-		CatalogDSN:    filepath.Join(dir, "catalog", "lake.ducklake"),
-		DataPath:      filepath.Join(dir, "data"),
-	}, dir
+	return lakeservertest.NewLocal(t)
 }

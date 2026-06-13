@@ -3,13 +3,13 @@ package pipeline
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/duckdb"
 	"github.com/omneval/omneval/internal/lake"
+	"github.com/omneval/omneval/internal/lake/lakeservertest"
 )
 
 func dualWriteSpan(spanID string) *domain.Span {
@@ -39,12 +39,8 @@ func TestDualWrite_SpansLandInBothStores(t *testing.T) {
 	}
 	defer db.Close()
 
-	dir := t.TempDir()
-	lk, err := lake.Open(ctx, lake.Config{
-		CatalogDriver: lake.CatalogDriverLocal,
-		CatalogDSN:    filepath.Join(dir, "catalog.ducklake"),
-		DataPath:      filepath.Join(dir, "data"),
-	})
+	cfg, _ := lakeservertest.NewLocal(t)
+	lk, err := lake.Open(ctx, cfg)
 	if err != nil {
 		t.Fatalf("open lake: %v", err)
 	}

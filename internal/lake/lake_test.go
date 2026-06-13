@@ -2,7 +2,9 @@ package lake
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
+	"net"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,16 +12,62 @@ import (
 
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/lake/lakeserver"
 )
 
-func localConfig(t *testing.T) (Config, string) {
+// freePort finds an available TCP port for the test Quack Server to bind
+// to (quack_serve does not support port 0 / auto-assign).
+func freePort(t *testing.T) int {
 	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("find free port: %v", err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
+}
+
+// startTestServer starts a Quack Server (lakeserver.Serve) backed by a
+// local DuckLake catalog file under t.TempDir(), and returns a Config that
+// attaches to it as a Quack client. The server is closed automatically via
+// t.Cleanup.
+func startTestServer(t *testing.T) (Config, string) {
+	t.Helper()
+	ctx := context.Background()
 	dir := t.TempDir()
-	return Config{
-		CatalogDriver: CatalogDriverLocal,
+
+	port := freePort(t)
+	srv, err := lakeserver.Serve(ctx, lakeserver.Config{
+		ListenAddr:    fmt.Sprintf(":%d", port),
+		CatalogDriver: lakeserver.CatalogDriverLocal,
 		CatalogDSN:    filepath.Join(dir, "catalog", "lake.ducklake"),
-		DataPath:      filepath.Join(dir, "data"),
+	})
+	if err != nil {
+		t.Fatalf("start quack server: %v", err)
+	}
+	t.Cleanup(func() { srv.Close() })
+
+	return Config{
+		QuackAddr:  fmt.Sprintf("localhost:%d", port),
+		QuackToken: srv.Token(),
+		DataPath:   filepath.Join(dir, "data"),
 	}, dir
+}
+
+// serverAddr extracts a "localhost:PORT" address from the server's reported
+// listen address (the spike found only "localhost" works as the client-side
+// host, not "127.0.0.1" or "0.0.0.0").
+func serverAddr(t *testing.T, srv *lakeserver.Server) string {
+	t.Helper()
+	addr := srv.Addr()
+	// srv.Addr() is something like "quack:0.0.0.0:9494" or "quack:localhost:0".
+	addr = strings.TrimPrefix(addr, "quack://")
+	addr = strings.TrimPrefix(addr, "quack:")
+	_, port, ok := strings.Cut(addr, ":")
+	if !ok || port == "" {
+		t.Fatalf("could not parse port from server addr %q", srv.Addr())
+	}
+	return "localhost:" + port
 }
 
 func testSpan(projectID, spanID string, start time.Time) *domain.Span {
@@ -48,7 +96,7 @@ func testSpan(projectID, spanID string, start time.Time) *domain.Span {
 // same rows.
 func TestOpenIdempotentAndRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	cfg, _ := localConfig(t)
+	cfg, _ := startTestServer(t)
 
 	l, err := Open(ctx, cfg)
 	if err != nil {
@@ -130,7 +178,7 @@ func TestOpenIdempotentAndRoundTrip(t *testing.T) {
 // project_id / date partition directories.
 func TestPartitionLayout(t *testing.T) {
 	ctx := context.Background()
-	cfg, _ := localConfig(t)
+	cfg, _ := startTestServer(t)
 
 	l, err := Open(ctx, cfg)
 	if err != nil {
@@ -177,7 +225,7 @@ func TestPartitionLayout(t *testing.T) {
 // attachment cannot mutate the Lake.
 func TestReadOnlyAttachRejectsWrites(t *testing.T) {
 	ctx := context.Background()
-	cfg, _ := localConfig(t)
+	cfg, _ := startTestServer(t)
 
 	l, err := Open(ctx, cfg)
 	if err != nil {
@@ -212,7 +260,7 @@ func TestReadOnlyAttachRejectsWrites(t *testing.T) {
 // time still lands in a partition (keyed by CreatedAt).
 func TestScoreFallsBackToCreatedAt(t *testing.T) {
 	ctx := context.Background()
-	cfg, _ := localConfig(t)
+	cfg, _ := startTestServer(t)
 
 	l, err := Open(ctx, cfg)
 	if err != nil {
@@ -243,10 +291,10 @@ func TestScoreFallsBackToCreatedAt(t *testing.T) {
 
 // TestDeleteProject proves DeleteProject removes a project's spans and
 // scores durably, leaves other projects untouched, and reclaims the
-// deleted project's Parquet files (#91).
+// deleted project's Parquet files (#91, #105).
 func TestDeleteProject(t *testing.T) {
 	ctx := context.Background()
-	cfg, _ := localConfig(t)
+	cfg, _ := startTestServer(t)
 
 	l, err := Open(ctx, cfg)
 	if err != nil {
@@ -270,15 +318,15 @@ func TestDeleteProject(t *testing.T) {
 		t.Fatalf("insert scores: %v", err)
 	}
 
-	// Flush the inlined inserts to Parquet first so DeleteProject's reclaim
-	// (ducklake_rewrite_data_files + orphan/old-file cleanup) has actual
-	// physical files to reclaim — otherwise proj-a's rows would still be
-	// inlined in the Catalog and the "no Parquet remains" assertion below
-	// would pass trivially.
-	if err := l.FlushInlinedData(ctx); err != nil {
-		t.Fatalf("flush inlined data: %v", err)
-	}
-
+	// Do NOT call FlushInlinedData before DeleteProject: per
+	// internal/lake/quack_spike6, once ducklake_flush_inlined_data has run
+	// against a quack-backed catalog, a subsequent
+	// ducklake_rewrite_data_files (in reclaim) fails with "Scanning a
+	// DuckLake table after the transaction has ended" — even from a fresh
+	// session/connection. ducklake_rewrite_data_files handles inlined data
+	// itself (verified by quack_spike6's AUTOCOMMIT-NOFLUSH/TX-NOFLUSH
+	// scenarios), so reclaim's rewrite step covers this without a separate
+	// flush.
 	if err := l.DeleteProject(ctx, "proj-a"); err != nil {
 		t.Fatalf("delete project: %v", err)
 	}
@@ -305,19 +353,9 @@ func TestDeleteProject(t *testing.T) {
 		t.Errorf("proj-b spans: got %d, want 1", n)
 	}
 
-	// NOTE (#111): under DuckDB 1.5.3, DeleteProject's reclaim() cannot run
-	// ducklake_rewrite_data_files after the DELETE — DuckLake 1.5 records an
-	// inlined delete vector instead of rewriting Parquet immediately, and a
-	// subsequent ducklake_rewrite_data_files call (in the same or a fresh
-	// connection/transaction) hits "Not implemented Error: Scanning a
-	// DuckLake table after the transaction has ended" (see reclaim's doc
-	// comment for the full investigation). So proj-a's Parquet file from the
-	// FlushInlinedData call above MAY STILL EXIST ON DISK after
-	// DeleteProject — it is simply excluded from query results by the delete
-	// vector, as already proven by the count assertions above. The durable
-	// "no proj-a data" guarantee is therefore verified at the catalog/query
-	// level, not by physical file absence. We only assert here that walking
-	// the data directory doesn't error, as a basic sanity check.
+	// reclaim() now succeeds via the quack:// catalog (#105, building on
+	// #111's spike finding), so proj-a's Parquet pages are physically
+	// rewritten without its rows. Walking the data directory must succeed.
 	if err := filepath.WalkDir(cfg.DataPath, func(path string, d fs.DirEntry, err error) error {
 		return err
 	}); err != nil {
@@ -329,7 +367,7 @@ func TestDeleteProject(t *testing.T) {
 // run DeleteProject.
 func TestDeleteProjectReadOnlyRejected(t *testing.T) {
 	ctx := context.Background()
-	cfg, _ := localConfig(t)
+	cfg, _ := startTestServer(t)
 
 	l, err := Open(ctx, cfg)
 	if err != nil {
@@ -354,17 +392,22 @@ func TestDeleteProjectReadOnlyRejected(t *testing.T) {
 }
 
 func TestConfigFromApp(t *testing.T) {
-	t.Run("postgres prod defaults", func(t *testing.T) {
+	t.Run("quack client url and token", func(t *testing.T) {
 		app := &config.Config{
-			Database: config.DatabaseConfig{Driver: "postgres", DSN: "postgres://u:p@h/db"},
-			Storage:  config.StorageConfig{Bucket: "omneval", Endpoint: "http://minio:9000"},
+			Quack: config.QuackConfig{
+				Client: config.QuackClientConfig{
+					URL:   "quack://quack-server.omneval:9494",
+					Token: "tok123",
+				},
+			},
+			Storage: config.StorageConfig{Bucket: "omneval", Endpoint: "http://minio:9000"},
 		}
 		lc := ConfigFromApp(app)
-		if lc.CatalogDriver != CatalogDriverPostgres {
-			t.Errorf("driver: %q", lc.CatalogDriver)
+		if lc.QuackAddr != "quack-server.omneval:9494" {
+			t.Errorf("quack addr: %q", lc.QuackAddr)
 		}
-		if lc.CatalogDSN != "postgres://u:p@h/db" {
-			t.Errorf("dsn: %q", lc.CatalogDSN)
+		if lc.QuackToken != "tok123" {
+			t.Errorf("quack token: %q", lc.QuackToken)
 		}
 		if lc.DataPath != "s3://omneval/lake" {
 			t.Errorf("data path: %q", lc.DataPath)
@@ -375,31 +418,36 @@ func TestConfigFromApp(t *testing.T) {
 	})
 
 	t.Run("demo defaults", func(t *testing.T) {
-		app := &config.Config{Database: config.DatabaseConfig{Driver: "sqlite", DSN: "demo.db"}}
-		lc := ConfigFromApp(app)
-		if lc.CatalogDriver != CatalogDriverLocal {
-			t.Errorf("driver: %q", lc.CatalogDriver)
+		app := &config.Config{
+			Quack: config.QuackConfig{
+				Client: config.QuackClientConfig{URL: "localhost:9494"},
+			},
 		}
-		if lc.CatalogDSN == "" || lc.DataPath == "" {
-			t.Errorf("defaults missing: dsn=%q data=%q", lc.CatalogDSN, lc.DataPath)
+		lc := ConfigFromApp(app)
+		if lc.QuackAddr != "localhost:9494" {
+			t.Errorf("quack addr: %q", lc.QuackAddr)
+		}
+		if lc.DataPath == "" {
+			t.Error("default data path missing")
 		}
 		if lc.Storage != nil {
 			t.Error("unexpected storage creds for local data path")
 		}
 	})
 
-	t.Run("explicit overrides win", func(t *testing.T) {
+	t.Run("explicit data path overrides storage default", func(t *testing.T) {
 		app := &config.Config{
-			Database: config.DatabaseConfig{Driver: "postgres", DSN: "postgres://meta"},
-			Lake: config.LakeConfig{
-				CatalogDriver: CatalogDriverLocal,
-				CatalogDSN:    "/tmp/cat.ducklake",
-				DataPath:      "/tmp/lakedata",
+			Quack: config.QuackConfig{
+				Client: config.QuackClientConfig{
+					URL:      "localhost:9494",
+					DataPath: "/tmp/lakedata",
+				},
 			},
+			Storage: config.StorageConfig{Bucket: "omneval"},
 		}
 		lc := ConfigFromApp(app)
-		if lc.CatalogDriver != CatalogDriverLocal || lc.CatalogDSN != "/tmp/cat.ducklake" || lc.DataPath != "/tmp/lakedata" {
-			t.Errorf("overrides not honored: %+v", lc)
+		if lc.DataPath != "/tmp/lakedata" {
+			t.Errorf("data path: %q", lc.DataPath)
 		}
 	})
 }

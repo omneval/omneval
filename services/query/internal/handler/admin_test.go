@@ -12,6 +12,7 @@ import (
 
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/lake"
+	"github.com/omneval/omneval/internal/lake/lakeservertest"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/services/query/internal/auth"
 )
@@ -71,12 +72,8 @@ func TestAdminHandler_ProjectsDelete(t *testing.T) {
 // one score per project for "proj-1" and "proj-2".
 func setupTestLake(t *testing.T) *lake.Lake {
 	t.Helper()
-	dir := t.TempDir()
-	lk, err := lake.Open(context.Background(), lake.Config{
-		CatalogDriver: lake.CatalogDriverLocal,
-		CatalogDSN:    dir + "/catalog/lake.ducklake",
-		DataPath:      dir + "/data",
-	})
+	cfg, _ := lakeservertest.NewLocal(t)
+	lk, err := lake.Open(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("open lake: %v", err)
 	}

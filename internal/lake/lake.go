@@ -1,7 +1,15 @@
-// Package lake implements the Lake: the single authoritative span/score
-// store from ADR-0004. DuckLake tables (spans, scores) stored as Parquet,
-// partitioned by project_id and the span's start_time date, with the
-// Catalog in Postgres (prod) or a local single-writer file (demo).
+// Package lake is the Quack Client (ADR-0005): the shared library that
+// Writer, Query API, and the backfill tool use to reach the Lake — the
+// single authoritative span/score store from ADR-0004. DuckLake tables
+// (spans, scores) are stored as Parquet, partitioned by project_id and the
+// span's start_time date.
+//
+// Per ADR-0005, this package never holds a direct Catalog connection: it
+// attaches via `ATTACH 'ducklake:quack:<host>:<port>' AS lake (DATA_PATH
+// ...)`, where the Quack Server (services/quack, internal/lake/lakeserver)
+// is the sole holder of the direct Postgres/local-file Catalog connection.
+// DATA_PATH is still read directly by this client — Quack carries only
+// catalog metadata, not span/score data.
 package lake
 
 import (
@@ -9,8 +17,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,23 +27,18 @@ import (
 	_ "github.com/omneval/omneval/internal/duckdbfix"
 )
 
-// CatalogDriverPostgres uses the shared Postgres instance as the Catalog —
-// the serialization point that makes multiple concurrent writers safe.
-const CatalogDriverPostgres = "postgres"
-
-// CatalogDriverLocal uses a local DuckDB-file Catalog (single-writer,
-// demo profile only).
-const CatalogDriverLocal = "duckdb"
-
-// Config describes how to attach the Lake.
+// Config describes how to attach the Lake as a Quack client.
 type Config struct {
-	// CatalogDriver is "postgres" or "duckdb" (local single-writer catalog).
-	CatalogDriver string
-	// CatalogDSN is the Postgres DSN for the Catalog, or the local catalog
-	// file path when CatalogDriver is "duckdb".
-	CatalogDSN string
+	// QuackAddr is the Quack Server's host:port (no scheme), e.g.
+	// "quack-server.omneval:9494".
+	QuackAddr string
+	// QuackToken authenticates this client via
+	// `CREATE SECRET ... TYPE quack`. Must match the Quack Server's
+	// configured token.
+	QuackToken string
 	// DataPath is where the Lake's Parquet files live: an s3://bucket/prefix
-	// URL or a local directory.
+	// URL or a local directory. Read directly by this client for DATA_PATH
+	// in the ATTACH statement.
 	DataPath string
 	// Storage supplies S3 credentials when DataPath is an s3:// URL.
 	Storage *config.StorageConfig
@@ -45,28 +46,15 @@ type Config struct {
 	ReadOnly bool
 }
 
-// ConfigFromApp derives the Lake connection settings from the application
-// config: explicit lake.* settings win; otherwise the Catalog follows the
-// metadata-store database and the data path follows the storage bucket.
+// ConfigFromApp derives the Quack client connection settings from the
+// application config: quack.client.* settings supply the Quack Server
+// address/token, and the data path follows quack.client.data_path or the
+// storage bucket.
 func ConfigFromApp(cfg *config.Config) Config {
 	lc := Config{
-		CatalogDriver: cfg.Lake.CatalogDriver,
-		CatalogDSN:    cfg.Lake.CatalogDSN,
-		DataPath:      cfg.Lake.DataPath,
-	}
-	if lc.CatalogDriver == "" {
-		if cfg.Database.Driver == "postgres" {
-			lc.CatalogDriver = CatalogDriverPostgres
-		} else {
-			lc.CatalogDriver = CatalogDriverLocal
-		}
-	}
-	if lc.CatalogDSN == "" {
-		if lc.CatalogDriver == CatalogDriverPostgres {
-			lc.CatalogDSN = cfg.Database.DSN
-		} else {
-			lc.CatalogDSN = "lake/catalog.ducklake"
-		}
+		QuackAddr:  strings.TrimPrefix(cfg.Quack.Client.URL, "quack://"),
+		QuackToken: cfg.Quack.Client.Token,
+		DataPath:   cfg.Quack.Client.DataPath,
 	}
 	if lc.DataPath == "" {
 		if cfg.Storage.Bucket != "" {
@@ -90,26 +78,30 @@ type Lake struct {
 	readOnly bool
 }
 
-// Open attaches the Lake described by cfg and (unless read-only) creates
-// the partitioned spans and scores tables idempotently.
+// Open attaches the Lake described by cfg via the Quack Server and (unless
+// read-only) creates the partitioned spans and scores tables idempotently.
 func Open(ctx context.Context, cfg Config) (*Lake, error) {
-	if cfg.CatalogDSN == "" {
-		return nil, fmt.Errorf("lake: catalog DSN is required")
+	if cfg.QuackAddr == "" {
+		return nil, fmt.Errorf("lake: quack server address is required")
 	}
 	if cfg.DataPath == "" {
 		return nil, fmt.Errorf("lake: data path is required")
-	}
-
-	if cfg.CatalogDriver != CatalogDriverPostgres && !cfg.ReadOnly {
-		if err := ensureLocalCatalogDir(cfg.CatalogDSN); err != nil {
-			return nil, fmt.Errorf("lake: create catalog dir: %w", err)
-		}
 	}
 
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
 		return nil, fmt.Errorf("lake: open duckdb: %w", err)
 	}
+
+	// DuckLake's quack: catalog driver ties a DuckLake transaction/snapshot
+	// to the DuckDB connection that started it (#111/#105 spike). database/sql
+	// pools connections across calls on *sql.DB, so a DELETE and the
+	// following ducklake_rewrite_data_files (reclaim) can land on different
+	// pooled connections and hit "Scanning a DuckLake table after the
+	// transaction has ended". Pinning the pool to a single connection makes
+	// every statement on this *Lake run on the same DuckDB session, matching
+	// the spike's verified same-session DELETE+rewrite pattern.
+	db.SetMaxOpenConns(1)
 
 	l := &Lake{db: db, readOnly: cfg.ReadOnly}
 	if err := l.attach(ctx, cfg); err != nil {
@@ -125,10 +117,10 @@ func Open(ctx context.Context, cfg Config) (*Lake, error) {
 	return l, nil
 }
 
-// attach loads the required extensions, registers S3 credentials, and
-// attaches the DuckLake catalog as "lake". Extension loads, secrets, and
-// attachments are DuckDB-instance level, so one setup pass covers every
-// pooled connection.
+// attach loads the required extensions, registers the Quack auth secret
+// and S3 credentials, and attaches the DuckLake catalog as "lake" via the
+// Quack Server. Extension loads, secrets, and attachments are
+// DuckDB-instance level, so one setup pass covers every pooled connection.
 func (l *Lake) attach(ctx context.Context, cfg Config) error {
 	conn, err := l.db.Conn(ctx)
 	if err != nil {
@@ -136,15 +128,18 @@ func (l *Lake) attach(ctx context.Context, cfg Config) error {
 	}
 	defer conn.Close()
 
-	steps := []string{"INSTALL ducklake", "LOAD ducklake"}
-	if cfg.CatalogDriver == CatalogDriverPostgres {
-		steps = append(steps, "INSTALL postgres", "LOAD postgres")
+	steps := []string{
+		"INSTALL ducklake", "LOAD ducklake",
+		"INSTALL quack", "LOAD quack",
 	}
 	if strings.HasPrefix(cfg.DataPath, "s3://") {
 		steps = append(steps, "INSTALL httpfs", "LOAD httpfs")
 		if cfg.Storage != nil {
 			steps = append(steps, s3SecretSQL(cfg.Storage))
 		}
+	}
+	if cfg.QuackToken != "" {
+		steps = append(steps, quackSecretSQL(cfg.QuackToken))
 	}
 	steps = append(steps, attachSQL(cfg))
 
@@ -156,15 +151,19 @@ func (l *Lake) attach(ctx context.Context, cfg Config) error {
 	return nil
 }
 
-// attachSQL builds the ATTACH statement for the configured Catalog.
+// quackSecretSQL builds the CREATE SECRET statement authenticating this
+// client to the Quack Server (the spike's required pattern: TOKEN is passed
+// via CREATE SECRET, not query-string or ATTACH options).
+func quackSecretSQL(token string) string {
+	return fmt.Sprintf("CREATE OR REPLACE SECRET quack_auth (TYPE quack, TOKEN %s)", sqlQuote(token))
+}
+
+// attachSQL builds the ATTACH statement for the Lake via the Quack Server's
+// `ducklake:quack:<host>:<port>` catalog driver (ADR-0005). DATA_PATH is
+// still read directly by this client; only catalog metadata flows through
+// Quack.
 func attachSQL(cfg Config) string {
-	var target string
-	switch cfg.CatalogDriver {
-	case CatalogDriverPostgres:
-		target = "ducklake:postgres:" + cfg.CatalogDSN
-	default:
-		target = "ducklake:" + cfg.CatalogDSN
-	}
+	target := "ducklake:quack:" + cfg.QuackAddr
 	options := []string{fmt.Sprintf("DATA_PATH %s", sqlQuote(cfg.DataPath))}
 	if cfg.ReadOnly {
 		options = append(options, "READ_ONLY")
@@ -419,13 +418,13 @@ func (l *Lake) FlushInlinedData(ctx context.Context) error {
 }
 
 // DeleteProject permanently deletes all of a project's spans and scores
-// from the Lake (admin/compliance deletion, ADR-0004 / #91). Unlike the
-// legacy snapshot path, this commits through the Catalog: the rows
-// disappear from every reader's next query, with no resurrection on the
-// next snapshot cycle. It then runs DuckLake's snapshot expiry and
-// orphan/old-file cleanup so the deleted rows' physical Parquet files are
-// reclaimed immediately rather than waiting for the next scheduled Table
-// Maintenance pass (#89).
+// from the Lake (admin/compliance deletion, ADR-0004 / #91). This commits
+// through the Catalog: the rows disappear from every reader's next query,
+// with no resurrection on the next poll. It then runs reclaim — rewriting
+// data files to drop the deleted rows' Parquet pages, expiring snapshots,
+// and cleaning up orphaned/old files — so the deleted rows' physical
+// storage is reclaimed immediately rather than waiting for the next
+// scheduled Table Maintenance pass (services/quack).
 func (l *Lake) DeleteProject(ctx context.Context, projectID string) error {
 	if l.readOnly {
 		return fmt.Errorf("lake: cannot delete from a read-only attachment")
@@ -439,75 +438,34 @@ func (l *Lake) DeleteProject(ctx context.Context, projectID string) error {
 	return l.reclaim(ctx)
 }
 
-// reclaim expires snapshots that are no longer the latest and deletes the
-// Parquet files that backed them, so deleted rows stop occupying space
-// immediately instead of lingering until the next leader-run Table
-// Maintenance pass.
+// reclaim rewrites data files to physically drop deleted rows, then expires
+// snapshots that are no longer the latest and deletes the Parquet files
+// that backed them, so deleted rows stop occupying space immediately
+// instead of lingering until the next scheduled Table Maintenance pass.
 //
 // DuckLake 1.5 records DELETE as an inlined delete vector against the
-// existing Parquet files rather than rewriting them immediately, so in
-// principle a preceding ducklake_rewrite_data_files pass is needed for
-// ducklake_delete_orphaned_files/ducklake_cleanup_old_files to find a
-// deleted project's data files: without a rewrite, those files are still
-// "live" as far as the Catalog is concerned, just filtered by the delete
-// vector at read time (query correctness is unaffected; lake.spans/scores
-// already exclude the deleted rows).
+// existing Parquet files rather than rewriting them immediately. Against a
+// direct local-file/Postgres Catalog attachment (pre-#105), a subsequent
+// ducklake_rewrite_data_files call hit "Not implemented Error: Scanning a
+// DuckLake table after the transaction has ended" in every combination
+// tried (#111).
 //
-// KNOWN LIMITATION (#111): against THIS package's direct local-file/Postgres
-// DuckLake catalog attachment, ducklake_rewrite_data_files still cannot be
-// sequenced around a preceding DELETE — confirmed again under the
-// duckdb-go/v2 v2.10503.1 (DuckDB 1.5.3) driver, same combinations as
-// before all hit "Not implemented Error: Scanning a DuckLake table after the
-// transaction has ended":
-//   - same *sql.DB, separate implicit transactions (delete autocommits,
-//     then rewrite): fails.
-//   - same *sql.DB, explicit transaction wrapping both DELETE and rewrite:
-//     does not error on the rewrite call itself in some configurations, but
-//     does not reliably see the uncommitted delete vector either.
-//   - a brand-new *sql.DB with a fresh ATTACH to the same catalog/data path,
-//     after the DELETE's transaction committed: fails with the same error.
-//
-// HOWEVER — the corrected quack:// spike (internal/lake/quack_spike,
-// rewritten for #111) found that DuckLake's "quack:" CATALOG driver changes
-// this picture entirely. With the catalog attached as
-// `ATTACH 'ducklake:quack:localhost:<port>' AS lake (DATA_PATH '<dir>')`
-// (Quack as the metadata/catalog backend, not a generic table proxy):
-//   - the ATTACH itself succeeds (auth via a client-side
-//     `CREATE SECRET quack_auth (TYPE quack, TOKEN '<server-issued-token>')`,
-//     where the token comes from quack_serve()'s own result row — NOT from
-//     any token passed to quack_serve at start time).
-//   - a second, independently-attached client sees the first client's
-//     committed inserts (shared catalog state works as expected).
-//   - DELETE followed by ducklake_rewrite_data_files on the SAME connection
-//     that issued the DELETE — as separate autocommit statements, exactly
-//     reclaim()'s pattern — now SUCCEEDS and physically rewrites the Parquet
-//     file without the deleted rows. The same sequence also succeeds inside
-//     an explicit transaction that commits both together.
-//   - the restriction is NOT fully lifted: a brand-new client/connection
-//     attached fresh AFTER another client's DELETE already committed still
-//     hits the same "Scanning a DuckLake table after the transaction has
-//     ended" error when calling ducklake_rewrite_data_files. So the fix is
-//     scoped to "rewrite on the same session that performed the delete",
-//     which is exactly this function's existing call pattern
-//     (DeleteProject -> reclaim on the same l.db).
-//
-// So: a deleted project's physical Parquet files are NOT immediately
-// reclaimed by this function TODAY, because this package attaches the
-// catalog directly (ducklake:<path> / ducklake:postgres:<dsn>), not via
-// quack:. Switching the Lake's catalog attachment to
-// `ducklake:quack:<host>:<port>` would unblock reclaim()'s
-// ducklake_rewrite_data_files call (same-session DELETE+rewrite is exactly
-// this code's shape) — that is the recommended direction for #105's Quack
-// Server design: the Quack Server holds the long-lived catalog session and
-// every writer attaches via ducklake:quack:<quack-server-addr>. Until #105
-// stands up a real Quack Server, this package keeps the direct catalog
-// attach and deleted rows remain filtered out at query time by the delete
-// vector, compacted away by a future Table Maintenance pass.
-// ducklake_expire_snapshots/ducklake_delete_orphaned_files/
-// ducklake_cleanup_old_files below remain useful for snapshot/orphan
-// cleanup that doesn't depend on rewriting live data files.
+// The #111/#105 quack_spike (internal/lake/quack_spike) found that DuckLake's
+// "quack:" CATALOG driver — `ATTACH 'ducklake:quack:<host>:<port>' AS lake
+// (DATA_PATH '<dir>')`, which this package now uses exclusively (ADR-0005) —
+// changes this picture: DELETE followed by ducklake_rewrite_data_files on
+// the SAME connection that issued the DELETE, as separate autocommit
+// statements (exactly this function's call pattern from DeleteProject),
+// SUCCEEDS and physically rewrites the Parquet file without the deleted
+// rows. The restriction is not fully lifted — a brand-new connection
+// attached AFTER another client's DELETE already committed still hits the
+// "Scanning a DuckLake table after the transaction has ended" error when
+// calling ducklake_rewrite_data_files — but that case does not arise here:
+// reclaim always runs on the same l.db/session that performed the DELETE.
 func (l *Lake) reclaim(ctx context.Context) error {
 	stmts := []string{
+		"CALL ducklake_rewrite_data_files('lake', 'spans')",
+		"CALL ducklake_rewrite_data_files('lake', 'scores')",
 		"CALL ducklake_expire_snapshots('lake', older_than => now())",
 		"CALL ducklake_delete_orphaned_files('lake', cleanup_all => true)",
 		"CALL ducklake_cleanup_old_files('lake', cleanup_all => true)",
@@ -546,12 +504,3 @@ func firstWords(s string, n int) string {
 	return strings.Join(fields, " ")
 }
 
-// ensureLocalCatalogDir creates the parent directory for a local catalog
-// path so first-run demo profiles work without manual setup.
-func ensureLocalCatalogDir(path string) error {
-	dir := filepath.Dir(path)
-	if dir == "" || dir == "." {
-		return nil
-	}
-	return os.MkdirAll(dir, 0755)
-}

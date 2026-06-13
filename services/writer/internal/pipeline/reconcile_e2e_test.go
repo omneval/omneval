@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/duckdb"
 	"github.com/omneval/omneval/internal/lake"
+	"github.com/omneval/omneval/internal/lake/lakeservertest"
 	"github.com/omneval/omneval/internal/queue"
 	s3pkg "github.com/omneval/omneval/internal/storage/s3"
 	"github.com/omneval/omneval/services/writer/internal/reconcile"
@@ -102,12 +102,8 @@ func reconcileTestPipeline(t *testing.T) (*Pipeline, *lake.Lake, *fakeReliableQu
 	}
 	t.Cleanup(func() { db.Close() })
 
-	dir := t.TempDir()
-	lk, err := lake.Open(ctx, lake.Config{
-		CatalogDriver: lake.CatalogDriverLocal,
-		CatalogDSN:    filepath.Join(dir, "catalog.ducklake"),
-		DataPath:      filepath.Join(dir, "data"),
-	})
+	lakeCfg, _ := lakeservertest.NewLocal(t)
+	lk, err := lake.Open(ctx, lakeCfg)
 	if err != nil {
 		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
 	}

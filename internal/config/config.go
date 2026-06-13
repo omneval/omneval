@@ -24,22 +24,69 @@ type Config struct {
 	Eval     EvalConfig     `mapstructure:"eval"`
 	Pricing  PricingConfig  `mapstructure:"pricing"`
 	Metrics  MetricsConfig  `mapstructure:"metrics"`
-	Lake     LakeConfig     `mapstructure:"lake"`
+	Quack    QuackConfig    `mapstructure:"quack"`
 }
 
-// LakeConfig holds the shared Lake (DuckLake) connection settings from
-// ADR-0004. Empty values are derived at wiring time: the Catalog follows
-// the metadata-store database (Postgres in prod, a local single-writer
-// catalog file otherwise) and the data path follows the storage bucket
-// (s3://<bucket>/lake).
-type LakeConfig struct {
+// QuackConfig holds the top-level `quack` configuration section (ADR-0005).
+// The Quack Server (services/quack) is the sole holder of a direct DuckLake
+// Catalog/data-path connection; every other service (Writer, Query API,
+// backfill tool) attaches to the Lake as a thin Quack client.
+type QuackConfig struct {
+	// Server configures the Quack Server (services/quack only).
+	Server QuackServerConfig `mapstructure:"server"`
+	// Client configures every other service's attachment to the Quack
+	// Server (Writer, Query API, backfill tool, demo profile).
+	Client QuackClientConfig `mapstructure:"client"`
+}
+
+// CatalogDriverPostgres uses the shared Postgres instance as the Catalog —
+// the serialization point that makes multiple concurrent writers safe.
+const CatalogDriverPostgres = "postgres"
+
+// CatalogDriverLocal uses a local DuckDB-file Catalog (single-writer,
+// demo profile only).
+const CatalogDriverLocal = "duckdb"
+
+// QuackServerConfig configures services/quack: the sole process holding a
+// direct DuckLake Catalog and data-path connection (ADR-0005). Empty values
+// are derived at wiring time: the Catalog follows the metadata-store
+// database (Postgres in prod, a local single-writer catalog file otherwise)
+// and the data path follows the storage bucket (s3://<bucket>/lake).
+type QuackServerConfig struct {
+	// ListenAddr is the address quack_serve() binds to (default ":9494").
+	ListenAddr string `mapstructure:"listen_addr"`
+	// Token authenticates Quack clients via `CREATE SECRET ... TYPE quack`.
+	// If unset, a random token is generated at startup and logged (demo/dev
+	// convenience).
+	Token string `mapstructure:"token"`
 	// CatalogDriver is "postgres" or "duckdb" (local single-writer catalog).
 	CatalogDriver string `mapstructure:"catalog_driver"`
-	// CatalogDSN is the Postgres DSN for the Catalog, or the catalog file
-	// path when CatalogDriver is "duckdb".
+	// CatalogDSN is the Postgres DSN for the Catalog, or the local catalog
+	// file path when CatalogDriver is "duckdb".
 	CatalogDSN string `mapstructure:"catalog_dsn"`
-	// DataPath is where Lake Parquet files live: s3://bucket/prefix or a
-	// local directory.
+	// DataPath is where the Lake's Parquet files live: an s3://bucket/prefix
+	// URL or a local directory.
+	DataPath string `mapstructure:"data_path"`
+	// MaintenanceInterval is how often the Table Maintenance scheduler runs
+	// (ducklake_flush_inlined_data, ducklake_merge_adjacent_files,
+	// ducklake_expire_snapshots, orphan/old-file cleanup). Default "5m".
+	MaintenanceInterval string `mapstructure:"maintenance_interval"`
+}
+
+// QuackClientConfig configures a Quack client attachment (Writer, Query
+// API, backfill tool, demo profile). Every Lake access in the platform
+// other than services/quack goes through this.
+type QuackClientConfig struct {
+	// URL is the Quack Server address, e.g. "quack://quack-server.omneval:9494"
+	// or "localhost:9494" (host:port; the "quack://" scheme is optional and
+	// stripped if present).
+	URL string `mapstructure:"url"`
+	// Token authenticates this client via `CREATE SECRET ... TYPE quack`.
+	// Must match the Quack Server's configured token.
+	Token string `mapstructure:"token"`
+	// DataPath is where the Lake's Parquet files live: an s3://bucket/prefix
+	// URL or a local directory. Read directly by the client for DATA_PATH in
+	// the ATTACH statement (Quack carries catalog metadata only).
 	DataPath string `mapstructure:"data_path"`
 }
 
@@ -356,10 +403,17 @@ func Load(path string) (*Config, error) {
 	// metrics
 	v.SetDefault("metrics.addr", ":9090")
 	v.SetDefault("metrics.disable_project_labels", false)
-	// lake
-	v.SetDefault("lake.catalog_driver", "")
-	v.SetDefault("lake.catalog_dsn", "")
-	v.SetDefault("lake.data_path", "")
+	// quack server (services/quack only)
+	v.SetDefault("quack.server.listen_addr", ":9494")
+	v.SetDefault("quack.server.token", "")
+	v.SetDefault("quack.server.catalog_driver", "")
+	v.SetDefault("quack.server.catalog_dsn", "")
+	v.SetDefault("quack.server.data_path", "")
+	v.SetDefault("quack.server.maintenance_interval", "5m")
+	// quack client (Writer, Query API, backfill tool, demo profile)
+	v.SetDefault("quack.client.url", "localhost:9494")
+	v.SetDefault("quack.client.token", "")
+	v.SetDefault("quack.client.data_path", "")
 	v.SetDefault("writer.lake.enabled", false)
 
 	if path != "" {
@@ -434,9 +488,15 @@ func Load(path string) (*Config, error) {
 	envInt(&cfg.Eval.RetryCount, "OMNEVAL_EVAL_RETRY_COUNT")
 	envString(&cfg.Metrics.Addr, "OMNEVAL_METRICS_ADDR")
 	envBool(&cfg.Metrics.DisableProjectLabels, "OMNEVAL_METRICS_DISABLE_PROJECT_LABELS")
-	envString(&cfg.Lake.CatalogDriver, "OMNEVAL_LAKE_CATALOG_DRIVER")
-	envString(&cfg.Lake.CatalogDSN, "OMNEVAL_LAKE_CATALOG_DSN")
-	envString(&cfg.Lake.DataPath, "OMNEVAL_LAKE_DATA_PATH")
+	envString(&cfg.Quack.Server.ListenAddr, "OMNEVAL_QUACK_SERVER_LISTEN_ADDR")
+	envString(&cfg.Quack.Server.Token, "OMNEVAL_QUACK_SERVER_TOKEN")
+	envString(&cfg.Quack.Server.CatalogDriver, "OMNEVAL_QUACK_SERVER_CATALOG_DRIVER")
+	envString(&cfg.Quack.Server.CatalogDSN, "OMNEVAL_QUACK_SERVER_CATALOG_DSN")
+	envString(&cfg.Quack.Server.DataPath, "OMNEVAL_QUACK_SERVER_DATA_PATH")
+	envString(&cfg.Quack.Server.MaintenanceInterval, "OMNEVAL_QUACK_SERVER_MAINTENANCE_INTERVAL")
+	envString(&cfg.Quack.Client.URL, "OMNEVAL_QUACK_CLIENT_URL")
+	envString(&cfg.Quack.Client.Token, "OMNEVAL_QUACK_CLIENT_TOKEN")
+	envString(&cfg.Quack.Client.DataPath, "OMNEVAL_QUACK_CLIENT_DATA_PATH")
 	envBool(&cfg.Writer.Lake.Enabled, "OMNEVAL_WRITER_LAKE_ENABLED")
 
 	return &cfg, nil
