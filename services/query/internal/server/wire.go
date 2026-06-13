@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -153,11 +154,24 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	}
 
 	// Open the snapshot database via SwappableDB so the poller can atomically
-	// reopen the connection each time S3 delivers a new snapshot.
-	sdb, err := NewSwappableDB(deps.DBPath)
-	if err != nil {
-		deps.Close()
-		return nil, fmt.Errorf("query: open snapshot: %w", err)
+	// reopen the connection each time S3 delivers a new snapshot. In Lake
+	// mode there is no snapshot file to open (it's never downloaded, see
+	// above) — wrap an empty in-memory DuckDB instead. Handlers that need
+	// span data get the Lake handle wired in separately below.
+	var sdb *SwappableDB
+	if cfg.Query.Lake.Enabled {
+		emptyDB, err := sql.Open("duckdb", "")
+		if err != nil {
+			deps.Close()
+			return nil, fmt.Errorf("query: open in-memory db: %w", err)
+		}
+		sdb = NewSwappableDBFromDB(emptyDB)
+	} else {
+		sdb, err = NewSwappableDB(deps.DBPath)
+		if err != nil {
+			deps.Close()
+			return nil, fmt.Errorf("query: open snapshot: %w", err)
+		}
 	}
 	deps.SDB = sdb
 

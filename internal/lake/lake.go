@@ -162,8 +162,17 @@ func quackSecretSQL(token string) string {
 // `ducklake:quack:<host>:<port>` catalog driver (ADR-0005). DATA_PATH is
 // still read directly by this client; only catalog metadata flows through
 // Quack.
+//
+// The quack extension defaults to HTTPS for any host other than
+// localhost/127.0.0.1/::1 (https://duckdb.org/docs/current/quack/overview).
+// The Quack Server (services/quack) never terminates TLS — it's plain HTTP,
+// with TLS expected to be handled by a reverse proxy if ever exposed — so
+// disable_ssl=true is appended to the quack URI to avoid HTTPS attempts
+// against in-cluster Service DNS names like "omneval-quack-server:9494".
+// DISABLE_SSL cannot be passed as a DuckLake ATTACH option ("Unsupported
+// option disable_ssl for DuckLake") — it must be part of the quack URI.
 func attachSQL(cfg Config) string {
-	target := "ducklake:quack:" + cfg.QuackAddr
+	target := "ducklake:quack:" + cfg.QuackAddr + "?disable_ssl=true"
 	options := []string{fmt.Sprintf("DATA_PATH %s", sqlQuote(cfg.DataPath))}
 	if cfg.ReadOnly {
 		options = append(options, "READ_ONLY")
