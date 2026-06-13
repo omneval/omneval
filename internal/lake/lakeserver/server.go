@@ -169,21 +169,19 @@ func Serve(ctx context.Context, cfg Config) (*Server, error) {
 
 	// quack_serve wants a host:port URI and, per quack_spike5, rejects any
 	// hostname other than "localhost" unless allow_other_hostname=true is
-	// passed. A bare ":9494" ListenAddr (the demo/test default, meant for
-	// loopback-only access) becomes "localhost:9494" so it works without the
-	// override. Any other explicit host (e.g. "0.0.0.0" or a Kubernetes
-	// Service DNS name, needed so Writer/Query pods can reach the Quack
-	// Server) is passed through as-is with allow_other_hostname=true.
+	// passed. A bare ":9494" ListenAddr becomes "0.0.0.0:9494" so the server
+	// binds every interface — reachable both from other pods via the
+	// Kubernetes Service DNS name and from "localhost" in tests, since
+	// 0.0.0.0 covers the loopback interface too. Binding "localhost:9494"
+	// instead (as this used to do) only accepts loopback connections, which
+	// makes the Quack Server unreachable from Writer/Query pods entirely.
+	// allow_other_hostname=true is always passed since the bound host is
+	// never "localhost".
 	hostPort := cfg.ListenAddr
-	allowOtherHostname := false
 	if strings.HasPrefix(hostPort, ":") {
-		hostPort = "localhost" + hostPort
-	} else {
-		host, _, ok := strings.Cut(hostPort, ":")
-		if ok && host != "localhost" {
-			allowOtherHostname = true
-		}
+		hostPort = "0.0.0.0" + hostPort
 	}
+	allowOtherHostname := true
 	serveURI := "quack://" + hostPort
 
 	s := &Server{db: db, done: make(chan struct{}), errCh: make(chan error, 1)}
