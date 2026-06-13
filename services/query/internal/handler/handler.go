@@ -501,16 +501,9 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Compile the query — all fields are validated against allowlists.
-	// When Lake is available, compile against the single Lake table set.
-	var sqlStr string
-	var args []any
-	var err error
-	if h.Lake != nil {
-		sqlStr, args, err = dsl.CompileLake(projectID, req)
-	} else {
-		sqlStr, args, err = dsl.Compile(projectID, req)
-	}
+	// Compile the query against the single Lake table set — all fields are
+	// validated against allowlists.
+	sqlStr, args, err := dsl.CompileLake(projectID, req)
 	if err != nil {
 		writeJSONError(w, "query compilation error: "+err.Error(), http.StatusBadRequest)
 		return
@@ -694,21 +687,36 @@ func (h *SpanHandler) spanDB() DBHandle {
 	return h.DB
 }
 
-// ScoreHandler handles POST /api/v1/scores — the public-facing endpoint
-// that allows manual score writes from the UI or API consumers.
-type ScoreHandler struct {
-	DB DBHandle
+// ScoreLakeWriter commits scores to the Lake (ADR-0004). Implemented by
+// *lake.Lake; an interface so tests can fake Lake failures.
+type ScoreLakeWriter interface {
+	InsertScores(ctx context.Context, scores []*domain.Score) error
 }
 
-// NewScoreHandler creates a new ScoreHandler.
-func NewScoreHandler(db DBHandle) http.Handler {
-	h := &ScoreHandler{DB: db}
+// ScoreHandler handles POST /api/v1/scores — the public-facing endpoint
+// that allows manual score writes from the UI or API consumers. Scores are
+// committed directly to the Lake (lake.scores) through a writable Lake
+// attachment (ADR-0004/#91) — the Query API has no other durable write path.
+type ScoreHandler struct {
+	// Lake is a writable Lake attachment (deps.AdminLake) used to commit
+	// scores via InsertScores.
+	Lake ScoreLakeWriter
+	// SpanDB is used to look up the annotated span's start_time so the score
+	// partitions alongside its span (ADR-0002). Falls back to CreatedAt if
+	// the lookup fails.
+	SpanDB DBHandle
+}
+
+// NewScoreHandler creates a new ScoreHandler backed by a writable Lake
+// attachment. spanDB is used to resolve span_start_time for partitioning.
+func NewScoreHandler(lakeWriter ScoreLakeWriter, spanDB DBHandle) http.Handler {
+	h := &ScoreHandler{Lake: lakeWriter, SpanDB: spanDB}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/scores", h.HandleScores)
 	return mux
 }
 
-// HandleScores writes a score to DuckDB.
+// HandleScores writes a score to the Lake (lake.scores).
 func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
 	var req domain.ScoreRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -718,6 +726,11 @@ func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
 
 	if req.SpanID == "" || req.TraceID == "" || req.ProjectID == "" {
 		writeJSONError(w, "span_id, trace_id, and project_id are required", http.StatusBadRequest)
+		return
+	}
+
+	if h.Lake == nil {
+		writeJSONError(w, "score writes are unavailable: Lake is not configured", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -736,7 +749,21 @@ func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:     time.Now(),
 	}
 
-	if err := h.writeScore(r.Context(), score); err != nil {
+	// Resolve the annotated span's start_time so the score partitions
+	// alongside its span (ADR-0002). Best-effort: InsertScores falls back to
+	// CreatedAt when SpanStartTime is zero.
+	if h.SpanDB != nil {
+		var spanStart time.Time
+		err := h.SpanDB.QueryRowContext(r.Context(),
+			"SELECT start_time FROM lake.spans WHERE trace_id = ? AND span_id = ?",
+			score.TraceID, score.SpanID,
+		).Scan(&spanStart)
+		if err == nil {
+			score.SpanStartTime = spanStart
+		}
+	}
+
+	if err := h.Lake.InsertScores(r.Context(), []*domain.Score{score}); err != nil {
 		writeJSONError(w, "write score: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -744,28 +771,4 @@ func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"score_id": scoreID})
-}
-
-// writeScore writes a score to DuckDB.
-func (h *ScoreHandler) writeScore(ctx context.Context, score *domain.Score) error {
-	_, err := h.DB.ExecContext(ctx, `
-		INSERT INTO scores (
-			score_id, span_id, trace_id, project_id,
-			eval_name, value, reasoning, judge_model,
-			prompt_name, prompt_version, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`,
-		score.ScoreID,
-		score.SpanID,
-		score.TraceID,
-		score.ProjectID,
-		score.EvalName,
-		score.Value,
-		score.Reasoning,
-		score.JudgeModel,
-		score.PromptName,
-		score.PromptVersion,
-		score.CreatedAt,
-	)
-	return err
 }

@@ -171,6 +171,14 @@ func (s *SwappableDB) ExecContext(ctx context.Context, query string, args ...any
 	return db.ExecContext(ctx, query, args...)
 }
 
+// QueryRowContext executes a query expected to return at most one row, with context.
+func (s *SwappableDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	s.mu.RLock()
+	db := s.db
+	s.mu.RUnlock()
+	return db.QueryRowContext(ctx, query, args...)
+}
+
 // copyFile copies src to dst, creating or truncating dst.
 // It does NOT use os.Rename because on Windows renaming onto an open file fails.
 func copyFile(src, dst string) error {

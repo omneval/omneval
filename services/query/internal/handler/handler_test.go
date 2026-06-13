@@ -46,6 +46,8 @@ const spansTableDDL = `
 		attributes     JSON,
 		PRIMARY KEY (trace_id, span_id)
 	);
+	CREATE SCHEMA IF NOT EXISTS lake;
+	CREATE VIEW lake.spans AS SELECT * FROM main.spans;
 `
 
 const scoresTableDDL = `
