@@ -123,7 +123,7 @@ func TestDeleteProjectNoResurrection(t *testing.T) {
 		t.Fatalf("open maintenance lake: %v", err)
 	}
 	defer maintLake.Close()
-	if err := lakeserver.RunMaintenance(ctx, maintLake.DB(), lakeserver.MaintenanceTables); err != nil {
+	if _, err := lakeserver.RunMaintenance(ctx, maintLake.DB(), lakeserver.MaintenanceTables, lakeserver.RetentionConfig{}); err != nil {
 		t.Fatalf("table maintenance pass: %v", err)
 	}
 	if err := queryLake.DB().QueryRowContext(ctx, "SELECT count(*) FROM lake.spans WHERE project_id = 'proj-a'").Scan(&n); err != nil {

@@ -71,6 +71,25 @@ type QuackServerConfig struct {
 	// (ducklake_flush_inlined_data, ducklake_merge_adjacent_files,
 	// ducklake_expire_snapshots, orphan/old-file cleanup). Default "5m".
 	MaintenanceInterval string `mapstructure:"maintenance_interval"`
+	// Retention controls Lake-native retention (#92): DELETEs aged spans and
+	// scores through the DuckLake Catalog and reclaims physical Parquet files
+	// in the same maintenance pass. This replaces the legacy S3-prefix-based
+	// file-deletion retention worker (Writer.Retention), which is wrong under
+	// DuckLake.
+	Retention QuackRetentionConfig `mapstructure:"retention"`
+}
+
+// QuackRetentionConfig controls the Lake-native retention step in Table
+// Maintenance (#92). Only Enabled and MaxAgeDays are used; the legacy
+// RetentionConfig fields (Action, Destination, etc.) are irrelevant for
+// the Catalog-based approach.
+type QuackRetentionConfig struct {
+	// Enabled turns on the retention DELETE step. Default false: Table
+	// Maintenance runs its compaction steps only, with no data loss.
+	Enabled bool `mapstructure:"enabled"`
+	// MaxAgeDays is how old a span (by start_time) or score (by
+	// span_start_time) must be to be deleted. Zero means no age limit.
+	MaxAgeDays int `mapstructure:"max_age_days"`
 }
 
 // QuackClientConfig configures a Quack client attachment (Writer, Query

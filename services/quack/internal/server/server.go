@@ -106,9 +106,22 @@ func Run() error {
 		interval = lakeserver.DefaultMaintenanceInterval
 	}
 
+	retention := lakeserver.RetentionConfig{
+		Enabled:    cfg.Quack.Server.Retention.Enabled,
+		MaxAgeDays: cfg.Quack.Server.Retention.MaxAgeDays,
+	}
+
 	maintDone := make(chan error, 1)
 	go func() {
-		maintDone <- lakeserver.RunMaintenanceLoop(ctx, maintLake.DB(), lakeserver.MaintenanceTables, interval)
+		maintDone <- lakeserver.RunMaintenanceLoop(ctx, maintLake.DB(), lakeserver.MaintenanceTables, interval, retention, func(result lakeserver.MaintenanceResult) {
+			if retention.Enabled {
+				slog.Info("quack: maintenance retention metrics",
+					"spans_deleted", result.Retention.SpansDeleted,
+					"scores_deleted", result.Retention.ScoresDeleted,
+					"retention_duration", result.Retention.Duration,
+				)
+			}
+		})
 	}()
 
 	// Health/readiness HTTP server.
