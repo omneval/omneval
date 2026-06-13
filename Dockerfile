@@ -26,6 +26,7 @@ COPY services/ingest/go.* ./services/ingest/
 COPY services/writer/go.* ./services/writer/
 COPY services/query/go.* ./services/query/
 COPY services/eval/go.* ./services/eval/
+COPY services/quack/go.* ./services/quack/
 COPY sdk/go/go.* ./sdk/go/
 
 # Copy pricing data (needed by the embedded pricing package for build cache)
@@ -41,7 +42,8 @@ RUN go mod download -C ./internal && \
     go mod download -C ./services/ingest && \
     go mod download -C ./services/writer && \
     go mod download -C ./services/query && \
-    go mod download -C ./services/eval
+    go mod download -C ./services/eval && \
+    go mod download -C ./services/quack
 
 # Copy source code
 COPY internal/ ./internal/
@@ -53,6 +55,7 @@ RUN go build -o /build/ingest ./services/ingest/cmd/ingest/
 RUN go build -o /build/writer ./services/writer/cmd/writer/
 RUN go build -o /build/query ./services/query/cmd/query/
 RUN go build -o /build/eval ./services/eval/cmd/eval/
+RUN go build -o /build/quack ./services/quack/cmd/quack/
 
 # ---- Stage 3: Runtime image ----
 # DuckDB's precompiled static library requires glibc >= 2.38; Ubuntu 24.04 ships 2.39.
@@ -70,6 +73,7 @@ COPY --from=go-builder /build/ingest /usr/local/bin/omneval-ingest
 COPY --from=go-builder /build/writer /usr/local/bin/omneval-writer
 COPY --from=go-builder /build/query /usr/local/bin/omneval-query
 COPY --from=go-builder /build/eval /usr/local/bin/omneval-eval
+COPY --from=go-builder /build/quack /usr/local/bin/omneval-quack
 
 WORKDIR /app
 

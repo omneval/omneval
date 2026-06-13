@@ -1,0 +1,211 @@
+{{- /*
+Quack Server StatefulSet — single replica, sole holder of the DuckLake
+Catalog/data-path connection (ADR-0005).
+
+Serves the Quack remote protocol (quack.server.listen_addr, default :9494)
+to Writer/Query/Eval Quack clients, and runs the Table Maintenance
+scheduler (compaction, snapshot expiry, retention GC).
+
+A PVC is only provisioned when quack.server.catalogDriver is "duckdb"
+(local single-writer catalog, demo profile). With catalogDriver "postgres"
+the Catalog lives in the shared metadata Postgres and no local catalog file
+is needed; the data path is normally s3://<bucket>/lake in that case.
+
+Infrastructure resolution:
+- Storage: uses internal MinIO when minio.enabled, or storage endpoint
+  (needed when the Lake data path is s3://...)
+- Catalog: shares the metadata Postgres DSN unless quack.server.catalogDSN
+  or catalogDriver: duckdb overrides it (see omneval.quackCatalogDSN)
+*/ -}}
+{{- $name := .Release.Name -}}
+{{- $useLocalCatalog := eq .Values.quack.server.catalogDriver "duckdb" -}}
+{{- $quackDataPath := include "omneval.quackDataPath" . -}}
+{{- $needsPVC := or $useLocalCatalog (not (hasPrefix "s3://" $quackDataPath)) -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}-quack-server
+  labels:
+    app.kubernetes.io/name: omneval
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: quack-server
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  serviceName: {{ $name }}-quack-server
+  replicas: {{ .Values.quack.server.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: omneval
+      app.kubernetes.io/instance: {{ $name }}
+      app.kubernetes.io/component: quack-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: omneval
+        app.kubernetes.io/instance: {{ $name }}
+        app.kubernetes.io/component: quack-server
+        {{- with .Values.commonLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.quack.server.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.quack.server.annotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- if .Values.quack.server.serviceAccount.create }}
+      serviceAccountName: {{ $name }}-quack-server
+      {{- end }}
+      {{- with .Values.quack.server.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.quack.server.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.quack.server.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: quack-server
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["omneval-quack"]
+          ports:
+            - name: quack
+              containerPort: 9494
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          env:
+            - name: OMNEVAL_CONFIG
+              value: "/etc/omneval/omneval.yaml"
+            - name: OMNEVAL_QUACK_SERVER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $name }}-secret
+                  key: quack-token
+            {{- with .Values.storage.endpoint }}
+            - name: OMNEVAL_STORAGE_ENDPOINT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.storage.bucket }}
+            - name: OMNEVAL_STORAGE_BUCKET
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.storage.region }}
+            - name: OMNEVAL_STORAGE_REGION
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if include "omneval.storageAccessKey" . }}
+            - name: OMNEVAL_STORAGE_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $name }}-secret
+                  key: storage-access-key
+                  optional: true
+            - name: OMNEVAL_STORAGE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $name }}-secret
+                  key: storage-secret-key
+                  optional: true
+            {{- end }}
+            {{- if and (eq .Values.database.driver "postgres") (not $useLocalCatalog) }}
+            - name: OMNEVAL_DATABASE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $name }}-secret
+                  key: postgres-dsn
+                  optional: true
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/omneval
+              readOnly: true
+            {{- if $needsPVC }}
+            - name: data
+              mountPath: /data
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.quack.server.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}-config
+        {{- if not $needsPVC }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if $needsPVC }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - {{ .Values.quack.pvc.accessMode }}
+        {{- if .Values.quack.pvc.storageClass }}
+        storageClassName: {{ .Values.quack.pvc.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.quack.pvc.size }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-quack-server
+  labels:
+    app.kubernetes.io/name: omneval
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: quack-server
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: quack
+      port: 9494
+      targetPort: 9494
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: omneval
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: quack-server
+---
+{{- if .Values.quack.server.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}-quack-server
+  labels:
+    app.kubernetes.io/name: omneval
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: quack-server
+automountServiceAccountToken: false
+{{- end }}

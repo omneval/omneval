@@ -34,11 +34,13 @@ After startup, the services will be available at:
 | Ingest API | http://localhost:8000 |
 | Writer Service | http://localhost:8001 |
 | Eval Workers | http://localhost:8003 |
+| Quack Server (Lake gateway) | localhost:9494 |
 | MinIO Console | http://localhost:9001 |
 | Ingest Metrics | http://localhost:9090 |
 | Writer Metrics | http://localhost:9091 |
 | Query Metrics | http://localhost:9092 |
 | Eval Metrics | http://localhost:9093 |
+| Quack Server Metrics | http://localhost:9094 |
 
 ## Admin Login
 
@@ -52,8 +54,17 @@ An admin user is bootstrapped on first start:
 | Service | Image | Ports | Purpose |
 |---------|-------|-------|---------|
 | Redis | `redis:7-alpine` | 6379 | Message queues (ingest + eval) |
-| PostgreSQL | `postgres:16-alpine` | 5432 | Metadata store (projects, users, API keys, prompts) |
-| MinIO | `minio/minio:latest` | 9000 / 9001 | S3-compatible object storage (snapshots + Parquet archive) |
+| PostgreSQL | `postgres:16-alpine` | 5432 | Metadata store (projects, users, API keys, prompts) + Quack Server Catalog |
+| MinIO | `minio/minio:latest` | 9000 / 9001 | S3-compatible object storage (snapshots + Parquet archive + Lake data) |
+
+### Quack Server
+
+`omneval-quack` is the sole Lake gateway (ADR-0005): the only process holding
+a direct DuckLake Catalog/data-path connection. The Writer, Query API, and
+Eval Workers attach to it as thin Quack clients via `OMNEVAL_QUACK_CLIENT_URL`
+/ `OMNEVAL_QUACK_CLIENT_TOKEN` / `OMNEVAL_QUACK_CLIENT_DATA_PATH`. The shared
+auth token is controlled by the `QUACK_TOKEN` environment variable (see
+`.env.example`) and must match between `omneval-quack` and its clients.
 
 ### MinIO Credentials
 

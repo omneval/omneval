@@ -131,6 +131,11 @@ spec:
                   key: postgres-dsn
                   optional: true
             {{- end }}
+            - name: OMNEVAL_QUACK_CLIENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $name }}-secret
+                  key: quack-token
           volumeMounts:
             - name: config
               mountPath: /etc/omneval

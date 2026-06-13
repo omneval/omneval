@@ -166,3 +166,70 @@ Usage: {{ include "omneval.redisAddr" . }}
 {{- .Values.redis.external.addr -}}
 {{- end }}
 {{- end -}}
+
+{{- /*
+omneval.quackServerAddr returns the in-cluster DNS address of the Quack
+Server (host:port, no scheme), used by Writer/Query/Eval as
+quack.client.url.
+
+Usage: {{ include "omneval.quackServerAddr" . }}
+*/ -}}
+{{- define "omneval.quackServerAddr" -}}
+{{- if .Values.quack.client.url -}}
+{{- .Values.quack.client.url -}}
+{{- else -}}
+{{- $port := trimPrefix ":" .Values.quack.server.listenAddr -}}
+{{- printf "%s-quack-server:%s" .Release.Name $port -}}
+{{- end }}
+{{- end -}}
+
+{{- /*
+omneval.quackDataPath returns the Lake data path shared by quack.server and
+quack.client config. Derived from storage.bucket (s3://<bucket>/lake) when
+S3 is configured, otherwise a local path on the quack-server PVC.
+
+Usage: {{ include "omneval.quackDataPath" . }}
+*/ -}}
+{{- define "omneval.quackDataPath" -}}
+{{- $bucket := include "omneval.storageBucket" . -}}
+{{- if $bucket -}}
+{{- printf "s3://%s/lake" $bucket -}}
+{{- else -}}
+/data/lake
+{{- end }}
+{{- end -}}
+
+{{- /*
+omneval.quackToken returns the Quack auth token shared between the
+quack-server pod and its clients (Writer/Query/Eval). Uses
+quack.server.token if set, otherwise generates a stable random token stored
+in the release Secret (regenerated on every `helm template`/`install` unless
+pinned via values — set quack.server.token to pin across upgrades).
+
+Usage: {{ include "omneval.quackToken" . }}
+*/ -}}
+{{- define "omneval.quackToken" -}}
+{{- if .Values.quack.server.token -}}
+{{- .Values.quack.server.token -}}
+{{- else -}}
+{{- randAlphaNum 32 -}}
+{{- end }}
+{{- end -}}
+
+{{- /*
+omneval.quackCatalogDSN returns the Quack Server's Catalog DSN. When
+catalogDriver is "postgres" and no explicit catalogDSN is set, this derives
+the same Postgres DSN as the metadata store. When catalogDriver is "duckdb",
+this is a local catalog file path on the quack-server PVC.
+
+Usage: {{ include "omneval.quackCatalogDSN" . }}
+*/ -}}
+{{- define "omneval.quackCatalogDSN" -}}
+{{- if .Values.quack.server.catalogDSN -}}
+{{- .Values.quack.server.catalogDSN -}}
+{{- else if eq .Values.quack.server.catalogDriver "duckdb" -}}
+/data/catalog.duckdb
+{{- else -}}
+{{- include "omneval.postgresDsn" . -}}
+{{- end }}
+{{- end -}}

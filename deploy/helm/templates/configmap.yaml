@@ -17,6 +17,9 @@ Infrastructure resolution:
 {{- $pgDsn := include "omneval.postgresDsn" . -}}
 {{- $storageEndpoint := include "omneval.storageEndpoint" . -}}
 {{- $storageBucket := include "omneval.storageBucket" . -}}
+{{- $quackAddr := include "omneval.quackServerAddr" . -}}
+{{- $quackDataPath := include "omneval.quackDataPath" . -}}
+{{- $quackCatalogDSN := include "omneval.quackCatalogDSN" . -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -78,3 +81,16 @@ data:
     metrics:
       addr: {{ .Values.metrics.addr }}
       disable_project_labels: {{ .Values.metrics.disableProjectLabels }}
+    quack:
+      server:
+        listen_addr: {{ .Values.quack.server.listenAddr | quote }}
+        catalog_driver: {{ .Values.quack.server.catalogDriver | quote }}
+        catalog_dsn: {{ $quackCatalogDSN | quote }}
+        data_path: {{ $quackDataPath | quote }}
+        maintenance_interval: {{ .Values.quack.server.maintenanceInterval | quote }}
+        retention:
+          enabled: {{ .Values.quack.server.retention.enabled }}
+          max_age_days: {{ .Values.quack.server.retention.maxAgeDays }}
+      client:
+        url: {{ $quackAddr | quote }}
+        data_path: {{ (.Values.quack.client.dataPath | default $quackDataPath) | quote }}
