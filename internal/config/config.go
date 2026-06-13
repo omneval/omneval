@@ -111,8 +111,8 @@ type QuackClientConfig struct {
 
 // WriterLakeConfig controls the Writer's Lake participation.
 type WriterLakeConfig struct {
-	// Enabled turns on dual-writing every batch to the Lake alongside the
-	// legacy hot DuckDB store. Default false (legacy behavior unchanged).
+	// Enabled turns on writing every batch to the Lake. Default true
+	// (#90 cutover) — the Lake is the only storage tier.
 	Enabled bool `mapstructure:"enabled"`
 }
 
@@ -179,10 +179,7 @@ type WriterConfig struct {
 	// LeaderElection enables Redis-based leader election for multi-replica HA.
 	// When enabled, only the leader processes the ingest queue and writes to DuckDB.
 	LeaderElection LeaderElectionConfig `mapstructure:"leader_election"`
-	// Retention controls the S3 retention worker that rotates or deletes aged
-	// trace data on a configurable policy.
-	Retention RetentionConfig `mapstructure:"retention"`
-	// Lake controls dual-writing to the Lake (ADR-0004).
+	// Lake controls writing to the Lake (ADR-0004).
 	Lake WriterLakeConfig `mapstructure:"lake"`
 	// Reconciliation controls the Ingest Buffer reconciliation sweep
 	// (ADR-0004, #88).
@@ -227,56 +224,6 @@ func (rc ReconciliationConfig) Validate() error {
 	return nil
 }
 
-// RetentionConfig holds settings for the S3 trace retention worker.
-type RetentionConfig struct {
-	// Enabled starts the retention ticker when true.
-	Enabled bool `mapstructure:"enabled"`
-	// Action is the retention strategy: "delete" or "move".
-	Action string `mapstructure:"action"`
-	// MaxAgeDays is the number of days after which objects are eligible for
-	// retention. Zero means no age limit.
-	MaxAgeDays int `mapstructure:"max_age_days"`
-	// IntervalMinutes is how often the worker scans for eligible objects.
-	IntervalMinutes int `mapstructure:"interval_minutes"`
-	// Destination is the target bucket for "move" actions.
-	Destination RetentionDestinationConfig `mapstructure:"destination"`
-	// TriggerEndpointEnabled exposes a POST /retention/trigger endpoint.
-	TriggerEndpointEnabled bool `mapstructure:"trigger_endpoint_enabled"`
-}
-
-// RetentionDestinationConfig describes where aged objects should be moved.
-type RetentionDestinationConfig struct {
-	Bucket       string `mapstructure:"bucket"`
-	Prefix       string `mapstructure:"prefix"`
-	StorageClass string `mapstructure:"storage_class"`
-}
-
-// Validate checks that the retention config is consistent.
-// Disabled retention is always valid (no-op).
-func (rc RetentionConfig) Validate() error {
-	if !rc.Enabled {
-		return nil
-	}
-	if rc.MaxAgeDays < 0 {
-		return fmt.Errorf("retention.max_age_days must be >= 0, got %d", rc.MaxAgeDays)
-	}
-	if rc.IntervalMinutes <= 0 {
-		return fmt.Errorf("retention.interval_minutes must be > 0, got %d", rc.IntervalMinutes)
-	}
-	switch rc.Action {
-	case "delete":
-	case "move":
-		if rc.Destination.Bucket == "" {
-			return fmt.Errorf("retention.destination.bucket is required for move action")
-		}
-	default:
-		if rc.Action != "" {
-			return fmt.Errorf("retention.action must be 'delete' or 'move', got %q", rc.Action)
-		}
-	}
-	return nil
-}
-
 type LeaderElectionConfig struct {
 	// Enabled enables leader election (default false for single-replica deployments).
 	Enabled bool `mapstructure:"enabled"`
@@ -295,8 +242,8 @@ type QueryLakeConfig struct {
 	// API attaches read-only to the Lake (DuckLake via the Catalog) instead
 	// of downloading the S3 snapshot. All span reads — span list, trace
 	// detail waterfall, conversations, and the Analytics DSL — compile
-	// against the single Lake table set. Default false (legacy snapshot
-	// path).
+	// against the single Lake table set. Default true (#90 cutover) — the
+	// Lake is the only read path.
 	Enabled bool `mapstructure:"enabled"`
 }
 
@@ -390,15 +337,6 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("writer.leader_election.enabled", false)
 	v.SetDefault("writer.leader_election.lock_ttl", 15)
 	v.SetDefault("writer.leader_election.fencing_enabled", true)
-	// writer retention
-	v.SetDefault("writer.retention.enabled", false)
-	v.SetDefault("writer.retention.action", "")
-	v.SetDefault("writer.retention.max_age_days", 0)
-	v.SetDefault("writer.retention.interval_minutes", 60)
-	v.SetDefault("writer.retention.destination.bucket", "")
-	v.SetDefault("writer.retention.destination.prefix", "")
-	v.SetDefault("writer.retention.destination.storage_class", "")
-	v.SetDefault("writer.retention.trigger_endpoint_enabled", false)
 	// writer reconciliation (ingest buffer sweep, #88)
 	v.SetDefault("writer.reconciliation.enabled", false)
 	v.SetDefault("writer.reconciliation.interval_minutes", 5)
@@ -408,7 +346,7 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("query.addr", ":8002")
 	v.SetDefault("query.duckdb_path", "")
 	v.SetDefault("query.sync_interval", "30s")
-	v.SetDefault("query.lake.enabled", false)
+	v.SetDefault("query.lake.enabled", true)
 	v.SetDefault("query.playground_llm_base_url", "")
 	v.SetDefault("query.playground_llm_api_key", "")
 	// eval
@@ -433,7 +371,7 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("quack.client.url", "localhost:9494")
 	v.SetDefault("quack.client.token", "")
 	v.SetDefault("quack.client.data_path", "")
-	v.SetDefault("writer.lake.enabled", false)
+	v.SetDefault("writer.lake.enabled", true)
 
 	if path != "" {
 		v.SetConfigFile(path)
@@ -479,14 +417,6 @@ func Load(path string) (*Config, error) {
 	envBool(&cfg.Writer.LeaderElection.Enabled, "OMNEVAL_WRITER_LEADER_ELECTION_ENABLED")
 	envInt(&cfg.Writer.LeaderElection.LockTTL, "OMNEVAL_WRITER_LEADER_ELECTION_LOCK_TTL")
 	envBool(&cfg.Writer.LeaderElection.FencingEnabled, "OMNEVAL_WRITER_LEADER_ELECTION_FENCING_ENABLED")
-	envBool(&cfg.Writer.Retention.Enabled, "OMNEVAL_WRITER_RETENTION_ENABLED")
-	envString(&cfg.Writer.Retention.Action, "OMNEVAL_WRITER_RETENTION_ACTION")
-	envInt(&cfg.Writer.Retention.MaxAgeDays, "OMNEVAL_WRITER_RETENTION_MAX_AGE_DAYS")
-	envInt(&cfg.Writer.Retention.IntervalMinutes, "OMNEVAL_WRITER_RETENTION_INTERVAL_MINUTES")
-	envString(&cfg.Writer.Retention.Destination.Bucket, "OMNEVAL_WRITER_RETENTION_DESTINATION_BUCKET")
-	envString(&cfg.Writer.Retention.Destination.Prefix, "OMNEVAL_WRITER_RETENTION_DESTINATION_PREFIX")
-	envString(&cfg.Writer.Retention.Destination.StorageClass, "OMNEVAL_WRITER_RETENTION_DESTINATION_STORAGE_CLASS")
-	envBool(&cfg.Writer.Retention.TriggerEndpointEnabled, "OMNEVAL_WRITER_RETENTION_TRIGGER_ENDPOINT_ENABLED")
 	envBool(&cfg.Writer.Reconciliation.Enabled, "OMNEVAL_WRITER_RECONCILIATION_ENABLED")
 	envInt(&cfg.Writer.Reconciliation.IntervalMinutes, "OMNEVAL_WRITER_RECONCILIATION_INTERVAL_MINUTES")
 	envInt(&cfg.Writer.Reconciliation.GracePeriodMinutes, "OMNEVAL_WRITER_RECONCILIATION_GRACE_PERIOD_MINUTES")
