@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/duckdb"
 	"github.com/omneval/omneval/internal/lake"
+	"github.com/omneval/omneval/internal/lake/lakeservertest"
 	"github.com/omneval/omneval/internal/queue"
 )
 
@@ -85,12 +85,8 @@ func bufferedTestPipeline(t *testing.T) (*Pipeline, *lake.Lake, *fakeReliableQue
 	}
 	t.Cleanup(func() { db.Close() })
 
-	dir := t.TempDir()
-	lk, err := lake.Open(ctx, lake.Config{
-		CatalogDriver: lake.CatalogDriverLocal,
-		CatalogDSN:    filepath.Join(dir, "catalog.ducklake"),
-		DataPath:      filepath.Join(dir, "data"),
-	})
+	cfg, _ := lakeservertest.NewLocal(t)
+	lk, err := lake.Open(ctx, cfg)
 	if err != nil {
 		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
 	}

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +17,7 @@ import (
 	"github.com/omneval/omneval/internal/domain"
 	_ "github.com/omneval/omneval/internal/duckdbfix"
 	"github.com/omneval/omneval/internal/lake"
+	"github.com/omneval/omneval/internal/lake/lakeservertest"
 	"github.com/omneval/omneval/services/query/internal/auth"
 )
 
@@ -2056,17 +2056,7 @@ func TestHandleTraceDetail_DedupeOnLake(t *testing.T) {
 	ctx := context.Background()
 
 	// Set up a real Lake with partitioned spans table.
-	tmpDir := t.TempDir()
-	_, err := os.MkdirTemp(tmpDir, "catalog")
-	if err != nil {
-		t.Fatalf("create catalog dir: %v", err)
-	}
-
-	cfg := lake.Config{
-		CatalogDriver: lake.CatalogDriverLocal,
-		CatalogDSN:    filepath.Join(tmpDir, "catalog", "lake.ducklake"),
-		DataPath:      filepath.Join(tmpDir, "data"),
-	}
+	cfg, _ := lakeservertest.NewLocal(t)
 
 	lk, err := lake.Open(ctx, cfg)
 	if err != nil {

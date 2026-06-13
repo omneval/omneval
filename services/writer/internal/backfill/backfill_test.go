@@ -10,6 +10,7 @@ import (
 
 	"github.com/omneval/omneval/internal/duckdb"
 	"github.com/omneval/omneval/internal/lake"
+	"github.com/omneval/omneval/internal/lake/lakeservertest"
 )
 
 // seedHotDB creates a legacy hot DuckDB file with the given spans/scores.
@@ -93,12 +94,7 @@ func seedColdArchive(t *testing.T, root string, spans [][3]string, scores [][2]s
 
 func openTestLake(t *testing.T) (*lake.Lake, lake.Config) {
 	t.Helper()
-	dir := t.TempDir()
-	cfg := lake.Config{
-		CatalogDriver: lake.CatalogDriverLocal,
-		CatalogDSN:    filepath.Join(dir, "catalog.ducklake"),
-		DataPath:      filepath.Join(dir, "data"),
-	}
+	cfg, _ := lakeservertest.NewLocal(t)
 	lk, err := lake.Open(context.Background(), cfg)
 	if err != nil {
 		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
