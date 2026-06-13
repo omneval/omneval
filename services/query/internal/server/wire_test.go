@@ -8,26 +8,25 @@ import (
 	"testing"
 
 	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/lake/lakeservertest"
 	"github.com/omneval/omneval/internal/metadata/sqlite"
 	_ "modernc.org/sqlite"
 )
 
-// wireTestConfig returns a config whose local pieces (snapshot path, SQLite
-// metadata store) live in a temp dir and no S3 storage configured.
+// wireTestConfig returns a config whose local pieces (SQLite metadata store)
+// live in a temp dir and a local Quack Server backs the Lake attachment.
 func wireTestConfig(t *testing.T) *config.Config {
 	t.Helper()
 	tmp := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Query.DuckDBPath = filepath.Join(tmp, "snapshot.duckdb")
 	cfg.Database.Driver = "sqlite"
 	cfg.Database.DSN = filepath.Join(tmp, "meta.db")
 
-	// Without S3 there is no snapshot download: pre-create the empty
-	// snapshot DB like a writer-produced one (matches production, where the
-	// no-S3 path expects the file to exist).
-	if err := createEmptyDB(cfg.Query.DuckDBPath); err != nil {
-		t.Fatalf("create empty snapshot db: %v", err)
-	}
+	lc, _ := lakeservertest.NewLocal(t)
+	cfg.Quack.Client.URL = "quack://" + lc.QuackAddr
+	cfg.Quack.Client.Token = lc.QuackToken
+	cfg.Quack.Client.DataPath = lc.DataPath
+
 	return cfg
 }
 
@@ -40,8 +39,8 @@ func TestWireDeps_Success_NoS3(t *testing.T) {
 	}
 	defer deps.Close()
 
-	if deps.Store == nil || deps.SDB == nil || deps.Auth == nil {
-		t.Error("expected store, snapshot DB, and auth handler to be wired")
+	if deps.Store == nil || deps.Lake == nil || deps.Auth == nil {
+		t.Error("expected store, lake, and auth handler to be wired")
 	}
 	if deps.Span == nil || deps.Admin == nil || deps.Prompt == nil ||
 		deps.Dataset == nil || deps.DatasetRun == nil || deps.Playground == nil {
@@ -70,22 +69,6 @@ func TestWireDeps_MetadataStoreFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "open metadata store") {
 		t.Errorf("error %q should mention open metadata store", err)
-	}
-}
-
-func TestWireDeps_SnapshotDownloadFailure(t *testing.T) {
-	cfg := wireTestConfig(t)
-	// Unreachable S3 endpoint: download must fail fast and WireDeps must
-	// surface it.
-	cfg.Storage.Endpoint = "http://127.0.0.1:1"
-	cfg.Storage.Bucket = "omneval"
-
-	_, err := WireDeps(cfg)
-	if err == nil {
-		t.Fatal("expected error for unreachable S3 endpoint, got nil")
-	}
-	if !strings.Contains(err.Error(), "download snapshot") {
-		t.Errorf("error %q should mention download snapshot", err)
 	}
 }
 

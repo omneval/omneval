@@ -39,8 +39,8 @@ func TestAdminHandler_TracesCount(t *testing.T) {
 }
 
 func TestAdminHandler_TracesDelete(t *testing.T) {
-	db := setupTestDB(t)
-	handler := &AdminHandler{DB: db, Store: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}
+	lk := setupTestLake(t)
+	handler := &AdminHandler{DB: lk.DB(), Store: newFakeAdminStore(), LakeRW: lk, SessionStore: &FakeSessionStore{projectID: "proj-1"}}
 
 	req := httptest.NewRequest("DELETE", "/api/v1/admin/traces/proj-1", nil)
 	req = withAdminContext(req, "admin@test.com")
@@ -54,8 +54,8 @@ func TestAdminHandler_TracesDelete(t *testing.T) {
 }
 
 func TestAdminHandler_ProjectsDelete(t *testing.T) {
-	db := setupTestDB(t)
-	handler := &AdminHandler{DB: db, Store: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}
+	lk := setupTestLake(t)
+	handler := &AdminHandler{DB: lk.DB(), Store: newFakeAdminStore(), LakeRW: lk, SessionStore: &FakeSessionStore{projectID: "proj-1"}}
 
 	req := httptest.NewRequest("DELETE", "/api/v1/admin/projects/proj-1", nil)
 	req = withAdminContext(req, "admin@test.com")

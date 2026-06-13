@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
@@ -22,12 +21,10 @@ import (
 // GET /api/v1/traces/:traceId (single-trace waterfall detail),
 // and GET /api/v1/projects (project list for the UI project switcher).
 type SpanHandler struct {
-	DB           DBHandle
 	SessionStore SessionStore
 	Metrics      *metrics.QueryMetrics
-	// Lake is the DuckDB handle attached read-only to the Lake.
-	// When non-nil, all span reads compile against lake.spans instead
-	// of the S3 snapshot path (ADR-0004).
+	// Lake is the DuckDB handle attached read-only to the Lake. All span
+	// reads compile against lake.spans (ADR-0004).
 	Lake DBHandle
 	// Meta resolves bookmarked trace IDs for "bookmarked" filters —
 	// bookmarks live in the Metadata Store, not DuckDB (ADR-0004).
@@ -173,7 +170,7 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 
 	// Build the query — projectID is validated server-side against the user's
 	// org; the raw client value is never trusted directly.
-	q, err := query.NewSpanQuery(projectID, req, nil, "")
+	q, err := query.NewSpanQuery(projectID, req)
 	if err != nil {
 		writeJSONError(w, "bad request: "+err.Error(), http.StatusBadRequest)
 		return
@@ -286,16 +283,8 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Build the trace tree (includes score loading).
-	// When Lake is available, read scores from lake.scores; otherwise
-	// fall back to the snapshot scores table.
-	scoresDB := h.DB
-	scoresTable := "scores"
-	if h.Lake != nil {
-		scoresDB = h.Lake
-		scoresTable = "lake.scores"
-	}
-	trace := buildTraceTree(spans, scoresDB, traceID, projectID, scoresTable)
+	// Build the trace tree (includes score loading from lake.scores).
+	trace := buildTraceTree(spans, h.Lake, traceID, projectID, "lake.scores")
 
 	resp := domain.TraceResponse{
 		TraceID:   trace.TraceID,
@@ -311,8 +300,8 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// querySpansForTrace fetches all spans for a given trace_id and project_id.
-// When Lake is available, it uses LakeTraceSpansSQL with dedupe (per ADR-0004).
+// querySpansForTrace fetches all spans for a given trace_id and project_id
+// using LakeTraceSpansSQL with dedupe on (trace_id, span_id) (per ADR-0004).
 func (h *SpanHandler) querySpansForTrace(projectID, traceID string) ([]*domain.Span, error) {
 	req := query.SpanQueryRequest{
 		From: time.Time{},
@@ -323,41 +312,15 @@ func (h *SpanHandler) querySpansForTrace(projectID, traceID string) ([]*domain.S
 		Limit: 10000,
 	}
 
-	q, err := query.NewSpanQuery(projectID, req, nil, "")
+	q, err := query.NewSpanQuery(projectID, req)
 	if err != nil {
 		return nil, fmt.Errorf("build span query: %w", err)
 	}
 
-	// When Lake is available, use LakeTraceSpansSQL with dedupe on (trace_id, span_id).
-	if h.Lake != nil {
-		sqlStr, args := q.LakeTraceSpansSQL(traceID)
-		rows, err := h.Lake.Query(sqlStr, args...)
-		if err != nil {
-			return nil, fmt.Errorf("execute lake trace spans query: %w", err)
-		}
-		defer rows.Close()
-
-		spanRows, err := scanAllRows(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan span rows: %w", err)
-		}
-
-		spans, err := query.ScanRows(spanRows)
-		if err != nil {
-			return nil, fmt.Errorf("convert span rows: %w", err)
-		}
-
-		return spans, nil
-	}
-
-	sqlStr, args, err := q.SQL()
+	sqlStr, args := q.LakeTraceSpansSQL(traceID)
+	rows, err := h.Lake.Query(sqlStr, args...)
 	if err != nil {
-		return nil, fmt.Errorf("compile span query: %w", err)
-	}
-
-	rows, err := h.DB.Query(sqlStr, args...)
-	if err != nil {
-		return nil, fmt.Errorf("execute span query: %w", err)
+		return nil, fmt.Errorf("execute lake trace spans query: %w", err)
 	}
 	defer rows.Close()
 
@@ -372,55 +335,6 @@ func (h *SpanHandler) querySpansForTrace(projectID, traceID string) ([]*domain.S
 	}
 
 	return spans, nil
-}
-
-// queryScoresForTrace fetches all scores for spans in a given trace_id and project_id.
-// Returns a map of span_id -> []*domain.SpanScore.
-// Gracefully handles missing scores table (returns empty map).
-func (h *SpanHandler) queryScoresForTrace(projectID, traceID string) (map[string][]*domain.SpanScore, error) {
-	result := make(map[string][]*domain.SpanScore)
-
-	rows, err := h.DB.Query(
-		`SELECT span_id, eval_name, value, reasoning FROM scores WHERE trace_id = ? AND project_id = ?`,
-		traceID, projectID,
-	)
-	if err != nil {
-		// If the scores table doesn't exist, return empty scores (graceful degradation).
-		// DuckDB reports missing tables with a message containing "Table".
-		if strings.Contains(err.Error(), "Table") {
-			return result, nil
-		}
-		return nil, fmt.Errorf("query scores: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var spanID string
-		var evalName string
-		var value float64
-		var reasoning *string
-
-		if err := rows.Scan(&spanID, &evalName, &value, &reasoning); err != nil {
-			return nil, fmt.Errorf("scan score row: %w", err)
-		}
-
-		sc := &domain.SpanScore{
-			EvalName:  evalName,
-			Value:     value,
-			Reasoning: "",
-		}
-		if reasoning != nil {
-			sc.Reasoning = *reasoning
-		}
-
-		result[spanID] = append(result[spanID], sc)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate score rows: %w", err)
-	}
-
-	return result, nil
 }
 
 // scanAllRows scans all database rows into [][]any.
@@ -669,22 +583,14 @@ func writeJSONError(w http.ResponseWriter, message string, status int) {
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
-// compileSpanQuery compiles a SpanQuery against the Lake when it is
-// available, otherwise against the legacy hot+cold UNION.
+// compileSpanQuery compiles a SpanQuery against the Lake (ADR-0004).
 func (h *SpanHandler) compileSpanQuery(q *query.SpanQuery) (string, []any, error) {
-	if h.Lake != nil {
-		return q.LakeSQL()
-	}
-	return q.SQL()
+	return q.LakeSQL()
 }
 
-// spanDB returns the database handle for span reads: the Lake when it is
-// available, otherwise the snapshot DB.
+// spanDB returns the database handle for span reads: the Lake.
 func (h *SpanHandler) spanDB() DBHandle {
-	if h.Lake != nil {
-		return h.Lake
-	}
-	return h.DB
+	return h.Lake
 }
 
 // ScoreLakeWriter commits scores to the Lake (ADR-0004). Implemented by

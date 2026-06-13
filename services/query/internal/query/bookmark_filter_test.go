@@ -1,12 +1,8 @@
 package query
 
 import (
-	"context"
-	"io"
 	"strings"
 	"testing"
-
-	"github.com/omneval/omneval/internal/storage"
 )
 
 func TestCompileSpecialFilter_Bookmarked(t *testing.T) {
@@ -97,7 +93,7 @@ func TestNewSpanQuery_BookmarkedFilter(t *testing.T) {
 		},
 	}
 
-	q, err := NewSpanQuery("test-project", req, nil, "")
+	q, err := NewSpanQuery("test-project", req)
 	if err != nil {
 		t.Fatalf("NewSpanQuery: %v", err)
 	}
@@ -110,7 +106,7 @@ func TestNewSpanQuery_BookmarkedFilter(t *testing.T) {
 }
 
 func TestNeedsBookmarks_FalseWithoutFilter(t *testing.T) {
-	q, err := NewSpanQuery("test-project", SpanQueryRequest{}, nil, "")
+	q, err := NewSpanQuery("test-project", SpanQueryRequest{})
 	if err != nil {
 		t.Fatalf("NewSpanQuery: %v", err)
 	}
@@ -157,30 +153,3 @@ func TestSpanQuery_BookmarkedFalseFilterInWhereClause(t *testing.T) {
 	}
 }
 
-func TestNewSpanQuery_NilS3Store(t *testing.T) {
-	// Verify that nil s3Store is handled correctly.
-	req := SpanQueryRequest{
-		Limit: 10,
-	}
-	q, err := NewSpanQuery("proj", req, nil, "")
-	if err != nil {
-		t.Fatalf("NewSpanQuery with nil s3Store: %v", err)
-	}
-	if q == nil {
-		t.Fatal("expected non-nil query")
-	}
-}
-
-// Compile-time check that storage.ObjectStore interface is satisfied by s3.Store.
-var _ storage.ObjectStore = (*testS3Store)(nil)
-
-type testS3Store struct{}
-
-func (m *testS3Store) Put(_ context.Context, _ string, _ io.Reader) error               { return nil }
-func (m *testS3Store) PutSized(_ context.Context, _ string, _ io.Reader, _ int64) error { return nil }
-func (m *testS3Store) Get(_ context.Context, _ string) (io.ReadCloser, error)           { return nil, nil }
-func (m *testS3Store) Delete(_ context.Context, _ string) error                         { return nil }
-func (m *testS3Store) ListPrefix(_ context.Context, _ string) ([]string, error)         { return nil, nil }
-func (m *testS3Store) Stat(_ context.Context, _ string) (*storage.ObjectStat, error) {
-	return nil, nil
-}

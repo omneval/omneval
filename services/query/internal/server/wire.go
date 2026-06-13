@@ -10,7 +10,6 @@ import (
 
 	internalauth "github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/config"
-	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/probe"
@@ -28,25 +27,19 @@ import (
 type WiredDeps struct {
 	Cfg          *config.Config
 	Store        metadata.Store
-	SDB          *SwappableDB
-	DBPath       string
 	S3           *s3.Store // nil when storage is not configured
-	SyncInterval time.Duration
 	SessionTTL   time.Duration
 	QueryMetrics *metrics.QueryMetrics
 	Prober       *probe.Prober
 
 	// Lake is the DuckDB handle attached read-only to the Lake (DuckLake via
-	// the Postgres Catalog). When query.lake.enabled is true, all span reads
-	// compile against this handle instead of the S3 snapshot.
-	Lake *SwappableDB
+	// the Postgres Catalog). All span reads compile against this handle
+	// (ADR-0004).
+	Lake *sql.DB
 
 	// AdminLake is a separate read-write Lake attachment used for durable
-	// admin deletes (#91). nil unless query.lake.enabled is true.
+	// admin deletes (#91) and score writes.
 	AdminLake *lake.Lake
-
-	// SnapshotLastModified tracks the S3 snapshot mtime for the poller.
-	SnapshotLastModified time.Time
 
 	// Handlers.
 	Auth            *auth.Handler
@@ -67,9 +60,6 @@ type WiredDeps struct {
 // startup failure paths; during normal operation RunWired manages shutdown
 // ordering itself.
 func (d *WiredDeps) Close() {
-	if d.SDB != nil {
-		d.SDB.Close()
-	}
 	if d.Lake != nil {
 		d.Lake.Close()
 	}
@@ -107,20 +97,6 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	}
 	deps.Store = store
 
-	// Resolve DuckDB snapshot path.
-	deps.DBPath = cfg.Query.DuckDBPath
-	if deps.DBPath == "" {
-		deps.DBPath = "/tmp/omneval-snapshot.duckdb"
-	}
-
-	// Parse sync interval (default 30s).
-	deps.SyncInterval, err = time.ParseDuration(cfg.Query.SyncInterval)
-	if err != nil {
-		deps.SyncInterval = 30 * time.Second
-		slog.Warn("query: invalid sync_interval, using default 30s",
-			"raw", cfg.Query.SyncInterval)
-	}
-
 	// Parse session TTL (default 7 days).
 	deps.SessionTTL, err = time.ParseDuration(cfg.Auth.SessionTTL)
 	if err != nil {
@@ -132,48 +108,6 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	if cfg.Storage.Bucket != "" || cfg.Storage.Endpoint != "" {
 		deps.S3 = s3.New(&cfg.Storage)
 	}
-
-	// Download snapshot from S3 (if configured). In Lake mode the snapshot
-	// tier is bypassed entirely — reads come from the Lake (ADR-0004), so
-	// no download happens and the poller never starts.
-	if deps.S3 != nil && !cfg.Query.Lake.Enabled {
-		if err := downloadSnapshot(context.Background(), deps.S3, deps.DBPath); err != nil {
-			deps.Close()
-			return nil, fmt.Errorf("query: download snapshot: %w", err)
-		}
-		if stat, err := deps.S3.Stat(context.Background(), s3.SnapshotKey()); err == nil && stat != nil {
-			slog.Info("query: snapshot downloaded from S3", "path", deps.DBPath, "last_modified", stat.LastModified)
-			deps.SnapshotLastModified = stat.LastModified
-		} else {
-			slog.Info("query: snapshot not yet available in S3")
-		}
-	} else if cfg.Query.Lake.Enabled {
-		slog.Info("query: Lake enabled, skipping snapshot download")
-	} else {
-		slog.Info("query: no S3 configured, skipping snapshot download")
-	}
-
-	// Open the snapshot database via SwappableDB so the poller can atomically
-	// reopen the connection each time S3 delivers a new snapshot. In Lake
-	// mode there is no snapshot file to open (it's never downloaded, see
-	// above) — wrap an empty in-memory DuckDB instead. Handlers that need
-	// span data get the Lake handle wired in separately below.
-	var sdb *SwappableDB
-	if cfg.Query.Lake.Enabled {
-		emptyDB, err := sql.Open("duckdb", "")
-		if err != nil {
-			deps.Close()
-			return nil, fmt.Errorf("query: open in-memory db: %w", err)
-		}
-		sdb = NewSwappableDBFromDB(emptyDB)
-	} else {
-		sdb, err = NewSwappableDB(deps.DBPath)
-		if err != nil {
-			deps.Close()
-			return nil, fmt.Errorf("query: open snapshot: %w", err)
-		}
-	}
-	deps.SDB = sdb
 
 	// Bootstrap admin user if no users exist.
 	h := auth.NewHandler(store, cfg.Auth.SecureCookie, deps.SessionTTL, cfg.Auth.AdminEmail, cfg.Auth.AdminPassword)
@@ -189,15 +123,10 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	}
 	deps.Auth = h
 
-	// One-time carry-over: bookmarks created before the move to the
-	// Metadata Store (ADR-0004 / #84) still live in the DuckDB snapshot's
-	// bookmarks table. Copy them across idempotently before serving.
-	migrateBookmarksFromSnapshot(context.Background(), sdb, store)
-
 	// Create handlers.
-	deps.Span = &handler.SpanHandler{DB: sdb, SessionStore: h, Meta: store}
+	deps.Span = &handler.SpanHandler{SessionStore: h, Meta: store}
 	deps.Bookmark = &handler.BookmarkHandler{Store: store, SessionStore: h}
-	deps.Conversation = &handler.ConversationHandler{DB: sdb, SessionStore: h}
+	deps.Conversation = &handler.ConversationHandler{SessionStore: h}
 
 	// Prompt registry handler. A CachingValidator is wired in so that SDK
 	// callers can authenticate GET prompt endpoints using X-API-Key in
@@ -212,13 +141,12 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	}
 
 	deps.EvalRule = &handler.EvalRuleHandler{
-		DB:                sdb,
 		Store:             store,
 		SessionStore:      h,
 		DefaultJudgeModel: cfg.Eval.LLMModel,
 	}
 
-	deps.Admin = &handler.AdminHandler{DB: sdb, Store: store, SessionStore: h}
+	deps.Admin = &handler.AdminHandler{Store: store, SessionStore: h}
 
 	deps.Dataset = &handler.DatasetHandler{Store: store, SessionStore: h}
 
@@ -245,67 +173,65 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	// Health and readiness probes.
 	p := probe.New()
 
-	// When the Lake is enabled, attach read-only to the Lake and gate
-	// readiness on Catalog reachability instead of snapshot-file existence.
-	// Legacy snapshot path remains fully functional when the flag is off
-	// (default off).
-	if cfg.Query.Lake.Enabled {
-		lakeHandle, err := openLakeDB(cfg)
-		if err != nil {
-			deps.Close()
-			return nil, fmt.Errorf("query: open lake: %w", err)
-		}
-		deps.Lake = lakeHandle
-		deps.Span.Lake = lakeHandle
-		deps.Conversation.Lake = lakeHandle
-		// Eval-rule preview reads `spans` unqualified; the views
-		// openLakeDB creates resolve that against the Lake.
-		deps.EvalRule.DB = lakeHandle
-
-		// Admin gets its own read-write Lake attachment (#91): DuckLake's
-		// catalog transactions make a second writer safe, and durable
-		// deletes must commit through the Catalog rather than the
-		// read-only snapshot copy (which never persisted — see
-		// docs/restore-from-snapshot.md). Admin counts also read through
-		// this attachment so a delete is reflected immediately, without
-		// waiting on the read-only attachment's cached catalog snapshot.
-		adminLake, err := lake.Open(context.Background(), lake.ConfigFromApp(cfg))
-		if err != nil {
-			deps.Close()
-			return nil, fmt.Errorf("query: open admin lake: %w", err)
-		}
-		deps.AdminLake = adminLake
-		if _, err := adminLake.DB().ExecContext(context.Background(),
-			"CREATE OR REPLACE VIEW spans AS SELECT * FROM lake.spans"); err != nil {
-			deps.Close()
-			return nil, fmt.Errorf("query: create admin lake view: %w", err)
-		}
-		deps.Admin.DB = NewSwappableDBFromDB(adminLake.DB())
-		deps.Admin.LakeRW = adminLake
-
-		p.AddCheck("catalog", &probe.CatalogReachable{
-			Ping: func(ctx context.Context) error {
-				// A metadata-only scan of lake.spans forces a round trip
-				// to the Catalog; pinging the in-memory DuckDB would not.
-				var n int64
-				return lakeHandle.DB().
-					QueryRowContext(ctx, "SELECT COUNT(*) FROM lake.spans WHERE 1 = 0").
-					Scan(&n)
-			},
-		})
-		slog.Info("query: Lake enabled, routing all span reads to lake.spans")
-	} else {
-		p.AddCheck("snapshot", &probe.FileExists{Path: deps.DBPath})
+	// Admin gets its own read-write Lake attachment (#91): DuckLake's
+	// catalog transactions make a second writer safe, and durable
+	// deletes must commit through the Catalog rather than a read-only
+	// attachment. Admin counts also read through this attachment so a
+	// delete is reflected immediately, without waiting on the read-only
+	// attachment's cached catalog snapshot. The same attachment backs
+	// score writes (POST /api/v1/scores).
+	//
+	// This attachment is opened first (and read-write) because it is
+	// responsible for creating the DuckLake catalog tables on a brand-new
+	// Lake (ensureTables); the read-only attachment below fails to attach
+	// if the catalog does not exist yet.
+	adminLake, err := lake.Open(context.Background(), lake.ConfigFromApp(cfg))
+	if err != nil {
+		deps.Close()
+		return nil, fmt.Errorf("query: open admin lake: %w", err)
 	}
+	deps.AdminLake = adminLake
+	if _, err := adminLake.DB().ExecContext(context.Background(),
+		"CREATE OR REPLACE VIEW spans AS SELECT * FROM lake.spans"); err != nil {
+		deps.Close()
+		return nil, fmt.Errorf("query: create admin lake view: %w", err)
+	}
+	deps.Admin.DB = adminLake.DB()
+	deps.Admin.LakeRW = adminLake
+
+	// Attach read-only to the Lake and gate readiness on Catalog
+	// reachability (ADR-0004).
+	lakeHandle, err := openLakeDB(cfg)
+	if err != nil {
+		deps.Close()
+		return nil, fmt.Errorf("query: open lake: %w", err)
+	}
+	deps.Lake = lakeHandle
+	deps.Span.Lake = lakeHandle
+	deps.Conversation.Lake = lakeHandle
+	// Eval-rule preview reads `spans` unqualified; the views
+	// openLakeDB creates resolve that against the Lake.
+	deps.EvalRule.DB = lakeHandle
+
+	p.AddCheck("catalog", &probe.CatalogReachable{
+		Ping: func(ctx context.Context) error {
+			// A metadata-only scan of lake.spans forces a round trip
+			// to the Catalog; pinging the in-memory DuckDB would not.
+			var n int64
+			return lakeHandle.
+				QueryRowContext(ctx, "SELECT COUNT(*) FROM lake.spans WHERE 1 = 0").
+				Scan(&n)
+		},
+	})
+	slog.Info("query: routing all span reads to lake.spans")
 	deps.Prober = p
 
 	return deps, nil
 }
 
 // openLakeDB attaches read-only to the Lake (DuckLake via the Catalog) and
-// exposes it through the SwappableDB seam the handlers already use (Swap is
-// never called on it — there is no snapshot to rotate).
-func openLakeDB(cfg *config.Config) (*SwappableDB, error) {
+// returns the underlying *sql.DB.
+func openLakeDB(cfg *config.Config) (*sql.DB, error) {
 	lc := lake.ConfigFromApp(cfg)
 	lc.ReadOnly = true
 	lk, err := lake.Open(context.Background(), lc)
@@ -325,34 +251,5 @@ func openLakeDB(cfg *config.Config) (*SwappableDB, error) {
 			return nil, fmt.Errorf("create lake view: %w", err)
 		}
 	}
-	return NewSwappableDBFromDB(lk.DB()), nil
-}
-
-// migrateBookmarksFromSnapshot copies bookmark rows left in the legacy
-// DuckDB snapshot into the Metadata Store (one-time carry-over for #84).
-// Idempotent — SetBookmark ignores rows that already exist — and
-// best-effort: a snapshot without a bookmarks table is not an error.
-func migrateBookmarksFromSnapshot(ctx context.Context, sdb *SwappableDB, store metadata.Store) {
-	rows, err := sdb.QueryContext(ctx, "SELECT project_id, trace_id, created_at FROM bookmarks")
-	if err != nil {
-		return // no bookmarks table in this snapshot — nothing to carry over
-	}
-	defer rows.Close()
-
-	var carried int
-	for rows.Next() {
-		var b domain.Bookmark
-		if err := rows.Scan(&b.ProjectID, &b.TraceID, &b.CreatedAt); err != nil {
-			slog.Warn("query: scan legacy bookmark", "err", err)
-			continue
-		}
-		if err := store.SetBookmark(ctx, &b); err != nil {
-			slog.Warn("query: carry over bookmark", "trace_id", b.TraceID, "err", err)
-			continue
-		}
-		carried++
-	}
-	if carried > 0 {
-		slog.Info("query: carried over legacy bookmarks to metadata store", "count", carried)
-	}
+	return lk.DB(), nil
 }
