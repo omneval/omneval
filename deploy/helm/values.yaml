@@ -95,18 +95,6 @@ writer:
   replicas: 1
   # Listen address for the score handler endpoint
   addr: ":8001"
-  # Path to the DuckDB file on the PVC
-  duckdbPath: "/data/omneval.duckdb"
-  # Snapshot sync interval to S3 (override via OMNEVAL_WRITER_SYNC_INTERVAL)
-  syncInterval: "30s"
-  # Aged partition flush interval to Parquet on S3 (override via OMNEVAL_WRITER_FLUSH_INTERVAL)
-  flushInterval: "30m"
-  # Flush spans older than N days to cold storage (override via OMNEVAL_WRITER_FLUSH_AGE_DAYS)
-  flushAgeDays: 2
-  # Leader election configuration (for multi-replica HA)
-  leaderElection:
-    enabled: false
-    lockTTL: 15
   # Resource limits and requests
   resources:
     limits:
@@ -133,10 +121,6 @@ query:
   replicas: 2
   # Listen address (override via OMNEVAL_QUERY_ADDR)
   addr: ":8002"
-  # Path to the DuckDB snapshot file (local, read from S3)
-  duckdbPath: "/tmp/omneval-snapshot.duckdb"
-  # Snapshot poll interval from S3 (override via OMNEVAL_QUERY_SYNC_INTERVAL)
-  syncInterval: "30s"
   # Session cookie TTL (override via OMNEVAL_AUTH_SESSION_TTL)
   sessionTTL: "168h"
   # Secure cookie flag (override via OMNEVAL_AUTH_SECURE_COOKIE)

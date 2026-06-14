@@ -9,11 +9,34 @@ import (
 
 	"github.com/omneval/omneval/internal/buffer"
 	"github.com/omneval/omneval/internal/domain"
-	"github.com/omneval/omneval/internal/duckdb"
 	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/lake/lakeservertest"
 	"github.com/omneval/omneval/internal/queue"
 )
+
+// bufferedTestSpan builds a minimal span for buffered-pipeline tests.
+func bufferedTestSpan(spanID string) *domain.Span {
+	return &domain.Span{
+		SpanID:       spanID,
+		TraceID:      "trace-" + spanID,
+		ProjectID:    "proj-1",
+		Name:         "llm-call",
+		Kind:         domain.SpanKind("llm"),
+		StartTime:    time.Date(2026, 6, 5, 10, 0, 0, 0, time.UTC),
+		EndTime:      time.Date(2026, 6, 5, 10, 0, 1, 0, time.UTC),
+		Model:        "gpt-4o",
+		InputTokens:  100,
+		OutputTokens: 50,
+	}
+}
+
+// failingLake is a SpanLakeWriter that always fails, for testing the
+// requeue-on-lake-failure path.
+type failingLake struct{}
+
+func (failingLake) InsertSpans(context.Context, []*domain.Span) error {
+	return errors.New("lake unavailable")
+}
 
 // fakeReliableQueue records Ack/Requeue/EnqueueRef calls.
 type fakeReliableQueue struct {
@@ -79,12 +102,6 @@ func bufferedTestPipeline(t *testing.T) (*Pipeline, *lake.Lake, *fakeReliableQue
 	t.Helper()
 	ctx := context.Background()
 
-	db, err := duckdb.Open(":memory:")
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-
 	cfg, _ := lakeservertest.NewLocal(t)
 	lk, err := lake.Open(ctx, cfg)
 	if err != nil {
@@ -95,7 +112,7 @@ func bufferedTestPipeline(t *testing.T) (*Pipeline, *lake.Lake, *fakeReliableQue
 	rq := &fakeReliableQueue{}
 	fetcher := &fakeFetcher{batches: make(map[string][]*domain.Span)}
 	ledger := newFakeLedger()
-	p := New(nil, db, testPricing, nil, nil, nil).
+	p := New(nil, testPricing, nil, nil, nil).
 		WithLake(lk).
 		WithBuffer(rq, fetcher, ledger)
 	return p, lk, rq, fetcher, ledger
@@ -118,7 +135,7 @@ func TestProcessEntry_RefCommitsLakeLedgerThenAcks(t *testing.T) {
 	ctx := context.Background()
 	p, lk, rq, fetcher, ledger := bufferedTestPipeline(t)
 
-	fetcher.batches["b1"] = []*domain.Span{dualWriteSpan("s1")}
+	fetcher.batches["b1"] = []*domain.Span{bufferedTestSpan("s1")}
 	entry := &queue.IngestEntry{Ref: &queue.BatchRef{BatchID: "b1"}, Raw: "raw-b1"}
 
 	p.processEntry(ctx, entry)
@@ -144,7 +161,7 @@ func TestProcessEntry_RedeliveryAddsZeroLakeRows(t *testing.T) {
 	ctx := context.Background()
 	p, lk, rq, fetcher, ledger := bufferedTestPipeline(t)
 
-	fetcher.batches["b1"] = []*domain.Span{dualWriteSpan("s1")}
+	fetcher.batches["b1"] = []*domain.Span{bufferedTestSpan("s1")}
 
 	p.processEntry(ctx, &queue.IngestEntry{Ref: &queue.BatchRef{BatchID: "b1"}, Raw: "raw-1"})
 	if got := lakeSpanCount(t, lk); got != 1 {
@@ -172,9 +189,9 @@ func TestProcessEntry_RedeliveryAddsZeroLakeRows(t *testing.T) {
 func TestProcessEntry_LakeFailureLeavesBatchReplayable(t *testing.T) {
 	ctx := context.Background()
 	p, _, rq, fetcher, ledger := bufferedTestPipeline(t)
-	p.lake = failingLake{} // shared fake from lake_dualwrite_test.go
+	p.lake = failingLake{}
 
-	fetcher.batches["b1"] = []*domain.Span{dualWriteSpan("s1")}
+	fetcher.batches["b1"] = []*domain.Span{bufferedTestSpan("s1")}
 	entry := &queue.IngestEntry{Ref: &queue.BatchRef{BatchID: "b1"}, Raw: "raw-b1"}
 
 	p.processEntry(ctx, entry)
@@ -201,7 +218,7 @@ func TestProcessEntry_LedgerInsertFailureRequeues(t *testing.T) {
 	p, _, rq, fetcher, ledger := bufferedTestPipeline(t)
 	ledger.markErr = errors.New("postgres down")
 
-	fetcher.batches["b1"] = []*domain.Span{dualWriteSpan("s1")}
+	fetcher.batches["b1"] = []*domain.Span{bufferedTestSpan("s1")}
 	p.processEntry(ctx, &queue.IngestEntry{Ref: &queue.BatchRef{BatchID: "b1"}, Raw: "raw-b1"})
 
 	if len(rq.acked) != 0 {
@@ -235,30 +252,23 @@ func TestProcessEntry_MissingBufferObjectIsDropped(t *testing.T) {
 	}
 }
 
-// TestProcessEntry_LegacyPayloadEntry: payload entries on the reliable
-// loop keep dual-write semantics (legacy write authoritative, lake best
-// effort) and ack after processing without touching the ledger.
-func TestProcessEntry_LegacyPayloadEntry(t *testing.T) {
+// TestProcessEntry_PayloadEntry: inline-payload entries on the reliable
+// loop are committed straight to the Lake and acked without touching the
+// ledger (the ledger only applies to Batch ID references).
+func TestProcessEntry_PayloadEntry(t *testing.T) {
 	ctx := context.Background()
 	p, lk, rq, _, ledger := bufferedTestPipeline(t)
 
-	entry := &queue.IngestEntry{Spans: []*domain.Span{dualWriteSpan("s9")}, Raw: "raw-legacy"}
+	entry := &queue.IngestEntry{Spans: []*domain.Span{bufferedTestSpan("s9")}, Raw: "raw-payload"}
 	p.processEntry(ctx, entry)
 
-	var legacyCount int
-	if err := p.db.QueryRowContext(ctx, "SELECT count(*) FROM spans").Scan(&legacyCount); err != nil {
-		t.Fatalf("count legacy spans: %v", err)
-	}
-	if legacyCount != 1 {
-		t.Errorf("legacy span count: got %d, want 1", legacyCount)
-	}
 	if got := lakeSpanCount(t, lk); got != 1 {
-		t.Errorf("lake span count: got %d, want 1 (dual-write)", got)
+		t.Errorf("lake span count: got %d, want 1", got)
 	}
 	if len(rq.acked) != 1 {
 		t.Errorf("acked: got %d, want 1", len(rq.acked))
 	}
 	if len(ledger.committed) != 0 {
-		t.Error("legacy payload entries must not touch the ledger")
+		t.Error("payload entries must not touch the ledger")
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -412,6 +413,33 @@ func (l *Lake) InsertScores(ctx context.Context, scores []*domain.Score) error {
 		return fmt.Errorf("lake: commit: %w", err)
 	}
 	return nil
+}
+
+// SpanStartTime looks up the start_time of the span a score annotates, so
+// the score can be written to the correct lake.scores partition (ADR-0002).
+// Returns the zero time and no error if the span is not found; callers
+// should fall back to the score's CreatedAt in that case (InsertScores does
+// this automatically when SpanStartTime is zero).
+func (l *Lake) SpanStartTime(ctx context.Context, traceID, spanID string) (time.Time, error) {
+	var startTime time.Time
+	err := l.db.QueryRowContext(ctx,
+		"SELECT start_time FROM lake.spans WHERE trace_id = ? AND span_id = ?",
+		traceID, spanID,
+	).Scan(&startTime)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return time.Time{}, nil
+		}
+		return time.Time{}, fmt.Errorf("lake: span start time %s/%s: %w", traceID, spanID, err)
+	}
+	return startTime, nil
+}
+
+// Ping verifies the Lake's Catalog connection is reachable with a
+// lightweight query. Used by the readiness probe (probe.CatalogReachable).
+func (l *Lake) Ping(ctx context.Context) error {
+	var one int
+	return l.db.QueryRowContext(ctx, "SELECT 1").Scan(&one)
 }
 
 // FlushInlinedData forces any rows DuckLake 1.5 has inlined into the

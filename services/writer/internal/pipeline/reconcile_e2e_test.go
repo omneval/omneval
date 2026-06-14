@@ -11,7 +11,6 @@ import (
 	"github.com/omneval/omneval/internal/buffer"
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/domain"
-	"github.com/omneval/omneval/internal/duckdb"
 	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/lake/lakeservertest"
 	"github.com/omneval/omneval/internal/queue"
@@ -96,12 +95,6 @@ func reconcileTestPipeline(t *testing.T) (*Pipeline, *lake.Lake, *fakeReliableQu
 	t.Helper()
 	ctx := context.Background()
 
-	db, err := duckdb.Open(":memory:")
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-
 	lakeCfg, _ := lakeservertest.NewLocal(t)
 	lk, err := lake.Open(ctx, lakeCfg)
 	if err != nil {
@@ -114,7 +107,7 @@ func reconcileTestPipeline(t *testing.T) (*Pipeline, *lake.Lake, *fakeReliableQu
 	buf := buffer.New(store)
 	ledger := newFakeLedger()
 
-	p := New(nil, db, testPricing, nil, nil, nil).
+	p := New(nil, testPricing, nil, nil, nil).
 		WithLake(lk).
 		WithBuffer(rq, buf, ledger)
 
@@ -145,7 +138,7 @@ func TestReconcileRecovery_CrashBeforeCommitIsRecovered(t *testing.T) {
 	// Simulate a writer that staged the batch (PutSized succeeded) but
 	// crashed before enqueueing the reference or committing to the ledger.
 	const batchID = "crashed-batch"
-	if err := buffer.New(store).Stage(ctx, batchID, []*domain.Span{dualWriteSpan("s1")}); err != nil {
+	if err := buffer.New(store).Stage(ctx, batchID, []*domain.Span{bufferedTestSpan("s1")}); err != nil {
 		t.Fatalf("stage: %v", err)
 	}
 	store.setAge(buffer.Key(batchID), 30*time.Minute) // older than the grace period
@@ -214,7 +207,7 @@ func TestReconcileRecovery_RetentionGCDeletesOnlyCommittedAgedObjects(t *testing
 	const uncommittedID = "old-uncommitted-batch"
 
 	for _, id := range []string{committedID, uncommittedID} {
-		if err := buffer.New(store).Stage(ctx, id, []*domain.Span{dualWriteSpan(id)}); err != nil {
+		if err := buffer.New(store).Stage(ctx, id, []*domain.Span{bufferedTestSpan(id)}); err != nil {
 			t.Fatalf("stage %s: %v", id, err)
 		}
 		// Older than both the grace period and the retention window.

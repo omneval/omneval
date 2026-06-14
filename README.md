@@ -21,26 +21,20 @@ Omneval consists of four independently deployable Go services communicating via 
 
 | Service | Role | Deployment |
 |---------|------|------------|
-| **Ingest API** | Accepts OTLP (proto+JSON) and native REST spans, validates API keys, translates to domain format, enqueues to Redis | Stateless, horizontally scalable |
-| **Writer Service** | Drains Redis queue, writes to DuckDB, syncs snapshots to S3, archives aged data to Parquet | Single-replica StatefulSet (DuckDB single-writer constraint) |
-| **Query API** | Downloads DuckDB snapshot from S3, serves REST API + embedded React SPA | Stateless, horizontally scalable |
+| **Ingest API** | Accepts OTLP (proto+JSON) and native REST spans, validates API keys, translates to domain format, stages batches in the Ingest Buffer (S3) and enqueues references to Redis | Stateless, horizontally scalable |
+| **Writer Service** | Drains the ingest queue, fetches batches from the Ingest Buffer, computes cost, commits spans/scores to the Lake via the Quack Server, matches eval rules and enqueues eval jobs | Stateless, horizontally scalable |
+| **Query API** | Attaches read-only to the Lake via the Quack Server, serves REST API + embedded React SPA | Stateless, horizontally scalable |
 | **Eval Worker** | Drains eval queue, calls judge LLM, writes scores back to Writer | Horizontally scalable |
 
 The React SPA (Vite + Tailwind CSS) is built as static assets and embedded into the Query API binary via Go's `embed.FS` — no separate Nginx or build step at runtime.
 
-### Storage Tiers
+### Storage
 
-| Tier | Location | Description |
-|------|----------|-------------|
-| **Hot** | DuckDB file on Writer PVC | Exclusive read-write by Writer; idempotent upserts on `(trace_id, span_id)` |
-| **Snapshot** | S3 DuckDB file | Written by Writer every 30s; read by Query API pods |
-| **Cold** | S3 Hive-partitioned Parquet | Aged spans flushed every 30m; queried via `read_parquet` with partition pruning |
-
-> **Migration in progress (ADR-0004):** the three tiers above are being replaced by the **Lake** — a single DuckLake table set (Parquet on S3, ACID via a Postgres **Catalog** shared with the metadata store). Setting `writer.lake.enabled: true` (`OMNEVAL_WRITER_LAKE_ENABLED=true`) makes the Writer dual-write every span batch and score to the Lake alongside the legacy store. Setting `query.lake.enabled: true` (`OMNEVAL_QUERY_LAKE_ENABLED=true`) makes the Query API attach read-only to the Lake and serve all span reads from it — no snapshot download, no hot+cold UNION; trace detail dedupes residual duplicate rows at read time. Lake connection settings live under `lake.*` (`catalog_driver`, `catalog_dsn`, `data_path`) and default to the metadata-store database and `s3://<storage.bucket>/lake`. Both flags are off by default; legacy behavior is unchanged until cutover.
+The **Lake** is the single authoritative span/score store (ADR-0004): DuckLake tables (`spans`, `scores`) stored as Parquet on S3 with ACID transactions through a Postgres **Catalog** shared with the metadata store. The **Quack Server** (ADR-0005, `services/quack/`) is the sole holder of a direct DuckLake Catalog/data-path connection and runs the Table Maintenance scheduler (compaction, snapshot expiry, retention GC); Writer, Query API, and Eval attach to it as thin Quack clients via `quack.client.*`. Writers stage incoming batches in the S3 **Ingest Buffer**, commit them to the Lake on the Commit Cadence (~5s/16MB), and record commits in the Postgres **Batch Ledger** (`committed_batches`) for idempotent recovery. There is no separate hot DuckDB tier, snapshot file, or cold-Parquet UNION — all reads and writes go through the Lake.
 
 ### Key Design Points
 
-- **Cost pre-computed at write time** — `cost_usd` is calculated when spans land in DuckDB using the LiteLLM pricing table. No query-time recomputation.
+- **Cost pre-computed at write time** — `cost_usd` is calculated by the Writer before committing to the Lake, using the LiteLLM pricing table. No query-time recomputation.
 - **OTLP compatible** — any LLM framework emitting OTel spans works with zero instrumentation changes.
 - **Self-hostable** — demo mode uses SQLite + MinIO; production uses Postgres + any S3-compatible store.
 - **Single binary deployment** — the React UI is compiled to static assets and embedded into the Query API binary via Go's `embed.FS`.
@@ -164,7 +158,7 @@ docker compose run --rm eval
 
 Omneval is under active development. The following features are implemented and tested:
 
-- **Tracing pipeline** — OTLP + REST span ingest, DuckDB write, snapshot/Parquet archival, hot+cold queries
+- **Tracing pipeline** — OTLP + REST span ingest via the Ingest Buffer, Writer commits to the Lake through the Quack Server
 - **Evaluation pipeline** — configurable judge LLM rules, score write-back, sample-rate support
 - **Eval rules** — create, list, preview, and delete eval rules with filter conditions
 - **Prompt registry** — version management, label resolution, `{{variable}}` template interpolation, prompt caching

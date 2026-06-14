@@ -12,7 +12,6 @@ import (
 	miniocred "github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/domain"
-	"github.com/omneval/omneval/internal/duckdb"
 	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/lake/lakeservertest"
 	"github.com/testcontainers/testcontainers-go"
@@ -21,10 +20,10 @@ import (
 )
 
 // TestLakeIntegration_PostgresCatalogMinIO is the ADR-0004 foundation
-// proof: a span written through the Writer pipeline with dual-write
-// enabled is readable from the Lake via a completely fresh DuckDB
-// connection (Postgres Catalog + MinIO data path), with the hive
-// partition layout the DSL compiler's pruning assumes.
+// proof: a span written through the Writer pipeline is readable from the
+// Lake via a completely fresh DuckDB connection (Postgres Catalog + MinIO
+// data path), with the hive partition layout the DSL compiler's pruning
+// assumes.
 func TestLakeIntegration_PostgresCatalogMinIO(t *testing.T) {
 	if _, err := os.Stat("/var/run/docker.sock"); os.IsNotExist(err) {
 		t.Skip("Docker not available, skipping integration test")
@@ -74,14 +73,7 @@ func TestLakeIntegration_PostgresCatalogMinIO(t *testing.T) {
 	}
 	defer lk.Close()
 
-	// Legacy hot store alongside, as in dual-write production wiring.
-	db, err := duckdb.Open(":memory:")
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	defer db.Close()
-
-	p := New(nil, db, testPricing, nil, nil, nil).WithLake(lk)
+	p := New(nil, testPricing, nil, nil, nil).WithLake(lk)
 
 	span := &domain.Span{
 		SpanID:       "span-lake-1",
@@ -97,8 +89,9 @@ func TestLakeIntegration_PostgresCatalogMinIO(t *testing.T) {
 		InputTokens:  100,
 		OutputTokens: 50,
 	}
-	if err := p.writeSpans(ctx, []*domain.Span{span}); err != nil {
-		t.Fatalf("writeSpans: %v", err)
+	p.computeCosts([]*domain.Span{span})
+	if err := p.commitLake(ctx, []*domain.Span{span}); err != nil {
+		t.Fatalf("commitLake: %v", err)
 	}
 
 	// Read back through a completely fresh DuckDB instance attached

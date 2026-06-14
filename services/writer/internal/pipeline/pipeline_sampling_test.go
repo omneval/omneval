@@ -32,7 +32,6 @@ func TestEvalSpans_SampleRate1EnqueuesAll(t *testing.T) {
 	}
 	p := &Pipeline{
 		ingest:  &fakeIngestQueue{},
-		db:      nil,
 		pricing: pricing.GetDefaultBundled(),
 		store:   store,
 		evalQ:   mq,
@@ -61,7 +60,6 @@ func TestEvalSpans_SampleRateZeroEnqueuesNone(t *testing.T) {
 	}
 	p := &Pipeline{
 		ingest:  &fakeIngestQueue{},
-		db:      nil,
 		pricing: pricing.GetDefaultBundled(),
 		store:   store,
 		evalQ:   mq,
@@ -84,7 +82,6 @@ func TestEvalSpans_SampleRateFractional(t *testing.T) {
 	}
 	p := &Pipeline{
 		ingest:  &fakeIngestQueue{},
-		db:      nil,
 		pricing: pricing.GetDefaultBundled(),
 		store:   store,
 		evalQ:   mq,
@@ -120,7 +117,6 @@ func TestEvalSpans_DisabledRule(t *testing.T) {
 	}
 	p := &Pipeline{
 		ingest:  &fakeIngestQueue{},
-		db:      nil,
 		pricing: pricing.GetDefaultBundled(),
 		store:   store,
 		evalQ:   mq,
@@ -143,7 +139,6 @@ func TestEvalSpans_FilterNoMatch(t *testing.T) {
 	}
 	p := &Pipeline{
 		ingest:  &fakeIngestQueue{},
-		db:      nil,
 		pricing: pricing.GetDefaultBundled(),
 		store:   store,
 		evalQ:   mq,

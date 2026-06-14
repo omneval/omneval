@@ -3,14 +3,38 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
-	"github.com/omneval/omneval/internal/duckdb"
+	"github.com/omneval/omneval/internal/lake"
+	"github.com/omneval/omneval/internal/lake/lakeservertest"
 	"github.com/omneval/omneval/internal/pricing"
 )
+
+// openErrTestLake opens an embedded local Lake for the pipeline error
+// tests, skipping if the DuckLake extension is unavailable.
+func openErrTestLake(t *testing.T) *lake.Lake {
+	t.Helper()
+	ctx := context.Background()
+	cfg, _ := lakeservertest.NewLocal(t)
+	lk, err := lake.Open(ctx, cfg)
+	if err != nil {
+		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
+	}
+	t.Cleanup(func() { lk.Close() })
+	return lk
+}
+
+func lakeSpanCountFor(t *testing.T, lk *lake.Lake, projectID string) int {
+	t.Helper()
+	var n int
+	if err := lk.DB().QueryRowContext(context.Background(),
+		"SELECT count(*) FROM lake.spans WHERE project_id = ?", projectID).Scan(&n); err != nil {
+		t.Fatalf("count lake spans: %v", err)
+	}
+	return n
+}
 
 // bundledPricing provides a minimal pricing table for tests.
 var testPricing = pricing.NewTableFromBytes([]byte(`{
@@ -202,11 +226,7 @@ func TestPipeline_Run_continuesAfterDequeueError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	db, err := duckdb.Open("test_err_dequeue.db")
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	defer func() { db.Close(); os.Remove("test_err_dequeue.db") }()
+	lk := openErrTestLake(t)
 
 	spans := []*domain.Span{{
 		TraceID:   "trace-00000000000000001",
@@ -225,7 +245,7 @@ func TestPipeline_Run_continuesAfterDequeueError(t *testing.T) {
 		consumeAll: false,
 	}
 
-	pl := New(ingestQ, db, testPricing, &fakeMetaStore{}, &fakeEvalQueue{}, nil)
+	pl := New(ingestQ, testPricing, &fakeMetaStore{}, &fakeEvalQueue{}, nil).WithLake(lk)
 
 	pipelineDone := make(chan error, 1)
 	go func() {
@@ -233,7 +253,7 @@ func TestPipeline_Run_continuesAfterDequeueError(t *testing.T) {
 	}()
 
 	// Wait for the pipeline to finish (it will loop until context deadline).
-	err = <-pipelineDone
+	err := <-pipelineDone
 	if err == nil {
 		t.Fatal("expected pipeline to stop when context canceled")
 	}
@@ -246,15 +266,8 @@ func TestPipeline_Run_continuesAfterDequeueError(t *testing.T) {
 	}
 
 	// The span should have been written after the retry.
-	var count int
-	rctx, rcancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer rcancel()
-	if err := db.QueryRowContext(rctx, "SELECT COUNT(*) FROM spans WHERE project_id = $1", "proj-1").
-		Scan(&count); err != nil {
-		t.Fatalf("query count: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("span count in DuckDB: got %d, want 1", count)
+	if count := lakeSpanCountFor(t, lk, "proj-1"); count != 1 {
+		t.Errorf("span count in lake: got %d, want 1", count)
 	}
 }
 
@@ -265,11 +278,7 @@ func TestPipeline_Run_continuesAfterWriteFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	db, err := duckdb.Open("test_err_write.db")
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	defer func() { db.Close(); os.Remove("test_err_write.db") }()
+	lk := openErrTestLake(t)
 
 	spans1 := []*domain.Span{{
 		TraceID:   "trace-00000000000000001",
@@ -293,14 +302,14 @@ func TestPipeline_Run_continuesAfterWriteFailure(t *testing.T) {
 		dequeueErr: nil,
 		consumeAll: false,
 	}
-	pl := New(ingestQ, db, testPricing, &fakeMetaStore{}, &fakeEvalQueue{}, nil)
+	pl := New(ingestQ, testPricing, &fakeMetaStore{}, &fakeEvalQueue{}, nil).WithLake(lk)
 
 	pipelineDone := make(chan error, 1)
 	go func() {
 		pipelineDone <- pl.Run(ctx)
 	}()
 
-	err = <-pipelineDone
+	err := <-pipelineDone
 	if err == nil {
 		t.Fatal("expected pipeline to stop when context canceled")
 	}
@@ -311,16 +320,9 @@ func TestPipeline_Run_continuesAfterWriteFailure(t *testing.T) {
 		t.Errorf("dequeued %d batches, want 2 (pipeline should not stop on any error)", ingestQ.idx)
 	}
 
-	// Both spans should be in DuckDB.
-	var count int
-	rctx, rcancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer rcancel()
-	if err := db.QueryRowContext(rctx, "SELECT COUNT(*) FROM spans WHERE project_id = $1", "proj-1").
-		Scan(&count); err != nil {
-		t.Fatalf("query count: %v", err)
-	}
-	if count != 2 {
-		t.Errorf("span count in DuckDB: got %d, want 2", count)
+	// Both spans should be in the Lake.
+	if count := lakeSpanCountFor(t, lk, "proj-1"); count != 2 {
+		t.Errorf("span count in lake: got %d, want 2", count)
 	}
 }
 
@@ -331,11 +333,7 @@ func TestPipeline_Run_continuesAfterWriteError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	db, err := duckdb.Open("test_err_write2.db")
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	defer func() { db.Close(); os.Remove("test_err_write2.db") }()
+	lk := openErrTestLake(t)
 
 	spans1 := []*domain.Span{{
 		TraceID:   "trace-00000000000000001",
@@ -359,8 +357,8 @@ func TestPipeline_Run_continuesAfterWriteError(t *testing.T) {
 		dequeueErr: nil,
 		consumeAll: false,
 	}
-	errWrite := fmt.Errorf("duckdb: constraint violation")
-	pl := New(ingestQ, db, testPricing, &fakeMetaStore{}, &fakeEvalQueue{}, nil)
+	errWrite := fmt.Errorf("lake: constraint violation")
+	pl := New(ingestQ, testPricing, &fakeMetaStore{}, &fakeEvalQueue{}, nil).WithLake(lk)
 	pl.writeErr = errWrite // inject write error
 
 	pipelineDone := make(chan error, 1)
@@ -368,7 +366,7 @@ func TestPipeline_Run_continuesAfterWriteError(t *testing.T) {
 		pipelineDone <- pl.Run(ctx)
 	}()
 
-	err = <-pipelineDone
+	err := <-pipelineDone
 	if err == nil {
 		t.Fatal("expected pipeline to stop when context canceled")
 	}
@@ -379,16 +377,9 @@ func TestPipeline_Run_continuesAfterWriteError(t *testing.T) {
 		t.Errorf("dequeued %d batches, want 2 (pipeline should not stop on write error)", ingestQ.idx)
 	}
 
-	// No spans should be in DuckDB (all writes failed).
-	var count int
-	rctx, rcancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer rcancel()
-	if err := db.QueryRowContext(rctx, "SELECT COUNT(*) FROM spans WHERE project_id = $1", "proj-1").
-		Scan(&count); err != nil {
-		t.Fatalf("query count: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("span count in DuckDB: got %d, want 0 (writes should have failed)", count)
+	// No spans should be in the lake (all writes failed).
+	if count := lakeSpanCountFor(t, lk, "proj-1"); count != 0 {
+		t.Errorf("span count in lake: got %d, want 0 (writes should have failed)", count)
 	}
 }
 

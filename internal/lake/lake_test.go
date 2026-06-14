@@ -174,6 +174,90 @@ func TestOpenIdempotentAndRoundTrip(t *testing.T) {
 	}
 }
 
+// TestInsertSpans_EmptyInputOutputCoercedToNull verifies that spans with
+// empty Input/Output strings (e.g. tool-call or chain-root spans) do not
+// fail the batch insert: DuckDB rejects "" as invalid JSON for JSON
+// columns, so InsertSpans coerces empty strings to NULL (issue #53).
+func TestInsertSpans_EmptyInputOutputCoercedToNull(t *testing.T) {
+	ctx := context.Background()
+	cfg, _ := startTestServer(t)
+
+	l, err := Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer l.Close()
+
+	start := time.Date(2026, 6, 5, 10, 0, 0, 0, time.UTC)
+	spans := []*domain.Span{
+		testSpan("proj-empty", "span-1", start),
+		{
+			SpanID:       "span-2",
+			TraceID:      "trace-span-2",
+			ProjectID:    "proj-empty",
+			Name:         "tool-call",
+			Kind:         domain.SpanKind("llm"),
+			StartTime:    start.Add(time.Second),
+			EndTime:      start.Add(2 * time.Second),
+			Model:        "gpt-4o",
+			Input:        "",
+			Output:       `[{"role":"tool","content":"tool result"}]`,
+			InputTokens:  5,
+			OutputTokens: 3,
+		},
+		{
+			SpanID:       "span-3",
+			TraceID:      "trace-span-3",
+			ProjectID:    "proj-empty",
+			Name:         "chain-root",
+			Kind:         domain.SpanKind("llm"),
+			StartTime:    start.Add(3 * time.Second),
+			EndTime:      start.Add(4 * time.Second),
+			Model:        "gpt-4o",
+			Input:        "",
+			Output:       "",
+			InputTokens:  0,
+			OutputTokens: 0,
+		},
+	}
+
+	if err := l.InsertSpans(ctx, spans); err != nil {
+		t.Fatalf("insert spans: %v", err)
+	}
+
+	var n int
+	if err := l.DB().QueryRowContext(ctx,
+		"SELECT count(*) FROM lake.spans WHERE project_id = 'proj-empty'").Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("span count: got %d, want 3", n)
+	}
+
+	var span3Input, span3Output *string
+	if err := l.DB().QueryRowContext(ctx,
+		"SELECT input, output FROM lake.spans WHERE span_id = 'span-3'",
+	).Scan(&span3Input, &span3Output); err != nil {
+		t.Fatalf("scan span-3 input/output: %v", err)
+	}
+	if span3Input != nil {
+		t.Errorf("span-3 input: got %q, want NULL", *span3Input)
+	}
+	if span3Output != nil {
+		t.Errorf("span-3 output: got %q, want NULL", *span3Output)
+	}
+
+	var span2Output string
+	if err := l.DB().QueryRowContext(ctx,
+		"SELECT CAST(output AS VARCHAR) FROM lake.spans WHERE span_id = 'span-2'",
+	).Scan(&span2Output); err != nil {
+		t.Fatalf("scan span-2 output: %v", err)
+	}
+	if span2Output == "" {
+		t.Error("span-2 output is empty, expected JSON content")
+	}
+}
+
 // TestPartitionLayout proves Parquet files land under hive-style
 // project_id / date partition directories.
 func TestPartitionLayout(t *testing.T) {
@@ -450,4 +534,75 @@ func TestConfigFromApp(t *testing.T) {
 			t.Errorf("data path: %q", lc.DataPath)
 		}
 	})
+}
+
+// TestInsertSpansSQL_PlaceholderCount verifies the INSERT statement has
+// the same number of column names and VALUES placeholders (issue #53).
+func TestInsertSpansSQL_PlaceholderCount(t *testing.T) {
+	stmtSQL := insertSpansSQL
+
+	// Extract column list: everything between first '(' after INTO lake.spans
+	colStart := strings.Index(stmtSQL, "INTO lake.spans (")
+	if colStart == -1 {
+		t.Fatal("could not find column list in SQL")
+	}
+	colStart += len("INTO lake.spans (")
+
+	// Find matching closing paren
+	depth := 1
+	colEnd := colStart
+	for i := colStart; i < len(stmtSQL); i++ {
+		if stmtSQL[i] == '(' {
+			depth++
+		} else if stmtSQL[i] == ')' {
+			depth--
+			if depth == 0 {
+				colEnd = i
+				break
+			}
+		}
+	}
+	colList := stmtSQL[colStart:colEnd]
+	columns := strings.FieldsFunc(colList, func(r rune) bool { return r == ',' })
+	for i := range columns {
+		columns[i] = strings.TrimSpace(columns[i])
+	}
+
+	// Extract VALUES clause
+	valStart := strings.Index(stmtSQL, "VALUES (")
+	if valStart == -1 {
+		t.Fatal("could not find VALUES clause in SQL")
+	}
+	valStart += len("VALUES (")
+
+	// Find matching closing paren
+	depth = 1
+	valEnd := valStart
+	for i := valStart; i < len(stmtSQL); i++ {
+		if stmtSQL[i] == '(' {
+			depth++
+		} else if stmtSQL[i] == ')' {
+			depth--
+			if depth == 0 {
+				valEnd = i
+				break
+			}
+		}
+	}
+	valList := stmtSQL[valStart:valEnd]
+	placeholders := strings.FieldsFunc(valList, func(r rune) bool { return r == ',' })
+	for i := range placeholders {
+		placeholders[i] = strings.TrimSpace(placeholders[i])
+	}
+
+	if len(columns) != len(placeholders) {
+		t.Errorf("column/placeholder mismatch: %d columns but %d placeholders", len(columns), len(placeholders))
+		for i, col := range columns {
+			if i < len(placeholders) {
+				t.Logf("  col[%d] = %s vs val[%d] = %s", i, col, i, placeholders[i])
+			} else {
+				t.Logf("  col[%d] = %s (no matching placeholder)", i, col)
+			}
+		}
+	}
 }
