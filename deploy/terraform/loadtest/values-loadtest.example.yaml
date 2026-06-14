@@ -1,0 +1,62 @@
+# Example Helm values for deploying Omneval onto the load-test EKS cluster.
+#
+# Fill in the placeholders from `terraform output` (s3_bucket, s3_endpoint,
+# omneval_s3_access_key_id, omneval_s3_secret_access_key), then:
+#
+#   helm install omneval ../../helm -f values-loadtest.yaml -n omneval --create-namespace
+#
+# This mirrors deploy/docker-compose/docker-compose.yml's service config but
+# points storage at the real S3 bucket created by this Terraform instead of
+# MinIO, and runs Postgres/Redis in-cluster for simplicity. For a result you'd
+# publish, consider replacing the in-cluster Postgres/Redis with managed
+# RDS/ElastiCache so the load test doesn't bottleneck on in-cluster storage.
+
+database:
+  driver: postgres
+
+storage:
+  endpoint: "<S3_ENDPOINT>"        # terraform output s3_endpoint
+  bucket: "<S3_BUCKET>"            # terraform output s3_bucket
+  region: "<AWS_REGION>"
+  accessKey: "<ACCESS_KEY_ID>"     # terraform output omneval_s3_access_key_id
+  secretKey: "<SECRET_ACCESS_KEY>" # terraform output -raw omneval_s3_secret_access_key
+
+minio:
+  enabled: false
+
+postgresql:
+  enabled: true
+
+redis:
+  enabled: true
+
+quack:
+  server:
+    catalogDriver: postgres
+
+# Bump replicas/resources to match the EKS node group sized by variables.tf
+# (default: 3x m5.xlarge). Tune these between runs as part of the benchmark.
+ingest:
+  replicas: 3
+  resources:
+    limits:
+      cpu: "1"
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+writer:
+  replicas: 3
+  resources:
+    limits:
+      cpu: "2"
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+query:
+  replicas: 2
+  adminEmail: "admin@omneval.com"
+  adminPassword: "admin"
