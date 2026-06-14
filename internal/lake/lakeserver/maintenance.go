@@ -60,9 +60,10 @@ type MaintenanceResult struct {
 // The pass: (if retention is enabled) delete spans/scores older than
 // retention.MaxAgeDays, then rewrite data files (so pending deletes —
 // retention's or any other DELETEs since the last pass — are physically
-// dropped and the cleanup calls below can find orphaned files), merge
-// adjacent small files, expire old snapshots, delete orphaned/old files, and
-// finally flush any remaining inlined data to Parquet. This is the scheduled
+// dropped and the cleanup call below can find stale files), merge
+// adjacent small files, expire old snapshots, delete old (catalog-tracked
+// stale) files, and finally flush any remaining inlined data to Parquet.
+// This is the scheduled
 // counterpart to internal/lake's per-DeleteProject reclaim() — reclaim
 // handles the immediate "this project's data must be gone now" case;
 // RunMaintenance handles steady-state compaction for everything else (small
@@ -124,16 +125,19 @@ func RunMaintenance(ctx context.Context, db *sql.DB, tables []string, retention 
 	}
 	stmts = append(stmts,
 		"CALL ducklake_expire_snapshots('lake', older_than => now())",
-		// cleanup_all => true (the default false omits it) makes both calls
-		// below additionally ListObjectsV2 the entire data path to find
-		// untracked files; that bucket-scan code path ignores the lake_s3
-		// secret's ENDPOINT/URL_STYLE/REGION and falls back to
-		// virtual-hosted-style requests against the default AWS endpoint,
-		// failing with NoSuchBucket against MinIO (duckdb/ducklake#562).
-		// Without cleanup_all, both calls operate only on files the catalog
-		// metadata already knows are stale, which the GET/PUT-based calls
-		// above (rewrite/merge/expire) prove works correctly against MinIO.
-		"CALL ducklake_delete_orphaned_files('lake')",
+		// ducklake_delete_orphaned_files is intentionally NOT called here.
+		// Per its purpose (finding files in the data path that the catalog
+		// has no record of at all), it always globs the data path via
+		// read_blob(<data_path> || '**') regardless of cleanup_all. That
+		// glob ignores the lake_s3 secret's ENDPOINT/URL_STYLE/REGION and
+		// falls back to virtual-hosted-style requests against the default
+		// AWS endpoint, failing with NoSuchBucket against MinIO
+		// (duckdb/ducklake#562) — confirmed broken even without cleanup_all
+		// in the issue's own reproduction. There is no SQL-level
+		// workaround, so orphan-file cleanup is skipped; ducklake_rewrite_*
+		// + ducklake_cleanup_old_files (without cleanup_all, which operate
+		// on files the catalog metadata already knows are stale via GET/PUT)
+		// still reclaim the normal steady-state compaction churn.
 		"CALL ducklake_cleanup_old_files('lake')",
 		"CALL ducklake_flush_inlined_data('lake')",
 	)
