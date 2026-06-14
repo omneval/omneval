@@ -94,6 +94,14 @@ func TestLakeIntegration_PostgresCatalogMinIO(t *testing.T) {
 		t.Fatalf("commitLake: %v", err)
 	}
 
+	// DuckLake 1.5 inlines small inserts into Catalog metadata rather than
+	// writing Parquet immediately (query correctness is unaffected, since
+	// lake.spans reads inlined rows transparently) — flush before
+	// inspecting the physical data layout below.
+	if err := lk.FlushInlinedData(ctx); err != nil {
+		t.Fatalf("flush inlined data: %v", err)
+	}
+
 	// Read back through a completely fresh DuckDB instance attached
 	// read-only — the Query API's view of the Lake.
 	roCfg := lakeCfg
