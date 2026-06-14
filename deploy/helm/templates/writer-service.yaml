@@ -1,9 +1,9 @@
 {{- /*
 Writer Service — exposes the score handler port (8001) and metrics (9090).
 
-The Writer is a StatefulSet with a single replica, so the service
-routes to that single pod. Eval Workers use this service for score
-write-back (internal-only, not exposed externally).
+The Writer is a stateless, horizontally scalable Deployment (#90 cutover).
+Eval Workers use this service for score write-back (internal-only, not
+exposed externally), and it load-balances across all Writer replicas.
 */ -}}
 {{- $name := .Release.Name -}}
 apiVersion: v1

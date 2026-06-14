@@ -13,10 +13,9 @@ import (
 //   - GET /api/v1/conversations
 //   - GET /api/v1/conversations/:conversationId
 type ConversationHandler struct {
-	DB           DBHandle
 	SessionStore SessionStore
 	// Lake is the DuckDB handle attached read-only to the Lake.
-	// When non-nil, conversation reads compile against lake.spans.
+	// Conversation reads compile against lake.spans (ADR-0004).
 	Lake DBHandle
 }
 
@@ -118,11 +117,8 @@ func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *
 	}
 	cursor := r.URL.Query().Get("cursor")
 
-	// Use lake.spans when Lake is available; otherwise snapshot spans table.
-	spansTable := "spans"
-	if h.Lake != nil {
-		spansTable = "lake.spans"
-	}
+	// Conversation reads compile against lake.spans (ADR-0004).
+	spansTable := "lake.spans"
 
 	// Build query.
 	query := "SELECT conversation_id, project_id, COALESCE(MAX(service_name), '') AS service_name, " +
@@ -224,10 +220,7 @@ func (h *ConversationHandler) HandleConversationDetail(w http.ResponseWriter, r 
 
 	// Get distinct traces ordered by start_time, with root span info.
 	dbHandle := h.selectDB()
-	spansTable := "spans"
-	if h.Lake != nil {
-		spansTable = "lake.spans"
-	}
+	spansTable := "lake.spans"
 	query := "SELECT trace_id, CAST(MIN(start_time) AS VARCHAR) AS start_time, " +
 		"COALESCE(CAST(MAX(end_time) AS VARCHAR), '') AS end_time, " +
 		"COUNT(*) AS span_count, ROUND(COALESCE(SUM(cost_usd), 0), 6) AS cost_usd, " +
@@ -280,11 +273,7 @@ func (h *ConversationHandler) HandleConversationDetail(w http.ResponseWriter, r 
 	}
 }
 
-// selectDB returns the database handle to use for conversation reads.
-// When Lake is available, it returns the Lake handle; otherwise the snapshot DB.
+// selectDB returns the database handle to use for conversation reads: the Lake.
 func (h *ConversationHandler) selectDB() DBHandle {
-	if h.Lake != nil {
-		return h.Lake
-	}
-	return h.DB
+	return h.Lake
 }

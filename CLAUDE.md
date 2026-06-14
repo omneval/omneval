@@ -39,22 +39,24 @@ go test ./sdk/go/...                                      # Go (from workspace r
 
 Four Go services communicating via Redis, plus shared packages:
 
-1. **Ingest API** (`services/ingest/`) — Accepts OTLP (proto+JSON at `POST /v1/traces`) and native REST spans (`POST /api/v1/spans`). Validates API keys (60s-TTL cache), translates OTLP to `domain.Span`, enqueues batches to Redis.
+1. **Ingest API** (`services/ingest/`) — Accepts OTLP (proto+JSON at `POST /v1/traces`) and native REST spans (`POST /api/v1/spans`). Validates API keys (60s-TTL cache), translates OTLP to `domain.Span`, stages batches in the Ingest Buffer (S3) and enqueues Batch ID references to Redis.
 
-2. **Writer Service** (`services/writer/`) — Dequeues span batches, computes `cost_usd` (LiteLLM pricing + bundled fallback), upserts to DuckDB, syncs a DuckDB snapshot to S3, archives old spans to Hive-partitioned Parquet, matches eval rules (refreshed every 60s) and enqueues eval jobs. Redis SETNX leader election lives in `internal/leader`. Receives score write-backs at `POST /internal/v1/scores`.
+2. **Writer Service** (`services/writer/`) — Dequeues batch references, fetches batches from the Ingest Buffer, computes `cost_usd` (LiteLLM pricing + bundled fallback), commits spans/scores to the Lake via the Quack Server, records commits in the Batch Ledger (`committed_batches`), matches eval rules (refreshed every 60s) and enqueues eval jobs. Runs an Ingest Buffer reconciliation sweep (recovery + retention GC) on a plain ticker. Receives score write-backs at `POST /internal/v1/scores`.
 
-3. **Query API** (`services/query/`) — Stateless. Downloads the DuckDB snapshot from S3, polls for updates, queries hot+cold UNION (snapshot + S3 Parquet). Serves the embedded React SPA (`embed.FS`), session auth, and all metadata CRUD: projects, API keys, prompts (versioned + labels), eval rules, datasets + dataset runs, conversations, bookmarks, playground runs, admin endpoints, Analytics DSL (`POST /api/v1/analytics/spans`).
+3. **Query API** (`services/query/`) — Stateless. Attaches read-only to the Lake via the Quack Server. Serves the embedded React SPA (`embed.FS`), session auth, and all metadata CRUD: projects, API keys, prompts (versioned + labels), eval rules, datasets + dataset runs, conversations, bookmarks, playground runs, admin endpoints, Analytics DSL (`POST /api/v1/analytics/spans`).
 
 4. **Eval Workers** (`services/eval/`) — Dequeue eval jobs, call an OpenAI-compatible judge LLM, write scores back to the Writer with exponential-backoff retry.
 
-5. **Shared** (`internal/`) — domain types, config (Viper, `omneval.yaml` / `OMNEVAL_*`), auth, metadata stores (Postgres prod / SQLite demo), DuckDB schema, OTLP translation, pricing, normalizer, queue, S3, leader election, probes.
+5. **Quack Server** (`services/quack/`) — The sole holder of a direct DuckLake Catalog/data-path connection; runs the Table Maintenance scheduler (compaction, snapshot expiry, retention GC). Writer, Query API, and Eval attach as thin Quack clients via `quack.client.*`.
 
-**IMPORTANT — target architecture shift:** ADR-0004 (`docs/adr/0004-ducklake-storage-core.md`) replaces the hot-DuckDB/snapshot/cold-Parquet tiers with a single DuckLake table set (Postgres catalog, S3-first ingestion, batch-ledger dedupe, multi-writer). When touching storage, snapshot, or archival code, read that ADR first — the snapshot/UNION/archival subsystems are scheduled for deletion. Until the migration lands, the code still implements the three-tier design.
+6. **Shared** (`internal/`) — domain types, config (Viper, `omneval.yaml` / `OMNEVAL_*`), auth, metadata stores (Postgres prod / SQLite demo), `internal/lake` (DuckLake/Quack client attach), OTLP translation, pricing, normalizer, queue, S3, probes.
+
+ADR-0004 (`docs/adr/0004-ducklake-storage-core.md`) and ADR-0005 (`docs/adr/0005-quack-server-as-lake-gateway.md`) describe the Lake/Quack storage architecture, which is now the sole storage tier (cutover complete as of #90) — there is no hot DuckDB store, snapshot file, cold-Parquet UNION, or leader election (`internal/leader` was retired; DuckLake supports multi-writer).
 
 ### Key Design Constraints
 
-- **Writer is single-replica** (until ADR-0004 lands): DuckDB allows one RW process. The Writer owns the PVC; Query API reads only the S3 snapshot.
-- **Idempotent upserts**: spans PK `(trace_id, span_id)` — duplicate Redis deliveries are safe. (Replaced by the Batch Ledger under ADR-0004.)
+- **All services are stateless and horizontally scalable**: DuckLake supports multi-writer, so there is no single-writer constraint and no PVC for Writer/Query. Only the Quack Server is a single-replica StatefulSet (sole direct Catalog/data-path connection).
+- **Idempotent commits**: the Batch Ledger (`committed_batches` in Postgres) records committed Batch IDs so redelivered batches are skipped; residual duplicates are deduped at read time on trace-detail queries.
 - **Cost pre-computed at write time** — never recomputed at query time. Model names are normalized (provider prefix stripped) before pricing; unknown models store cost 0 and surface as "unpriced".
 - **Traces list = one row per Trace** (root span + rollups), never a flat span list.
 - **API key format**: `oev_proj_<43 base58>` / `oev_svc_<43 base58>`; only SHA-256 hashes stored.

@@ -78,13 +78,13 @@ Keyset pagination on `(start_time DESC, span_id ASC)`. The cursor is a base64-en
 Eval Workers write completed scores to the Writer Service via `POST /internal/v1/scores`. This is an internal-only endpoint, not exposed to external clients. Eval Workers retry with exponential backoff for up to 5 minutes on failure (covering Writer restarts). Scores that still fail after 5 minutes are logged and dropped — losing an occasional score is acceptable; blocking the eval pipeline is not. REST is used (not a return queue) because score acceptance is a synchronous confirmation needed before the Eval Worker can acknowledge the job as done.
 
 ### Prompt Cache
-The Query API caches prompt lookups in two independent caches. Version lookups (`/prompts/{name}?version=N`) use an LRU cache with no TTL — versions are immutable. Label lookups (`/prompts/{name}?label=production`) use a 30-second TTL, matching the DuckDB snapshot staleness window. A label reassignment is visible to production agents within 30 seconds.
+The Query API caches prompt lookups in two independent caches. Version lookups (`/prompts/{name}?version=N`) use an LRU cache with no TTL — versions are immutable. Label lookups (`/prompts/{name}?label=production`) use a 30-second TTL. A label reassignment is visible to production agents within 30 seconds.
 
 ### Metrics
 All services expose Prometheus metrics on a configurable address (default `:9090/metrics`). `metrics.disable_project_labels: true` suppresses `project_id` label cardinality globally. Phase 1 metric set:
 - **Ingest API**: `omneval_ingest_spans_received_total{project_id}`, `omneval_ingest_enqueue_errors_total`, `omneval_ingest_request_duration_seconds`
-- **Writer Service**: `omneval_writer_spans_written_total{project_id}`, `omneval_writer_duckdb_write_duration_seconds`, `omneval_writer_snapshot_sync_duration_seconds`, `omneval_writer_archive_spans_total{project_id}`
-- **Query API**: `omneval_query_request_duration_seconds{endpoint}`, `omneval_query_snapshot_age_seconds`
+- **Writer Service**: `omneval_writer_spans_written_total{project_id}`, `omneval_writer_lake_commit_duration_seconds`
+- **Query API**: `omneval_query_request_duration_seconds{endpoint}`
 - **Eval Workers**: `omneval_eval_jobs_processed_total{project_id,rule_id}`, `omneval_eval_job_duration_seconds`, `omneval_eval_judge_errors_total`
 
 ### Ingest Queue
@@ -110,7 +110,7 @@ Per-project price entries (input/output USD per million tokens, keyed by normali
 The `internal/otlp` package translates `ResourceSpans` into `domain.Span` values. The Ingest API accepts OTLP at `POST /v1/traces` as both `Content-Type: application/x-protobuf` (default for OTel SDKs) and `Content-Type: application/json`. Both encodings are decoded into the same `[]ResourceSpans` input before translation. Key mapping rules: `gen_ai.request.model`→`Model`; `gen_ai.usage.input_tokens` (or legacy `prompt_tokens`)→`InputTokens`; `gen_ai.usage.output_tokens` (or legacy `completion_tokens`)→`OutputTokens`; `gen_ai.prompt.N.{role,content}` arrays→`Input` JSON; `gen_ai.completion.N.{role,content}`→`Output` JSON; `omneval.prompt.name`/`omneval.prompt.version`→prompt linkage. `service.name` comes from the OTLP Resource; a service-scoped API key's `ServiceName` overrides it. `Kind` is derived: explicit `omneval.kind` attribute wins, then `gen_ai.*` presence→`llm`, then `tool.*` presence→`tool`, else `internal`. All unmapped attributes land in `Span.Attributes` overflow map.
 
 ### Analytics DSL
-The structured query language accepted by `POST /api/v1/analytics/spans`. Compiled server-side into parameterized DuckDB SQL; `project_id` is always injected. Supports `from`/`to` (absolute UTC `time.Time` — the client resolves any relative shortcuts before sending), `filters` (field + allowlisted op + value), `aggregations` (allowlisted function + field + alias), `group_by` (structured objects with optional `truncate` enum: `hour|day|week|month`), `order_by`, and `limit`. `duration_ms` is a virtual field compiled to `EPOCH_MS(end_time) - EPOCH_MS(start_time)`. Percentile aggregations (`p50`, `p95`, `p99`) compile to `approx_quantile(field, 0.X)`. Raw SQL strings are never accepted from clients. The compiler always emits a hot+cold UNION regardless of the time range.
+The structured query language accepted by `POST /api/v1/analytics/spans`. Compiled server-side into parameterized SQL against the Lake; `project_id` is always injected. Supports `from`/`to` (absolute UTC `time.Time` — the client resolves any relative shortcuts before sending), `filters` (field + allowlisted op + value), `aggregations` (allowlisted function + field + alias), `group_by` (structured objects with optional `truncate` enum: `hour|day|week|month`), `order_by`, and `limit`. `duration_ms` is a virtual field compiled to `EPOCH_MS(end_time) - EPOCH_MS(start_time)`. Percentile aggregations (`p50`, `p95`, `p99`) compile to `approx_quantile(field, 0.X)`. Raw SQL strings are never accepted from clients.
 
 ### Eval Rule
 A configuration that specifies a judge model, a judge prompt, an `EvalFilter`, and a sample rate. Triggers automatically on ingested spans that match the filter. Stored in the metadata store. The filter is evaluated in-process by the Writer Service against the `domain.Span` struct — no DuckDB query on the ingest hot path. The Writer loads all active rules at startup and refreshes them every 60 seconds via a background ticker — new rules start firing within one minute of creation. Sampling: `rand.Float64() < rule.SampleRate` per matching span per rule; `1.0` = score every match, `0.0` = effectively disabled.
@@ -147,16 +147,16 @@ Implementation proceeds as vertical TDD slices — each slice has a failing test
 
 1. **Metadata Store + Config** — foundation, no deps
 2. **Ingest API → Redis** — REST span ingest, enqueue to Redis
-3. **Writer Service → DuckDB** — dequeue, write to DuckDB, snapshot to S3
-4. **Query API → span list + trace** — read snapshot, serve `/api/v1/spans/query` and `/api/v1/traces/:id`
+3. **Writer Service → Lake** — dequeue, write to the Lake via the Quack Server
+4. **Query API → span list + trace** — read from the Lake, serve `/api/v1/spans/query` and `/api/v1/traces/:id`
 5. **Auth** — login, session cookie, admin bootstrap
 6. **React UI shell + /traces** — SPA served from embed.FS, paginated trace list
-7. **Analytics DSL + /dashboard** — compiler, hot+cold UNION, cost/latency charts
+7. **Analytics DSL + /dashboard** — compiler against the Lake, cost/latency charts
 8. **OTLP ingest** — proto+JSON decode, two-step translation, same Redis enqueue as slice 2
 9. **Eval pipeline** — rule cache, eval queue, Eval Workers, score write-back
 10. **Prompt Registry** — version create, label assign, caching client
 11. **SDK (Go + Python)** — tracer + client wired to Ingest API
-12. **Archival sweep** — hot→cold Parquet flush, S3 COPY via httpfs
+12. **Ingest Buffer reconciliation + retention GC** — recovery sweep for lost batch references and Lake-native retention enforcement
 
 Slices 8–12 are independent of each other once slices 1–4 are done.
 
@@ -167,13 +167,13 @@ The Lake lives entirely on S3, so span/score durability is S3 durability. The Ca
 CORS is enabled on the Ingest API only — the Query API (same-origin with the UI) and Writer Service (internal-only) do not need it. Configurable via `ingest.cors_allowed_origins` in `omneval.yaml`; defaults to `*` (the API key is the auth mechanism). Allowed methods: `POST, OPTIONS`. Allowed headers: `Content-Type, Authorization`. Preflight `OPTIONS` requests return `204`.
 
 ### Graceful Shutdown
-All services listen for `SIGTERM` (Kubernetes pod termination) and `SIGINT` (dev Ctrl-C). On signal: (1) stop accepting new connections via `http.Server.Shutdown(ctx)`; (2) drain in-flight HTTP requests with a 30-second timeout; (3) service-specific teardown. **Ingest API**: no extra teardown — Redis enqueue completes within the drain. **Writer Service**: finish the current DuckDB write batch; perform a final snapshot sync to S3; do not start a new archival sweep after signal. **Query API**: no extra teardown beyond HTTP drain. **Eval Workers**: finish the current eval job (LLM call may take tens of seconds) with a 120-second drain; do not `BLPOP` a new job after signal.
+All services listen for `SIGTERM` (Kubernetes pod termination) and `SIGINT` (dev Ctrl-C). On signal: (1) stop accepting new connections via `http.Server.Shutdown(ctx)`; (2) drain in-flight HTTP requests with a 30-second timeout; (3) service-specific teardown. **Ingest API**: no extra teardown — Redis enqueue completes within the drain. **Writer Service**: finish the current in-flight batch commit to the Lake; do not start a new reconciliation sweep after signal. **Query API**: no extra teardown beyond HTTP drain. **Eval Workers**: finish the current eval job (LLM call may take tens of seconds) with a 120-second drain; do not `BLPOP` a new job after signal.
 
 ### Health and Readiness Probes
 Each service exposes two routes. `GET /healthz` — liveness; returns `200 OK` if the process is alive, no external checks. `GET /readyz` — readiness; returns `200 OK` only when the service is ready for traffic, `503` otherwise. Kubernetes removes a pod from load balancer rotation while `/readyz` returns 503. Readiness gates per service:
 - **Ingest API**: Redis `PING` succeeds
-- **Writer Service**: DuckDB file open and writable; Redis `PING` succeeds
-- **Query API**: snapshot file exists on disk (initial download complete); metadata store reachable
+- **Writer Service**: Quack Server (Lake) connection healthy; Redis `PING` succeeds
+- **Query API**: Quack Server (Lake) connection healthy; metadata store reachable
 - **Eval Workers**: Redis `PING` succeeds
 
 ---

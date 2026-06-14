@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"embed"
 	"fmt"
 	"log/slog"
@@ -16,12 +15,9 @@ import (
 	"time"
 
 	_ "github.com/duckdb/duckdb-go/v2"
-	"github.com/minio/minio-go/v7"
 	"github.com/omneval/omneval/internal/config"
 	_ "github.com/omneval/omneval/internal/duckdbfix"
 	"github.com/omneval/omneval/internal/metadata"
-	"github.com/omneval/omneval/internal/storage"
-	s3 "github.com/omneval/omneval/internal/storage/s3"
 	"github.com/omneval/omneval/services/query/internal/auth"
 	"github.com/omneval/omneval/services/query/internal/handler"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -119,7 +115,7 @@ func Run() error {
 func RunWired(deps *WiredDeps) error {
 	cfg := deps.Cfg
 	defer deps.Store.Close()
-	defer deps.SDB.Close()
+	defer deps.Lake.Close()
 
 	router := buildRouter(deps)
 
@@ -135,12 +131,6 @@ func RunWired(deps *WiredDeps) error {
 	// Graceful shutdown on SIGINT/SIGTERM.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	// Start S3 snapshot poller (separate goroutine). Lake mode has no
-	// snapshot to poll — reads see committed Lake data directly (ADR-0004).
-	if deps.S3 != nil && !cfg.Query.Lake.Enabled {
-		go pollSnapshotLoop(ctx, deps)
-	}
 
 	// Start the dedicated Prometheus metrics server on cfg.Metrics.Addr (:9090).
 	if err := StartMetricsServer(ctx, cfg.Metrics.Addr); err != nil {
@@ -251,12 +241,8 @@ func buildRouter(deps *WiredDeps) http.Handler {
 	// Score write endpoint (for eval worker score write-back, no auth required).
 	// Scores are committed directly to the Lake via the AdminLake attachment
 	// (ADR-0004/#91); SpanDB resolves span_start_time for partitioning.
-	if deps.AdminLake != nil {
-		var spanDB handler.DBHandle = deps.AdminLake.DB()
-		mux.HandleFunc("POST /api/v1/scores", handler.NewScoreHandler(deps.AdminLake, spanDB).ServeHTTP)
-	} else {
-		mux.HandleFunc("POST /api/v1/scores", handler.NewScoreHandler(nil, deps.SDB).ServeHTTP)
-	}
+	var spanDB handler.DBHandle = deps.AdminLake.DB()
+	mux.HandleFunc("POST /api/v1/scores", handler.NewScoreHandler(deps.AdminLake, spanDB).ServeHTTP)
 
 	// Prometheus metrics.
 	mux.HandleFunc("GET /metrics", promhttp.Handler().ServeHTTP)
@@ -290,250 +276,6 @@ func buildRouter(deps *WiredDeps) http.Handler {
 		// SPA fallback and anything else.
 		mux.ServeHTTP(w, r)
 	})
-}
-
-// pollSnapshotLoop periodically polls S3 for an updated snapshot, downloads
-// it, and swaps the live DuckDB connection. On shutdown it triggers one
-// final sync.
-func pollSnapshotLoop(ctx context.Context, deps *WiredDeps) {
-	ticker := time.NewTicker(deps.SyncInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			downloaded, err := pollAndDownload(ctx, deps.S3, deps.DBPath, &deps.SnapshotLastModified)
-			if err != nil {
-				slog.Warn("query: snapshot poll/download failed", "err", err)
-			} else if downloaded {
-				if err := deps.SDB.Swap(deps.DBPath); err != nil {
-					slog.Warn("query: snapshot swap failed", "err", err)
-				} else {
-					slog.Info("query: snapshot swapped — new data now visible")
-				}
-			}
-			// Update snapshot age metric.
-			if !deps.SnapshotLastModified.IsZero() {
-				age := time.Since(deps.SnapshotLastModified).Seconds()
-				deps.QueryMetrics.RecordSnapshotAge(age)
-			}
-		case <-ctx.Done():
-			// Trigger one final sync before exit.
-			if downloaded, err := pollAndDownload(ctx, deps.S3, deps.DBPath, &deps.SnapshotLastModified); err != nil {
-				slog.Warn("query: final sync failed", "err", err)
-			} else if downloaded {
-				if err := deps.SDB.Swap(deps.DBPath); err != nil {
-					slog.Warn("query: snapshot swap on shutdown failed", "err", err)
-				}
-			}
-			return
-		}
-	}
-}
-
-// isS3NotFound checks whether the error indicates that the S3 object
-// does not exist (NoSuchKey or NoSuchBucket). Used to distinguish
-// "not ready yet" from genuine failures.
-func isS3NotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	resp := minio.ToErrorResponse(err)
-	return resp.Code == minio.NoSuchKey || resp.Code == minio.NoSuchBucket
-}
-
-// downloadSnapshot downloads the DuckDB snapshot from S3 to the local path.
-// If the snapshot does not exist yet (NoSuchKey), it creates an empty
-// DuckDB file with the required schema instead of failing.
-func downloadSnapshot(ctx context.Context, store storage.ObjectStore, dbPath string) error {
-	// Ensure parent directory exists.
-	dir := filepath.Dir(dbPath)
-	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("snapshot: create dir %s: %w", dir, err)
-		}
-	}
-
-	// Get the latest snapshot from S3.
-	snapshotKey := s3.SnapshotKey()
-	reader, err := store.Get(ctx, snapshotKey)
-	if err != nil {
-		// If the snapshot doesn't exist yet, create an empty DB.
-		if isS3NotFound(err) {
-			slog.Warn("query: no snapshot found in S3, starting with empty database")
-			return createEmptyDB(dbPath)
-		}
-		return fmt.Errorf("snapshot: get %s: %w", snapshotKey, err)
-	}
-	defer reader.Close()
-
-	// Write to local file.
-	tmpPath := dbPath + ".tmp"
-	f, err := os.Create(tmpPath)
-	if err != nil {
-		return fmt.Errorf("snapshot: create temp file %s: %w", tmpPath, err)
-	}
-
-	if _, err := f.ReadFrom(reader); err != nil {
-		f.Close()
-		os.Remove(tmpPath)
-		// minio.GetObject is lazy: the actual GET fires on first Read, so
-		// NoSuchKey surfaces here rather than at store.Get().
-		if isS3NotFound(err) {
-			slog.Warn("query: no snapshot found in S3, starting with empty database")
-			return createEmptyDB(dbPath)
-		}
-		return fmt.Errorf("snapshot: write temp file: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("snapshot: close temp file: %w", err)
-	}
-
-	// Atomically replace the snapshot.
-	if err := os.Rename(tmpPath, dbPath); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("snapshot: rename temp to %s: %w", dbPath, err)
-	}
-
-	return nil
-}
-
-// pollAndDownload checks if the S3 snapshot has changed and re-downloads if needed.
-// It compares the S3 object's LastModified against the previously stored value
-// to avoid the stale-mod-time problem where the local file's filesystem timestamp
-// reflects the download time rather than the S3 object's LastModified.
-// If the snapshot does not exist yet (NoSuchKey), it logs a warning and returns nil.
-// It returns (true, nil) when a new snapshot was downloaded, (false, nil) when
-// unchanged or unavailable, and (false, err) on unexpected errors.
-func pollAndDownload(ctx context.Context, store storage.ObjectStore, dbPath string, lastModified *time.Time) (bool, error) {
-	snapshotKey := s3.SnapshotKey()
-
-	// Stat the S3 object to check for changes.
-	info, err := store.Stat(ctx, snapshotKey)
-	if err != nil {
-		// Snapshot doesn't exist yet — log a warning but don't fail.
-		// The writer will produce one within ~30 seconds.
-		if isS3NotFound(err) {
-			slog.Warn("query: snapshot not yet available in S3, waiting for writer", "key", snapshotKey)
-			// Ensure we have at least an empty DB.
-			if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {
-				if createErr := createEmptyDB(dbPath); createErr != nil {
-					slog.Warn("query: failed to create empty DB as fallback", "err", createErr)
-				}
-			}
-			return false, nil
-		}
-		return false, fmt.Errorf("snapshot: stat %s: %w", snapshotKey, err)
-	}
-
-	// Skip download if the S3 object hasn't changed since our last known version.
-	if lastModified != nil && !lastModified.IsZero() {
-		if info.LastModified.Equal(*lastModified) {
-			slog.Debug("query: snapshot unchanged, skipping download",
-				"last_modified", info.LastModified)
-			return false, nil
-		}
-	}
-
-	// Download new snapshot.
-	slog.Info("query: downloading updated snapshot from S3",
-		"etag", info.ETag,
-		"last_modified", info.LastModified)
-	if err := downloadSnapshot(ctx, store, dbPath); err != nil {
-		return false, err
-	}
-
-	// Update the last modified time.
-	*lastModified = info.LastModified
-
-	return true, nil
-}
-
-// createEmptyDB creates a new DuckDB file with the Omneval schema.
-// Used when the S3 snapshot does not exist yet (first boot).
-func createEmptyDB(path string) error {
-	db, err := sql.Open("duckdb", path+"?access_mode=read_write")
-	if err != nil {
-		return fmt.Errorf("duckdb: create empty db: %w", err)
-	}
-	defer db.Close()
-
-	if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS spans (
-			span_id          VARCHAR      NOT NULL,
-			trace_id         VARCHAR      NOT NULL,
-			parent_id        VARCHAR,
-			conversation_id  VARCHAR,
-			project_id       VARCHAR      NOT NULL,
-			service_name     VARCHAR,
-			name             VARCHAR,
-			kind             VARCHAR,
-			start_time       TIMESTAMPTZ  NOT NULL,
-			end_time         TIMESTAMPTZ,
-			model            VARCHAR,
-			input            JSON,
-			output           JSON,
-			input_tokens     BIGINT,
-			output_tokens    BIGINT,
-			cost_usd         DOUBLE,
-			prompt_name      VARCHAR,
-			prompt_version   BIGINT,
-			status_code      VARCHAR,
-			status_message   VARCHAR,
-			attributes       JSON,
-			PRIMARY KEY (trace_id, span_id)
-		);
-		CREATE INDEX IF NOT EXISTS idx_spans_project_time
-			ON spans (project_id, start_time);
-		CREATE INDEX IF NOT EXISTS idx_spans_conversation
-			ON spans (project_id, conversation_id);
-
-		CREATE TABLE IF NOT EXISTS bookmarks (
-			trace_id       VARCHAR      NOT NULL,
-			project_id     VARCHAR      NOT NULL,
-			created_at     TIMESTAMPTZ  NOT NULL,
-			PRIMARY KEY (trace_id, project_id)
-		);
-
-		CREATE TABLE IF NOT EXISTS scores (
-			score_id       VARCHAR      NOT NULL PRIMARY KEY,
-			span_id        VARCHAR      NOT NULL,
-			trace_id       VARCHAR      NOT NULL,
-			project_id     VARCHAR      NOT NULL,
-			eval_name      VARCHAR,
-			value          DOUBLE,
-			reasoning      VARCHAR,
-			judge_model    VARCHAR,
-			prompt_name    VARCHAR,
-			prompt_version BIGINT,
-			created_at     TIMESTAMPTZ  NOT NULL
-		);
-	`); err != nil {
-		return fmt.Errorf("duckdb: create schema: %w", err)
-	}
-
-	return nil
-}
-
-// openSnapshotDBRW opens a DuckDB database in read-write mode.
-// Used by the Query API for score writes.
-func openSnapshotDBRW(path string) (*sql.DB, error) {
-	return openDuckDB(path + "?access_mode=read_write")
-}
-
-// openDuckDB opens a DuckDB database with the given DSN and verifies connectivity.
-func openDuckDB(dsn string) (*sql.DB, error) {
-	db, err := sql.Open("duckdb", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("duckdb: open %s: %w", dsn, err)
-	}
-
-	if err := db.Ping(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("duckdb: ping: %w", err)
-	}
-
-	return db, nil
 }
 
 // openMetadataStore opens the configured metadata store via the shared

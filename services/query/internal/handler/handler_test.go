@@ -64,6 +64,8 @@ const scoresTableDDL = `
 		prompt_version BIGINT,
 		created_at     TIMESTAMPTZ  NOT NULL
 	);
+	CREATE SCHEMA IF NOT EXISTS lake;
+	CREATE VIEW lake.scores AS SELECT * FROM main.scores;
 `
 
 func TestHandleSpansQuery_AuthRequired(t *testing.T) {
@@ -239,6 +241,13 @@ func TestHandleSpansQuery_WithDatabase(t *testing.T) {
 		t.Fatalf("create table: %v", err)
 	}
 
+	// SpanHandler reads lake.spans (ADR-0004); create a "lake" schema with a
+	// view over the spans table to stand in for the Lake.
+	if _, err := db.ExecContext(context.Background(),
+		`CREATE SCHEMA lake; CREATE VIEW lake.spans AS SELECT * FROM main.spans;`); err != nil {
+		t.Fatalf("create lake schema: %v", err)
+	}
+
 	// Insert a test span.
 	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
 	if _, err := db.ExecContext(context.Background(),
@@ -250,7 +259,7 @@ func TestHandleSpansQuery_WithDatabase(t *testing.T) {
 
 	// Create handler with real DB.
 	h := &SpanHandler{
-		DB:           db,
+		Lake:         db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -332,7 +341,7 @@ func TestHandleSpansQuery_NoTimeRange_DefaultsTo30Days(t *testing.T) {
 	}
 
 	h := &SpanHandler{
-		DB:           db,
+		Lake:         db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -410,7 +419,7 @@ func TestHandleAnalyticsSpans_NoTimeRange_DefaultsTo30Days(t *testing.T) {
 	}
 
 	h := &SpanHandler{
-		DB:           db,
+		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -461,7 +470,7 @@ func TestHandleAnalyticsSpans_FromAfterTo_Returns400(t *testing.T) {
 	defer db.Close()
 
 	h := &SpanHandler{
-		DB:           db,
+		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -588,7 +597,7 @@ func TestHandleTraceDetail_NotFound(t *testing.T) {
 	}
 
 	h := &SpanHandler{
-		DB:           db,
+		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -641,7 +650,7 @@ func TestHandleTraceDetail_SingleSpan(t *testing.T) {
 	}
 
 	h := &SpanHandler{
-		DB:           db,
+		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -713,7 +722,7 @@ func TestHandleTraceDetail_MultiLevelTree(t *testing.T) {
 	}
 
 	h := &SpanHandler{
-		DB:           db,
+		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -795,7 +804,7 @@ func TestHandleTraceDetail_SiblingChildren(t *testing.T) {
 	}
 
 	h := &SpanHandler{
-		DB:           db,
+		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -864,7 +873,7 @@ func TestHandleTraceDetail_NoParentFallback(t *testing.T) {
 	}
 
 	h := &SpanHandler{
-		DB:           db,
+		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -927,7 +936,7 @@ func TestHandleTraceDetail_ScoresAttached(t *testing.T) {
 	}
 
 	h := &SpanHandler{
-		DB:           db,
+		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -995,7 +1004,7 @@ func TestHandleTraceDetail_ProjectIsolation(t *testing.T) {
 
 	// Query as proj-a — should only see proj-a's span.
 	h := &SpanHandler{
-		DB:           db,
+		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "proj-a"},
 	}
 
@@ -1365,7 +1374,7 @@ func TestHandleAnalyticsSpans_WithDatabase_ProjectFromSession(t *testing.T) {
 	}
 
 	h := &SpanHandler{
-		DB:           db,
+		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -1448,7 +1457,7 @@ func TestHandleAnalyticsSpans_ProjectIDOverride(t *testing.T) {
 
 	// Session returns proj-a, but the request overrides to proj-b.
 	h := &SpanHandler{
-		DB: db,
+		Lake: db,
 		SessionStore: &FakeSessionStore{
 			projectID:    "proj-a",
 			userProjects: userProjects,
@@ -1509,7 +1518,7 @@ func TestHandleAnalyticsSpans_ProjectIDForbidden(t *testing.T) {
 	defer db.Close()
 
 	h := &SpanHandler{
-		DB: db,
+		Lake: db,
 		SessionStore: &FakeSessionStore{
 			projectID: "proj-a",
 			userProjects: []*domain.Project{
@@ -1569,7 +1578,7 @@ func TestHandleSpansQuery_ContainsFilter(t *testing.T) {
 	}
 
 	h := &SpanHandler{
-		DB:           db,
+		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -1650,7 +1659,7 @@ func TestHandleAnalyticsSpans_TimeBucketHour(t *testing.T) {
 	}
 
 	h := &SpanHandler{
-		DB:           db,
+		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -1728,7 +1737,7 @@ func TestHandleAnalyticsSpans_TimeBucketInvalidInterval(t *testing.T) {
 	defer db.Close()
 
 	h := &SpanHandler{
-		DB:           db,
+		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -1792,7 +1801,7 @@ func TestHandleSpansQuery_ProjectIDOverride(t *testing.T) {
 
 	// Session default is proj-a, but the request selects proj-b.
 	h := &SpanHandler{
-		DB: db,
+		Lake: db,
 		SessionStore: &FakeSessionStore{
 			projectID:    "proj-a",
 			userProjects: []*domain.Project{{ProjectID: "proj-a"}, {ProjectID: "proj-b"}},
@@ -1848,7 +1857,7 @@ func TestHandleSpansQuery_ProjectIDForbidden(t *testing.T) {
 	}
 
 	h := &SpanHandler{
-		DB: db,
+		Lake: db,
 		SessionStore: &FakeSessionStore{
 			projectID:    "proj-a",
 			userProjects: []*domain.Project{{ProjectID: "proj-a"}},

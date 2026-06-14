@@ -63,17 +63,8 @@ data:
         {{- end }}
     writer:
       addr: {{ .Values.writer.addr }}
-      duckdb_path: {{ .Values.writer.duckdbPath | quote }}
-      sync_interval: {{ .Values.writer.syncInterval }}
-      flush_interval: {{ .Values.writer.flushInterval }}
-      flush_age_days: {{ .Values.writer.flushAgeDays }}
-      leader_election:
-        enabled: {{ .Values.writer.leaderElection.enabled }}
-        lock_ttl: {{ .Values.writer.leaderElection.lockTTL }}
     query:
       addr: {{ .Values.query.addr }}
-      duckdb_path: {{ .Values.query.duckdbPath | quote }}
-      sync_interval: {{ .Values.query.syncInterval }}
     eval:
       concurrency: {{ .Values.eval.concurrency }}
       judge_timeout: {{ .Values.eval.judgeTimeout }}

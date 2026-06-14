@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -19,13 +18,17 @@ type ScoreLakeWriter interface {
 	InsertScores(ctx context.Context, scores []*domain.Score) error
 }
 
+// SpanStartTimeLookup resolves the start_time of the span a score annotates,
+// so the score lands in the correct lake.scores partition (ADR-0002).
+// Implemented by *lake.Lake.
+type SpanStartTimeLookup interface {
+	SpanStartTime(ctx context.Context, traceID, spanID string) (time.Time, error)
+}
+
 // ScoreMux handles POST /internal/v1/scores — the internal-only endpoint
-// called by Eval Workers to write completed scores back to DuckDB.
+// called by Eval Workers to write completed scores back to the Lake.
 // Not exposed outside the cluster.
 type ScoreMux struct {
-	db *sql.DB
-	// lake, when non-nil, receives a dual-write of every score after the
-	// legacy DuckDB write succeeds (writer.lake.enabled).
 	lake ScoreLakeWriter
 }
 
@@ -43,17 +46,25 @@ type ScoreRequest struct {
 	PromptVersion int64   `json:"prompt_version"`
 }
 
-// New creates a new ScoreMux that handles POST /internal/v1/scores.
-// lake may be nil (legacy-only writes).
-func New(db *sql.DB, lake ScoreLakeWriter) http.Handler {
-	h := &ScoreMux{db: db, lake: lake}
+// New creates a new ScoreMux that handles POST /internal/v1/scores. lake is
+// required (writer.lake.enabled defaults true); a nil lake is treated as a
+// misconfiguration and every request returns 503.
+func New(lake ScoreLakeWriter) http.Handler {
+	h := &ScoreMux{lake: lake}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /internal/v1/scores", h.HandleScores)
 	return mux
 }
 
-// HandleScores writes a single score to DuckDB.
+// HandleScores writes a single score to the Lake, the sole storage tier
+// for scores (ADR-0004).
 func (h *ScoreMux) HandleScores(w http.ResponseWriter, r *http.Request) {
+	if h.lake == nil {
+		slog.ErrorContext(r.Context(), "score handler misconfigured: lake is nil")
+		http.Error(w, "lake not configured", http.StatusServiceUnavailable)
+		return
+	}
+
 	var req ScoreRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -74,62 +85,27 @@ func (h *ScoreMux) HandleScores(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:     time.Now(),
 	}
 
-	if err := h.writeScore(r.Context(), score); err != nil {
+	// The score partitions by its span's start_time (ADR-0002). Look it up
+	// from the Lake; if the span isn't found (or the lookup fails),
+	// InsertScores falls back to score.CreatedAt.
+	if lookup, ok := h.lake.(SpanStartTimeLookup); ok {
+		spanStart, err := lookup.SpanStartTime(r.Context(), score.TraceID, score.SpanID)
+		if err != nil {
+			slog.WarnContext(r.Context(), "span start time lookup failed, falling back to created_at",
+				"score_id", score.ScoreID, "err", err)
+		} else if !spanStart.IsZero() {
+			score.SpanStartTime = spanStart
+		}
+	}
+
+	ctx := r.Context()
+	if err := h.lake.InsertScores(ctx, []*domain.Score{score}); err != nil {
+		metrics.LakeWriteErrors.WithLabelValues("scores").Inc()
+		slog.ErrorContext(ctx, "lake score write failed",
+			"score_id", score.ScoreID, "err", err)
 		http.Error(w, fmt.Sprintf("write score: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	h.dualWriteLake(r.Context(), score)
-
 	w.WriteHeader(http.StatusCreated)
-}
-
-// dualWriteLake commits the score to the Lake after a successful legacy
-// write. The score partitions by its span's start_time (ADR-0002), looked
-// up from the legacy spans table where the span already landed. A
-// lake-write failure must never fail the legacy write while dual-writing.
-func (h *ScoreMux) dualWriteLake(ctx context.Context, score *domain.Score) {
-	if h.lake == nil {
-		return
-	}
-
-	var spanStart time.Time
-	err := h.db.QueryRowContext(ctx,
-		"SELECT start_time FROM spans WHERE trace_id = ? AND span_id = ?",
-		score.TraceID, score.SpanID,
-	).Scan(&spanStart)
-	if err == nil {
-		score.SpanStartTime = spanStart
-	}
-
-	if err := h.lake.InsertScores(ctx, []*domain.Score{score}); err != nil {
-		slog.ErrorContext(ctx, "lake score write failed, legacy write kept",
-			"score_id", score.ScoreID,
-			"err", err)
-		metrics.LakeWriteErrors.WithLabelValues("scores").Inc()
-	}
-}
-
-// writeScore writes a single score to DuckDB.
-func (h *ScoreMux) writeScore(ctx context.Context, score *domain.Score) error {
-	_, err := h.db.ExecContext(ctx, `
-		INSERT INTO scores (
-			score_id, span_id, trace_id, project_id,
-			eval_name, value, reasoning, judge_model,
-			prompt_name, prompt_version, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`,
-		score.ScoreID,
-		score.SpanID,
-		score.TraceID,
-		score.ProjectID,
-		score.EvalName,
-		score.Value,
-		score.Reasoning,
-		score.JudgeModel,
-		score.PromptName,
-		score.PromptVersion,
-		score.CreatedAt,
-	)
-	return err
 }

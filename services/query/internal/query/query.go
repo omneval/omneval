@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
-	"github.com/omneval/omneval/internal/storage"
 	"github.com/omneval/omneval/services/query/internal/cursor"
 )
 
@@ -175,7 +174,7 @@ type SpanQueryFilter struct {
 // defaults to the last 30 days (from = now - 30d, to = now).
 // Time range validation: if from is explicitly set after to, an error is
 // returned so the caller can respond with 400.
-func NewSpanQuery(projectID string, req SpanQueryRequest, s3Store storage.ObjectStore, snapshotDB string) (*SpanQuery, error) {
+func NewSpanQuery(projectID string, req SpanQueryRequest) (*SpanQuery, error) {
 	from := req.From
 	to := req.To
 
@@ -191,13 +190,11 @@ func NewSpanQuery(projectID string, req SpanQueryRequest, s3Store storage.Object
 	}
 
 	q := &SpanQuery{
-		projectID:  projectID,
-		from:       from,
-		to:         to,
-		filters:    make([]SpanQueryFilter, len(req.Filters)),
-		limit:      DefaultLimit,
-		s3Store:    s3Store,
-		snapshotDB: snapshotDB,
+		projectID: projectID,
+		from:      from,
+		to:        to,
+		filters:   make([]SpanQueryFilter, len(req.Filters)),
+		limit:     DefaultLimit,
 	}
 
 	for i, f := range req.Filters {
@@ -227,9 +224,6 @@ const (
 	DefaultLimit = 50
 	// MaxLimit is the maximum page size allowed.
 	MaxLimit = 500
-	// omnevalBucket is the default S3 bucket for both the Writer's flusher
-	// and the Query API's cold Parquet reads. Must match config.Storage.Bucket.
-	omnevalBucket = "omneval"
 )
 
 // defaultTimeRange is the time range applied when from and to are omitted
@@ -237,19 +231,16 @@ const (
 const defaultTimeRange = 30 * 24 * time.Hour
 
 // SpanQuery builds a parameterized SQL query for POST /api/v1/spans/query.
-// It handles hot+cold UNION with keyset cursor pagination and
-// field-level filters with allowlisted operators.
-// The cold side reads Hive-partitioned Parquet files from S3 via
-// DuckDB's read_parquet with hive_partitioning=true.
+// It compiles to a single-table read against the Lake (lake.spans, ADR-0004)
+// with keyset cursor pagination and field-level filters with allowlisted
+// operators. See LakeSQL.
 type SpanQuery struct {
-	projectID  string
-	from       time.Time
-	to         time.Time
-	filters    []SpanQueryFilter
-	cursor     cursor.Cursor
-	limit      int
-	s3Store    storage.ObjectStore // nil when S3 not configured
-	snapshotDB string              // local DuckDB snapshot path
+	projectID string
+	from      time.Time
+	to        time.Time
+	filters   []SpanQueryFilter
+	cursor    cursor.Cursor
+	limit     int
 	// bookmarkedTraceIDs is the project's starred trace IDs, resolved from
 	// the Metadata Store by the handler before SQL compilation. Bookmarks
 	// no longer live in DuckDB (ADR-0004), so "bookmarked" filters compile
@@ -259,7 +250,7 @@ type SpanQuery struct {
 
 // NeedsBookmarks reports whether any filter requires the project's
 // bookmarked trace IDs to compile. Callers should resolve them from the
-// Metadata Store and call SetBookmarkedTraceIDs before SQL().
+// Metadata Store and call SetBookmarkedTraceIDs before LakeSQL().
 func (q *SpanQuery) NeedsBookmarks() bool {
 	for _, f := range q.filters {
 		if f.Field == "bookmarked" {
@@ -279,114 +270,6 @@ func (q *SpanQuery) SetBookmarkedTraceIDs(ids []string) {
 // validated, bounded value — not the raw client input.
 func (q *SpanQuery) EffectiveLimit() int {
 	return q.limit
-}
-
-// SQL returns the compiled SQL string and positional arguments.
-// The query always emits a hot+cold UNION. The cold side reads
-// Hive-partitioned Parquet files from S3 via read_parquet with
-// hive_partitioning=true.
-func (q *SpanQuery) SQL() (sql string, args []any, err error) {
-	// --- Hot side: local DuckDB snapshot ---
-	hotSQL, hotArgs, err := q.hotSQL()
-	if err != nil {
-		return "", nil, err
-	}
-
-	// --- Cold side: Parquet on S3 via read_parquet ---
-	coldSQL := q.coldSQL()
-	var coldArgs []any
-	if q.s3Store != nil {
-		// Apply the same WHERE clause as the hot side. Without it the cold
-		// branch returned every archived span of the project regardless of
-		// filters or time range — which made GET /api/v1/traces/{traceId}
-		// build its tree from unrelated spans and render the same trace no
-		// matter which id was requested (issue #66). Aliased as "spans" so
-		// special filters (bookmarked) that reference spans.trace_id keep
-		// resolving inside the wrapper.
-		whereArgs, where := q.buildWhereClause()
-		coldSQL = "SELECT * FROM (" + coldSQL + ") AS spans" + where
-		coldArgs = whereArgs
-	}
-
-	parts := []string{hotSQL, coldSQL}
-	unionSQL := strings.Join(parts, "\nUNION ALL\n")
-
-	// Wrap in outer query for cursor, ordering, and limit.
-	outerSQL := q.outerSQL(unionSQL)
-
-	// Collect all args: hot side args + cold side args + cursor args —
-	// positional placeholders resolve in SQL order (hot WHERE, cold WHERE,
-	// outer cursor/limit).
-	args = append(hotArgs, coldArgs...)
-	if q.cursor.StartTime.IsZero() && q.cursor.SpanID == "" {
-		// First page: pass limit+1 as arg for the outer LIMIT.
-		args = append(args, q.limit+1)
-	} else {
-		// Cursor page: pass (start_time, start_time, span_id, limit+1).
-		args = append(args, q.cursor.StartTime, q.cursor.StartTime, q.cursor.SpanID, q.limit+1)
-	}
-
-	return outerSQL, args, nil
-}
-
-// hotSQL builds the SELECT for the local DuckDB snapshot.
-// It returns just the SELECT with WHERE — ORDER BY and LIMIT are applied
-// by the outer query to support UNION properly.
-func (q *SpanQuery) hotSQL() (string, []any, error) {
-	var sb strings.Builder
-	sb.WriteString("SELECT span_id, trace_id, parent_id, conversation_id, project_id, service_name, name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message FROM spans")
-
-	args, where := q.buildWhereClause()
-	sb.WriteString(where)
-
-	return sb.String(), args, nil
-}
-
-// coldSQL builds the SELECT for the Parquet archive on S3.
-// It uses read_parquet with hive_partitioning=true to read Hive-partitioned
-// Parquet files from s3://bucket/archive/project_id={id}/date={date}/spans/.
-// Only reads when S3 is configured (s3Store != nil).
-// The bucket defaults to "omneval" — matching the Writer's s3URL default.
-func (q *SpanQuery) coldSQL() string {
-	if q.s3Store == nil {
-		// No S3 configured: return a no-op that produces zero rows.
-		return `SELECT span_id, trace_id, parent_id, conversation_id, project_id, service_name, name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message FROM (VALUES (CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR), CAST(NULL AS TIMESTAMPTZ), CAST(NULL AS TIMESTAMPTZ), CAST(NULL AS VARCHAR), CAST(NULL AS JSON), CAST(NULL AS JSON), CAST(NULL AS BIGINT), CAST(NULL AS BIGINT), CAST(NULL AS DOUBLE), CAST(NULL AS VARCHAR), CAST(NULL AS BIGINT), CAST(NULL AS VARCHAR), CAST(NULL AS VARCHAR)) LIMIT 0) AS t(span_id, trace_id, parent_id, conversation_id, project_id, service_name, name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message)`
-	}
-
-	parquetPrefix := fmt.Sprintf(
-		"s3://%s/archive/project_id=%s/**/*.parquet",
-		omnevalBucket,
-		q.projectID,
-	)
-
-	return fmt.Sprintf(`
-		SELECT span_id, trace_id, parent_id, conversation_id, project_id, service_name, name, kind,
-		       start_time, end_time, model, input, output,
-		       input_tokens, output_tokens, cost_usd,
-		       prompt_name, prompt_version,
-		       status_code, status_message
-		FROM read_parquet(['%s'], hive_partitioning=true)
-	`, parquetPrefix)
-}
-
-// outerSQL wraps the UNION result for keyset cursor pagination.
-// ORDER BY and LIMIT are applied to the outer query.
-func (q *SpanQuery) outerSQL(innerSQL string) string {
-	var sb strings.Builder
-	sb.WriteString("SELECT * FROM (")
-	sb.WriteString(innerSQL)
-	sb.WriteString(") AS _unioned")
-
-	if q.cursor.StartTime.IsZero() && q.cursor.SpanID == "" {
-		sb.WriteString("\n  ORDER BY start_time DESC, span_id ASC")
-		sb.WriteString("\n  LIMIT ?")
-		return sb.String()
-	}
-
-	sb.WriteString("\n  WHERE (start_time < ? OR (start_time = ? AND span_id < ?))")
-	sb.WriteString("\n  ORDER BY start_time DESC, span_id ASC")
-	sb.WriteString("\n  LIMIT ?")
-	return sb.String()
 }
 
 // buildWhereClause assembles the WHERE clause from filters.
@@ -673,12 +556,6 @@ type SpanResponse struct {
 	Next  string         `json:"next,omitempty"`
 	Total int64          `json:"total,omitempty"`
 	Limit int            `json:"limit"`
-}
-
-// CountSQL returns a COUNT(*) query for the same filter set.
-func (q *SpanQuery) CountSQL() (sql string, args []any, err error) {
-	_, where := q.buildWhereClause()
-	return fmt.Sprintf("SELECT COUNT(*) FROM spans%s", where), nil, nil
 }
 
 // MarshalResponse serializes a SpanResponse to JSON bytes.

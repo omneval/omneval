@@ -3,8 +3,6 @@ package pipeline
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,20 +17,6 @@ import (
 	"github.com/omneval/omneval/internal/queue"
 	"github.com/omneval/omneval/services/writer/internal/metrics"
 )
-
-// insertSpansSQL is the INSERT OR REPLACE statement for the DuckDB spans table.
-// Columns: span_id, trace_id, parent_id, conversation_id, project_id, service_name,
-// name, kind, start_time, end_time, model, input, output, input_tokens, output_tokens,
-// cost_usd, prompt_name, prompt_version, status_code, status_message, attributes.
-const insertSpansSQL = `
-	INSERT OR REPLACE INTO spans (
-		span_id, trace_id, parent_id, conversation_id, project_id, service_name,
-		name, kind, start_time, end_time,
-		model, input, output, input_tokens, output_tokens, cost_usd,
-		prompt_name, prompt_version,
-		status_code, status_message, attributes
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`
 
 // SpanLakeWriter commits span batches to the Lake (ADR-0004). Implemented
 // by *lake.Lake; an interface so tests can fake lake failures.
@@ -53,16 +37,17 @@ type BatchLedger interface {
 	IsBatchCommitted(ctx context.Context, batchID string) (bool, error)
 }
 
-// Pipeline drains the Redis ingest queue and batches writes into DuckDB.
+// Pipeline drains the Redis ingest queue, computes cost, and commits
+// batches to the Lake (ADR-0004) — the sole storage tier.
 type Pipeline struct {
 	ingest  queue.IngestQueue
-	db      *sql.DB
 	pricing *pricing.Table
 	store   metadata.Store
 	evalQ   queue.EvalQueue
 	metrics *metrics.WriterMetrics
-	// lake, when non-nil, receives a dual-write of every batch after the
-	// legacy DuckDB write succeeds (writer.lake.enabled).
+	// lake is the Lake write path. Required when writer.lake.enabled
+	// (the default); a nil lake is a misconfiguration and Run returns an
+	// error at startup.
 	lake SpanLakeWriter
 	// reliable + fetcher + ledger, when set via WithBuffer, switch Run to
 	// the S3-first loop: dequeue references, fetch from the Ingest Buffer,
@@ -70,14 +55,14 @@ type Pipeline struct {
 	reliable queue.ReliableIngestQueue
 	fetcher  BatchFetcher
 	ledger   BatchLedger
-	// writeErr, if set, causes writeSpans to return this error (test only).
+	// writeErr, if set, causes commitLake to return this error (test only).
 	writeErr error
 }
 
-// New creates a new Pipeline.
+// New creates a new Pipeline. lake is the Lake write path (ADR-0004); it is
+// required for Run to operate (a nil lake causes Run to return an error).
 func New(
 	ingest queue.IngestQueue,
-	db *sql.DB,
 	pricing *pricing.Table,
 	store metadata.Store,
 	evalQ queue.EvalQueue,
@@ -85,7 +70,6 @@ func New(
 ) *Pipeline {
 	return &Pipeline{
 		ingest:  ingest,
-		db:      db,
 		pricing: pricing,
 		store:   store,
 		evalQ:   evalQ,
@@ -93,8 +77,8 @@ func New(
 	}
 }
 
-// WithLake enables dual-writing every batch to the Lake. Returns the
-// pipeline for chaining at wiring time.
+// WithLake sets the Lake write path. Returns the pipeline for chaining at
+// wiring time.
 func (p *Pipeline) WithLake(l SpanLakeWriter) *Pipeline {
 	p.lake = l
 	return p
@@ -112,10 +96,15 @@ func (p *Pipeline) WithBuffer(rq queue.ReliableIngestQueue, fetcher BatchFetcher
 }
 
 // Run blocks until ctx is canceled. It continuously dequeues spans from Redis,
-// writes them to DuckDB, computes cost, matches eval rules, and enqueues eval jobs.
-// On non-fatal errors (dequeue, write, eval rule listing), the pipeline logs
-// the error and continues processing subsequent batches instead of crashing.
+// computes cost, commits the batch to the Lake, matches eval rules, and
+// enqueues eval jobs. On non-fatal errors (dequeue, write, eval rule
+// listing), the pipeline logs the error and continues processing subsequent
+// batches instead of crashing. Requires p.lake to be non-nil; returns an
+// error immediately if it is not.
 func (p *Pipeline) Run(ctx context.Context) error {
+	if p.lake == nil {
+		return fmt.Errorf("pipeline: lake is required (writer.lake.enabled)")
+	}
 	if p.reliable != nil {
 		return p.runBuffered(ctx)
 	}
@@ -139,8 +128,9 @@ func (p *Pipeline) Run(ctx context.Context) error {
 			continue
 		}
 
-		if err := p.writeSpans(ctx, spans); err != nil {
-			slog.ErrorContext(ctx, "write spans failed, skipping batch",
+		p.computeCosts(spans)
+		if err := p.commitLake(ctx, spans); err != nil {
+			slog.ErrorContext(ctx, "lake commit failed, skipping batch",
 				"span_count", len(spans),
 				"err", err)
 			if p.metrics != nil {
@@ -239,8 +229,12 @@ func (p *Pipeline) processEntry(ctx context.Context, entry *queue.IngestEntry) {
 		}
 	}
 
-	if err := p.writeLegacy(ctx, spans); err != nil {
-		slog.ErrorContext(ctx, "write spans failed, requeueing",
+	p.computeCosts(spans)
+
+	// The Lake commit is authoritative for both entry types: a failure
+	// must retry, not be swallowed (ADR-0004, Lake is the sole tier).
+	if err := p.commitLake(ctx, spans); err != nil {
+		slog.ErrorContext(ctx, "lake commit failed, requeueing",
 			"span_count", len(spans), "err", err)
 		if p.metrics != nil {
 			p.metrics.RecordWriteError()
@@ -250,19 +244,6 @@ func (p *Pipeline) processEntry(ctx context.Context, entry *queue.IngestEntry) {
 	}
 
 	if entry.Ref != nil {
-		// For buffered batches the Lake commit is authoritative — unlike
-		// dual-write, a failure here must retry, not be swallowed.
-		if p.lake != nil {
-			if err := p.commitLake(ctx, spans); err != nil {
-				slog.ErrorContext(ctx, "lake commit failed, requeueing",
-					"batch_id", entry.Ref.BatchID, "err", err)
-				p.requeue(ctx, entry)
-				return
-			}
-		} else {
-			slog.WarnContext(ctx, "buffered batch without lake enabled — committed to legacy store only; enable writer.lake.enabled",
-				"batch_id", entry.Ref.BatchID)
-		}
 		if err := p.ledger.MarkBatchCommitted(ctx, entry.Ref.BatchID, time.Now()); err != nil {
 			// Crash window: the Lake commit stood but the ledger insert
 			// failed. Requeue — redelivery re-commits and trace-detail
@@ -272,9 +253,6 @@ func (p *Pipeline) processEntry(ctx context.Context, entry *queue.IngestEntry) {
 			p.requeue(ctx, entry)
 			return
 		}
-	} else {
-		// Legacy payload entry: keep dual-write semantics (best effort).
-		p.dualWriteLake(ctx, spans)
 	}
 
 	p.ack(ctx, entry)
@@ -301,39 +279,10 @@ func (p *Pipeline) requeue(ctx context.Context, entry *queue.IngestEntry) {
 	}
 }
 
-// writeSpans writes a batch of spans to DuckDB using INSERT OR REPLACE,
-// then dual-writes the Lake best-effort (legacy flow).
-func (p *Pipeline) writeSpans(ctx context.Context, spans []*domain.Span) error {
-	if err := p.writeLegacy(ctx, spans); err != nil {
-		return err
-	}
-	p.dualWriteLake(ctx, spans)
-	return nil
-}
-
-// writeLegacy computes cost and writes a batch to the legacy DuckDB store.
-func (p *Pipeline) writeLegacy(ctx context.Context, spans []*domain.Span) error {
-	if p.writeErr != nil {
-		return p.writeErr
-	}
-	if len(spans) == 0 {
-		return nil
-	}
-
-	start := time.Now()
-
-	tx, err := p.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("pipeline: begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	stmt, err := tx.PrepareContext(ctx, insertSpansSQL)
-	if err != nil {
-		return fmt.Errorf("pipeline: prepare: %w", err)
-	}
-	defer stmt.Close()
-
+// computeCosts fills in span.CostUSD and defaults missing start/end times,
+// in place, before the batch is committed to the Lake. Cost is pre-computed
+// at write time and never recomputed at query time.
+func (p *Pipeline) computeCosts(spans []*domain.Span) {
 	now := time.Now()
 	for _, span := range spans {
 		var cost float64
@@ -342,78 +291,30 @@ func (p *Pipeline) writeLegacy(ctx context.Context, spans []*domain.Span) error 
 		}
 		span.CostUSD = cost
 
-		startTime := span.StartTime
-		if startTime.IsZero() {
-			startTime = now
+		if span.StartTime.IsZero() {
+			span.StartTime = now
 		}
-		endTime := span.EndTime
-		if endTime.IsZero() {
-			endTime = now
-		}
-
-		// Coerce empty strings to nil so DuckDB stores NULL instead of
-		// rejecting them as malformed JSON in JSON-typed columns.
-		var inputVal, outputVal interface{}
-		if span.Input != "" {
-			inputVal = span.Input
-		}
-		if span.Output != "" {
-			outputVal = span.Output
-		}
-
-		_, err := stmt.ExecContext(ctx,
-			span.SpanID,
-			span.TraceID,
-			span.ParentID,
-			span.ConversationID,
-			span.ProjectID,
-			span.ServiceName,
-			span.Name,
-			string(span.Kind),
-			startTime,
-			endTime,
-			span.Model,
-			inputVal,
-			outputVal,
-			span.InputTokens,
-			span.OutputTokens,
-			cost,
-			span.PromptName,
-			span.PromptVersion,
-			span.StatusCode,
-			span.StatusMessage,
-			attributesJSON(span.Attributes),
-		)
-		if err != nil {
-			return fmt.Errorf("pipeline: exec span %s: %w", span.SpanID, err)
+		if span.EndTime.IsZero() {
+			span.EndTime = now
 		}
 	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("pipeline: commit: %w", err)
-	}
-
-	// Record metrics after successful write.
-	if p.metrics != nil {
-		elapsed := time.Since(start).Seconds()
-		p.metrics.RecordDuckDBWriteDuration(elapsed)
-
-		projectCounts := make(map[string]int)
-		for _, span := range spans {
-			projectCounts[span.ProjectID]++
-		}
-		for projectID, count := range projectCounts {
-			p.metrics.RecordSpansWritten(projectID, count)
-		}
-	}
-
-	return nil
 }
 
-// commitLake commits the batch to the Lake, recording commit latency on
-// success and the failure counter on error. The caller decides whether a
-// failure is fatal for the batch (buffered flow) or tolerated (dual-write).
+// commitLake commits the batch to the Lake, recording write duration on
+// success and the failure counter on error. The Lake is the sole storage
+// tier (ADR-0004): a failure here is fatal for the batch and the caller
+// requeues/skips accordingly.
 func (p *Pipeline) commitLake(ctx context.Context, spans []*domain.Span) error {
+	if p.writeErr != nil {
+		return p.writeErr
+	}
+	if len(spans) == 0 {
+		return nil
+	}
+	if p.lake == nil {
+		return fmt.Errorf("pipeline: lake is not configured")
+	}
+
 	start := time.Now()
 	if err := p.lake.InsertSpans(ctx, spans); err != nil {
 		if p.metrics != nil {
@@ -423,22 +324,16 @@ func (p *Pipeline) commitLake(ctx context.Context, spans []*domain.Span) error {
 	}
 	if p.metrics != nil {
 		p.metrics.RecordLakeWriteDuration(time.Since(start).Seconds())
+
+		projectCounts := make(map[string]int)
+		for _, span := range spans {
+			projectCounts[span.ProjectID]++
+		}
+		for projectID, count := range projectCounts {
+			p.metrics.RecordSpansWritten(projectID, count)
+		}
 	}
 	return nil
-}
-
-// dualWriteLake commits the batch to the Lake after a successful legacy
-// write. A lake-write failure must never fail the batch while
-// dual-writing: it is logged and counted, and the legacy write stands.
-func (p *Pipeline) dualWriteLake(ctx context.Context, spans []*domain.Span) {
-	if p.lake == nil {
-		return
-	}
-	if err := p.commitLake(ctx, spans); err != nil {
-		slog.ErrorContext(ctx, "lake write failed, legacy write kept",
-			"span_count", len(spans),
-			"err", err)
-	}
 }
 
 // evalSpans checks each eval rule against the span and enqueues matching jobs.
@@ -497,17 +392,6 @@ func (p *Pipeline) listEvalRules(ctx context.Context) ([]domain.EvalRule, error)
 		}
 	}
 	return result, nil
-}
-
-func attributesJSON(attrs map[string]any) string {
-	if len(attrs) == 0 {
-		return "null"
-	}
-	data, err := json.Marshal(attrs)
-	if err != nil {
-		return "null"
-	}
-	return string(data)
 }
 
 // isSampled returns true when a span is selected for sampling

@@ -47,10 +47,15 @@ func newConversationMux(t *testing.T, projectID string) (*http.ServeMux, *sql.DB
 	if _, err := db.Exec(conversationTestSchema); err != nil {
 		t.Fatalf("create schema: %v", err)
 	}
+	// ConversationHandler reads lake.spans (ADR-0004); create a "lake" schema
+	// with a view over the in-memory spans table to stand in for the Lake.
+	if _, err := db.Exec(`CREATE SCHEMA lake; CREATE VIEW lake.spans AS SELECT * FROM main.spans;`); err != nil {
+		t.Fatalf("create lake schema: %v", err)
+	}
 
 	mux := http.NewServeMux()
 	ch := &ConversationHandler{
-		DB:           db,
+		Lake:         db,
 		SessionStore: &FakeSessionStore{projectID: projectID},
 	}
 	mux.HandleFunc("GET /api/v1/conversations", ch.HandleListConversations)

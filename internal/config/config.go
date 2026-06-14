@@ -171,14 +171,7 @@ type IngestConfig struct {
 }
 
 type WriterConfig struct {
-	Addr          string `mapstructure:"addr"`
-	DuckDBPath    string `mapstructure:"duckdb_path"`
-	SyncInterval  string `mapstructure:"sync_interval"`  // default "30s"
-	FlushInterval string `mapstructure:"flush_interval"` // default "30m"
-	FlushAgeDays  int    `mapstructure:"flush_age_days"` // default 2
-	// LeaderElection enables Redis-based leader election for multi-replica HA.
-	// When enabled, only the leader processes the ingest queue and writes to DuckDB.
-	LeaderElection LeaderElectionConfig `mapstructure:"leader_election"`
+	Addr string `mapstructure:"addr"`
 	// Lake controls writing to the Lake (ADR-0004).
 	Lake WriterLakeConfig `mapstructure:"lake"`
 	// Reconciliation controls the Ingest Buffer reconciliation sweep
@@ -187,9 +180,10 @@ type WriterConfig struct {
 }
 
 // ReconciliationConfig holds settings for the Ingest Buffer reconciliation
-// sweep: a leader-elected job that recovers buffered batches whose queue
+// sweep: a periodic job that recovers buffered batches whose queue
 // reference was lost and garbage-collects committed buffer objects past
-// their retention window.
+// their retention window. DuckLake supports multi-writer, so the sweep
+// runs on a plain ticker without any leader-election gate (#90).
 type ReconciliationConfig struct {
 	// Enabled starts the reconciliation ticker when true. Requires S3
 	// (storage) to be configured.
@@ -224,18 +218,6 @@ func (rc ReconciliationConfig) Validate() error {
 	return nil
 }
 
-type LeaderElectionConfig struct {
-	// Enabled enables leader election (default false for single-replica deployments).
-	Enabled bool `mapstructure:"enabled"`
-	// LockTTL is the leader election lock TTL in seconds (default 15).
-	LockTTL int `mapstructure:"lock_ttl"`
-	// FencingEnabled prevents dual-writer data corruption on failover.
-	// When true, a newly-elected leader reconciles the S3 snapshot before
-	// accepting writes, and a deposed leader closes DuckDB immediately.
-	// Defaults to true when leader election is enabled.
-	FencingEnabled bool `mapstructure:"fencing_enabled"`
-}
-
 // QueryLakeConfig controls the Query API's Lake participation.
 type QueryLakeConfig struct {
 	// Enabled gates the Lake read path (ADR-0004). When true, the Query
@@ -248,9 +230,7 @@ type QueryLakeConfig struct {
 }
 
 type QueryConfig struct {
-	Addr         string `mapstructure:"addr"`
-	DuckDBPath   string `mapstructure:"duckdb_path"`
-	SyncInterval string `mapstructure:"sync_interval"` // default "30s"
+	Addr string `mapstructure:"addr"`
 	// Lake controls the Lake read path (ADR-0004).
 	Lake QueryLakeConfig `mapstructure:"lake"`
 	// PlaygroundLLMBaseURL is an OpenAI-compatible base URL for the playground LLM.
@@ -330,13 +310,6 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("ingest.buffer.enabled", false)
 	// writer
 	v.SetDefault("writer.addr", ":8001")
-	v.SetDefault("writer.duckdb_path", "")
-	v.SetDefault("writer.sync_interval", "30s")
-	v.SetDefault("writer.flush_interval", "30m")
-	v.SetDefault("writer.flush_age_days", 2)
-	v.SetDefault("writer.leader_election.enabled", false)
-	v.SetDefault("writer.leader_election.lock_ttl", 15)
-	v.SetDefault("writer.leader_election.fencing_enabled", true)
 	// writer reconciliation (ingest buffer sweep, #88)
 	v.SetDefault("writer.reconciliation.enabled", false)
 	v.SetDefault("writer.reconciliation.interval_minutes", 5)
@@ -344,8 +317,6 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("writer.reconciliation.retention_hours", 168)
 	// query
 	v.SetDefault("query.addr", ":8002")
-	v.SetDefault("query.duckdb_path", "")
-	v.SetDefault("query.sync_interval", "30s")
 	v.SetDefault("query.lake.enabled", true)
 	v.SetDefault("query.playground_llm_base_url", "")
 	v.SetDefault("query.playground_llm_api_key", "")
@@ -410,20 +381,11 @@ func Load(path string) (*Config, error) {
 		cfg.Ingest.CORSAllowedOrigins = strings.Split(v, ",")
 	}
 	envString(&cfg.Writer.Addr, "OMNEVAL_WRITER_ADDR")
-	envString(&cfg.Writer.DuckDBPath, "OMNEVAL_WRITER_DUCKDB_PATH")
-	envString(&cfg.Writer.SyncInterval, "OMNEVAL_WRITER_SYNC_INTERVAL")
-	envString(&cfg.Writer.FlushInterval, "OMNEVAL_WRITER_FLUSH_INTERVAL")
-	envInt(&cfg.Writer.FlushAgeDays, "OMNEVAL_WRITER_FLUSH_AGE_DAYS")
-	envBool(&cfg.Writer.LeaderElection.Enabled, "OMNEVAL_WRITER_LEADER_ELECTION_ENABLED")
-	envInt(&cfg.Writer.LeaderElection.LockTTL, "OMNEVAL_WRITER_LEADER_ELECTION_LOCK_TTL")
-	envBool(&cfg.Writer.LeaderElection.FencingEnabled, "OMNEVAL_WRITER_LEADER_ELECTION_FENCING_ENABLED")
 	envBool(&cfg.Writer.Reconciliation.Enabled, "OMNEVAL_WRITER_RECONCILIATION_ENABLED")
 	envInt(&cfg.Writer.Reconciliation.IntervalMinutes, "OMNEVAL_WRITER_RECONCILIATION_INTERVAL_MINUTES")
 	envInt(&cfg.Writer.Reconciliation.GracePeriodMinutes, "OMNEVAL_WRITER_RECONCILIATION_GRACE_PERIOD_MINUTES")
 	envInt(&cfg.Writer.Reconciliation.RetentionHours, "OMNEVAL_WRITER_RECONCILIATION_RETENTION_HOURS")
 	envString(&cfg.Query.Addr, "OMNEVAL_QUERY_ADDR")
-	envString(&cfg.Query.DuckDBPath, "OMNEVAL_QUERY_DUCKDB_PATH")
-	envString(&cfg.Query.SyncInterval, "OMNEVAL_QUERY_SYNC_INTERVAL")
 	envBool(&cfg.Query.Lake.Enabled, "OMNEVAL_QUERY_LAKE_ENABLED")
 	envString(&cfg.Query.PlaygroundLLMBaseURL, "OMNEVAL_QUERY_PLAYGROUND_LLM_BASE_URL")
 	envString(&cfg.Query.PlaygroundLLMAPIKey, "OMNEVAL_QUERY_PLAYGROUND_LLM_API_KEY")

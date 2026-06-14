@@ -3,7 +3,6 @@ package pipeline_test
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,8 +13,9 @@ import (
 
 	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
-	"github.com/omneval/omneval/internal/duckdb"
 	"github.com/omneval/omneval/internal/handlers"
+	"github.com/omneval/omneval/internal/lake"
+	"github.com/omneval/omneval/internal/lake/lakeservertest"
 	qredis "github.com/omneval/omneval/internal/queue/redis"
 	"github.com/omneval/omneval/services/writer/internal/pipeline"
 	redisgo "github.com/redis/go-redis/v9"
@@ -27,6 +27,19 @@ import (
 	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/protobuf/proto"
 )
+
+// openTestLake opens an embedded local Lake for the pipeline E2E tests,
+// skipping if the DuckLake extension is unavailable.
+func openTestLake(t *testing.T, ctx context.Context) *lake.Lake {
+	t.Helper()
+	cfg, _ := lakeservertest.NewLocal(t)
+	lk, err := lake.Open(ctx, cfg)
+	if err != nil {
+		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
+	}
+	t.Cleanup(func() { lk.Close() })
+	return lk
+}
 
 // TestOTLP_EndToEndProto verifies the full pipeline:
 // proto OTLP → Ingest API → Redis → Writer → DuckDB → Query returns expected span.
@@ -44,11 +57,7 @@ func TestOTLP_EndToEndProto(t *testing.T) {
 	}
 	defer redisContainer.Terminate(ctx)
 
-	db, err := duckdb.Open(":memory:")
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	defer db.Close()
+	lk := openTestLake(t, ctx)
 
 	rdb := redisgo.NewClient(&redisgo.Options{Addr: redisPort})
 	if err := rdb.Ping(ctx).Err(); err != nil {
@@ -68,7 +77,7 @@ func TestOTLP_EndToEndProto(t *testing.T) {
 	ts := httptest.NewServer(router)
 	defer ts.Close()
 
-	go pipeline.New(ingestQ, db, nil, nil, nil, nil).Run(ctx)
+	go pipeline.New(ingestQ, nil, nil, nil, nil).WithLake(lk).Run(ctx)
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -85,7 +94,7 @@ func TestOTLP_EndToEndProto(t *testing.T) {
 		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
 	}
 
-	pollForSpanCount(t, ctx, db, "proj-1", 1, 10*time.Second)
+	pollForLakeSpanCount(t, ctx, lk, "proj-1", 1, 10*time.Second)
 
 	// Verify typed fields.
 	var spanModel, spanInput, spanOutput, spanServiceName, spanKind string
@@ -94,8 +103,8 @@ func TestOTLP_EndToEndProto(t *testing.T) {
 
 	query := `SELECT model, input, output, service_name, kind,
 		      input_tokens, output_tokens, cost_usd
-	      FROM spans WHERE project_id = $1`
-	row := db.QueryRowContext(ctx, query, "proj-1")
+	      FROM lake.spans WHERE project_id = ?`
+	row := lk.DB().QueryRowContext(ctx, query, "proj-1")
 	if err := row.Scan(&spanModel, &spanInput, &spanOutput, &spanServiceName, &spanKind,
 		&inputTokens, &outputTokens, &costUSD); err != nil {
 		t.Fatalf("scan span: %v", err)
@@ -154,7 +163,7 @@ func TestOTLP_EndToEndProto(t *testing.T) {
 		t.Fatalf("native status: got %d, want %d", nativeResp.StatusCode, http.StatusAccepted)
 	}
 
-	pollForSpanCount(t, ctx, db, "proj-1", 2, 10*time.Second)
+	pollForLakeSpanCount(t, ctx, lk, "proj-1", 2, 10*time.Second)
 }
 
 // TestOTLP_EndToEndJSON verifies JSON OTLP produces the same result as proto.
@@ -172,11 +181,7 @@ func TestOTLP_EndToEndJSON(t *testing.T) {
 	}
 	defer redisContainer.Terminate(ctx)
 
-	db, err := duckdb.Open(":memory:")
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	defer db.Close()
+	lk := openTestLake(t, ctx)
 
 	rdb := redisgo.NewClient(&redisgo.Options{Addr: redisPort})
 	if err := rdb.Ping(ctx).Err(); err != nil {
@@ -195,7 +200,7 @@ func TestOTLP_EndToEndJSON(t *testing.T) {
 	ts := httptest.NewServer(router)
 	defer ts.Close()
 
-	go pipeline.New(ingestQ, db, nil, nil, nil, nil).Run(ctx)
+	go pipeline.New(ingestQ, nil, nil, nil, nil).WithLake(lk).Run(ctx)
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -235,13 +240,13 @@ func TestOTLP_EndToEndJSON(t *testing.T) {
 		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
 	}
 
-	pollForSpanCount(t, ctx, db, "proj-2", 1, 10*time.Second)
+	pollForLakeSpanCount(t, ctx, lk, "proj-2", 1, 10*time.Second)
 
 	var spanModel, spanServiceName string
 	var inputTokens, outputTokens int64
 
-	query := `SELECT model, service_name, input_tokens, output_tokens FROM spans WHERE project_id = $1`
-	row := db.QueryRowContext(ctx, query, "proj-2")
+	query := `SELECT model, service_name, input_tokens, output_tokens FROM lake.spans WHERE project_id = ?`
+	row := lk.DB().QueryRowContext(ctx, query, "proj-2")
 	if err := row.Scan(&spanModel, &spanServiceName, &inputTokens, &outputTokens); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
@@ -267,11 +272,7 @@ func TestOTLP_UnknownModelZeroCost(t *testing.T) {
 	}
 	defer redisContainer.Terminate(ctx)
 
-	db, err := duckdb.Open(":memory:")
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	defer db.Close()
+	lk := openTestLake(t, ctx)
 
 	rdb := redisgo.NewClient(&redisgo.Options{Addr: redisPort})
 	if err := rdb.Ping(ctx).Err(); err != nil {
@@ -290,7 +291,7 @@ func TestOTLP_UnknownModelZeroCost(t *testing.T) {
 	ts := httptest.NewServer(router)
 	defer ts.Close()
 
-	go pipeline.New(ingestQ, db, nil, nil, nil, nil).Run(ctx)
+	go pipeline.New(ingestQ, nil, nil, nil, nil).WithLake(lk).Run(ctx)
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -333,11 +334,11 @@ func TestOTLP_UnknownModelZeroCost(t *testing.T) {
 		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
 	}
 
-	pollForSpanCount(t, ctx, db, "proj-5", 1, 10*time.Second)
+	pollForLakeSpanCount(t, ctx, lk, "proj-5", 1, 10*time.Second)
 
 	var costUSD float64
-	if err := db.QueryRowContext(ctx,
-		"SELECT cost_usd FROM spans WHERE project_id = $1", "proj-5").
+	if err := lk.DB().QueryRowContext(ctx,
+		"SELECT cost_usd FROM lake.spans WHERE project_id = ?", "proj-5").
 		Scan(&costUSD); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
@@ -361,11 +362,7 @@ func TestOTLP_NativeHandlerStillWorks(t *testing.T) {
 	}
 	defer redisContainer.Terminate(ctx)
 
-	db, err := duckdb.Open(":memory:")
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	defer db.Close()
+	lk := openTestLake(t, ctx)
 
 	rdb := redisgo.NewClient(&redisgo.Options{Addr: redisPort})
 	if err := rdb.Ping(ctx).Err(); err != nil {
@@ -379,7 +376,7 @@ func TestOTLP_NativeHandlerStillWorks(t *testing.T) {
 	ts := httptest.NewServer(nativeH.Router())
 	defer ts.Close()
 
-	go pipeline.New(ingestQ, db, nil, nil, nil, nil).Run(ctx)
+	go pipeline.New(ingestQ, nil, nil, nil, nil).WithLake(lk).Run(ctx)
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -400,11 +397,11 @@ func TestOTLP_NativeHandlerStillWorks(t *testing.T) {
 		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusAccepted)
 	}
 
-	pollForSpanCount(t, ctx, db, "proj-native", 1, 10*time.Second)
+	pollForLakeSpanCount(t, ctx, lk, "proj-native", 1, 10*time.Second)
 
 	var spanModel string
-	if err := db.QueryRowContext(ctx,
-		"SELECT model FROM spans WHERE project_id = $1", "proj-native").
+	if err := lk.DB().QueryRowContext(ctx,
+		"SELECT model FROM lake.spans WHERE project_id = ?", "proj-native").
 		Scan(&spanModel); err != nil {
 		t.Fatalf("scan model: %v", err)
 	}
@@ -450,13 +447,13 @@ func mustDo(t *testing.T, r *http.Request) *http.Response {
 	return resp
 }
 
-// pollForSpanCount polls DuckDB until the span count reaches want, or times out.
-func pollForSpanCount(t *testing.T, ctx context.Context, db *sql.DB, projectID string, want int, timeout time.Duration) {
+// pollForLakeSpanCount polls the Lake until the span count reaches want, or times out.
+func pollForLakeSpanCount(t *testing.T, ctx context.Context, lk *lake.Lake, projectID string, want int, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		var count int
-		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM spans WHERE project_id = $1", projectID).Scan(&count); err != nil {
+		if err := lk.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM lake.spans WHERE project_id = ?", projectID).Scan(&count); err != nil {
 			t.Fatalf("poll span count: %v", err)
 		}
 		if count >= want {
@@ -465,7 +462,7 @@ func pollForSpanCount(t *testing.T, ctx context.Context, db *sql.DB, projectID s
 		time.Sleep(100 * time.Millisecond)
 	}
 	var count int
-	db.QueryRowContext(ctx, "SELECT COUNT(*) FROM spans WHERE project_id = $1", projectID).Scan(&count)
+	lk.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM lake.spans WHERE project_id = ?", projectID).Scan(&count)
 	t.Fatalf("timeout waiting for %d spans in project %s, got %d", want, projectID, count)
 }
 

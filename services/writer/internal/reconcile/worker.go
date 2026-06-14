@@ -1,8 +1,12 @@
 // Package reconcile implements the Ingest Buffer reconciliation sweep
-// (ADR-0004, #88): a leader-elected job that recovers buffered batches whose
-// queue reference was lost (writer crash after dequeue, Redis restart) by
-// re-enqueueing their Batch ID, and garbage-collects committed buffer
-// objects past their retention window so the buffer stays bounded.
+// (ADR-0004, #88): every Writer replica runs this job on its own ticker to
+// recover buffered batches whose queue reference was lost (writer crash
+// after dequeue, Redis restart) by re-enqueueing their Batch ID, and to
+// garbage-collect committed buffer objects past their retention window so
+// the buffer stays bounded. Multi-writer concurrency is safe: batch
+// recovery re-enqueues a ref keyed by Batch ID and the Batch Ledger dedupes
+// any resulting double-processing, and S3 batch-delete of already-deleted
+// keys is idempotent.
 package reconcile
 
 import (
@@ -14,7 +18,6 @@ import (
 
 	"github.com/omneval/omneval/internal/buffer"
 	"github.com/omneval/omneval/internal/config"
-	"github.com/omneval/omneval/internal/leader"
 	"github.com/omneval/omneval/internal/queue"
 	s3pkg "github.com/omneval/omneval/internal/storage/s3"
 )
@@ -177,9 +180,11 @@ func (w *Worker) Run(ctx context.Context) (Result, error) {
 	return result, nil
 }
 
-// RunLoop starts the sweep ticker. It blocks until ctx is canceled. When
-// election is non-nil, only the leader runs each tick; followers skip it.
-func (w *Worker) RunLoop(ctx context.Context, election *leader.LeaderElection) error {
+// RunLoop starts the sweep ticker. It blocks until ctx is canceled. Every
+// Writer replica runs the sweep on its own ticker (#90); DuckLake's
+// multi-writer support and the Batch Ledger's dedupe make concurrent sweeps
+// from multiple replicas safe.
+func (w *Worker) RunLoop(ctx context.Context) error {
 	interval := time.Duration(w.cfg.IntervalMinutes) * time.Minute
 
 	slog.Info("reconcile: ticker started",
@@ -197,10 +202,6 @@ func (w *Worker) RunLoop(ctx context.Context, election *leader.LeaderElection) e
 			slog.Info("reconcile: ticker stopped (context canceled)")
 			return ctx.Err()
 		case <-ticker.C:
-			if election != nil && !election.IsLeader() {
-				slog.Debug("reconcile: not leader, skipping sweep")
-				continue
-			}
 			if _, err := w.Run(ctx); err != nil {
 				slog.Error("reconcile: sweep error", "err", err)
 			}

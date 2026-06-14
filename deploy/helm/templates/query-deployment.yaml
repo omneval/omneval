@@ -1,9 +1,9 @@
 {{- /*
 Query API Deployment — fully stateless, horizontally scalable.
 
-Downloads the DuckDB snapshot from S3, polls for updates, and serves
+Attaches read-only to the Lake (DuckLake via the Quack Server) and serves
 the REST API, analytics, prompt registry, auth, and embedded React SPA.
-No PVC — all data comes from S3 snapshot and metadata store.
+No PVC — all data comes from the Lake and metadata store.
 
 Infrastructure resolution:
 - Database: uses internal PostgreSQL when postgresql.enabled, or postgresql.external

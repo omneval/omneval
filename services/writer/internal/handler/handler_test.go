@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
-	"github.com/omneval/omneval/internal/duckdb"
 	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/lake/lakeservertest"
 )
@@ -34,25 +33,11 @@ func postScore(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
 	return rec
 }
 
-// TestScoreDualWrite proves a written-back score lands in both the legacy
-// store and the Lake, partitioned by the annotated span's start_time.
-func TestScoreDualWrite(t *testing.T) {
+// TestScoreWriteToLake proves a written-back score lands in the Lake,
+// partitioned by the annotated span's start_time looked up from
+// lake.spans (ADR-0002).
+func TestScoreWriteToLake(t *testing.T) {
 	ctx := context.Background()
-
-	db, err := duckdb.Open(":memory:")
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	defer db.Close()
-
-	// The span the score annotates, already in the hot store.
-	spanStart := time.Date(2026, 6, 4, 11, 0, 0, 0, time.UTC)
-	_, err = db.ExecContext(ctx, `
-		INSERT INTO spans (span_id, trace_id, project_id, start_time)
-		VALUES ('s1', 't1', 'p1', ?)`, spanStart)
-	if err != nil {
-		t.Fatalf("seed span: %v", err)
-	}
 
 	cfg, _ := lakeservertest.NewLocal(t)
 	lk, err := lake.Open(ctx, cfg)
@@ -61,17 +46,17 @@ func TestScoreDualWrite(t *testing.T) {
 	}
 	defer lk.Close()
 
-	rec := postScore(t, New(db, lk))
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status: got %d, want 201 (%s)", rec.Code, rec.Body.String())
+	// The span the score annotates, already in the Lake.
+	spanStart := time.Date(2026, 6, 4, 11, 0, 0, 0, time.UTC)
+	if err := lk.InsertSpans(ctx, []*domain.Span{{
+		SpanID: "s1", TraceID: "t1", ProjectID: "p1", StartTime: spanStart,
+	}}); err != nil {
+		t.Fatalf("seed span: %v", err)
 	}
 
-	var legacyCount int
-	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM scores").Scan(&legacyCount); err != nil {
-		t.Fatalf("legacy count: %v", err)
-	}
-	if legacyCount != 1 {
-		t.Errorf("legacy scores: got %d, want 1", legacyCount)
+	rec := postScore(t, New(lk))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want 201 (%s)", rec.Code, rec.Body.String())
 	}
 
 	var gotSpanStart time.Time
@@ -96,40 +81,20 @@ func (failingScoreLake) InsertScores(context.Context, []*domain.Score) error {
 	return errors.New("lake unavailable")
 }
 
-// TestScoreLakeFailureKeepsLegacyWrite proves a lake failure still
-// returns 201 and the legacy write stands.
-func TestScoreLakeFailureKeepsLegacyWrite(t *testing.T) {
-	db, err := duckdb.Open(":memory:")
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	defer db.Close()
-
-	rec := postScore(t, New(db, failingScoreLake{}))
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status: got %d, want 201", rec.Code)
-	}
-
-	var n int
-	if err := db.QueryRow("SELECT count(*) FROM scores").Scan(&n); err != nil {
-		t.Fatalf("count: %v", err)
-	}
-	if n != 1 {
-		t.Errorf("legacy scores: got %d, want 1", n)
+// TestScoreLakeFailureReturnsError proves a lake write failure is surfaced
+// to the caller (Lake is now authoritative — there is no legacy fallback).
+func TestScoreLakeFailureReturnsError(t *testing.T) {
+	rec := postScore(t, New(failingScoreLake{}))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status: got %d, want 500", rec.Code)
 	}
 }
 
-// TestScoreNoLakeLegacyOnly proves nil lake (flag off) is byte-identical
-// to the old behavior.
-func TestScoreNoLakeLegacyOnly(t *testing.T) {
-	db, err := duckdb.Open(":memory:")
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	defer db.Close()
-
-	rec := postScore(t, New(db, nil))
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status: got %d, want 201", rec.Code)
+// TestScoreNilLakeReturnsServiceUnavailable proves a nil lake (misconfigured
+// writer) returns 503 instead of silently dropping the score.
+func TestScoreNilLakeReturnsServiceUnavailable(t *testing.T) {
+	rec := postScore(t, New(nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status: got %d, want 503", rec.Code)
 	}
 }
