@@ -46,9 +46,13 @@ echo $API_KEY
 
 ## Run
 
+This is a standalone module (not part of the root `go.work`, so the Docker
+build doesn't need to know about it). Run with `GOWORK=off` from within the
+omneval checkout:
+
 ```bash
 cd tools/loadtest
-go run . \
+GOWORK=off go run . \
   -url http://localhost:8000 \
   -api-key "$API_KEY" \
   -duration 60s \

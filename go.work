@@ -8,5 +8,4 @@ use (
 	./services/query
 	./services/quack
 	./services/writer
-	./tools/loadtest
 )
