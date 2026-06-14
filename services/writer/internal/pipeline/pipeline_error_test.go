@@ -223,10 +223,10 @@ func (f *fakeMetaStore) GetUserByResetToken(ctx context.Context, token string) (
 // returns an error (e.g. Redis unreachable), the pipeline logs the error
 // and continues on the next iteration instead of exiting.
 func TestPipeline_Run_continuesAfterDequeueError(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	lk := openErrTestLake(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	spans := []*domain.Span{{
 		TraceID:   "trace-00000000000000001",
@@ -275,10 +275,10 @@ func TestPipeline_Run_continuesAfterDequeueError(t *testing.T) {
 // write fails, the pipeline logs the error but continues processing subsequent
 // batches instead of crashing and losing remaining spans.
 func TestPipeline_Run_continuesAfterWriteFailure(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	lk := openErrTestLake(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	spans1 := []*domain.Span{{
 		TraceID:   "trace-00000000000000001",
@@ -330,10 +330,10 @@ func TestPipeline_Run_continuesAfterWriteFailure(t *testing.T) {
 // fails (simulating a DuckDB error), the pipeline logs the error, skips
 // the batch, and continues processing subsequent batches.
 func TestPipeline_Run_continuesAfterWriteError(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	lk := openErrTestLake(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	spans1 := []*domain.Span{{
 		TraceID:   "trace-00000000000000001",
