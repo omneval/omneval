@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,6 +17,15 @@ import (
 	"github.com/omneval/omneval/internal/pricing"
 	"github.com/omneval/omneval/internal/queue"
 	"github.com/omneval/omneval/services/writer/internal/metrics"
+)
+
+const (
+	// batchFlushInterval and batchMaxBytes bound how long the buffered loop
+	// (runBuffered) accumulates dequeued entries before committing them to
+	// the Lake as a single DuckLake snapshot — the commit cadence described
+	// in ADR-0004 / CONTEXT.md.
+	batchFlushInterval = 5 * time.Second
+	batchMaxBytes      = 16 * 1024 * 1024
 )
 
 // SpanLakeWriter commits span batches to the Lake (ADR-0004). Implemented
@@ -155,13 +165,39 @@ func (p *Pipeline) Run(ctx context.Context) error {
 // runBuffered is the S3-first ingest loop (ADR-0004). Entries are dequeued
 // onto a processing list and acked only after the batch is durably
 // committed; references are resolved through the Ingest Buffer and deduped
-// via the Batch Ledger.
+// via the Batch Ledger. Entries are accumulated into a window (up to
+// batchFlushInterval or batchMaxBytes) and committed to the Lake together as
+// a single DuckLake snapshot.
 func (p *Pipeline) runBuffered(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+		}
+		p.collectAndCommit(ctx)
+	}
+}
+
+// collectAndCommit accumulates resolved entries into a window bounded by
+// batchFlushInterval and batchMaxBytes, then commits them to the Lake as a
+// single batch. It returns once the window closes, including immediately
+// if the queue is idle (nothing to commit).
+func (p *Pipeline) collectAndCommit(ctx context.Context) {
+	var pending []*queue.IngestEntry
+	var allSpans []*domain.Span
+	var totalBytes int
+	var deadline time.Time
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		if len(pending) > 0 && (totalBytes >= batchMaxBytes || time.Now().After(deadline)) {
+			break
 		}
 
 		entry, err := p.reliable.DequeueEntry(ctx)
@@ -178,17 +214,34 @@ func (p *Pipeline) runBuffered(ctx context.Context) error {
 			continue
 		}
 		if entry == nil {
+			// Queue idle: flush whatever was accumulated so far.
+			break
+		}
+
+		resolved, spans, size := p.resolveEntry(ctx, entry)
+		if resolved == nil {
 			continue
 		}
-		p.processEntry(ctx, entry)
+		if len(pending) == 0 {
+			deadline = time.Now().Add(batchFlushInterval)
+		}
+		pending = append(pending, resolved)
+		allSpans = append(allSpans, spans...)
+		totalBytes += size
 	}
+
+	if len(pending) == 0 {
+		return
+	}
+	p.commitBatch(ctx, pending, allSpans)
 }
 
-// processEntry handles one dequeued ingest entry end to end. The entry is
-// acked only after every durable step succeeded; any failure requeues it
-// for another attempt. The staged buffer object is never touched here, so
-// a crash at any point leaves the batch replayable.
-func (p *Pipeline) processEntry(ctx context.Context, entry *queue.IngestEntry) {
+// resolveEntry resolves one dequeued ingest entry to its spans, handling the
+// Batch Ledger dedupe check and Ingest Buffer fetch for reference entries.
+// It returns (nil, nil, 0) when the entry was fully handled here (acked or
+// requeued) and must not be included in the batch commit. The returned size
+// is the JSON-encoded size of the resolved spans, used for batchMaxBytes.
+func (p *Pipeline) resolveEntry(ctx context.Context, entry *queue.IngestEntry) (*queue.IngestEntry, []*domain.Span, int) {
 	spans := entry.Spans
 	if entry.Ref != nil {
 		committed, err := p.ledger.IsBatchCommitted(ctx, entry.Ref.BatchID)
@@ -196,7 +249,7 @@ func (p *Pipeline) processEntry(ctx context.Context, entry *queue.IngestEntry) {
 			slog.ErrorContext(ctx, "batch ledger lookup failed, requeueing",
 				"batch_id", entry.Ref.BatchID, "err", err)
 			p.requeue(ctx, entry)
-			return
+			return nil, nil, 0
 		}
 		if committed {
 			// Redelivery of an already-committed batch: ack without
@@ -205,7 +258,7 @@ func (p *Pipeline) processEntry(ctx context.Context, entry *queue.IngestEntry) {
 				p.metrics.RecordLedgerSkip()
 			}
 			p.ack(ctx, entry)
-			return
+			return nil, nil, 0
 		}
 
 		spans, err = p.fetcher.Fetch(ctx, entry.Ref.BatchID)
@@ -220,42 +273,62 @@ func (p *Pipeline) processEntry(ctx context.Context, entry *queue.IngestEntry) {
 				slog.ErrorContext(ctx, "staged batch missing from ingest buffer, dropping",
 					"batch_id", entry.Ref.BatchID, "err", err)
 				p.ack(ctx, entry)
-				return
+				return nil, nil, 0
 			}
 			slog.ErrorContext(ctx, "ingest buffer fetch failed, requeueing",
 				"batch_id", entry.Ref.BatchID, "err", err)
 			p.requeue(ctx, entry)
-			return
+			return nil, nil, 0
 		}
 	}
+	return entry, spans, estimateSize(spans)
+}
 
+// estimateSize returns the JSON-encoded size of spans, used to bound batch
+// windows by batchMaxBytes. Returns 0 if spans cannot be marshaled (the
+// later Lake commit will surface the real error).
+func estimateSize(spans []*domain.Span) int {
+	data, err := json.Marshal(spans)
+	if err != nil {
+		return 0
+	}
+	return len(data)
+}
+
+// commitBatch commits the combined spans from one or more resolved entries
+// to the Lake as a single snapshot, then records each entry's outcome
+// (Batch Ledger insert + ack, or requeue on failure). The Lake commit is
+// authoritative for every entry: a failure requeues the whole batch so it
+// stays replayable (ADR-0004, Lake is the sole tier).
+func (p *Pipeline) commitBatch(ctx context.Context, pending []*queue.IngestEntry, spans []*domain.Span) {
 	p.computeCosts(spans)
 
-	// The Lake commit is authoritative for both entry types: a failure
-	// must retry, not be swallowed (ADR-0004, Lake is the sole tier).
 	if err := p.commitLake(ctx, spans); err != nil {
-		slog.ErrorContext(ctx, "lake commit failed, requeueing",
-			"span_count", len(spans), "err", err)
+		slog.ErrorContext(ctx, "lake commit failed, requeueing batch",
+			"span_count", len(spans), "entry_count", len(pending), "err", err)
 		if p.metrics != nil {
 			p.metrics.RecordWriteError()
 		}
-		p.requeue(ctx, entry)
+		for _, entry := range pending {
+			p.requeue(ctx, entry)
+		}
 		return
 	}
 
-	if entry.Ref != nil {
-		if err := p.ledger.MarkBatchCommitted(ctx, entry.Ref.BatchID, time.Now()); err != nil {
-			// Crash window: the Lake commit stood but the ledger insert
-			// failed. Requeue — redelivery re-commits and trace-detail
-			// reads dedupe the residual duplicates (ADR-0004).
-			slog.ErrorContext(ctx, "batch ledger insert failed, requeueing",
-				"batch_id", entry.Ref.BatchID, "err", err)
-			p.requeue(ctx, entry)
-			return
+	for _, entry := range pending {
+		if entry.Ref != nil {
+			if err := p.ledger.MarkBatchCommitted(ctx, entry.Ref.BatchID, time.Now()); err != nil {
+				// Crash window: the Lake commit stood but the ledger insert
+				// failed. Requeue — redelivery re-commits and trace-detail
+				// reads dedupe the residual duplicates (ADR-0004).
+				slog.ErrorContext(ctx, "batch ledger insert failed, requeueing",
+					"batch_id", entry.Ref.BatchID, "err", err)
+				p.requeue(ctx, entry)
+				continue
+			}
 		}
+		p.ack(ctx, entry)
 	}
-
-	p.ack(ctx, entry)
 
 	rules, err := p.listEvalRules(ctx)
 	if err != nil {
@@ -265,6 +338,17 @@ func (p *Pipeline) processEntry(ctx context.Context, entry *queue.IngestEntry) {
 	for _, span := range spans {
 		p.evalSpans(ctx, span, rules)
 	}
+}
+
+// processEntry handles one dequeued ingest entry end to end as a
+// single-entry batch. Used directly by tests; runBuffered uses
+// collectAndCommit to accumulate multiple entries per commit.
+func (p *Pipeline) processEntry(ctx context.Context, entry *queue.IngestEntry) {
+	resolved, spans, _ := p.resolveEntry(ctx, entry)
+	if resolved == nil {
+		return
+	}
+	p.commitBatch(ctx, []*queue.IngestEntry{resolved}, spans)
 }
 
 func (p *Pipeline) ack(ctx context.Context, entry *queue.IngestEntry) {
