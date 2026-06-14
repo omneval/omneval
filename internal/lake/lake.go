@@ -136,6 +136,7 @@ func (l *Lake) attach(ctx context.Context, cfg Config) error {
 		steps = append(steps, "INSTALL httpfs", "LOAD httpfs")
 		if cfg.Storage != nil {
 			steps = append(steps, s3SecretSQL(cfg.Storage))
+			steps = append(steps, s3ConfigSQL(cfg.Storage)...)
 		}
 	}
 	steps = append(steps, attachSQL(cfg))
@@ -208,6 +209,41 @@ func s3SecretSQL(sc *config.StorageConfig) string {
 		}
 	}
 	return fmt.Sprintf("CREATE OR REPLACE SECRET lake_s3 (%s)", strings.Join(fields, ", "))
+}
+
+// s3ConfigSQL returns global `SET s3_*` statements mirroring the lake_s3
+// secret (s3SecretSQL). DuckLake's maintenance functions that list bucket
+// contents (notably ducklake_delete_orphaned_files and
+// ducklake_cleanup_old_files with cleanup_all => true, which issue a
+// ListObjectsV2 via read_blob(<data_path> || '**')) have been observed to
+// fall back to virtual-hosted-style requests against the default AWS
+// endpoint, ignoring the ENDPOINT/URL_STYLE on the lake_s3 secret
+// (duckdb/ducklake#562). Setting the equivalent global httpfs S3 config
+// gives those code paths a correct endpoint/style to fall back to, so
+// orphan-file cleanup can reach MinIO instead of NoSuchBucket-ing against
+// real AWS S3.
+func s3ConfigSQL(sc *config.StorageConfig) []string {
+	region := sc.Region
+	if region == "" {
+		region = "us-east-1"
+	}
+	stmts := []string{
+		fmt.Sprintf("SET s3_access_key_id=%s", sqlQuote(sc.AccessKey)),
+		fmt.Sprintf("SET s3_secret_access_key=%s", sqlQuote(sc.SecretKey)),
+		fmt.Sprintf("SET s3_region=%s", sqlQuote(region)),
+	}
+	if sc.Endpoint != "" {
+		endpoint := strings.TrimPrefix(sc.Endpoint, "http://")
+		endpoint = strings.TrimPrefix(endpoint, "https://")
+		stmts = append(stmts,
+			fmt.Sprintf("SET s3_endpoint=%s", sqlQuote(endpoint)),
+			"SET s3_url_style='path'",
+		)
+		if strings.HasPrefix(sc.Endpoint, "http://") {
+			stmts = append(stmts, "SET s3_use_ssl=false")
+		}
+	}
+	return stmts
 }
 
 // ensureTables creates the Lake's spans and scores tables and their
