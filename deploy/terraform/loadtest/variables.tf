@@ -64,6 +64,36 @@ variable "k8s_namespace" {
   default     = "omneval"
 }
 
+variable "db_instance_class" {
+  description = "RDS instance class for the shared Postgres (Omneval metadata store + DuckLake Catalog)."
+  type        = string
+  default     = "db.m5.large"
+}
+
+variable "db_engine_version" {
+  description = "RDS PostgreSQL engine version."
+  type        = string
+  default     = "16"
+}
+
+variable "db_allocated_storage_gb" {
+  description = "RDS allocated storage (GB), gp3."
+  type        = number
+  default     = 50
+}
+
+variable "redis_node_type" {
+  description = "ElastiCache node type for the Omneval ingest queue (Redis)."
+  type        = string
+  default     = "cache.m5.large"
+}
+
+variable "redis_engine_version" {
+  description = "ElastiCache Redis engine version."
+  type        = string
+  default     = "7.1"
+}
+
 variable "k8s_service_accounts" {
   description = <<-EOT
     Kubernetes ServiceAccount names allowed to assume the S3 access IRSA

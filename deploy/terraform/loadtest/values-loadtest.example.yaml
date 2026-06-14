@@ -1,15 +1,16 @@
 # Example Helm values for deploying Omneval onto the load-test EKS cluster.
 #
 # Fill in the placeholders from `terraform output` (s3_bucket, s3_endpoint,
-# omneval_s3_access_key_id, omneval_s3_secret_access_key), then:
+# omneval_s3_access_key_id, omneval_s3_secret_access_key, rds_*, redis_addr),
+# then:
 #
 #   helm install omneval ../../helm -f values-loadtest.yaml -n omneval --create-namespace
 #
 # This mirrors deploy/docker-compose/docker-compose.yml's service config but
-# points storage at the real S3 bucket created by this Terraform instead of
-# MinIO, and runs Postgres/Redis in-cluster for simplicity. For a result you'd
-# publish, consider replacing the in-cluster Postgres/Redis with managed
-# RDS/ElastiCache so the load test doesn't bottleneck on in-cluster storage.
+# points storage at the real S3 bucket, Postgres at RDS, and Redis at
+# ElastiCache, all created by this Terraform, instead of in-cluster
+# MinIO/Postgres/Redis — so in-cluster storage/queue I/O isn't a confound
+# when publishing throughput numbers.
 
 database:
   driver: postgres
@@ -24,11 +25,24 @@ storage:
 minio:
   enabled: false
 
+# Shared Postgres (Omneval metadata store + DuckLake Catalog) — RDS instead
+# of in-cluster.
 postgresql:
-  enabled: true
+  enabled: false
+  external:
+    host: "<RDS_HOST>"            # terraform output rds_host
+    port: 5432                    # terraform output rds_port
+    database: "<RDS_DATABASE>"    # terraform output rds_database
+    user: "<RDS_USERNAME>"        # terraform output rds_username
+    password: "<RDS_PASSWORD>"    # terraform output -raw rds_password
+    sslmode: "require"
 
+# Ingest -> Writer queue — ElastiCache instead of in-cluster.
 redis:
-  enabled: true
+  enabled: false
+  external:
+    addr: "<REDIS_ADDR>"          # terraform output redis_addr
+    password: ""
 
 quack:
   server:
