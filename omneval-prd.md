@@ -108,7 +108,6 @@ A minimal deployment requires only a single `docker compose up`. A production Ku
 55. As a platform engineer, I want to run Omneval with a single `docker compose up` command for a proof-of-concept deployment, so that I can evaluate it without provisioning cloud infrastructure.
 56. As a platform engineer, I want the demo deployment to use SQLite and MinIO, so that there are zero external dependencies for evaluation.
 57. As a platform engineer, I want a production Helm chart for Kubernetes deployment, so that I can deploy Omneval using standard GitOps workflows.
-58. As a platform engineer, I want a Kustomize base configuration, so that I can manage Omneval deployments with Flux CD or ArgoCD.
 59. As a platform engineer, I want the Query API pods to be fully stateless, so that they can be scheduled on any node and scaled horizontally without volume constraints.
 60. As a platform engineer, I want DuckDB snapshots synced to S3 at a configurable interval (default 30 seconds), so that Query API replicas always serve data within one sync interval of the latest writes.
 61. As a platform engineer, I want trace data older than the hot window automatically flushed to S3 as Parquet files partitioned by project and date, so that the hot DuckDB file stays small and historical data is retained cheaply.

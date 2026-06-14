@@ -144,7 +144,7 @@ Phase 1 implementation progress. All Phase 1 slices are complete. Work is organi
 - [x] Prompt Registry UI (version management, label assignment, diff view)
 - [x] Dataset curation UI (creation, items, runs with status)
 - [x] TypeScript SDK (tracer, OTel exporter, client)
-- [x] Helm chart + Kustomize base
+- [x] Helm chart
 - [x] Eval filter enhancements (OR / NOT, regex attribute filters, nested `attributes.key.subkey` access)
 - [x] Conversations (grouping, list + detail UI)
 - [x] Playground API (`POST /api/v1/playground/run`)
