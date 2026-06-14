@@ -109,6 +109,13 @@ writer:
   tolerations: []
   annotations: {}
   labels: {}
+  # Horizontal Pod Autoscaler
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    # targetMemoryUtilizationPercentage: 80
   # Service account
   serviceAccount:
     create: false

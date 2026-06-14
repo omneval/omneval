@@ -35,3 +35,9 @@ tests:
               secretKeyRef:
                 name: RELEASE-NAME-secret
                 key: quack-token
+  - it: should create HPA when autoscaling is enabled
+    set:
+      writer.autoscaling.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 2
