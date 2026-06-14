@@ -49,7 +49,13 @@ jobs:
 
       - run: go vet ${{ env.GO_MODULES }}
 
-      - run: go test -race ${{ env.GO_MODULES }}
+      # -gcflags=all=-d=checkptr=0: -race enables checkptr, which fatally
+      # crashes the whole test binary ("checkptr: misaligned pointer
+      # conversion") inside github.com/duckdb/duckdb-go/v2's vector.getBytes
+      # when reading VARCHAR/BLOB columns longer than 12 bytes. This is an
+      # upstream bug with no fixed release available; disable checkptr while
+      # keeping the data-race detector active.
+      - run: go test -race -gcflags=all=-d=checkptr=0 ${{ env.GO_MODULES }}
 
   go-build:
     name: Go - build binaries
