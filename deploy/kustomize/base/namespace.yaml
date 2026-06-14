@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: omneval
-  labels:
-    app.kubernetes.io/name: omneval
-    app.kubernetes.io/part-of: omneval
