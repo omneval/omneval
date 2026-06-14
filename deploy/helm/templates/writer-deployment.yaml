@@ -24,7 +24,9 @@ metadata:
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
+  {{- if not .Values.writer.autoscaling.enabled }}
   replicas: {{ .Values.writer.replicas }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: omneval
@@ -148,4 +150,39 @@ metadata:
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: writer
 automountServiceAccountToken: false
+{{- end }}
+{{- if .Values.writer.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}-writer
+  labels:
+    app.kubernetes.io/name: omneval
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: writer
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $name }}-writer
+  minReplicas: {{ .Values.writer.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.writer.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.writer.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.writer.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.writer.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.writer.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
 {{- end }}
