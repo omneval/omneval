@@ -124,8 +124,17 @@ func RunMaintenance(ctx context.Context, db *sql.DB, tables []string, retention 
 	}
 	stmts = append(stmts,
 		"CALL ducklake_expire_snapshots('lake', older_than => now())",
-		"CALL ducklake_delete_orphaned_files('lake', cleanup_all => true)",
-		"CALL ducklake_cleanup_old_files('lake', cleanup_all => true)",
+		// cleanup_all => true (the default false omits it) makes both calls
+		// below additionally ListObjectsV2 the entire data path to find
+		// untracked files; that bucket-scan code path ignores the lake_s3
+		// secret's ENDPOINT/URL_STYLE/REGION and falls back to
+		// virtual-hosted-style requests against the default AWS endpoint,
+		// failing with NoSuchBucket against MinIO (duckdb/ducklake#562).
+		// Without cleanup_all, both calls operate only on files the catalog
+		// metadata already knows are stale, which the GET/PUT-based calls
+		// above (rewrite/merge/expire) prove works correctly against MinIO.
+		"CALL ducklake_delete_orphaned_files('lake')",
+		"CALL ducklake_cleanup_old_files('lake')",
 		"CALL ducklake_flush_inlined_data('lake')",
 	)
 
