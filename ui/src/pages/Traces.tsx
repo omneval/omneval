@@ -307,6 +307,79 @@ function TextFilter({
   );
 }
 
+// ── ModelFilter: known-model checkboxes + free-text search ───────
+//
+// Combines a checkbox list of the distinct models seen in the current
+// project/time range (fetched via the Analytics DSL) with the existing
+// free-text search box, so users can quickly toggle known models on/off
+// while still being able to type a model that hasn't been seen yet.
+
+function ModelFilter({
+  value,
+  onApply,
+  activeProject,
+  timeRange,
+}: {
+  value: string[];
+  onApply: (vals: string[]) => void;
+  activeProject: string;
+  timeRange?: string;
+}) {
+  const [knownModels, setKnownModels] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchDistinctModels() {
+      try {
+        const { from, to } = presetToFromTo(timeRange);
+        const res = await fetch("/api/v1/analytics/spans", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: activeProject,
+            from,
+            to,
+            group_by: [{ field: "model" }],
+          }),
+        });
+        if (!res.ok) return;
+        const data: { rows?: Array<{ model?: string }> } = await res.json();
+        if (cancelled) return;
+        const models = (data.rows ?? [])
+          .map((row) => row.model)
+          .filter((m): m is string => !!m);
+        setKnownModels(models);
+      } catch {
+        // Network error — leave knownModels empty; free-text search still works.
+      }
+    }
+
+    fetchDistinctModels();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProject, timeRange]);
+
+  return (
+    <div className="space-y-3">
+      {knownModels.length > 0 && (
+        <CheckboxFilter options={knownModels} value={value} onApply={onApply} />
+      )}
+      <TextFilter
+        value={value}
+        onApply={(vals) => {
+          // Merge free-text entries with any currently-checked known models,
+          // deduping so the same model isn't listed twice.
+          const merged = Array.from(new Set([...value.filter((v) => knownModels.includes(v)), ...vals]));
+          onApply(merged);
+        }}
+        placeholder="e.g. gpt-4, claude-3…"
+      />
+    </div>
+  );
+}
+
 // ── CheckboxFilter: multi-select checkboxes ──────────────────────
 
 function CheckboxFilter({
@@ -427,6 +500,8 @@ function FilterSection({
   onToggle,
   onApply,
   value,
+  activeProject,
+  timeRange,
 }: {
   name: string;
   label: string;
@@ -434,6 +509,8 @@ function FilterSection({
   onToggle: () => void;
   onApply: (field: string, val: string[] | RangeFilter) => void;
   value: string[] | RangeFilter;
+  activeProject: string;
+  timeRange?: string;
 }) {
   const isRange = isRangeFilter(value);
 
@@ -470,11 +547,18 @@ function FilterSection({
 
       {expanded && (
         <div className="px-3 pb-3">
-          {name === "trace_name" || name === "model" ? (
+          {name === "model" ? (
+            <ModelFilter
+              value={Array.isArray(value) ? value : []}
+              onApply={(vals) => onApply(name, vals)}
+              activeProject={activeProject}
+              timeRange={timeRange}
+            />
+          ) : name === "trace_name" ? (
             <TextFilter
               value={Array.isArray(value) ? value : []}
               onApply={(vals) => onApply(name, vals)}
-              placeholder={name === "model" ? "e.g. gpt-4, claude-3…" : "Search trace names…"}
+              placeholder="Search trace names…"
             />
           ) : name === "kind" ? (
             <CheckboxFilter
@@ -912,6 +996,8 @@ export default function TracesPage({
               onToggle={() => toggleFilter(section)}
               onApply={(field, vals) => applyFilter(field, vals)}
               value={filterState[section] ?? []}
+              activeProject={activeProject}
+              timeRange={timeRange}
             />
           ))}
         </div>
