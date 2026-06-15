@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import DashboardPage, { AnalyticsRequest, formatTraceTimeTick } from "./Dashboard";
 import { ToastProvider } from "@/components/Toast";
 
@@ -541,9 +541,10 @@ describe("DashboardPage", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
       if (url === "/api/v1/analytics/spans" && options?.body) {
         const body = JSON.parse(options.body as string) as AnalyticsRequest;
-        // Token usage request: sums input_tokens and output_tokens
+        // Token usage request: sums input_tokens and output_tokens, grouped by model
         if (body.aggregations?.some((a: { alias: string }) => a.alias === "input_tokens") &&
-            body.aggregations?.some((a: { alias: string }) => a.alias === "output_tokens")) {
+            body.aggregations?.some((a: { alias: string }) => a.alias === "output_tokens") &&
+            body.group_by?.some((g: { field: string }) => g.field === "model")) {
           tokenUsageBodies.push(body);
         }
         return resolveAnalyticsResponse({ rows: [] });
@@ -563,6 +564,124 @@ describe("DashboardPage", () => {
       expect(groupByFields).not.toContain("kind");
       expect(groupByFields).toContain("model");
     }
+  });
+
+  // ── Issue #140: "by Type" tabs should show kind-grouped data ─────
+
+  it("#140: issues an analytics request grouped by 'kind' for the by-Type tabs", async () => {
+    const kindUsageBodies: AnalyticsRequest[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (url === "/api/v1/analytics/spans" && options?.body) {
+        const body = JSON.parse(options.body as string) as AnalyticsRequest;
+        if (
+          body.group_by?.some((g: { field: string }) => g.field === "kind") &&
+          body.aggregations?.some((a: { alias: string }) => a.alias === "input_tokens") &&
+          body.aggregations?.some((a: { alias: string }) => a.alias === "output_tokens")
+        ) {
+          kindUsageBodies.push(body);
+        }
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    });
+
+    expect(kindUsageBodies.length).toBeGreaterThan(0);
+  });
+
+  it("#140: 'Usage by Type' tab renders kind values (e.g. 'llm', 'tool'), not model names", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (url === "/api/v1/analytics/spans" && options?.body) {
+        const body = JSON.parse(options.body as string) as AnalyticsRequest;
+        if (body.group_by?.some((g: { field: string }) => g.field === "kind")) {
+          return resolveAnalyticsResponse({
+            rows: [
+              { kind: "llm", input_tokens: 1000, output_tokens: 500, total_cost: 0.05 },
+              { kind: "tool", input_tokens: 200, output_tokens: 100, total_cost: 0.01 },
+            ],
+          });
+        }
+        if (body.group_by?.some((g: { field: string }) => g.field === "model")) {
+          return resolveAnalyticsResponse({
+            rows: [
+              { model: "gpt-4-model-only", input_tokens: 1000, output_tokens: 500, total_cost: 0.05 },
+            ],
+          });
+        }
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    });
+
+    // Switch to the "Usage by Type" tab (index 3 of USAGE_TABS)
+    const usageByTypeTab = await screen.findByText("Usage by Type");
+    const tokenUsageCard = usageByTypeTab.closest(".card") as HTMLElement;
+    fireEvent.click(usageByTypeTab);
+
+    await waitFor(() => {
+      expect(screen.getByText("llm")).toBeInTheDocument();
+      expect(screen.getByText("tool")).toBeInTheDocument();
+    });
+
+    // The model-only data should not leak into the Token Usage card's
+    // "by Type" tab (it may legitimately appear in the separate
+    // "Cost by Model" widget elsewhere on the dashboard).
+    const { queryByText } = within(tokenUsageCard);
+    expect(queryByText("gpt-4-model-only")).not.toBeInTheDocument();
+  });
+
+  it("#140: 'Cost by Type' tab renders kind values (e.g. 'agent'), not model names", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (url === "/api/v1/analytics/spans" && options?.body) {
+        const body = JSON.parse(options.body as string) as AnalyticsRequest;
+        if (body.group_by?.some((g: { field: string }) => g.field === "kind")) {
+          return resolveAnalyticsResponse({
+            rows: [
+              { kind: "agent", input_tokens: 1000, output_tokens: 500, total_cost: 0.05 },
+            ],
+          });
+        }
+        if (body.group_by?.some((g: { field: string }) => g.field === "model")) {
+          return resolveAnalyticsResponse({
+            rows: [
+              { model: "claude-model-only", input_tokens: 1000, output_tokens: 500, total_cost: 0.05 },
+            ],
+          });
+        }
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    });
+
+    // Switch to the "Cost by Type" tab (index 1 of USAGE_TABS)
+    const costByTypeTab = await screen.findByText("Cost by Type");
+    const tokenUsageCard = costByTypeTab.closest(".card") as HTMLElement;
+    fireEvent.click(costByTypeTab);
+
+    await waitFor(() => {
+      expect(screen.getByText("agent")).toBeInTheDocument();
+    });
+
+    const { queryByText } = within(tokenUsageCard);
+    expect(queryByText("claude-model-only")).not.toBeInTheDocument();
   });
 
   it("refreshes data and updates from/to when timeRange prop changes", async () => {
