@@ -681,11 +681,16 @@ describe("fetch correctness", () => {
 
   it("every fetch after applying a filter includes the new filter state (no stale-closure fetch)", async () => {
     const fetchBodies: string[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
-      if (init?.body) fetchBodies.push(String(init.body));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      // The Model filter's distinct-models lookup (/api/v1/analytics/spans)
+      // is a separate, independent fetch — exclude it from the spans/query
+      // stale-closure check below.
+      if (init?.body && !String(url).includes("/api/v1/analytics/spans")) {
+        fetchBodies.push(String(init.body));
+      }
       return {
         ok: true,
-        json: () => Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+        json: () => Promise.resolve({ spans: mockSpans, next: "", limit: 25, rows: [] }),
       } as Response;
     });
 
@@ -1130,6 +1135,139 @@ describe("filters", () => {
     const modelBody = fetchBodies.find((b) => b.includes('"model"') && b.includes('"in"'));
     expect(modelBody).toBeDefined();
     expect(modelBody).toContain("gpt-4");
+  });
+
+  it("shows checkboxes for distinct models in the project alongside free-text search", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (String(url).includes("/api/v1/analytics/spans")) {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              rows: [{ model: "gpt-4" }, { model: "claude-3" }, { model: "unknown" }],
+            }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: () => Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response;
+    });
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // Expand the Model filter section
+    const modelHeader = screen.getByText("Model");
+    await act(async () => {
+      fireEvent.click(modelHeader);
+    });
+
+    const modelBorderDiv = modelHeader.closest("div.border-b") as HTMLElement;
+    const expandedContent = modelBorderDiv.querySelector("div.px-3") as HTMLElement;
+    expect(expandedContent).toBeInTheDocument();
+
+    // The distinct models returned by the analytics endpoint should render
+    // as checkboxes within the Model filter section.
+    await waitFor(() => {
+      expect(expandedContent.querySelector('input[type="checkbox"]')).toBeInTheDocument();
+    });
+
+    expect(expandedContent.textContent).toContain("gpt-4");
+    expect(expandedContent.textContent).toContain("claude-3");
+    expect(expandedContent.textContent).toContain("unknown");
+
+    // Free-text search box must still be present alongside the checkboxes.
+    expect(expandedContent.querySelector('input[type="text"]')).toBeInTheDocument();
+  });
+
+  it("sends model filter as 'in' operator when a known-model checkbox is toggled, and merges with free-text entries", async () => {
+    const fetchBodies: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      if (String(url).includes("/api/v1/analytics/spans")) {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              rows: [{ model: "gpt-4" }, { model: "claude-3" }],
+            }),
+        } as Response;
+      }
+      if (init?.body) {
+        fetchBodies.push(String(init.body));
+      }
+      return {
+        ok: true,
+        json: () => Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response;
+    });
+
+    renderTracesPage();
+
+    await waitFor(
+      () => { expect(fetchBodies.length).toBeGreaterThanOrEqual(1); },
+      { timeout: 2000 }
+    );
+
+    // Expand the Model filter section
+    const modelHeader = screen.getByText("Model");
+    await act(async () => {
+      fireEvent.click(modelHeader);
+    });
+
+    const modelBorderDiv = modelHeader.closest("div.border-b") as HTMLElement;
+    const expandedContent = modelBorderDiv.querySelector("div.px-3") as HTMLElement;
+
+    await waitFor(() => {
+      expect(expandedContent.querySelector('input[type="checkbox"]')).toBeInTheDocument();
+    });
+
+    // Toggle the "claude-3" checkbox.
+    const checkboxes = Array.from(
+      expandedContent.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    );
+    const claudeCheckbox = checkboxes.find(
+      (cb) => cb.closest("label")?.textContent?.includes("claude-3"),
+    );
+    expect(claudeCheckbox).toBeDefined();
+    await act(async () => {
+      fireEvent.click(claudeCheckbox!);
+    });
+
+    await waitFor(
+      () => { expect(fetchBodies.length).toBeGreaterThanOrEqual(2); },
+      { timeout: 2000 }
+    );
+
+    let modelBody = fetchBodies.find((b) => b.includes('"model"') && b.includes('"in"'));
+    expect(modelBody).toBeDefined();
+    expect(modelBody).toContain("claude-3");
+
+    // Now also enter a free-text model not in the known list — it should be
+    // unioned with the already-checked "claude-3" rather than replacing it.
+    const modelInput = expandedContent.querySelector<HTMLInputElement>('input[type="text"]');
+    expect(modelInput).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.change(modelInput!, { target: { value: "custom-model" } });
+    });
+
+    const applyBtn = expandedContent.querySelector('button');
+    expect(applyBtn).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(applyBtn as HTMLButtonElement);
+    });
+
+    await waitFor(
+      () => { expect(fetchBodies.length).toBeGreaterThanOrEqual(3); },
+      { timeout: 2000 }
+    );
+
+    modelBody = fetchBodies[fetchBodies.length - 1];
+    expect(modelBody).toContain("claude-3");
+    expect(modelBody).toContain("custom-model");
   });
 
   it("sends kind filter when kind checkboxes are selected", async () => {
