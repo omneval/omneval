@@ -604,4 +604,201 @@ describe("AdminPage", () => {
       expect(screen.getByText("oev_proj_proj2_key")).toBeInTheDocument();
     });
   });
+
+  describe("sorting by Created date", () => {
+    const sortKeys = [
+      {
+        key_id: "oev_proj_oldest",
+        kind: "project" as const,
+        created_at: "2026-05-01T10:00:00Z",
+      },
+      {
+        key_id: "oev_proj_newest",
+        kind: "project" as const,
+        created_at: "2026-06-14T10:00:00Z",
+      },
+      {
+        key_id: "oev_proj_middle",
+        kind: "project" as const,
+        created_at: "2026-05-29T10:00:00Z",
+      },
+    ];
+
+    function mockFetchWithSortKeys() {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+        if (url === "/api/v1/admin/api-keys") {
+          return resolveKeys(sortKeys);
+        }
+        if (url === "/api/v1/projects") {
+          return resolveProjects([]);
+        }
+        return resolveKeys([{ count: 0 }]);
+      });
+    }
+
+    function getKeyOrder() {
+      const ids = sortKeys.map((k) => k.key_id);
+      const text = document.body.textContent || "";
+      return ids
+        .map((id) => ({ id, index: text.indexOf(id) }))
+        .filter((entry) => entry.index !== -1)
+        .sort((a, b) => a.index - b.index)
+        .map((entry) => entry.id);
+    }
+
+    it("defaults to newest-first order by Created date", async () => {
+      mockFetchWithSortKeys();
+
+      renderWithToast(<AdminPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("oev_proj_oldest")).toBeInTheDocument();
+      });
+
+      expect(getKeyOrder()).toEqual([
+        "oev_proj_newest",
+        "oev_proj_middle",
+        "oev_proj_oldest",
+      ]);
+    });
+
+    it("toggles to oldest-first order when the Created sort control is clicked", async () => {
+      mockFetchWithSortKeys();
+
+      renderWithToast(<AdminPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("oev_proj_oldest")).toBeInTheDocument();
+      });
+
+      const sortButton = screen.getByRole("button", { name: /created/i });
+      fireEvent.click(sortButton);
+
+      await waitFor(() => {
+        expect(getKeyOrder()).toEqual([
+          "oev_proj_oldest",
+          "oev_proj_middle",
+          "oev_proj_newest",
+        ]);
+      });
+
+      // Clicking again should toggle back to newest-first
+      fireEvent.click(sortButton);
+
+      await waitFor(() => {
+        expect(getKeyOrder()).toEqual([
+          "oev_proj_newest",
+          "oev_proj_middle",
+          "oev_proj_oldest",
+        ]);
+      });
+    });
+  });
+
+  describe("search/filter by name or key ID", () => {
+    const searchKeys = [
+      {
+        key_id: "oev_proj_abc123",
+        kind: "project" as const,
+        created_at: "2026-05-13T10:00:00Z",
+      },
+      {
+        key_id: "oev_svc_worker-1",
+        kind: "service" as const,
+        service_name: "my-agent",
+        created_at: "2026-05-14T08:00:00Z",
+      },
+      {
+        key_id: "oev_proj_xyz789",
+        kind: "project" as const,
+        created_at: "2026-05-15T08:00:00Z",
+      },
+    ];
+
+    function mockFetchWithSearchKeys() {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+        if (url === "/api/v1/admin/api-keys") {
+          return resolveKeys(searchKeys);
+        }
+        if (url === "/api/v1/projects") {
+          return resolveProjects([]);
+        }
+        return resolveKeys([{ count: 0 }]);
+      });
+    }
+
+    it("renders a search input for filtering keys", async () => {
+      mockFetchWithSearchKeys();
+
+      renderWithToast(<AdminPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("oev_proj_abc123")).toBeInTheDocument();
+      });
+
+      expect(
+        screen.getByPlaceholderText(/search/i)
+      ).toBeInTheDocument();
+    });
+
+    it("filters keys by key ID prefix", async () => {
+      mockFetchWithSearchKeys();
+
+      renderWithToast(<AdminPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("oev_proj_abc123")).toBeInTheDocument();
+      });
+
+      const searchInput = screen.getByPlaceholderText(/search/i);
+      fireEvent.change(searchInput, { target: { value: "abc123" } });
+
+      await waitFor(() => {
+        expect(screen.getByText("oev_proj_abc123")).toBeInTheDocument();
+        expect(screen.queryByText("oev_proj_xyz789")).not.toBeInTheDocument();
+        expect(screen.queryByText("oev_svc_worker-1")).not.toBeInTheDocument();
+      });
+    });
+
+    it("filters keys by service/key name (case-insensitive)", async () => {
+      mockFetchWithSearchKeys();
+
+      renderWithToast(<AdminPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("oev_proj_abc123")).toBeInTheDocument();
+      });
+
+      const searchInput = screen.getByPlaceholderText(/search/i);
+      fireEvent.change(searchInput, { target: { value: "MY-AGENT" } });
+
+      await waitFor(() => {
+        expect(screen.getByText("oev_svc_worker-1")).toBeInTheDocument();
+        expect(screen.queryByText("oev_proj_abc123")).not.toBeInTheDocument();
+        expect(screen.queryByText("oev_proj_xyz789")).not.toBeInTheDocument();
+      });
+    });
+
+    it("shows a no-results message when the search matches nothing", async () => {
+      mockFetchWithSearchKeys();
+
+      renderWithToast(<AdminPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("oev_proj_abc123")).toBeInTheDocument();
+      });
+
+      const searchInput = screen.getByPlaceholderText(/search/i);
+      fireEvent.change(searchInput, { target: { value: "no-such-key" } });
+
+      await waitFor(() => {
+        expect(screen.queryByText("oev_proj_abc123")).not.toBeInTheDocument();
+        expect(screen.queryByText("oev_proj_xyz789")).not.toBeInTheDocument();
+        expect(screen.queryByText("oev_svc_worker-1")).not.toBeInTheDocument();
+        expect(
+          screen.getByText(/no .* keys (found|match)/i)
+        ).toBeInTheDocument();
+      });
+    });
+  });
 });
