@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
@@ -101,7 +102,7 @@ func toRawMap(projectID string, resource Resource, span Span, opts Options) map[
 	}
 
 	// Derive Kind: explicit omneval.kind wins, then heuristic.
-	kind := deriveKind(span.Attributes)
+	kind := deriveKind(span.Attributes, span.Name)
 
 	// Derive ServiceName from Resource attributes.
 	serviceName := extractResourceAttributeString(resource.Attributes, "service.name")
@@ -302,13 +303,41 @@ func extractNumberedIndex(key, prefix string) (int, bool) {
 	return n, true
 }
 
-// deriveKind determines the SpanKind from attribute heuristics.
-func deriveKind(attrs map[string]any) domain.SpanKind {
+// deriveKind determines the SpanKind from attribute heuristics, falling back
+// to span-name pattern matching for common agent-framework conventions
+// (e.g. OpenInference/OTel GenAI semconv don't cover every span).
+func deriveKind(attrs map[string]any, name string) domain.SpanKind {
 	// Explicit omneval.kind wins.
 	if kind := extractAttributeString(attrs, "omneval.kind"); kind != "" {
 		if dk := domain.SpanKind(kind); dk == domain.SpanKindLLM || dk == domain.SpanKindTool ||
 			dk == domain.SpanKindAgent || dk == domain.SpanKindChain || dk == domain.SpanKindInternal {
 			return dk
+		}
+	}
+
+	// Check for OpenInference span-kind attribute.
+	if oiKind := extractAttributeString(attrs, "openinference.span.kind"); oiKind != "" {
+		switch strings.ToUpper(oiKind) {
+		case "AGENT":
+			return domain.SpanKindAgent
+		case "LLM":
+			return domain.SpanKindLLM
+		case "TOOL":
+			return domain.SpanKindTool
+		case "CHAIN", "RETRIEVER", "EMBEDDING", "RERANKER", "GUARDRAIL":
+			return domain.SpanKindChain
+		}
+	}
+
+	// Check for GenAI operation-name attribute (OTel GenAI semconv).
+	if op := extractAttributeString(attrs, "gen_ai.operation.name"); op != "" {
+		switch strings.ToLower(op) {
+		case "invoke_agent", "create_agent":
+			return domain.SpanKindAgent
+		case "execute_tool":
+			return domain.SpanKindTool
+		case "chat", "text_completion", "embeddings", "generate_content":
+			return domain.SpanKindLLM
 		}
 	}
 
@@ -330,6 +359,16 @@ func deriveKind(attrs map[string]any) domain.SpanKind {
 		return domain.SpanKindTool
 	}
 	if _, hasToolName := attrs["tool.name"]; hasToolName {
+		return domain.SpanKindTool
+	}
+
+	// Fall back to span-name pattern heuristics for common agent-framework
+	// conventions that don't set any of the attributes above.
+	lowerName := strings.ToLower(name)
+	switch {
+	case strings.HasSuffix(lowerName, ".step") || strings.Contains(lowerName, "agent"):
+		return domain.SpanKindAgent
+	case strings.HasSuffix(name, "Action") || strings.Contains(lowerName, "tool"):
 		return domain.SpanKindTool
 	}
 
