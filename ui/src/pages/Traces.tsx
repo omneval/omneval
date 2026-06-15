@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { colors } from "@/theme";
 import { OnboardingEmptyState } from "@/components/OnboardingEmptyState";
 import { Skeleton } from "@/components/Skeleton";
@@ -42,6 +42,11 @@ interface Span {
   output?: string;
   status_code?: string;
   attributes?: Record<string, unknown>;
+  /** Number of spans in this trace (root span + rollups, issue #136). */
+  span_count?: number;
+  /** Per-kind span counts across the trace (e.g. {"llm": 2, "tool": 1}),
+   *  used to render the Levels column without a flat span list. */
+  kind_counts?: Record<string, number>;
 }
 
 interface SpanQueryResponse {
@@ -92,18 +97,11 @@ interface ConversationListResponse {
 // ── Observation Level Pills ────────────────────────────────────────
 
 interface ObservationPillsProps {
-  childSpans: Span[];
+  kindCounts?: Record<string, number>;
 }
 
-function ObservationPills({ childSpans }: ObservationPillsProps) {
-  if (childSpans.length === 0) return null;
-
-  // Aggregate child counts by kind.
-  const kindCounts: Record<string, number> = {};
-  childSpans.forEach((span) => {
-    const kind = span.kind ?? "span";
-    kindCounts[kind] = (kindCounts[kind] ?? 0) + 1;
-  });
+function ObservationPills({ kindCounts }: ObservationPillsProps) {
+  if (!kindCounts || Object.keys(kindCounts).length === 0) return null;
 
   return (
     <div className="flex items-center gap-1 flex-wrap">
@@ -515,7 +513,6 @@ function formatRange(min: number | "", max: number | ""): string {
 interface TableCellRendererProps {
   col: { key: string; label: string };
   span: Span;
-  childSpans: Span[];
   bookmarks: Set<string>;
   onToggleBookmark: (traceId: string) => void;
   onNavigateToTrace: (traceId: string) => void;
@@ -525,7 +522,6 @@ interface TableCellRendererProps {
 function TableCellRenderer({
   col,
   span,
-  childSpans,
   bookmarks,
   onToggleBookmark,
   onNavigateToTrace,
@@ -576,7 +572,7 @@ function TableCellRenderer({
         </div>
       );
     case "observationLevels":
-      return <ObservationPills key={col.key} childSpans={childSpans} />;
+      return <ObservationPills key={col.key} kindCounts={span.kind_counts} />;
     case "latency":
       return (
         <span key={col.key} className="text-omneval-text-muted">
@@ -880,13 +876,6 @@ export default function TracesPage({
     }));
   };
 
-  // Reconstruct parent-child relationships from the flat span list.
-  const traceGroups = useMemo<Record<string, Span[]>>(() => {
-    const groups: Record<string, Span[]> = {};
-    spans.forEach((span) => (groups[span.trace_id] ??= []).push(span));
-    return groups;
-  }, [spans]);
-
   const visibleColumns = columns.filter((c) => c.visible);
 
   return (
@@ -1134,41 +1123,35 @@ export default function TracesPage({
                 </tr>
               </thead>
               <tbody>
-                {spans.map((span) => {
-                  const childSpans = (
-                    traceGroups[span.trace_id] ?? []
-                  ).filter((s) => s.parent_id === span.span_id);
-                  return (
-                    <tr
-                      key={span.span_id}
-                      className="cursor-pointer transition-colors duration-150"
-                      style={{
-                        borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
-                      }}
-                      onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLElement).style.background =
-                          "rgba(124, 58, 237, 0.12)";
-                      }}
-                      onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLElement).style.background = "transparent";
-                      }}
-                    >
-                      {visibleColumns.map((col) => (
-                        <td key={col.key} className="px-3 py-2.5 whitespace-nowrap">
-                          <TableCellRenderer
-                            col={col}
-                            span={span}
-                            childSpans={childSpans}
-                            bookmarks={bookmarks}
-                            onToggleBookmark={toggleBookmark}
-                            onNavigateToTrace={onNavigateToTrace}
-                            onNavigateToTraceDetail={onNavigateToTraceDetail}
-                          />
-                        </td>
-                      ))}
-                    </tr>
-                  );
-                })}
+                {spans.map((span) => (
+                  <tr
+                    key={span.span_id}
+                    className="cursor-pointer transition-colors duration-150"
+                    style={{
+                      borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLElement).style.background =
+                        "rgba(124, 58, 237, 0.12)";
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLElement).style.background = "transparent";
+                    }}
+                  >
+                    {visibleColumns.map((col) => (
+                      <td key={col.key} className="px-3 py-2.5 whitespace-nowrap">
+                        <TableCellRenderer
+                          col={col}
+                          span={span}
+                          bookmarks={bookmarks}
+                          onToggleBookmark={toggleBookmark}
+                          onNavigateToTrace={onNavigateToTrace}
+                          onNavigateToTraceDetail={onNavigateToTraceDetail}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
               </tbody>
             </table>
           )}

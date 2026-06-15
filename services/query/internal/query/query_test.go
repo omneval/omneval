@@ -455,8 +455,14 @@ func TestLakeSQL_FirstPage(t *testing.T) {
 	if strings.Contains(sql, "UNION") {
 		t.Errorf("Lake reads must not UNION hot+cold, got:\n%s", sql)
 	}
-	if got := strings.Count(sql, "WHERE"); got != 1 {
-		t.Errorf("expected exactly one WHERE clause, got %d:\n%s", got, sql)
+	// The traces-list query (issue #136) filters the underlying spans in the
+	// "filtered" CTE WHERE clause, then selects rn=1 (root span) rows from
+	// "ranked" with a second WHERE — two WHERE clauses is expected here.
+	if got := strings.Count(sql, "WHERE"); got != 2 {
+		t.Errorf("expected two WHERE clauses (filtered CTE + root-span selection), got %d:\n%s", got, sql)
+	}
+	if !strings.Contains(sql, "GROUP BY trace_id") {
+		t.Errorf("expected trace-level rollup aggregation, got:\n%s", sql)
 	}
 	// args: project_id, from, to, limit+1.
 	if len(args) != 4 {
@@ -485,13 +491,14 @@ func TestLakeSQL_CursorPage(t *testing.T) {
 		t.Fatalf("LakeSQL error: %v", err)
 	}
 
-	// The cursor predicate must join the filter WHERE clause with AND — a
-	// second WHERE is a syntax error on the single-table read.
-	if got := strings.Count(sql, "WHERE"); got != 1 {
-		t.Errorf("expected exactly one WHERE clause, got %d:\n%s", got, sql)
+	// The cursor predicate is ANDed onto the root-span selection WHERE
+	// (r.rn = 1), the second of the two WHERE clauses (see
+	// TestLakeSQL_FirstPage for why two are expected post-#136).
+	if got := strings.Count(sql, "WHERE"); got != 2 {
+		t.Errorf("expected two WHERE clauses (filtered CTE + root-span selection), got %d:\n%s", got, sql)
 	}
-	if !strings.Contains(sql, "AND (start_time < ? OR (start_time = ? AND span_id < ?))") {
-		t.Errorf("expected keyset cursor predicate ANDed into WHERE, got:\n%s", sql)
+	if !strings.Contains(sql, "AND (r.start_time < ? OR (r.start_time = ? AND r.span_id < ?))") {
+		t.Errorf("expected keyset cursor predicate ANDed into root-span WHERE, got:\n%s", sql)
 	}
 	// args: project_id, from, to, cursor start_time x2, cursor span_id, limit+1.
 	if len(args) != 7 {
@@ -603,5 +610,207 @@ func TestLakeSQL_CursorPagination_Integration(t *testing.T) {
 		if seen[i] != want[i] {
 			t.Fatalf("paginated spans out of order: got %v, want %v", seen, want)
 		}
+	}
+}
+
+// TestLakeSQL_OneRowPerTrace verifies that the traces-list query (LakeSQL)
+// returns exactly one row per distinct trace_id — the root span (the span
+// with no parent_id) annotated with trace-level rollups — rather than a flat
+// row per span (issue #136).
+func TestLakeSQL_OneRowPerTrace(t *testing.T) {
+	ctx := context.Background()
+
+	cfg, _ := lakeservertest.NewLocal(t)
+	lk, err := lake.Open(ctx, cfg)
+	if err != nil {
+		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
+	}
+	defer lk.Close()
+
+	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	// A single trace with a root span and three child spans.
+	root := &domain.Span{
+		SpanID:       "root-span",
+		TraceID:      "trace-rollup",
+		ParentID:     "",
+		ProjectID:    "proj-rollup",
+		Name:         "agent.run",
+		Kind:         domain.SpanKindAgent,
+		StartTime:    base,
+		EndTime:      base.Add(10 * time.Second),
+		InputTokens:  10,
+		OutputTokens: 20,
+		CostUSD:      0.01,
+		StatusCode:   "ok",
+	}
+	child1 := &domain.Span{
+		SpanID:       "child-1",
+		TraceID:      "trace-rollup",
+		ParentID:     "root-span",
+		ProjectID:    "proj-rollup",
+		Name:         "litellm.completion",
+		Kind:         domain.SpanKindLLM,
+		StartTime:    base.Add(1 * time.Second),
+		EndTime:      base.Add(3 * time.Second),
+		InputTokens:  100,
+		OutputTokens: 50,
+		CostUSD:      0.05,
+		StatusCode:   "ok",
+	}
+	child2 := &domain.Span{
+		SpanID:       "child-2",
+		TraceID:      "trace-rollup",
+		ParentID:     "root-span",
+		ProjectID:    "proj-rollup",
+		Name:         "tool.call",
+		Kind:         domain.SpanKindTool,
+		StartTime:    base.Add(3 * time.Second),
+		EndTime:      base.Add(4 * time.Second),
+		InputTokens:  5,
+		OutputTokens: 5,
+		CostUSD:      0.0,
+		StatusCode:   "ok",
+	}
+	// A child that ends after the root span's own end_time, so the trace's
+	// overall end_time (and therefore duration) must reflect this span, not
+	// just the root span's own end_time. Also has an error status, so the
+	// trace's overall status must reflect the worst status across spans.
+	child3 := &domain.Span{
+		SpanID:       "child-3",
+		TraceID:      "trace-rollup",
+		ParentID:     "root-span",
+		ProjectID:    "proj-rollup",
+		Name:         "tool.call.slow",
+		Kind:         domain.SpanKindTool,
+		StartTime:    base.Add(4 * time.Second),
+		EndTime:      base.Add(15 * time.Second),
+		InputTokens:  1,
+		OutputTokens: 1,
+		CostUSD:      0.001,
+		StatusCode:   "error",
+	}
+
+	// A second, unrelated trace in the same project — must appear as its own
+	// row and must not have its rollups contaminated by trace-rollup's spans.
+	other := &domain.Span{
+		SpanID:    "other-root",
+		TraceID:   "trace-other",
+		ParentID:  "",
+		ProjectID: "proj-rollup",
+		Name:      "agent.run",
+		Kind:      domain.SpanKindAgent,
+		StartTime: base.Add(-1 * time.Minute),
+		EndTime:   base.Add(-1*time.Minute + 2*time.Second),
+		StatusCode: "ok",
+	}
+
+	if err := lk.InsertSpans(ctx, []*domain.Span{root, child1, child2, child3, other}); err != nil {
+		t.Fatalf("insert spans: %v", err)
+	}
+
+	req := SpanQueryRequest{Limit: 10}
+	q, err := NewSpanQuery("proj-rollup", req)
+	if err != nil {
+		t.Fatalf("NewSpanQuery: %v", err)
+	}
+
+	sqlStr, args, err := q.LakeSQL()
+	if err != nil {
+		t.Fatalf("LakeSQL: %v", err)
+	}
+
+	rows, err := lk.DB().QueryContext(ctx, sqlStr, args...)
+	if err != nil {
+		t.Fatalf("query: %v\nSQL:\n%s", err, sqlStr)
+	}
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("columns: %v", err)
+	}
+	var raw [][]any
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		raw = append(raw, vals)
+	}
+	rows.Close()
+
+	traces, err := ScanRows(raw)
+	if err != nil {
+		t.Fatalf("ScanRows: %v", err)
+	}
+
+	if len(traces) != 2 {
+		t.Fatalf("expected one row per trace (2 traces), got %d rows", len(traces))
+	}
+
+	// Newest trace (trace-rollup) first — ORDER BY start_time DESC.
+	got := traces[0]
+	if got.TraceID != "trace-rollup" {
+		t.Fatalf("expected first row to be trace-rollup, got %q", got.TraceID)
+	}
+	if got.SpanID != "root-span" {
+		t.Errorf("expected root span (root-span) to represent the trace, got span_id %q", got.SpanID)
+	}
+	if got.SpanCount != 4 {
+		t.Errorf("span_count: got %d, want 4", got.SpanCount)
+	}
+	if got.InputTokens != 116 { // 10 + 100 + 5 + 1
+		t.Errorf("total input_tokens: got %d, want 116", got.InputTokens)
+	}
+	if got.OutputTokens != 76 { // 20 + 50 + 5 + 1
+		t.Errorf("total output_tokens: got %d, want 76", got.OutputTokens)
+	}
+	if want := 0.061; got.CostUSD < want-0.0001 || got.CostUSD > want+0.0001 {
+		t.Errorf("total cost_usd: got %v, want ~%v", got.CostUSD, want)
+	}
+	// Trace end_time must be the max end_time across all spans (child-3's,
+	// 15s after base), not just the root span's own end_time (10s).
+	wantEnd := base.Add(15 * time.Second)
+	if !got.EndTime.Equal(wantEnd) {
+		t.Errorf("trace end_time: got %v, want %v", got.EndTime, wantEnd)
+	}
+	// Overall status must reflect the worst status across spans — child-3
+	// errored, so the trace-level status must be "error" even though the
+	// root span itself was "ok".
+	if got.StatusCode != "error" {
+		t.Errorf("overall status_code: got %q, want %q", got.StatusCode, "error")
+	}
+
+	// KindCounts must reflect the per-kind breakdown across all spans in the
+	// trace (root agent.run + 2 tool.call + 1 litellm.completion), so the
+	// Traces list "Levels" column can render observation pills without a
+	// flat span list (issue #136).
+	wantKindCounts := map[string]int64{
+		string(domain.SpanKindAgent): 1,
+		string(domain.SpanKindLLM):   1,
+		string(domain.SpanKindTool):  2,
+	}
+	if len(got.KindCounts) != len(wantKindCounts) {
+		t.Errorf("kind_counts: got %v, want %v", got.KindCounts, wantKindCounts)
+	}
+	for k, want := range wantKindCounts {
+		if got.KindCounts[k] != want {
+			t.Errorf("kind_counts[%q]: got %d, want %d", k, got.KindCounts[k], want)
+		}
+	}
+
+	other2 := traces[1]
+	if other2.TraceID != "trace-other" {
+		t.Fatalf("expected second row to be trace-other, got %q", other2.TraceID)
+	}
+	if other2.SpanCount != 1 {
+		t.Errorf("trace-other span_count: got %d, want 1 (must not be contaminated by trace-rollup's spans)", other2.SpanCount)
+	}
+	wantOtherKindCounts := map[string]int64{string(domain.SpanKindAgent): 1}
+	if len(other2.KindCounts) != len(wantOtherKindCounts) || other2.KindCounts[string(domain.SpanKindAgent)] != 1 {
+		t.Errorf("trace-other kind_counts: got %v, want %v", other2.KindCounts, wantOtherKindCounts)
 	}
 }
