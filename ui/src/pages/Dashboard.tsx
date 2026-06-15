@@ -447,7 +447,15 @@ interface CostData {
   totalCost: number;
 }
 
-function ModelCostsTable({ data, loading }: { data: CostData[]; loading: boolean }) {
+function ModelCostsTable({
+  data,
+  loading,
+  labelHeader = "Model",
+}: {
+  data: CostData[];
+  loading: boolean;
+  labelHeader?: string;
+}) {
   const sorted = useMemo(
     () => [...data].sort((a, b) => b.totalCost - a.totalCost),
     [data],
@@ -480,7 +488,7 @@ function ModelCostsTable({ data, loading }: { data: CostData[]; loading: boolean
             }}
           >
             <th className="text-left py-2 px-3 font-medium text-xs uppercase tracking-wider">
-              Model
+              {labelHeader}
             </th>
             <th className="text-right py-2 px-3 font-medium text-xs uppercase tracking-wider">
               Input Tokens
@@ -562,9 +570,13 @@ const USAGE_TABS = ["Cost by Model", "Cost by Type", "Usage by Model", "Usage by
 function ModelUsageWidget({
   loading,
   data,
+  typeData,
 }: {
   loading: boolean;
+  /** Model-grouped data, used by the "by Model" tabs (0, 2). */
   data: CostData[];
+  /** Kind-grouped data (span kind: llm/tool/agent/chain), used by the "by Type" tabs (1, 3). */
+  typeData: CostData[];
 }) {
   const [activeTab, setActiveTab] = useState(0);
 
@@ -572,7 +584,11 @@ function ModelUsageWidget({
     return <LoadingState rows={3} rowHeight="2.5rem" />;
   }
 
-  const isEmpty = data.length === 0;
+  // "by Type" tabs (1, 3) use the kind-grouped data; "by Model" tabs (0, 2)
+  // use the model-grouped data.
+  const isTypeTab = activeTab === 1 || activeTab === 3;
+  const activeData = isTypeTab ? typeData : data;
+  const isEmpty = activeData.length === 0;
 
   // Tokens-only tabs: "Usage by Model" and "Usage by Type".
   const showTokensOnly = activeTab === 2 || activeTab === 3;
@@ -632,7 +648,7 @@ function ModelUsageWidget({
               </tr>
             </thead>
             <tbody>
-              {data
+              {activeData
                 .sort((a, b) => b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens))
                 .map((row, i) => (
                   <tr
@@ -664,7 +680,11 @@ function ModelUsageWidget({
           </table>
         </div>
       ) : (
-        <ModelCostsTable data={data} loading={false} />
+        <ModelCostsTable
+          data={activeData}
+          loading={false}
+          labelHeader={activeTab === 1 ? "Type" : "Model"}
+        />
       )}
     </div>
   );
@@ -749,8 +769,10 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
   const [modelCosts, setModelCosts] = useState<CostData[]>([]);
   const [userConsumption, setUserConsumption] = useState<UserConsumptionData[]>([]);
 
-  // Token Usage tab data
+  // Token Usage tab data (model-grouped, for "by Model" tabs)
   const [tokenUsageData, setTokenUsageData] = useState<CostData[]>([]);
+  // Token Usage tab data (kind-grouped, for "by Type" tabs)
+  const [kindUsageData, setKindUsageData] = useState<CostData[]>([]);
 
   // Monotonic sequence so a slow in-flight response (e.g. for a previous
   // project) can never overwrite the latest results.
@@ -812,6 +834,18 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         ],
       };
 
+      // ── Token Usage: grouped by kind (span type: llm/tool/agent/chain) ──
+      const kindUsageReq: AnalyticsRequest = {
+        ...body,
+        group_by: [{ field: "kind" }],
+        order_by: [{ field: "total_cost", desc: true }],
+        aggregations: [
+          { function: "sum", field: "input_tokens", alias: "input_tokens" },
+          { function: "sum", field: "output_tokens", alias: "output_tokens" },
+          { function: "sum", field: "cost_usd", alias: "total_cost" },
+        ],
+      };
+
       // ── Model Costs ──
       const modelCostsReq: AnalyticsRequest = {
         ...body,
@@ -838,6 +872,7 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         tracesByNameResp,
         tracesByTimeResp,
         tokenUsageResp,
+        kindUsageResp,
         modelCostsResp,
         userConsumptionResp,
       ] = await Promise.all([
@@ -859,6 +894,11 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         fetch("/api/v1/analytics/spans", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(kindUsageReq),
+        }),
+        fetch("/api/v1/analytics/spans", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(modelCostsReq),
         }),
         fetch("/api/v1/analytics/spans", {
@@ -876,12 +916,14 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         tracesByNameData,
         tracesByTimeData,
         tokenUsageJson,
+        kindUsageJson,
         modelCostsJson,
         userConsumptionJson,
       ] = await Promise.all([
         tracesByNameResp.ok ? tracesByNameResp.json() : { rows: [] },
         tracesByTimeResp.ok ? tracesByTimeResp.json() : { rows: [] },
         tokenUsageResp.ok ? tokenUsageResp.json() : { rows: [] },
+        kindUsageResp.ok ? kindUsageResp.json() : { rows: [] },
         modelCostsResp.ok ? modelCostsResp.json() : { rows: [] },
         userConsumptionResp.ok ? userConsumptionResp.json() : { rows: [] },
       ]);
@@ -891,6 +933,17 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
       const mapCostRows = (rows: Record<string, unknown>[]): CostData[] =>
         rows.map((row) => ({
           model: (row.model as string) || "unknown",
+          inputTokens: Number(row.input_tokens) || 0,
+          outputTokens: Number(row.output_tokens) || 0,
+          totalCost: Number(row.total_cost) || 0,
+        }));
+
+      // Kind-grouped rows reuse the CostData shape, keyed off `model` so the
+      // existing table components render without changes — the `model`
+      // field here holds the span `kind` (llm/tool/agent/chain).
+      const mapKindRows = (rows: Record<string, unknown>[]): CostData[] =>
+        rows.map((row) => ({
+          model: (row.kind as string) || "unknown",
           inputTokens: Number(row.input_tokens) || 0,
           outputTokens: Number(row.output_tokens) || 0,
           totalCost: Number(row.total_cost) || 0,
@@ -911,6 +964,7 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
           .filter((d: TimeSeriesData) => d.time > 0),
       );
       setTokenUsageData(mapCostRows(tokenUsageJson.rows ?? []));
+      setKindUsageData(mapKindRows(kindUsageJson.rows ?? []));
       setModelCosts(mapCostRows(modelCostsJson.rows ?? []));
       setUserConsumption(
         (userConsumptionJson.rows ?? []).map((row: Record<string, unknown>) => ({
@@ -1033,7 +1087,7 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
 
         {/* 5. Model Usage (Tabbed) */}
         <Card title="Token Usage" subtitle="input + output tokens">
-          <ModelUsageWidget loading={loading} data={tokenUsageData} />
+          <ModelUsageWidget loading={loading} data={tokenUsageData} typeData={kindUsageData} />
         </Card>
 
         {/* 6. User Consumption (Horizontal Bar) */}
