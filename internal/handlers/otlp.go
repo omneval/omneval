@@ -207,17 +207,22 @@ func unixNanoToTime(nano uint64) time.Time {
 	return time.Unix(int64(sec), int64(nsec)).UTC()
 }
 
+// statusToCode maps an OTLP proto Status to the stored status_code value.
+// Stored values are the uppercase OTel status names ("OK"/"ERROR"/"UNSET"),
+// matching the literals used by the Traces page status_code filter (#139).
+// A span with no Status field at all returns "" so the column remains
+// NULL — distinct from a span that explicitly sets STATUS_CODE_UNSET.
 func statusToCode(status *tracev1.Status) string {
 	if status == nil {
 		return ""
 	}
 	switch status.GetCode() {
 	case tracev1.Status_STATUS_CODE_UNSET:
-		return "unset"
+		return "UNSET"
 	case tracev1.Status_STATUS_CODE_OK:
-		return "ok"
+		return "OK"
 	case tracev1.Status_STATUS_CODE_ERROR:
-		return "error"
+		return "ERROR"
 	default:
 		return fmt.Sprintf("%d", status.GetCode())
 	}

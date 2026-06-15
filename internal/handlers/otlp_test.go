@@ -520,6 +520,212 @@ func (v *trackingValidator) Validate(ctx context.Context, rawKey string) (*auth.
 	return v.validate(ctx, rawKey)
 }
 
+// postOTLPRequest sends req to h via the given content type and returns the
+// spans enqueued in q. It fails the test if the request is not accepted.
+func postOTLPRequest(t *testing.T, h *handlers.OTLPHandler, q *fakeIngestQueue, req *coltracev1.ExportTraceServiceRequest, contentType string) []*domain.Span {
+	t.Helper()
+
+	ts := httptest.NewServer(h.Router())
+	defer ts.Close()
+
+	var body []byte
+	var err error
+	switch contentType {
+	case "application/json":
+		body, err = protojson.Marshal(req)
+	default:
+		body, err = proto.Marshal(req)
+	}
+	if err != nil {
+		t.Fatalf("marshal OTLP request: %v", err)
+	}
+
+	rq, _ := http.NewRequest("POST", ts.URL+"/v1/traces", bytes.NewReader(body))
+	rq.Header.Set("X-API-Key", "valid_project_key")
+	rq.Header.Set("Content-Type", contentType)
+
+	resp, err := http.DefaultClient.Do(rq)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status: got %d, want %d, body: %s", resp.StatusCode, http.StatusAccepted, string(bodyBytes))
+	}
+	if len(q.batches) != 1 {
+		t.Fatalf("expected 1 batch, got %d", len(q.batches))
+	}
+	return q.batches[0]
+}
+
+// buildOTLPRequestWithStatus creates an OTLP request with a single span
+// carrying the given proto Status (which may be nil for "no status set").
+func buildOTLPRequestWithStatus(status *tracev1.Status) *coltracev1.ExportTraceServiceRequest {
+	return &coltracev1.ExportTraceServiceRequest{
+		ResourceSpans: []*tracev1.ResourceSpans{
+			{
+				ScopeSpans: []*tracev1.ScopeSpans{
+					{
+						Spans: []*tracev1.Span{
+							{
+								TraceId: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+								SpanId:  []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+								Name:    "status-span",
+								Status:  status,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// TestOTLPHandler_StatusCodeOK_Protobuf covers issue #135: an OTLP span with
+// proto Status{Code: STATUS_CODE_OK, Message: "all good"} sent as protobuf
+// should translate to domain.Span.StatusCode == "OK" with the message carried
+// through to StatusMessage.
+func TestOTLPHandler_StatusCodeOK_Protobuf(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+
+	req := buildOTLPRequestWithStatus(&tracev1.Status{
+		Code:    tracev1.Status_STATUS_CODE_OK,
+		Message: "all good",
+	})
+
+	spans := postOTLPRequest(t, h, q, req, "application/x-protobuf")
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+	if got := spans[0].StatusCode; got != "OK" {
+		t.Errorf("status_code: got %q, want %q", got, "OK")
+	}
+	if got := spans[0].StatusMessage; got != "all good" {
+		t.Errorf("status_message: got %q, want %q", got, "all good")
+	}
+}
+
+// TestOTLPHandler_StatusCodeError_Protobuf covers STATUS_CODE_ERROR mapping
+// to domain.Span.StatusCode == "ERROR".
+func TestOTLPHandler_StatusCodeError_Protobuf(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+
+	req := buildOTLPRequestWithStatus(&tracev1.Status{
+		Code:    tracev1.Status_STATUS_CODE_ERROR,
+		Message: "boom",
+	})
+
+	spans := postOTLPRequest(t, h, q, req, "application/x-protobuf")
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+	if got := spans[0].StatusCode; got != "ERROR" {
+		t.Errorf("status_code: got %q, want %q", got, "ERROR")
+	}
+	if got := spans[0].StatusMessage; got != "boom" {
+		t.Errorf("status_message: got %q, want %q", got, "boom")
+	}
+}
+
+// TestOTLPHandler_StatusCodeExplicitUnset_Protobuf covers an OTLP span that
+// explicitly sets Status{Code: STATUS_CODE_UNSET} (as opposed to omitting the
+// Status field entirely). This should translate to the literal "UNSET" so it
+// is consistent with the stored values used by the status_code filter (#139).
+func TestOTLPHandler_StatusCodeExplicitUnset_Protobuf(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+
+	req := buildOTLPRequestWithStatus(&tracev1.Status{
+		Code: tracev1.Status_STATUS_CODE_UNSET,
+	})
+
+	spans := postOTLPRequest(t, h, q, req, "application/x-protobuf")
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+	if got := spans[0].StatusCode; got != "UNSET" {
+		t.Errorf("status_code: got %q, want %q", got, "UNSET")
+	}
+}
+
+// TestOTLPHandler_StatusCodeAbsent_Protobuf covers an OTLP span with no
+// Status field at all (the common case for SDKs that never set status).
+// status_code should remain empty (stored as NULL/'' in the Lake, matched by
+// the "UNSET" filter per #139).
+func TestOTLPHandler_StatusCodeAbsent_Protobuf(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+
+	req := buildOTLPRequestWithStatus(nil)
+
+	spans := postOTLPRequest(t, h, q, req, "application/x-protobuf")
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+	if got := spans[0].StatusCode; got != "" {
+		t.Errorf("status_code: got %q, want empty", got)
+	}
+	if got := spans[0].StatusMessage; got != "" {
+		t.Errorf("status_message: got %q, want empty", got)
+	}
+}
+
+// TestOTLPHandler_StatusCodeOK_JSON covers the JSON (protojson) content-type
+// path: STATUS_CODE_OK should still map to "OK".
+func TestOTLPHandler_StatusCodeOK_JSON(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+
+	req := buildOTLPRequestWithStatus(&tracev1.Status{
+		Code:    tracev1.Status_STATUS_CODE_OK,
+		Message: "fine",
+	})
+
+	spans := postOTLPRequest(t, h, q, req, "application/json")
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+	if got := spans[0].StatusCode; got != "OK" {
+		t.Errorf("status_code: got %q, want %q", got, "OK")
+	}
+	if got := spans[0].StatusMessage; got != "fine" {
+		t.Errorf("status_message: got %q, want %q", got, "fine")
+	}
+}
+
+// TestOTLPHandler_StatusCodeError_JSON covers the JSON (protojson) content-type
+// path: STATUS_CODE_ERROR should still map to "ERROR".
+func TestOTLPHandler_StatusCodeError_JSON(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+
+	req := buildOTLPRequestWithStatus(&tracev1.Status{
+		Code:    tracev1.Status_STATUS_CODE_ERROR,
+		Message: "broke",
+	})
+
+	spans := postOTLPRequest(t, h, q, req, "application/json")
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+	if got := spans[0].StatusCode; got != "ERROR" {
+		t.Errorf("status_code: got %q, want %q", got, "ERROR")
+	}
+	if got := spans[0].StatusMessage; got != "broke" {
+		t.Errorf("status_message: got %q, want %q", got, "broke")
+	}
+}
+
 // buildMinimalOTLPRequest creates an OTLP request with a single span.
 func buildMinimalOTLPRequest() *coltracev1.ExportTraceServiceRequest {
 	return &coltracev1.ExportTraceServiceRequest{
