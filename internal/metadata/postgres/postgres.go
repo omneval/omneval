@@ -52,6 +52,10 @@ func New(dsn string) (*Store, error) {
 	return s, nil
 }
 
+// migrateLockKey is the string key used for the session-level advisory lock
+// that serializes concurrent Migrate() calls across service instances.
+const migrateLockKey = "omneval_metadata_migrate"
+
 // Migrate applies pending SQL migrations.
 // Applies migration 1 (init) and migration 2 (add reset token) if not already applied.
 func (s *Store) Migrate(ctx context.Context) error {
@@ -59,24 +63,39 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return nil
 	}
 
-	// Acquire an advisory lock to serialize concurrent Migrate() calls.
-	// pg_advisory_xact_lock is transaction-scoped: it's released when the
-	// transaction ends (here, immediately after this ExecContext call since
-	// it runs in its own implicit transaction). We use a negative lock ID
-	// derived from the string "omneval_metadata_migrate" so that different
-	// databases don't collide on shared Postgres clusters.
+	// Pin to a single connection for the entire Migrate() call. This is required
+	// because pg_advisory_lock is session-scoped and tied to a specific Postgres
+	// backend connection. Without pinning, database/sql's connection pool could
+	// route each query to a different connection, meaning the advisory lock would
+	// be acquired on one connection but migration queries would run on another -
+	// providing zero serialization.
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("postgres: connect for migration: %w", err)
+	}
+	defer conn.Close() //nolint:errcheck // returns connection to pool
+
+	// Acquire a session-level advisory lock on the pinned connection to serialize
+	// concurrent Migrate() calls across multiple service instances.
 	//
-	// The lock serializes the check-then-apply cycle: the first process to
-	// acquire the lock runs all pending migrations; subsequent processes
-	// block, then see count == 1 and skip.
-	if _, err := s.db.ExecContext(ctx,
-		"SELECT pg_advisory_xact_lock(hashtext($1))", "omneval_metadata_migrate",
-	); err != nil {
+	// pg_advisory_lock (NOT pg_advisory_xact_lock) is session-scoped: it persists
+	// until explicitly released or the connection closes. This is critical because
+	// Go's database/sql uses autocommit semantics - pg_advisory_xact_lock would be
+	// acquired and released within the same implicit transaction, providing no
+	// serialization. With pg_advisory_lock on a pinned connection, the first process
+	// holds the lock for the entire duration of Migrate(); subsequent processes block
+	// on acquire, then see count == 1 and skip.
+	var lockID int64
+	if err := conn.QueryRowContext(ctx,
+		"SELECT hashtext($1)::bigint, pg_advisory_lock(hashtext($2)::bigint)",
+		migrateLockKey, migrateLockKey,
+	).Scan(&lockID); err != nil {
 		return fmt.Errorf("postgres: acquire migration lock: %w", err)
 	}
+	defer func() { _, _ = conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", lockID) }() //nolint:errcheck
 
 	// Create schema_migrations table
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := conn.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS _schema_migrations (
 			version INTEGER PRIMARY KEY,
 			applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -85,64 +104,27 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return fmt.Errorf("postgres: create migrations table: %w", err)
 	}
 
-	// Check if migration 1 is already applied
-	var count int
-	err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM _schema_migrations WHERE version = 1").Scan(&count)
-	if err != nil {
-		return fmt.Errorf("postgres: check migration status: %w", err)
+	// Apply each pending migration using the pinned connection.
+	migrations := []struct {
+		version int64
+		sql     string
+	}{
+		{1, migrationSQL},
+		{2, migrationSQL2},
+		{3, migrationSQL3},
+		{4, migrationSQL4},
+		{5, migrationSQL5},
 	}
-	if count == 0 {
-		// Run migration 1
-		if err := s.applyMigration(ctx, 1, migrationSQL); err != nil {
-			return err
+	for _, m := range migrations {
+		var count int
+		err = conn.QueryRowContext(ctx, "SELECT count(*) FROM _schema_migrations WHERE version = $1", m.version).Scan(&count)
+		if err != nil {
+			return fmt.Errorf("postgres: check migration %d status: %w", m.version, err)
 		}
-	}
-
-	// Check if migration 2 is already applied
-	err = s.db.QueryRowContext(ctx, "SELECT count(*) FROM _schema_migrations WHERE version = 2").Scan(&count)
-	if err != nil {
-		return fmt.Errorf("postgres: check migration 2 status: %w", err)
-	}
-	if count == 0 {
-		// Run migration 2
-		if err := s.applyMigration(ctx, 2, migrationSQL2); err != nil {
-			return err
-		}
-	}
-
-	// Check if migration 3 is already applied
-	err = s.db.QueryRowContext(ctx, "SELECT count(*) FROM _schema_migrations WHERE version = 3").Scan(&count)
-	if err != nil {
-		return fmt.Errorf("postgres: check migration 3 status: %w", err)
-	}
-	if count == 0 {
-		// Run migration 3
-		if err := s.applyMigration(ctx, 3, migrationSQL3); err != nil {
-			return err
-		}
-	}
-
-	// Check if migration 4 is already applied
-	err = s.db.QueryRowContext(ctx, "SELECT count(*) FROM _schema_migrations WHERE version = 4").Scan(&count)
-	if err != nil {
-		return fmt.Errorf("postgres: check migration 4 status: %w", err)
-	}
-	if count == 0 {
-		// Run migration 4
-		if err := s.applyMigration(ctx, 4, migrationSQL4); err != nil {
-			return err
-		}
-	}
-
-	// Check if migration 5 is already applied
-	err = s.db.QueryRowContext(ctx, "SELECT count(*) FROM _schema_migrations WHERE version = 5").Scan(&count)
-	if err != nil {
-		return fmt.Errorf("postgres: check migration 5 status: %w", err)
-	}
-	if count == 0 {
-		// Run migration 5
-		if err := s.applyMigration(ctx, 5, migrationSQL5); err != nil {
-			return err
+		if count == 0 {
+			if err := applyMigrationOnConn(ctx, conn, m.version, m.sql); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -150,9 +132,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 	return nil
 }
 
-// applyMigration wraps a single migration SQL in a transaction.
-func (s *Store) applyMigration(ctx context.Context, version int64, sql string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+// applyMigrationOnConn wraps a single migration SQL in a transaction on a pinned connection.
+func applyMigrationOnConn(ctx context.Context, conn *sql.Conn, version int64, sql string) error {
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("postgres: begin migration %d tx: %w", version, err)
 	}
