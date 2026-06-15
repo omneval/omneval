@@ -190,6 +190,121 @@ export function formatJsonPreview(json: string, maxLen = 60): string {
   }
 }
 
+// ── Tool / action span summaries ───────────────────────────────────
+
+export interface ToolSummary {
+  /** Short one-line summary (e.g. the command, file path, or skill name). */
+  title: string;
+  /** Truncated detail body (e.g. command output, diff/content preview, reasoning). */
+  detail: string;
+}
+
+/**
+ * Try to parse a string as JSON, returning the parsed object (if it is a
+ * plain object) or null otherwise.
+ */
+function tryParseObject(raw: string | undefined): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // not JSON
+  }
+  return null;
+}
+
+/**
+ * Return the first string value found among the given keys of an object.
+ */
+function firstStringField(obj: Record<string, unknown> | null, keys: string[]): string | undefined {
+  if (!obj) return undefined;
+  for (const key of keys) {
+    const val = obj[key];
+    if (typeof val === "string" && val.length > 0) return val;
+  }
+  return undefined;
+}
+
+const TOOL_DETAIL_MAX_LEN = 500;
+
+/**
+ * Build a generic "tool call summary" for tool/action-kind spans, used in
+ * the trace Tree view.
+ *
+ * Recognizes a handful of common agent-framework action shapes
+ * (TerminalAction, FileEditorAction, InvokeSkillAction, ThinkAction) and
+ * extracts a short title plus a detail body. Falls back to a compact JSON
+ * (or plain-text) preview of input/output for anything else. Returns null
+ * when there is no input or output to summarize.
+ */
+export function getToolSummary(
+  actionName: string | undefined,
+  input: string | undefined,
+  output: string | undefined,
+): ToolSummary | null {
+  const hasInput = !!input && input.length > 0;
+  const hasOutput = !!output && output.length > 0;
+  if (!hasInput && !hasOutput) return null;
+
+  const inputObj = tryParseObject(input);
+  const outputObj = tryParseObject(output);
+  const name = actionName || "";
+
+  // TerminalAction: command in input, output/stdout(+stderr) in output.
+  if (/terminal|shell|bash|exec/i.test(name) || firstStringField(inputObj, ["command", "cmd"])) {
+    const command = firstStringField(inputObj, ["command", "cmd"]);
+    if (command) {
+      const stdout = firstStringField(outputObj, ["output", "stdout", "result"]);
+      const stderr = firstStringField(outputObj, ["stderr"]);
+      const combined = [stdout, stderr].filter(Boolean).join("\n");
+      return {
+        title: `$ ${command}`,
+        detail: combined ? truncate(combined, TOOL_DETAIL_MAX_LEN) : "(no output)",
+      };
+    }
+  }
+
+  // FileEditorAction: file path + diff/content in input.
+  if (/file|edit/i.test(name) || firstStringField(inputObj, ["path", "file_path", "filepath", "file"])) {
+    const path = firstStringField(inputObj, ["path", "file_path", "filepath", "file"]);
+    if (path) {
+      const detail = firstStringField(inputObj, ["diff", "content", "new_content", "patch"]);
+      return {
+        title: path,
+        detail: detail ? truncate(detail, TOOL_DETAIL_MAX_LEN) : "(no diff/content)",
+      };
+    }
+  }
+
+  // InvokeSkillAction: skill name (+ args) in input.
+  if (/invokeskill|skill/i.test(name) || firstStringField(inputObj, ["skill", "skill_name"])) {
+    const skill = firstStringField(inputObj, ["skill", "skill_name"]);
+    if (skill) {
+      const args = inputObj?.args ?? inputObj?.arguments;
+      return {
+        title: `skill: ${skill}`,
+        detail: args !== undefined ? truncate(JSON.stringify(args), TOOL_DETAIL_MAX_LEN) : "(no args)",
+      };
+    }
+  }
+
+  // ThinkAction: reasoning text is typically the output.
+  if (/think|reason/i.test(name) && hasOutput && !outputObj) {
+    return {
+      title: "thought",
+      detail: truncate(output, TOOL_DETAIL_MAX_LEN),
+    };
+  }
+
+  // Generic fallback: compact JSON (or plain text) preview of input/output.
+  const title = hasInput ? formatJsonPreview(input!, 120) : "(no input)";
+  const detail = hasOutput ? truncate(formatJsonPreview(output!, TOOL_DETAIL_MAX_LEN), TOOL_DETAIL_MAX_LEN) : "(no output)";
+  return { title, detail };
+}
+
 /**
  * Format milliseconds to a human-readable string ("Xms" or "X.Xs").
  */
