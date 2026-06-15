@@ -501,16 +501,69 @@ func strVal(v any) string {
 	}
 }
 
+// parseKindCounts decodes the kind_counts column — a JSON object (e.g.
+// `{"llm":2,"tool":1}`) produced by to_json(MAP(...)) in LakeSQL — into a
+// map[string]int64. Returns (nil, nil) for NULL/empty values (e.g.
+// span-level reads that don't select this column).
+func parseKindCounts(v any) (map[string]int64, error) {
+	switch s := v.(type) {
+	case []byte:
+		if len(s) == 0 {
+			return nil, nil
+		}
+		var asFloat map[string]float64
+		if err := json.Unmarshal(s, &asFloat); err != nil {
+			return nil, err
+		}
+		out := make(map[string]int64, len(asFloat))
+		for k, n := range asFloat {
+			out[k] = int64(n)
+		}
+		return out, nil
+	case string:
+		if s == "" {
+			return nil, nil
+		}
+		var asFloat map[string]float64
+		if err := json.Unmarshal([]byte(s), &asFloat); err != nil {
+			return nil, err
+		}
+		out := make(map[string]int64, len(asFloat))
+		for k, n := range asFloat {
+			out[k] = int64(n)
+		}
+		return out, nil
+	case map[string]any:
+		out := make(map[string]int64, len(s))
+		for k, n := range s {
+			switch num := n.(type) {
+			case int64:
+				out[k] = num
+			case float64:
+				out[k] = int64(num)
+			default:
+				return nil, fmt.Errorf("kind_counts[%q]: unexpected value type %T", k, n)
+			}
+		}
+		return out, nil
+	case nil:
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unexpected type %T", v)
+	}
+}
+
 // ScanRows converts raw rows from the query result into domain.Span objects.
 // Expected column order: span_id, trace_id, parent_id, conversation_id, project_id,
 // service_name, name, kind, start_time, end_time, model, input, output,
 // input_tokens, output_tokens, cost_usd, prompt_name, prompt_version,
 // status_code, status_message
 //
-// Trace-rollup reads (LakeSQL, issue #136) append a 21st column,
-// span_count — the number of spans in the row's trace. Span-level reads
-// (e.g. LakeTraceSpansSQL) produce exactly 20 columns and leave SpanCount
-// at its zero value.
+// Trace-rollup reads (LakeSQL, issue #136) append a 21st and 22nd column,
+// span_count and kind_counts — the number of spans in the row's trace, and
+// a JSON object mapping each observation kind present in the trace to its
+// count. Span-level reads (e.g. LakeTraceSpansSQL) produce exactly 20
+// columns and leave SpanCount/KindCounts at their zero values.
 func ScanRows(rows [][]any) ([]*domain.Span, error) {
 	spans := make([]*domain.Span, len(rows))
 	for i, row := range rows {
@@ -553,6 +606,13 @@ func ScanRows(rows [][]any) ([]*domain.Span, error) {
 		if len(row) >= 21 {
 			if v, ok := row[20].(int64); ok {
 				s.SpanCount = v
+			}
+		}
+		if len(row) >= 22 {
+			if kc, err := parseKindCounts(row[21]); err != nil {
+				return nil, fmt.Errorf("scan: kind_counts: %w", err)
+			} else if kc != nil {
+				s.KindCounts = kc
 			}
 		}
 		spans[i] = s
@@ -628,6 +688,17 @@ rollups AS (
     MAX(CASE WHEN status_code = 'error' THEN 1 ELSE 0 END) AS has_error
   FROM filtered
   GROUP BY trace_id
+),
+kind_rollups AS (
+  SELECT
+    trace_id,
+    to_json(MAP(LIST(kind), LIST(kind_count))) AS kind_counts
+  FROM (
+    SELECT trace_id, kind, CAST(COUNT(*) AS BIGINT) AS kind_count
+    FROM filtered
+    GROUP BY trace_id, kind
+  )
+  GROUP BY trace_id
 )
 SELECT
   r.span_id, r.trace_id, r.parent_id, r.conversation_id, r.project_id,
@@ -640,9 +711,11 @@ SELECT
   r.prompt_name, r.prompt_version,
   CASE WHEN ru.has_error = 1 THEN 'error' ELSE r.status_code END AS status_code,
   r.status_message,
-  ru.span_count
+  ru.span_count,
+  kr.kind_counts
 FROM ranked r
 JOIN rollups ru USING (trace_id)
+JOIN kind_rollups kr USING (trace_id)
 WHERE r.rn = 1`)
 
 	if !q.cursor.StartTime.IsZero() || q.cursor.SpanID != "" {

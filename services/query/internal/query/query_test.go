@@ -784,11 +784,33 @@ func TestLakeSQL_OneRowPerTrace(t *testing.T) {
 		t.Errorf("overall status_code: got %q, want %q", got.StatusCode, "error")
 	}
 
+	// KindCounts must reflect the per-kind breakdown across all spans in the
+	// trace (root agent.run + 2 tool.call + 1 litellm.completion), so the
+	// Traces list "Levels" column can render observation pills without a
+	// flat span list (issue #136).
+	wantKindCounts := map[string]int64{
+		string(domain.SpanKindAgent): 1,
+		string(domain.SpanKindLLM):   1,
+		string(domain.SpanKindTool):  2,
+	}
+	if len(got.KindCounts) != len(wantKindCounts) {
+		t.Errorf("kind_counts: got %v, want %v", got.KindCounts, wantKindCounts)
+	}
+	for k, want := range wantKindCounts {
+		if got.KindCounts[k] != want {
+			t.Errorf("kind_counts[%q]: got %d, want %d", k, got.KindCounts[k], want)
+		}
+	}
+
 	other2 := traces[1]
 	if other2.TraceID != "trace-other" {
 		t.Fatalf("expected second row to be trace-other, got %q", other2.TraceID)
 	}
 	if other2.SpanCount != 1 {
 		t.Errorf("trace-other span_count: got %d, want 1 (must not be contaminated by trace-rollup's spans)", other2.SpanCount)
+	}
+	wantOtherKindCounts := map[string]int64{string(domain.SpanKindAgent): 1}
+	if len(other2.KindCounts) != len(wantOtherKindCounts) || other2.KindCounts[string(domain.SpanKindAgent)] != 1 {
+		t.Errorf("trace-other kind_counts: got %v, want %v", other2.KindCounts, wantOtherKindCounts)
 	}
 }

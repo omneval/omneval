@@ -5,6 +5,9 @@ import TracesPage from "./Traces";
 
 // ── Helper data ──────────────────────────────────────────────────
 
+// Post-#136: the Traces list returns one row per trace — the root span
+// annotated with trace-level rollups (span_count, kind_counts, summed
+// tokens/cost, max end_time) — not a flat list of every span.
 const mockSpans = [
   {
     span_id: "root-1",
@@ -16,61 +19,16 @@ const mockSpans = [
     model: "gpt-4",
     start_time: "2025-01-15T10:00:00Z",
     end_time: "2025-01-15T10:00:30Z",
-    cost_usd: 0.05,
-    input_tokens: 100,
-    output_tokens: 200,
+    cost_usd: 0.11,
+    input_tokens: 210,
+    output_tokens: 405,
     input: '{"message":"hello"}',
     output: '{"reply":"hi"}',
     status_code: "OK",
+    span_count: 4,
+    kind_counts: { chain: 1, llm: 2, tool: 1 },
   },
-  {
-    span_id: "child-llm-1",
-    trace_id: "trace-a",
-    parent_id: "root-1",
-    project_id: "test-project",
-    name: "llm-call-1",
-    kind: "llm",
-    model: "gpt-4",
-    start_time: "2025-01-15T10:00:01Z",
-    end_time: "2025-01-15T10:00:10Z",
-    cost_usd: 0.03,
-    input_tokens: 50,
-    output_tokens: 100,
-    input: '{"prompt":"a"}',
-    output: '{"completion":"b"}',
-    status_code: "OK",
-  },
-  {
-    span_id: "child-llm-2",
-    trace_id: "trace-a",
-    parent_id: "root-1",
-    project_id: "test-project",
-    name: "llm-call-2",
-    kind: "llm",
-    model: "gpt-4",
-    start_time: "2025-01-15T10:00:11Z",
-    end_time: "2025-01-15T10:00:20Z",
-    cost_usd: 0.02,
-    input_tokens: 50,
-    output_tokens: 100,
-    input: '{"prompt":"c"}',
-    output: '{"completion":"d"}',
-    status_code: "OK",
-  },
-  {
-    span_id: "child-tool-1",
-    trace_id: "trace-a",
-    parent_id: "root-1",
-    project_id: "test-project",
-    name: "tool-use",
-    kind: "tool",
-    start_time: "2025-01-15T10:00:21Z",
-    end_time: "2025-01-15T10:00:25Z",
-    cost_usd: 0.01,
-    input_tokens: 10,
-    output_tokens: 5,
-  },
-  // Second trace with only one child
+  // Second trace with only one LLM child
   {
     span_id: "root-2",
     trace_id: "trace-b",
@@ -81,23 +39,12 @@ const mockSpans = [
     model: "",
     start_time: "2025-01-15T11:00:00Z",
     end_time: "2025-01-15T11:00:10Z",
-    cost_usd: 0.01,
-    input_tokens: 10,
-    output_tokens: 20,
-  },
-  {
-    span_id: "child-llm-3",
-    trace_id: "trace-b",
-    parent_id: "root-2",
-    project_id: "test-project",
-    name: "llm-call",
-    kind: "llm",
-    model: "gpt-4",
-    start_time: "2025-01-15T11:00:01Z",
-    end_time: "2025-01-15T11:00:09Z",
-    cost_usd: 0.01,
-    input_tokens: 10,
-    output_tokens: 20,
+    cost_usd: 0.02,
+    input_tokens: 20,
+    output_tokens: 40,
+    status_code: "OK",
+    span_count: 2,
+    kind_counts: { chain: 1, llm: 1 },
   },
   // Third trace with no children (leaf span)
   {
@@ -113,6 +60,9 @@ const mockSpans = [
     cost_usd: 0.005,
     input_tokens: 5,
     output_tokens: 10,
+    status_code: "OK",
+    span_count: 1,
+    kind_counts: { llm: 1 },
   },
 ];
 
@@ -151,61 +101,59 @@ describe("ObservationPills component", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders a single badge when one kind of child exists", async () => {
+  it("renders a badge for each kind in kind_counts", async () => {
     renderTracesPage();
 
     await waitFor(() => {
       expect(screen.getByText("main-trace")).toBeInTheDocument();
     });
 
-    // trace-a root span has 2 llm children + 1 tool child
-    // trace-b root span has 1 llm child
-    // trace-c root span has 0 children (leaf)
-    // The first root row should show LLM and TOOL badges
+    // trace-a's kind_counts is {chain: 1, llm: 2, tool: 1} — the LLM and
+    // TOOL badges should be present (CHA/LLM/TOO are the 3-char prefixes).
     const llmBadges = screen.getAllByText(/LLM/);
     expect(llmBadges.length).toBeGreaterThan(0);
   });
 
-  it("shows multiple badges for mixed child kinds", async () => {
+  it("shows multiple badges for mixed kind_counts", async () => {
     renderTracesPage();
 
     await waitFor(() => {
       expect(screen.getByText("main-trace")).toBeInTheDocument();
     });
 
-    // trace-a has 2 LLM + 1 tool children, so should show both
-    const allText = screen.queryAllByText(/LLM|TOOL/);
+    // trace-a has kind_counts {chain: 1, llm: 2, tool: 1} — both LLM and
+    // TOOL pills should render.
+    const allText = screen.queryAllByText(/LLM|TOO/);
     expect(allText.length).toBeGreaterThan(1);
   });
 
-  it("shows single badge when all children are same kind", async () => {
+  it("shows single badge when kind_counts has one llm entry", async () => {
     renderTracesPage();
 
     await waitFor(() => {
       expect(screen.getByText("simple-trace")).toBeInTheDocument();
     });
 
-    // trace-b has only 1 LLM child, so should show just one badge
+    // trace-b's kind_counts is {chain: 1, llm: 1} — should show "LLM 1".
     const llmBadges = screen.queryAllByText(/LLM 1/);
     expect(llmBadges.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("shows nothing when a trace has no children", async () => {
+  it("shows a badge for a single-span trace with kind_counts", async () => {
     renderTracesPage();
 
     await waitFor(() => {
       expect(screen.getByText("leaf-span")).toBeInTheDocument();
     });
 
-    // leaf-span has no children, so ObservationPills renders nothing
+    // trace-c's kind_counts is {llm: 1} — even a single-span trace
+    // (span_count: 1) shows its own kind as a badge.
     const leafRow = screen.getByText("leaf-span").closest("tr");
     expect(leafRow).toBeInTheDocument();
-
-    // The observation levels cell should be empty (no badge text)
     const leafRowCells = leafRow?.querySelectorAll("td");
     // observationLevels is the 6th column (0-indexed = 5)
     const levelsCell = leafRowCells?.[5];
-    expect(levelsCell?.textContent).toBe("");
+    expect(levelsCell?.textContent).toContain("LLM 1");
   });
 });
 
@@ -696,7 +644,7 @@ describe("search", () => {
         ok: true,
         json: () =>
           Promise.resolve({
-            spans: mockSpans.filter((s) => s.name.toLowerCase().includes("llm")),
+            spans: mockSpans.filter((s) => s.kind === "llm"),
             next: "",
             limit: 25,
           }),
@@ -715,9 +663,9 @@ describe("search", () => {
       fireEvent.change(searchInput, { target: { value: "llm" } });
     });
 
-    // Should show LLM results
+    // Should show the leaf-span trace (kind: "llm")
     await waitFor(() => {
-      expect(screen.getByText("llm-call-1")).toBeInTheDocument();
+      expect(screen.getByText("leaf-span")).toBeInTheDocument();
     });
 
     vi.restoreAllMocks();
