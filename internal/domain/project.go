@@ -45,6 +45,7 @@ type APIKey struct {
 	ProjectID   string
 	Kind        APIKeyKind
 	ServiceName string // non-empty for service-scoped keys
+	Name        string // optional user-supplied display name (any key kind)
 	HashedKey   string
 	CreatedAt   time.Time
 	RevokedAt   *time.Time

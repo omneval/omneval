@@ -115,6 +115,39 @@ describe("AdminPage", () => {
     });
   });
 
+  it("shows the user-supplied name for a project key, falling back to a truncated key ID when unnamed (#143)", async () => {
+    const keysWithNames = [
+      {
+        key_id: "oev_proj_named1234",
+        kind: "project" as const,
+        name: "CI ingest",
+        created_at: "2026-05-13T10:00:00Z",
+      },
+      {
+        key_id: "oev_proj_unnamed5678",
+        kind: "project" as const,
+        created_at: "2026-05-13T10:00:00Z",
+      },
+    ];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/admin/api-keys") {
+        return resolveKeys(keysWithNames);
+      }
+      if (url === "/api/v1/projects") {
+        return resolveProjects([]);
+      }
+      return resolveKeys([{ count: 0 }]);
+    });
+
+    renderWithToast(<AdminPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("CI ingest")).toBeInTheDocument();
+      expect(screen.getByText(/Project Key \(\.\.\.5678\)/)).toBeInTheDocument();
+    });
+  });
+
   it("groups keys by kind (project vs service)", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       if (url === "/api/v1/admin/api-keys") {

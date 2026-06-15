@@ -7,8 +7,19 @@ interface APIKey {
   key_id: string;
   kind: "project" | "service";
   service_name?: string;
+  name?: string;
   created_at: string;
   revoked_at?: string;
+}
+
+// keyDisplayName returns the best human-readable label for an API key:
+// the user-supplied name (or service_name for service keys) if set,
+// otherwise a fallback derived from the truncated key ID (#143).
+function keyDisplayName(keyData: APIKey): string {
+  if (keyData.name) return keyData.name;
+  if (keyData.kind === "service" && keyData.service_name) return keyData.service_name;
+  const suffix = keyData.key_id.slice(-4);
+  return keyData.kind === "service" ? `Service Key (...${suffix})` : `Project Key (...${suffix})`;
 }
 
 interface Project {
@@ -212,7 +223,7 @@ function KeyRow({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
           <span className="text-sm font-medium text-omneval-text-pure truncate">
-            {keyData.service_name ?? (keyData.kind === "service" ? "Service Key" : "Project Key")}
+            {keyDisplayName(keyData)}
           </span>
           <span
             className={`text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${

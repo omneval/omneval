@@ -20,6 +20,7 @@ type adminAPIKeyInfo struct {
 	ProjectID   string            `json:"project_id"`
 	Kind        domain.APIKeyKind `json:"kind"`
 	ServiceName string            `json:"service_name,omitempty"`
+	Name        string            `json:"name,omitempty"`
 	CreatedAt   time.Time         `json:"created_at"`
 	RevokedAt   *time.Time        `json:"revoked_at,omitempty"`
 }
@@ -71,6 +72,7 @@ func (h *AdminHandler) HandleAdminAPIKeysList(w http.ResponseWriter, r *http.Req
 				ProjectID:   k.ProjectID,
 				Kind:        k.Kind,
 				ServiceName: k.ServiceName,
+				Name:        auth.DisplayName(k),
 				CreatedAt:   k.CreatedAt,
 				RevokedAt:   k.RevokedAt,
 			}
