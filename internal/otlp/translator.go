@@ -89,16 +89,36 @@ func toRawMap(projectID string, resource Resource, span Span, opts Options) map[
 		outputTokens = 0
 	}
 
-	// Build Input from gen_ai.prompt.N.
+	// Build Input from gen_ai.prompt.N., falling back through other
+	// supported conventions and finally the Omneval SDK's plain-string
+	// "omneval.input" attribute.
 	input := buildMessageArray(span.Attributes, "gen_ai.prompt")
 	if input == "" {
 		input = buildMessageArray(span.Attributes, "llm.prompt")
 	}
+	if input == "" {
+		input = extractMessagesJSON(span.Attributes, "gen_ai.input.messages")
+	}
+	if input == "" {
+		input = extractAttributeString(span.Attributes, "input.value")
+	}
+	if input == "" {
+		input = extractAttributeString(span.Attributes, "omneval.input")
+	}
 
-	// Build Output from gen_ai.completion.N.
+	// Build Output from gen_ai.completion.N., with the same fallback chain.
 	output := buildMessageArray(span.Attributes, "gen_ai.completion")
 	if output == "" {
 		output = buildMessageArray(span.Attributes, "llm.completion")
+	}
+	if output == "" {
+		output = extractMessagesJSON(span.Attributes, "gen_ai.output.messages")
+	}
+	if output == "" {
+		output = extractAttributeString(span.Attributes, "output.value")
+	}
+	if output == "" {
+		output = extractAttributeString(span.Attributes, "omneval.output")
 	}
 
 	// Derive Kind: explicit omneval.kind wins, then heuristic.
@@ -270,6 +290,43 @@ func buildMessageArray(attrs map[string]any, prefix string) string {
 	return string(data)
 }
 
+// extractMessagesJSON looks up an attribute holding a list of message
+// objects per the newer OTel GenAI semantic conventions (e.g.
+// gen_ai.input.messages / gen_ai.output.messages). The attribute value may
+// arrive either as a JSON-encoded string (already a JSON array) or as a
+// decoded Go slice (e.g. []any from JSON-encoded OTLP). Returns "" if the
+// attribute is absent or doesn't hold a non-empty array.
+func extractMessagesJSON(attrs map[string]any, key string) string {
+	v, ok := attrs[key]
+	if !ok {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		trimmed := val
+		if len(trimmed) == 0 {
+			return ""
+		}
+		// Validate it's a JSON array before accepting it.
+		var arr []any
+		if err := json.Unmarshal([]byte(trimmed), &arr); err != nil || len(arr) == 0 {
+			return ""
+		}
+		return trimmed
+	case []any:
+		if len(val) == 0 {
+			return ""
+		}
+		data, err := json.Marshal(val)
+		if err != nil {
+			return ""
+		}
+		return string(data)
+	default:
+		return ""
+	}
+}
+
 // extractNumberedIndex checks if a key matches pattern "prefix.N.suffix"
 // and returns N. Returns false if no match.
 func extractNumberedIndex(key, prefix string) (int, bool) {
@@ -411,6 +468,30 @@ func buildOverflowAttributes(attrs map[string]any, model string, inputTokens, ou
 		} else if _, ok := extractNumberedIndex(k, "llm.completion"); ok {
 			remove[k] = true
 		}
+	}
+
+	// Omneval SDK plain-string input/output attributes.
+	if _, ok := attrs["omneval.input"]; ok {
+		remove["omneval.input"] = true
+	}
+	if _, ok := attrs["omneval.output"]; ok {
+		remove["omneval.output"] = true
+	}
+
+	// Newer OTel GenAI semconv message-list attributes.
+	if _, ok := attrs["gen_ai.input.messages"]; ok {
+		remove["gen_ai.input.messages"] = true
+	}
+	if _, ok := attrs["gen_ai.output.messages"]; ok {
+		remove["gen_ai.output.messages"] = true
+	}
+
+	// OpenInference plain-value input/output attributes.
+	if _, ok := attrs["input.value"]; ok {
+		remove["input.value"] = true
+	}
+	if _, ok := attrs["output.value"]; ok {
+		remove["output.value"] = true
 	}
 
 	// Kind.
