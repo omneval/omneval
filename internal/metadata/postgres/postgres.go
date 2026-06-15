@@ -59,6 +59,22 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return nil
 	}
 
+	// Acquire an advisory lock to serialize concurrent Migrate() calls.
+	// pg_advisory_xact_lock is transaction-scoped: it's released when the
+	// transaction ends (here, immediately after this ExecContext call since
+	// it runs in its own implicit transaction). We use a negative lock ID
+	// derived from the string "omneval_metadata_migrate" so that different
+	// databases don't collide on shared Postgres clusters.
+	//
+	// The lock serializes the check-then-apply cycle: the first process to
+	// acquire the lock runs all pending migrations; subsequent processes
+	// block, then see count == 1 and skip.
+	if _, err := s.db.ExecContext(ctx,
+		"SELECT pg_advisory_xact_lock(hashtext($1))", "omneval_metadata_migrate",
+	); err != nil {
+		return fmt.Errorf("postgres: acquire migration lock: %w", err)
+	}
+
 	// Create schema_migrations table
 	if _, err := s.db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS _schema_migrations (
@@ -146,7 +162,13 @@ func (s *Store) applyMigration(ctx context.Context, version int64, sql string) e
 		return fmt.Errorf("postgres: apply migration %d: %w", version, err)
 	}
 
-	if _, err := tx.ExecContext(ctx, "INSERT INTO _schema_migrations (version) VALUES ($1)", version); err != nil {
+	// Use ON CONFLICT DO NOTHING so that if another process somehow
+	// applied this migration concurrently (e.g. before the advisory
+	// lock was fully effective), we don't crash with a duplicate-key error.
+	if _, err := tx.ExecContext(ctx,
+		"INSERT INTO _schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING",
+		version,
+	); err != nil {
 		return fmt.Errorf("postgres: record migration %d version: %w", version, err)
 	}
 

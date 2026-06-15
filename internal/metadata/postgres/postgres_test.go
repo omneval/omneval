@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -150,6 +151,90 @@ func TestMigrate_Idempotent(t *testing.T) {
 	// Calling Migrate again should be a no-op
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatalf("second migrate call: %v", err)
+	}
+}
+
+func TestMigrate_Concurrent(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Spin up a fresh Postgres container (no migrations applied yet)
+	pc, err := testpg.RunContainer(ctx,
+		testpg.WithDatabase("omneval"),
+		testpg.WithUsername("postgres"),
+		testpg.WithPassword("postgres"),
+	)
+	if err != nil {
+		t.Skipf("postgres container unavailable: %v", err)
+		return
+	}
+	defer pc.Terminate(ctx) //nolint:errcheck
+
+	dsn, err := pc.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		t.Skipf("postgres container port unavailable: %v", err)
+		return
+	}
+
+	const concurrency = 8
+	errCh := make(chan error, concurrency)
+	var stores []*postgres.Store
+
+	// Open all stores first (fresh database, no migrations yet)
+	for i := 0; i < concurrency; i++ {
+		s, err := postgres.New(dsn)
+		if err != nil {
+			t.Fatalf("open store %d: %v", i, err)
+		}
+		stores = append(stores, s)
+	}
+	t.Cleanup(func() {
+		for _, s := range stores {
+			s.Close() //nolint:errcheck
+		}
+	})
+
+	// Run Migrate() concurrently from all stores
+	var wg sync.WaitGroup
+	for _, s := range stores {
+		s := s
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errCh <- s.Migrate(ctx)
+		}()
+	}
+
+	// Wait for all to complete
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("concurrent migration timed out")
+	}
+
+	// Check results: every call should succeed (no duplicate-key errors)
+	for i := 0; i < concurrency; i++ {
+		if err := <-errCh; err != nil {
+			t.Errorf("concurrent migrate %d: %v", i, err)
+		}
+	}
+
+	// Verify migrations were applied exactly once
+	var count int
+	err = stores[0].DB().QueryRowContext(ctx,
+		"SELECT count(DISTINCT version) FROM _schema_migrations",
+	).Scan(&count)
+	if err != nil {
+		t.Fatalf("count migrations: %v", err)
+	}
+	if count == 0 {
+		t.Fatal("expected at least one migration to be applied")
 	}
 }
 
