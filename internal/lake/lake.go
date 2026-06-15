@@ -18,7 +18,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/duckdb/duckdb-go/v2"
@@ -75,8 +77,10 @@ func ConfigFromApp(cfg *config.Config) Config {
 // attached as catalog "lake"; the attachment is shared by every pooled
 // connection of the instance.
 type Lake struct {
+	mu       sync.Mutex
 	db       *sql.DB
 	readOnly bool
+	cfg      Config // retained for reconnection after Quack Server restarts
 }
 
 // Open attaches the Lake described by cfg via the Quack Server and (unless
@@ -104,7 +108,7 @@ func Open(ctx context.Context, cfg Config) (*Lake, error) {
 	// the spike's verified same-session DELETE+rewrite pattern.
 	db.SetMaxOpenConns(1)
 
-	l := &Lake{db: db, readOnly: cfg.ReadOnly}
+	l := &Lake{db: db, readOnly: cfg.ReadOnly, cfg: cfg}
 	if err := l.attach(ctx, cfg); err != nil {
 		db.Close()
 		return nil, err
@@ -146,6 +150,38 @@ func (l *Lake) attach(ctx context.Context, cfg Config) error {
 			return fmt.Errorf("lake: %s: %w", firstWords(stmt, 3), err)
 		}
 	}
+	return nil
+}
+
+// isStaleConn reports whether err is the DuckLake "Invalid connection id"
+// error that occurs when the Quack Server restarts and the client's
+// catalog attachment becomes invalid.
+func isStaleConn(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Invalid connection id")
+}
+
+// reconnect closes the current DuckDB in-memory instance, opens a fresh one,
+// and re-establishes the Quack Server attachment. Callers must hold l.mu.
+func (l *Lake) reconnect(ctx context.Context) error {
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		return fmt.Errorf("lake: reconnect open: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	tmp := &Lake{db: db, readOnly: l.readOnly}
+	if err := tmp.attach(ctx, l.cfg); err != nil {
+		db.Close()
+		return err
+	}
+	if !l.readOnly {
+		if err := tmp.ensureTables(ctx); err != nil {
+			db.Close()
+			return err
+		}
+	}
+	l.db.Close()
+	l.db = db
+	slog.Info("lake: reconnected to quack server", "addr", l.cfg.QuackAddr)
 	return nil
 }
 
@@ -286,11 +322,25 @@ const insertSpansSQL = `
 // InsertSpans commits a batch of spans to the Lake in one transaction
 // (one DuckLake snapshot). Spans are written as-is: cost must already be
 // computed (cost is computed at write time, never at query time).
+// On a stale Quack Server connection ("Invalid connection id"), the lake
+// reconnects and retries once.
 func (l *Lake) InsertSpans(ctx context.Context, spans []*domain.Span) error {
 	if len(spans) == 0 {
 		return nil
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := l.insertSpansLocked(ctx, spans); isStaleConn(err) {
+		if rerr := l.reconnect(ctx); rerr != nil {
+			return fmt.Errorf("lake: reconnect: %w", rerr)
+		}
+		return l.insertSpansLocked(ctx, spans)
+	} else {
+		return err
+	}
+}
 
+func (l *Lake) insertSpansLocked(ctx context.Context, spans []*domain.Span) error {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("lake: begin tx: %w", err)
@@ -369,11 +419,25 @@ const insertScoresSQL = `
 // annotated span's start_time (ADR-0002); when SpanStartTime is unknown
 // the score's CreatedAt is the fallback so the row still lands in a
 // recent partition.
+// On a stale Quack Server connection ("Invalid connection id"), the lake
+// reconnects and retries once.
 func (l *Lake) InsertScores(ctx context.Context, scores []*domain.Score) error {
 	if len(scores) == 0 {
 		return nil
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := l.insertScoresLocked(ctx, scores); isStaleConn(err) {
+		if rerr := l.reconnect(ctx); rerr != nil {
+			return fmt.Errorf("lake: reconnect: %w", rerr)
+		}
+		return l.insertScoresLocked(ctx, scores)
+	} else {
+		return err
+	}
+}
 
+func (l *Lake) insertScoresLocked(ctx context.Context, scores []*domain.Score) error {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("lake: begin tx: %w", err)
@@ -435,11 +499,24 @@ func (l *Lake) SpanStartTime(ctx context.Context, traceID, spanID string) (time.
 	return startTime, nil
 }
 
-// Ping verifies the Lake's Catalog connection is reachable with a
-// lightweight query. Used by the readiness probe (probe.CatalogReachable).
+// Ping verifies the Lake's Catalog connection is reachable by executing
+// a metadata-only scan against lake.spans. This forces a round-trip
+// through the Quack Server catalog — pinging the in-memory DuckDB via
+// "SELECT 1" would not detect a stale Quack connection. On a stale
+// connection, Ping reconnects and retries once so the readiness probe
+// self-heals after a Quack Server restart.
 func (l *Lake) Ping(ctx context.Context) error {
-	var one int
-	return l.db.QueryRowContext(ctx, "SELECT 1").Scan(&one)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var n int64
+	err := l.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM lake.spans WHERE 1 = 0").Scan(&n)
+	if isStaleConn(err) {
+		if rerr := l.reconnect(ctx); rerr != nil {
+			return fmt.Errorf("lake: reconnect: %w", rerr)
+		}
+		err = l.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM lake.spans WHERE 1 = 0").Scan(&n)
+	}
+	return err
 }
 
 // FlushInlinedData forces any rows DuckLake 1.5 has inlined into the

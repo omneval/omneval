@@ -146,7 +146,7 @@ func (s *Store) applyMigration(ctx context.Context, version int64, sql string) e
 		return fmt.Errorf("postgres: apply migration %d: %w", version, err)
 	}
 
-	if _, err := tx.ExecContext(ctx, "INSERT INTO _schema_migrations (version) VALUES ($1)", version); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO _schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING", version); err != nil {
 		return fmt.Errorf("postgres: record migration %d version: %w", version, err)
 	}
 
