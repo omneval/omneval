@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -760,6 +761,88 @@ func TestHandleTraceDetail_MultiLevelTree(t *testing.T) {
 	}
 	if len(child.Children) > 0 && child.Children[0].Name != "grandchild" {
 		t.Errorf("grandchild.name: got %q, want %q", child.Children[0].Name, "grandchild")
+	}
+}
+
+// TestHandleTraceDetail_TokenRollup verifies that the trace detail response
+// includes trace-level rollups (SUM input_tokens, SUM output_tokens, SUM
+// cost_usd) across all spans in the trace, not just the root span's own
+// (typically zero) values. See issue #137.
+func TestHandleTraceDetail_TokenRollup(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omneval-trace-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+
+	// Root span: an orchestration span with no tokens/cost of its own.
+	_, err = db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, kind, start_time, end_time, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"span-root", "trace-tokens", "", "test-proj", "conversation", "chain", baseTime, baseTime.Add(200*time.Millisecond), 0, 0, 0.0)
+	if err != nil {
+		t.Fatalf("insert root: %v", err)
+	}
+
+	// Two descendant LLM spans carrying the actual token usage.
+	_, err = db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, kind, model, start_time, end_time, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"span-llm1", "trace-tokens", "span-root", "test-proj", "litellm.completion", "llm", "gpt-4", baseTime.Add(10*time.Millisecond), baseTime.Add(80*time.Millisecond), 30000, 10000, 0.5)
+	if err != nil {
+		t.Fatalf("insert llm span 1: %v", err)
+	}
+	_, err = db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, kind, model, start_time, end_time, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"span-llm2", "trace-tokens", "span-root", "test-proj", "litellm.completion", "llm", "gpt-4", baseTime.Add(90*time.Millisecond), baseTime.Add(180*time.Millisecond), 5000, 1795, 0.1)
+	if err != nil {
+		t.Fatalf("insert llm span 2: %v", err)
+	}
+
+	h := &SpanHandler{
+		Lake:         db,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	w := serveTraceDetail(h, http.MethodGet, "/api/v1/traces/trace-tokens", nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var trace struct {
+		TraceID           string  `json:"trace_id"`
+		TotalInputTokens  int64   `json:"total_input_tokens"`
+		TotalOutputTokens int64   `json:"total_output_tokens"`
+		TotalCostUSD      float64 `json:"total_cost_usd"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&trace); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	wantInput := int64(30000 + 5000)
+	wantOutput := int64(10000 + 1795)
+	wantCost := 0.5 + 0.1
+
+	if trace.TotalInputTokens != wantInput {
+		t.Errorf("total_input_tokens: got %d, want %d", trace.TotalInputTokens, wantInput)
+	}
+	if trace.TotalOutputTokens != wantOutput {
+		t.Errorf("total_output_tokens: got %d, want %d", trace.TotalOutputTokens, wantOutput)
+	}
+	if math.Abs(trace.TotalCostUSD-wantCost) > 1e-9 {
+		t.Errorf("total_cost_usd: got %v, want %v", trace.TotalCostUSD, wantCost)
 	}
 }
 

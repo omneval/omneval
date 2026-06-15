@@ -75,6 +75,11 @@ type TraceResponse struct {
 	ProjectID string  `json:"project_id"`
 	RootSpan  *Span   `json:"root_span"`
 	Spans     []*Span `json:"spans"`
+
+	// Trace-level rollups computed across all spans in the trace (see #137).
+	TotalInputTokens  int64   `json:"total_input_tokens"`
+	TotalOutputTokens int64   `json:"total_output_tokens"`
+	TotalCostUSD      float64 `json:"total_cost_usd"`
 }
 
 // Score is an evaluation result attached to a span (used by eval pipeline).

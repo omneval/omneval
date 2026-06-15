@@ -286,11 +286,25 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 	// Build the trace tree (includes score loading from lake.scores).
 	trace := buildTraceTree(spans, h.Lake, traceID, projectID, "lake.scores")
 
+	// Compute trace-level rollups (sum across all spans) so the UI header
+	// pill reflects total usage rather than just the root span's own
+	// (typically zero) values. See #137.
+	var totalInputTokens, totalOutputTokens int64
+	var totalCostUSD float64
+	for _, s := range trace.Spans {
+		totalInputTokens += s.InputTokens
+		totalOutputTokens += s.OutputTokens
+		totalCostUSD += s.CostUSD
+	}
+
 	resp := domain.TraceResponse{
-		TraceID:   trace.TraceID,
-		ProjectID: trace.ProjectID,
-		RootSpan:  trace.RootSpan,
-		Spans:     trace.Spans,
+		TraceID:           trace.TraceID,
+		ProjectID:         trace.ProjectID,
+		RootSpan:          trace.RootSpan,
+		Spans:             trace.Spans,
+		TotalInputTokens:  totalInputTokens,
+		TotalOutputTokens: totalOutputTokens,
+		TotalCostUSD:      totalCostUSD,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
