@@ -288,15 +288,15 @@ function TextFilter({
         value={input}
         onChange={(e) => setInput(e.target.value)}
         placeholder={placeholder ?? "Enter values…"}
-        className="input-focus w-full text-sm px-2 py-1.5 rounded border border-omneval-border bg-omneval-surface text-omneval-text-pure placeholder-omneval-text-muted"
+        className="input-focus w-full text-sm px-2.5 py-1.5 rounded-md border border-omneval-border bg-omneval-surface text-omneval-text-pure placeholder-omneval-text-muted"
       />
       <button
         type="button"
         onClick={handleApply}
-        className="text-xs px-2 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
+        className="text-xs px-2.5 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
         style={{
-          background: colors.accents.emberFlare,
-          boxShadow: "0 1px 4px rgba(124, 58, 237, 0.25)",
+          background: "var(--color-omneval-violet)",
+          boxShadow: "0 1px 4px var(--omneval-focus-ring)",
         }}
       >
         Apply
@@ -400,18 +400,18 @@ function CheckboxFilter({
   };
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       {options.map((option) => (
         <label
           key={option}
-          className="flex items-center gap-2 text-sm text-omneval-text-muted hover:text-omneval-text-pure cursor-pointer"
+          className="flex items-center gap-2.5 text-sm text-omneval-text-muted hover:text-omneval-text-pure cursor-pointer rounded-md px-1.5 py-1 -mx-1.5 transition-colors bg-violet-hover"
         >
           <input
             type="checkbox"
             checked={value.includes(option)}
             onChange={() => toggle(option)}
-            className="rounded"
-            style={{ accentColor: colors.accents.emberFlare }}
+            className="h-3.5 w-3.5 rounded border border-omneval-border bg-omneval-surface accent-omneval-violet cursor-pointer"
+            style={{ accentColor: "var(--color-omneval-violet)" }}
           />
           <span className="capitalize">{labels?.[option] ?? option}</span>
         </label>
@@ -451,7 +451,7 @@ function RangeFilterField({
   const handleMax = makeRangeHandler("max", onApply, value);
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2.5">
       <div className="flex items-center gap-2">
         <div className="flex-1">
           <span className="text-xs text-omneval-text-muted mb-1 block">{minLabel}</span>
@@ -461,7 +461,7 @@ function RangeFilterField({
             onChange={handleMin}
             placeholder={placeholder}
             min={0}
-            className="input-focus w-full text-sm px-2 py-1.5 rounded border border-omneval-border bg-omneval-surface text-omneval-text-pure placeholder-omneval-text-muted"
+            className="input-focus w-full text-sm px-2.5 py-1.5 rounded-md border border-omneval-border bg-omneval-surface text-omneval-text-pure placeholder-omneval-text-muted"
           />
         </div>
         <span className="text-omneval-text-muted pt-5">—</span>
@@ -473,17 +473,17 @@ function RangeFilterField({
             onChange={handleMax}
             placeholder={placeholder}
             min={0}
-            className="input-focus w-full text-sm px-2 py-1.5 rounded border border-omneval-border bg-omneval-surface text-omneval-text-pure placeholder-omneval-text-muted"
+            className="input-focus w-full text-sm px-2.5 py-1.5 rounded-md border border-omneval-border bg-omneval-surface text-omneval-text-pure placeholder-omneval-text-muted"
           />
         </div>
       </div>
       <button
         type="button"
         onClick={() => onApply(value)}
-        className="text-xs px-2 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
+        className="text-xs px-2.5 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
         style={{
-          background: colors.accents.emberFlare,
-          boxShadow: "0 1px 4px rgba(124, 58, 237, 0.25)",
+          background: "var(--color-omneval-violet)",
+          boxShadow: "0 1px 4px var(--omneval-focus-ring)",
         }}
       >
         Apply
@@ -516,38 +516,43 @@ function FilterSection({
   const isRange = isRangeFilter(value);
 
   return (
-    <div
-      className="border-b"
-      style={{ borderColor: colors.backgrounds.caveWall }}
-    >
+    <div className="border-b border-omneval-border">
       <button
         onClick={onToggle}
-        className="flex items-center justify-between w-full px-3 py-2 text-sm font-medium text-omneval-text-pure hover:bg-omneval-violet-hover transition-colors"
+        className="flex items-center justify-between w-full px-3 py-2.5 text-sm font-medium text-omneval-text-pure hover:bg-omneval-violet-hover transition-colors"
       >
         <span>{label}</span>
-        {isRange && (
-          <span className="text-xs text-omneval-text-muted font-normal ml-2">
-            {formatRange(value.min, value.max)}
-          </span>
-        )}
-        {!isRange && Array.isArray(value) && value.length > 0 && (
-          <span className="text-xs text-omneval-text-muted font-normal ml-2">
-            {value.length} selected
-          </span>
-        )}
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          fill="none"
-          className={`transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
-        >
-          <path d="M4.5 3l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <span className="flex items-center gap-2 ml-2">
+          {isRange && (
+            <span className="text-xs text-omneval-text-muted font-normal">
+              {formatRange(value.min, value.max)}
+            </span>
+          )}
+          {!isRange && Array.isArray(value) && value.length > 0 && (
+            <span
+              className="text-xs font-medium px-1.5 py-0.5 rounded-full"
+              style={{
+                color: "var(--color-omneval-violet-pale)",
+                background: "var(--omneval-violet-hover-strong)",
+              }}
+            >
+              {value.length} selected
+            </span>
+          )}
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            fill="none"
+            className={`text-omneval-text-muted transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
+          >
+            <path d="M4.5 3l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
       </button>
 
       {expanded && (
-        <div className="px-3 pb-3">
+        <div className="px-3 pb-3 pt-1">
           {name === "model" ? (
             <ModelFilter
               value={Array.isArray(value) ? value : []}
@@ -969,15 +974,9 @@ export default function TracesPage({
   return (
     <div className="flex h-full" style={{ background: colors.backgrounds.abyssBlack }}>
       {/* ── Filter Sidebar ── */}
-      <div
-        className="flex flex-col w-64 border-r overflow-y-auto"
-        style={{
-          background: colors.backgrounds.charcoalDepth,
-          borderColor: colors.backgrounds.caveWall,
-        }}
-      >
-        <div className="px-3 py-3 border-b" style={{ borderColor: colors.backgrounds.caveWall }}>
-          <h3 className="text-sm font-medium text-omneval-text-pure">Filters</h3>
+      <div className="flex flex-col w-64 border-r border-omneval-border bg-omneval-depth overflow-y-auto">
+        <div className="px-3 py-3 border-b border-omneval-border">
+          <h3 className="text-sm font-semibold tracking-wide text-omneval-text-pure uppercase">Filters</h3>
         </div>
         <div className="flex-1 py-1">
           {FILTER_SECTIONS.map((section) => (
@@ -994,25 +993,13 @@ export default function TracesPage({
             />
           ))}
         </div>
-        <div className="px-3 py-2 border-t" style={{ borderColor: colors.backgrounds.caveWall }}>
+        <div className="px-3 py-3 border-t border-omneval-border">
           <button
             onClick={() => {
               setFilterState(DEFAULT_FILTERS);
               setExpandedFilters({ trace_name: true });
             }}
-            className="w-full text-center text-sm py-1.5 rounded transition-colors"
-            style={{
-              border: `1px solid ${colors.backgrounds.caveWall}`,
-              color: colors.typography.ashGrey,
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.borderColor = colors.accents.emberFlare;
-              (e.currentTarget as HTMLElement).style.color = colors.accents.emberFlare;
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.borderColor = colors.backgrounds.caveWall;
-              (e.currentTarget as HTMLElement).style.color = colors.typography.ashGrey;
-            }}
+            className="btn-secondary w-full text-center text-sm"
           >
             Clear All Filters
           </button>
