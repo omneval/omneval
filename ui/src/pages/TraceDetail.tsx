@@ -65,6 +65,9 @@ interface TraceResponse {
   trace_id: string;
   project_id: string;
   root_span: Span;
+  total_input_tokens?: number;
+  total_output_tokens?: number;
+  total_cost_usd?: number;
 }
 
 export interface WaterfallEntry {
@@ -86,6 +89,11 @@ export default function TraceDetailPage({
 }: TraceDetailPageProps) {
   const { addToast } = useToast();
   const [trace, setTrace] = useState<Span | null>(null);
+  const [traceRollup, setTraceRollup] = useState<{
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveSpan, setSaveSpan] = useState<{
@@ -114,6 +122,11 @@ export default function TraceDetailPage({
       })
       .then((data: TraceResponse) => {
         setTrace(data.root_span);
+        setTraceRollup({
+          inputTokens: data.total_input_tokens ?? 0,
+          outputTokens: data.total_output_tokens ?? 0,
+          costUsd: data.total_cost_usd ?? 0,
+        });
         setLoading(false);
       })
       .catch((err) => {
@@ -296,10 +309,15 @@ export default function TraceDetailPage({
             <div className="flex items-center gap-4 text-xs text-omneval-text-muted">
               <span>{formatTime(trace.start_time)}</span>
               <span>{formatDuration(trace.start_time, trace.end_time)}</span>
-              <span>{totalTokens(trace).toLocaleString()} tokens</span>
-              {trace.cost_usd > 0 && (
+              <span>
+                {(
+                  (traceRollup?.inputTokens ?? 0) + (traceRollup?.outputTokens ?? 0)
+                ).toLocaleString()}{" "}
+                tokens
+              </span>
+              {(traceRollup?.costUsd ?? 0) > 0 && (
                 <span style={{ color: colors.accents.emberFlare }}>
-                  ${trace.cost_usd.toFixed(4)}
+                  ${(traceRollup?.costUsd ?? 0).toFixed(4)}
                 </span>
               )}
             </div>

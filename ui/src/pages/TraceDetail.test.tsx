@@ -219,6 +219,75 @@ describe("waterfall view renders with loaded trace data", () => {
   });
 });
 
+// ── Header pill token rollup (#137) ──────────────────────────────
+
+describe("header pill token rollup", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows the trace-level token rollup, not just the root span's own tokens", async () => {
+    // The root span (an orchestration span) has 0 tokens of its own; the
+    // actual usage lives on descendant llm spans. The API response carries
+    // a precomputed trace-level rollup.
+    const tracePayload = {
+      trace_id: "rollup-trace",
+      project_id: "test-project",
+      total_input_tokens: 35000,
+      total_output_tokens: 11795,
+      total_cost_usd: 0.6,
+      root_span: {
+        span_id: "root-span",
+        trace_id: "rollup-trace",
+        parent_id: "",
+        project_id: "test-project",
+        name: "conversation",
+        kind: "chain",
+        start_time: "2025-01-15T10:00:00Z",
+        end_time: "2025-01-15T10:00:30Z",
+        cost_usd: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        children: [
+          {
+            span_id: "llm-span-1",
+            trace_id: "rollup-trace",
+            parent_id: "root-span",
+            project_id: "test-project",
+            name: "litellm.completion",
+            kind: "llm",
+            model: "gpt-4",
+            start_time: "2025-01-15T10:00:01Z",
+            end_time: "2025-01-15T10:00:10Z",
+            cost_usd: 0.6,
+            input_tokens: 35000,
+            output_tokens: 11795,
+          },
+        ],
+      },
+    };
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(tracePayload),
+    } as Response);
+
+    renderWithProvider(
+      <TraceDetailPage
+        traceId="rollup-trace"
+        activeProject="test-project"
+        onBack={() => {}}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText("conversation").length).toBeGreaterThan(0);
+    });
+
+    expect(screen.getByText("46,795 tokens")).toBeInTheDocument();
+  });
+});
+
 describe("tree view renders with loaded trace data", () => {
   beforeEach(() => {
     mockFetchSuccess();
