@@ -506,11 +506,16 @@ func strVal(v any) string {
 // service_name, name, kind, start_time, end_time, model, input, output,
 // input_tokens, output_tokens, cost_usd, prompt_name, prompt_version,
 // status_code, status_message
+//
+// Trace-rollup reads (LakeSQL, issue #136) append a 21st column,
+// span_count — the number of spans in the row's trace. Span-level reads
+// (e.g. LakeTraceSpansSQL) produce exactly 20 columns and leave SpanCount
+// at its zero value.
 func ScanRows(rows [][]any) ([]*domain.Span, error) {
 	spans := make([]*domain.Span, len(rows))
 	for i, row := range rows {
 		if len(row) < 20 {
-			return nil, fmt.Errorf("scan: expected 20 columns, got %d", len(row))
+			return nil, fmt.Errorf("scan: expected at least 20 columns, got %d", len(row))
 		}
 		s := &domain.Span{}
 		s.SpanID = strVal(row[0])
@@ -545,6 +550,11 @@ func ScanRows(rows [][]any) ([]*domain.Span, error) {
 		}
 		s.StatusCode = strVal(row[18])
 		s.StatusMessage = strVal(row[19])
+		if len(row) >= 21 {
+			if v, ok := row[20].(int64); ok {
+				s.SpanCount = v
+			}
+		}
 		spans[i] = s
 	}
 	return spans, nil
@@ -563,25 +573,83 @@ func MarshalResponse(r SpanResponse) ([]byte, error) {
 	return json.Marshal(r)
 }
 
-// LakeSQL returns the SQL for listing spans directly from the Lake table
-// (lake.spans) with the provided filters and keyset cursor pagination.
-// Unlike SQL(), it does not use the hot+cold UNION — it reads from the
-// single Lake table, so the cursor predicate joins the filter WHERE clause
-// directly instead of wrapping a union in an outer query. List reads do not
-// dedupe (ADR-0004 tolerates residual duplicates outside trace detail).
+// LakeSQL returns the SQL for the Traces list: one row per distinct
+// trace_id, representing that trace's root span (the span with no
+// parent_id, or the earliest-starting span if no explicit root is present)
+// annotated with trace-level rollups (issue #136):
+//
+//   - input_tokens, output_tokens, cost_usd are overridden with the SUM
+//     across all spans in the trace (not just the root span's own values).
+//   - end_time is overridden with the MAX end_time across all spans in the
+//     trace, so duration_ms reflects the trace's true end-to-end latency
+//     even when child spans outlive the root span.
+//   - status_code is overridden with the "worst" status across the trace's
+//     spans: "error" wins if any span errored, else the root span's status.
+//   - span_count (a new trailing column) is the number of spans in the
+//     trace.
+//
+// Filters and the time range apply to the underlying spans before
+// rollup — e.g. a kind=llm filter selects traces containing at least one
+// llm span, and rollups are computed over that filtered span set. This
+// mirrors the pre-#136 filter semantics applied at the span level.
+//
+// Like the prior flat-span query, this reads only from the single Lake
+// table (lake.spans, ADR-0004) — no hot+cold UNION — and does not dedupe
+// residual duplicate spans (tolerated outside trace detail).
 func (q *SpanQuery) LakeSQL() (sql string, args []any, err error) {
 	// buildWhereClause always emits a WHERE clause — project_id is
-	// unconditionally injected — so the cursor predicate is ANDed onto it.
-	args, where := q.buildWhereClause()
+	// unconditionally injected.
+	whereArgs, where := q.buildWhereClause()
 
 	var sb strings.Builder
-	sb.WriteString("SELECT * FROM lake.spans")
+	sb.WriteString("WITH filtered AS (\n")
+	sb.WriteString("  SELECT * FROM lake.spans")
 	sb.WriteString(where)
+	sb.WriteString("\n)")
+	args = append(args, whereArgs...)
+
+	sb.WriteString(`,
+ranked AS (
+  SELECT *,
+    ROW_NUMBER() OVER (
+      PARTITION BY trace_id
+      ORDER BY (CASE WHEN parent_id IS NULL OR parent_id = '' THEN 0 ELSE 1 END), start_time ASC, span_id ASC
+    ) AS rn
+  FROM filtered
+),
+rollups AS (
+  SELECT
+    trace_id,
+    CAST(COUNT(*) AS BIGINT) AS span_count,
+    CAST(COALESCE(SUM(input_tokens), 0) AS BIGINT) AS total_input_tokens,
+    CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT) AS total_output_tokens,
+    COALESCE(SUM(cost_usd), 0) AS total_cost_usd,
+    MAX(end_time) AS trace_end_time,
+    MAX(CASE WHEN status_code = 'error' THEN 1 ELSE 0 END) AS has_error
+  FROM filtered
+  GROUP BY trace_id
+)
+SELECT
+  r.span_id, r.trace_id, r.parent_id, r.conversation_id, r.project_id,
+  r.service_name, r.name, r.kind, r.start_time,
+  ru.trace_end_time AS end_time,
+  r.model, r.input, r.output,
+  ru.total_input_tokens AS input_tokens,
+  ru.total_output_tokens AS output_tokens,
+  ru.total_cost_usd AS cost_usd,
+  r.prompt_name, r.prompt_version,
+  CASE WHEN ru.has_error = 1 THEN 'error' ELSE r.status_code END AS status_code,
+  r.status_message,
+  ru.span_count
+FROM ranked r
+JOIN rollups ru USING (trace_id)
+WHERE r.rn = 1`)
+
 	if !q.cursor.StartTime.IsZero() || q.cursor.SpanID != "" {
-		sb.WriteString(" AND (start_time < ? OR (start_time = ? AND span_id < ?))")
+		sb.WriteString(" AND (r.start_time < ? OR (r.start_time = ? AND r.span_id < ?))")
 		args = append(args, q.cursor.StartTime, q.cursor.StartTime, q.cursor.SpanID)
 	}
-	sb.WriteString("\n  ORDER BY start_time DESC, span_id ASC")
+	sb.WriteString("\n  ORDER BY r.start_time DESC, r.span_id ASC")
 	sb.WriteString("\n  LIMIT ?")
 	args = append(args, q.limit+1)
 

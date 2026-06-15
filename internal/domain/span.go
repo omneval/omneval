@@ -51,6 +51,11 @@ type Span struct {
 	StatusCode    string `json:"status_code"`
 	StatusMessage string `json:"status_message"`
 
+	// SpanCount is the number of spans in this span's trace. Populated only
+	// on trace-rollup rows (the Traces list, LakeSQL) — zero for span-level
+	// reads such as trace detail.
+	SpanCount int64 `json:"span_count,omitempty"`
+
 	// Overflow bucket for all other OTel attributes.
 	Attributes map[string]any `json:"attributes"`
 
