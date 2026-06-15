@@ -6,6 +6,7 @@ import {
   safeExtractInputOutput,
   formatJsonPreview,
   truncate,
+  getToolSummary,
 } from "@/utils/formatters";
 
 // ── formatTime ─────────────────────────────────────────────────────
@@ -238,5 +239,100 @@ describe("formatDuration", () => {
     const start = "2025-01-15T10:00:00.000Z";
     const end = "2025-01-15T10:00:01.234Z";
     expect(formatDuration(start, end)).toBe("1.2s");
+  });
+});
+
+// ── getToolSummary ─────────────────────────────────────────────────
+
+describe("getToolSummary", () => {
+  it("returns null when both input and output are empty", () => {
+    expect(getToolSummary("TerminalAction", undefined, undefined)).toBeNull();
+    expect(getToolSummary("TerminalAction", "", "")).toBeNull();
+  });
+
+  it("summarizes a TerminalAction with command and output", () => {
+    const input = JSON.stringify({ command: "ls -la /tmp" });
+    const output = JSON.stringify({ output: "total 0\ndrwxr-xr-x  2 root root", exit_code: 0 });
+    const summary = getToolSummary("TerminalAction", input, output);
+
+    expect(summary).not.toBeNull();
+    expect(summary!.title).toContain("ls -la /tmp");
+    expect(summary!.detail).toContain("total 0");
+  });
+
+  it("summarizes a TerminalAction with stdout/stderr fields", () => {
+    const input = JSON.stringify({ command: "npm test" });
+    const output = JSON.stringify({ stdout: "All tests passed", stderr: "", exit_code: 0 });
+    const summary = getToolSummary("TerminalAction", input, output);
+
+    expect(summary!.title).toContain("npm test");
+    expect(summary!.detail).toContain("All tests passed");
+  });
+
+  it("truncates long terminal output", () => {
+    const input = JSON.stringify({ command: "cat bigfile" });
+    const output = JSON.stringify({ output: "x".repeat(1000) });
+    const summary = getToolSummary("TerminalAction", input, output);
+
+    expect(summary!.detail.length).toBeLessThan(1000);
+    expect(summary!.detail.endsWith("…")).toBe(true);
+  });
+
+  it("summarizes a FileEditorAction with path and diff", () => {
+    const input = JSON.stringify({
+      path: "/src/main.go",
+      diff: "-old line\n+new line",
+    });
+    const output = JSON.stringify({ status: "ok" });
+    const summary = getToolSummary("FileEditorAction", input, output);
+
+    expect(summary).not.toBeNull();
+    expect(summary!.title).toContain("/src/main.go");
+    expect(summary!.detail).toContain("new line");
+  });
+
+  it("summarizes a FileEditorAction with file_path and content", () => {
+    const input = JSON.stringify({
+      file_path: "/src/app.py",
+      content: "print('hello')",
+    });
+    const summary = getToolSummary("FileEditorAction", input, undefined);
+
+    expect(summary!.title).toContain("/src/app.py");
+    expect(summary!.detail).toContain("print('hello')");
+  });
+
+  it("surfaces ThinkAction reasoning text as output", () => {
+    const output = "I should check the config file before editing it.";
+    const summary = getToolSummary("ThinkAction", undefined, output);
+
+    expect(summary).not.toBeNull();
+    expect(summary!.detail).toContain("check the config file");
+  });
+
+  it("summarizes an InvokeSkillAction with skill name and args", () => {
+    const input = JSON.stringify({ skill: "diagnose", args: { issue: "flaky test" } });
+    const summary = getToolSummary("InvokeSkillAction", input, undefined);
+
+    expect(summary).not.toBeNull();
+    expect(summary!.title).toContain("diagnose");
+  });
+
+  it("falls back to a compact JSON preview for unrecognized actions", () => {
+    const input = JSON.stringify({ foo: "bar", nested: { a: 1 } });
+    const output = JSON.stringify({ result: "done" });
+    const summary = getToolSummary("CustomWidgetAction", input, output);
+
+    expect(summary).not.toBeNull();
+    expect(summary!.title).toContain("foo");
+    expect(summary!.detail).toContain("result");
+  });
+
+  it("falls back to plain text for non-JSON input/output", () => {
+    const summary = getToolSummary("tool", "plain text input", "plain text output");
+
+    expect(summary).not.toBeNull();
+    expect(summary!.title).toContain("plain text input");
+    expect(summary!.detail).toContain("plain text output");
   });
 });

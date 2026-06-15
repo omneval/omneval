@@ -14,7 +14,7 @@ import Breadcrumb from "@/components/Breadcrumb";
 import JsonCodeBlock from "@/components/JsonCodeBlock";
 import { Skeleton } from "@/components/Skeleton";
 import { EmptyState, LoadingState } from "@/components/EmptyState";
-import { formatTime, formatDuration, formatMs, totalTokens, parseChatTurns } from "@/utils/formatters";
+import { formatTime, formatDuration, formatMs, totalTokens, parseChatTurns, getToolSummary } from "@/utils/formatters";
 import { useToast } from "@/components/Toast";
 import SaveToDatasetModal from "@/components/SaveToDatasetModal";
 
@@ -746,8 +746,8 @@ function TraceTree({
         span={trace}
         depth={0}
         onShowSaveModal={onShowSaveModal}
-        isExpanded={expandedSpanId === trace.span_id}
-        onToggleExpand={() => onToggleExpand(trace.span_id)}
+        expandedSpanId={expandedSpanId}
+        onToggleExpand={onToggleExpand}
         selectedSpanId={selectedSpanId}
         onSelect={onSelect}
       />
@@ -761,7 +761,7 @@ function SpanRow({
   span,
   depth,
   onShowSaveModal,
-  isExpanded,
+  expandedSpanId,
   onToggleExpand,
   selectedSpanId,
   onSelect,
@@ -769,15 +769,18 @@ function SpanRow({
   span: Span;
   depth: number;
   onShowSaveModal: (span: Span) => void;
-  isExpanded: boolean;
-  onToggleExpand: () => void;
+  expandedSpanId: string | null;
+  onToggleExpand: (id: string) => void;
   selectedSpanId: string | null;
   onSelect: (spanId: string) => void;
 }) {
+  const isExpanded = expandedSpanId === span.span_id;
   const [treeExpanded, setTreeExpanded] = useState(depth <= 1);
   const hasChildren = span.children && span.children.length > 0;
   const hasInput = span.input && span.input.length > 0;
   const hasOutput = span.output && span.output.length > 0;
+  const isToolSpan = span.kind === "tool" || /Action$/.test(span.name);
+  const toolSummary = isToolSpan ? getToolSummary(span.name, span.input, span.output) : null;
 
   const indentPx = depth * 20 + 12;
   const isSelected = selectedSpanId === span.span_id;
@@ -842,7 +845,7 @@ function SpanRow({
         <button
           onClick={(e) => {
             e.stopPropagation();
-            onToggleExpand();
+            onToggleExpand(span.span_id);
           }}
           className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded transition-colors"
           style={{
@@ -870,6 +873,15 @@ function SpanRow({
               <span className="ml-2 opacity-60">{span.model}</span>
             )}
           </div>
+          {toolSummary && (
+            <div
+              className="text-xs font-mono truncate max-w-[480px] mt-0.5"
+              style={{ color: colors.typography.ashGrey }}
+              title={toolSummary.title}
+            >
+              {toolSummary.title}
+            </div>
+          )}
         </div>
 
         {/* Duration */}
@@ -923,6 +935,30 @@ function SpanRow({
             marginLeft: `${indentPx + 12}px`,
           }}
         >
+          {toolSummary && (
+            <div className="mb-3">
+              <div className="text-xs font-medium mb-1 uppercase tracking-wider" style={{ color: colors.typography.ashGrey }}>
+                Tool Call
+              </div>
+              <div
+                className="rounded-md border overflow-hidden text-xs"
+                style={{
+                  backgroundColor: colors.backgrounds.abyssBlack,
+                  borderColor: colors.backgrounds.caveWall,
+                }}
+              >
+                <div
+                  className="px-3 py-2 font-mono break-all"
+                  style={{ borderBottom: `1px solid ${colors.backgrounds.caveWall}`, color: colors.typography.pureLight }}
+                >
+                  {toolSummary.title}
+                </div>
+                <pre className="px-3 py-2 whitespace-pre-wrap break-all" style={{ color: colors.typography.ashGrey }}>
+                  {toolSummary.detail}
+                </pre>
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {hasInput && (
               <JsonCodeBlock value={span.input!} label="Input" maxHeight={200} />
@@ -952,8 +988,8 @@ function SpanRow({
               span={child}
               depth={depth + 1}
               onShowSaveModal={onShowSaveModal}
-              isExpanded={isExpanded && child.span_id === span.span_id}
-              onToggleExpand={() => onToggleExpand()}
+              expandedSpanId={expandedSpanId}
+              onToggleExpand={onToggleExpand}
               selectedSpanId={selectedSpanId}
               onSelect={onSelect}
             />
