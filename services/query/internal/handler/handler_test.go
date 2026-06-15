@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -301,6 +302,126 @@ func TestHandleSpansQuery_WithDatabase(t *testing.T) {
 	if resp.Next != "" {
 		t.Errorf("next: got %q, want empty", resp.Next)
 	}
+}
+
+// TestHandleSpansQuery_StatusCodeFilter covers the Traces page "Status Code"
+// filter (issue #139): given spans whose status_code is already populated as
+// "OK", "ERROR", "UNSET", or left unset (NULL), filtering by status_code
+// should return exactly the matching subset — and filtering by "UNSET"
+// should also match the NULL row, since pre-#135 data never populates
+// status_code at all.
+func TestHandleSpansQuery_StatusCodeFilter(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omneval-handler-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	insert := func(spanID, traceID string, statusCode any) {
+		if _, err := db.ExecContext(context.Background(),
+			`INSERT INTO spans (span_id, trace_id, project_id, model, start_time, end_time, status_code) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			spanID, traceID, "test-proj", "gpt-4", baseTime, baseTime.Add(10*time.Second), statusCode); err != nil {
+			t.Fatalf("insert span %s: %v", spanID, err)
+		}
+	}
+
+	insert("span-ok", "trace-ok", "OK")
+	insert("span-error", "trace-error", "ERROR")
+	insert("span-unset", "trace-unset", "UNSET")
+	insert("span-null", "trace-null", nil)
+
+	h := &SpanHandler{
+		Lake:         db,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	query := func(t *testing.T, filterValue []string) []string {
+		t.Helper()
+		valueJSON, err := json.Marshal(filterValue)
+		if err != nil {
+			t.Fatalf("marshal filter value: %v", err)
+		}
+		reqBody := fmt.Sprintf(`{
+			"from": "2025-01-01T00:00:00Z",
+			"to": "2025-01-02T00:00:00Z",
+			"filters": [{"field": "status_code", "op": "in", "value": %s}]
+		}`, valueJSON)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", strings.NewReader(reqBody))
+		w := httptest.NewRecorder()
+		h.HandleSpansQuery(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+
+		var resp struct {
+			Spans []struct {
+				TraceID string `json:"trace_id"`
+			} `json:"spans"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+
+		traceIDs := make([]string, 0, len(resp.Spans))
+		for _, s := range resp.Spans {
+			traceIDs = append(traceIDs, s.TraceID)
+		}
+		return traceIDs
+	}
+
+	t.Run("OK", func(t *testing.T) {
+		got := query(t, []string{"OK"})
+		if len(got) != 1 || got[0] != "trace-ok" {
+			t.Errorf("status_code=OK: got %v, want [trace-ok]", got)
+		}
+	})
+
+	t.Run("ERROR", func(t *testing.T) {
+		got := query(t, []string{"ERROR"})
+		if len(got) != 1 || got[0] != "trace-error" {
+			t.Errorf("status_code=ERROR: got %v, want [trace-error]", got)
+		}
+	})
+
+	t.Run("OK_and_ERROR", func(t *testing.T) {
+		got := query(t, []string{"OK", "ERROR"})
+		want := map[string]bool{"trace-ok": true, "trace-error": true}
+		if len(got) != 2 {
+			t.Fatalf("status_code=OK,ERROR: got %v, want 2 traces", got)
+		}
+		for _, id := range got {
+			if !want[id] {
+				t.Errorf("status_code=OK,ERROR: unexpected trace %q in %v", id, got)
+			}
+		}
+	})
+
+	t.Run("UNSET_matches_literal_and_null", func(t *testing.T) {
+		got := query(t, []string{"UNSET"})
+		want := map[string]bool{"trace-unset": true, "trace-null": true}
+		if len(got) != 2 {
+			t.Fatalf("status_code=UNSET: got %v, want 2 traces (trace-unset, trace-null)", got)
+		}
+		for _, id := range got {
+			if !want[id] {
+				t.Errorf("status_code=UNSET: unexpected trace %q in %v", id, got)
+			}
+		}
+	})
 }
 
 func TestHandleSpansQuery_NoTimeRange_DefaultsTo30Days(t *testing.T) {
@@ -760,6 +881,88 @@ func TestHandleTraceDetail_MultiLevelTree(t *testing.T) {
 	}
 	if len(child.Children) > 0 && child.Children[0].Name != "grandchild" {
 		t.Errorf("grandchild.name: got %q, want %q", child.Children[0].Name, "grandchild")
+	}
+}
+
+// TestHandleTraceDetail_TokenRollup verifies that the trace detail response
+// includes trace-level rollups (SUM input_tokens, SUM output_tokens, SUM
+// cost_usd) across all spans in the trace, not just the root span's own
+// (typically zero) values. See issue #137.
+func TestHandleTraceDetail_TokenRollup(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omneval-trace-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+
+	// Root span: an orchestration span with no tokens/cost of its own.
+	_, err = db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, kind, start_time, end_time, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"span-root", "trace-tokens", "", "test-proj", "conversation", "chain", baseTime, baseTime.Add(200*time.Millisecond), 0, 0, 0.0)
+	if err != nil {
+		t.Fatalf("insert root: %v", err)
+	}
+
+	// Two descendant LLM spans carrying the actual token usage.
+	_, err = db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, kind, model, start_time, end_time, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"span-llm1", "trace-tokens", "span-root", "test-proj", "litellm.completion", "llm", "gpt-4", baseTime.Add(10*time.Millisecond), baseTime.Add(80*time.Millisecond), 30000, 10000, 0.5)
+	if err != nil {
+		t.Fatalf("insert llm span 1: %v", err)
+	}
+	_, err = db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, kind, model, start_time, end_time, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"span-llm2", "trace-tokens", "span-root", "test-proj", "litellm.completion", "llm", "gpt-4", baseTime.Add(90*time.Millisecond), baseTime.Add(180*time.Millisecond), 5000, 1795, 0.1)
+	if err != nil {
+		t.Fatalf("insert llm span 2: %v", err)
+	}
+
+	h := &SpanHandler{
+		Lake:         db,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	w := serveTraceDetail(h, http.MethodGet, "/api/v1/traces/trace-tokens", nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var trace struct {
+		TraceID           string  `json:"trace_id"`
+		TotalInputTokens  int64   `json:"total_input_tokens"`
+		TotalOutputTokens int64   `json:"total_output_tokens"`
+		TotalCostUSD      float64 `json:"total_cost_usd"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&trace); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	wantInput := int64(30000 + 5000)
+	wantOutput := int64(10000 + 1795)
+	wantCost := 0.5 + 0.1
+
+	if trace.TotalInputTokens != wantInput {
+		t.Errorf("total_input_tokens: got %d, want %d", trace.TotalInputTokens, wantInput)
+	}
+	if trace.TotalOutputTokens != wantOutput {
+		t.Errorf("total_output_tokens: got %d, want %d", trace.TotalOutputTokens, wantOutput)
+	}
+	if math.Abs(trace.TotalCostUSD-wantCost) > 1e-9 {
+		t.Errorf("total_cost_usd: got %v, want %v", trace.TotalCostUSD, wantCost)
 	}
 }
 

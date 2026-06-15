@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
@@ -88,20 +89,40 @@ func toRawMap(projectID string, resource Resource, span Span, opts Options) map[
 		outputTokens = 0
 	}
 
-	// Build Input from gen_ai.prompt.N.
+	// Build Input from gen_ai.prompt.N., falling back through other
+	// supported conventions and finally the Omneval SDK's plain-string
+	// "omneval.input" attribute.
 	input := buildMessageArray(span.Attributes, "gen_ai.prompt")
 	if input == "" {
 		input = buildMessageArray(span.Attributes, "llm.prompt")
 	}
+	if input == "" {
+		input = extractMessagesJSON(span.Attributes, "gen_ai.input.messages")
+	}
+	if input == "" {
+		input = extractAttributeString(span.Attributes, "input.value")
+	}
+	if input == "" {
+		input = extractAttributeString(span.Attributes, "omneval.input")
+	}
 
-	// Build Output from gen_ai.completion.N.
+	// Build Output from gen_ai.completion.N., with the same fallback chain.
 	output := buildMessageArray(span.Attributes, "gen_ai.completion")
 	if output == "" {
 		output = buildMessageArray(span.Attributes, "llm.completion")
 	}
+	if output == "" {
+		output = extractMessagesJSON(span.Attributes, "gen_ai.output.messages")
+	}
+	if output == "" {
+		output = extractAttributeString(span.Attributes, "output.value")
+	}
+	if output == "" {
+		output = extractAttributeString(span.Attributes, "omneval.output")
+	}
 
 	// Derive Kind: explicit omneval.kind wins, then heuristic.
-	kind := deriveKind(span.Attributes)
+	kind := deriveKind(span.Attributes, span.Name)
 
 	// Derive ServiceName from Resource attributes.
 	serviceName := extractResourceAttributeString(resource.Attributes, "service.name")
@@ -269,6 +290,43 @@ func buildMessageArray(attrs map[string]any, prefix string) string {
 	return string(data)
 }
 
+// extractMessagesJSON looks up an attribute holding a list of message
+// objects per the newer OTel GenAI semantic conventions (e.g.
+// gen_ai.input.messages / gen_ai.output.messages). The attribute value may
+// arrive either as a JSON-encoded string (already a JSON array) or as a
+// decoded Go slice (e.g. []any from JSON-encoded OTLP). Returns "" if the
+// attribute is absent or doesn't hold a non-empty array.
+func extractMessagesJSON(attrs map[string]any, key string) string {
+	v, ok := attrs[key]
+	if !ok {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		trimmed := val
+		if len(trimmed) == 0 {
+			return ""
+		}
+		// Validate it's a JSON array before accepting it.
+		var arr []any
+		if err := json.Unmarshal([]byte(trimmed), &arr); err != nil || len(arr) == 0 {
+			return ""
+		}
+		return trimmed
+	case []any:
+		if len(val) == 0 {
+			return ""
+		}
+		data, err := json.Marshal(val)
+		if err != nil {
+			return ""
+		}
+		return string(data)
+	default:
+		return ""
+	}
+}
+
 // extractNumberedIndex checks if a key matches pattern "prefix.N.suffix"
 // and returns N. Returns false if no match.
 func extractNumberedIndex(key, prefix string) (int, bool) {
@@ -302,13 +360,41 @@ func extractNumberedIndex(key, prefix string) (int, bool) {
 	return n, true
 }
 
-// deriveKind determines the SpanKind from attribute heuristics.
-func deriveKind(attrs map[string]any) domain.SpanKind {
+// deriveKind determines the SpanKind from attribute heuristics, falling back
+// to span-name pattern matching for common agent-framework conventions
+// (e.g. OpenInference/OTel GenAI semconv don't cover every span).
+func deriveKind(attrs map[string]any, name string) domain.SpanKind {
 	// Explicit omneval.kind wins.
 	if kind := extractAttributeString(attrs, "omneval.kind"); kind != "" {
 		if dk := domain.SpanKind(kind); dk == domain.SpanKindLLM || dk == domain.SpanKindTool ||
 			dk == domain.SpanKindAgent || dk == domain.SpanKindChain || dk == domain.SpanKindInternal {
 			return dk
+		}
+	}
+
+	// Check for OpenInference span-kind attribute.
+	if oiKind := extractAttributeString(attrs, "openinference.span.kind"); oiKind != "" {
+		switch strings.ToUpper(oiKind) {
+		case "AGENT":
+			return domain.SpanKindAgent
+		case "LLM":
+			return domain.SpanKindLLM
+		case "TOOL":
+			return domain.SpanKindTool
+		case "CHAIN", "RETRIEVER", "EMBEDDING", "RERANKER", "GUARDRAIL":
+			return domain.SpanKindChain
+		}
+	}
+
+	// Check for GenAI operation-name attribute (OTel GenAI semconv).
+	if op := extractAttributeString(attrs, "gen_ai.operation.name"); op != "" {
+		switch strings.ToLower(op) {
+		case "invoke_agent", "create_agent":
+			return domain.SpanKindAgent
+		case "execute_tool":
+			return domain.SpanKindTool
+		case "chat", "text_completion", "embeddings", "generate_content":
+			return domain.SpanKindLLM
 		}
 	}
 
@@ -330,6 +416,16 @@ func deriveKind(attrs map[string]any) domain.SpanKind {
 		return domain.SpanKindTool
 	}
 	if _, hasToolName := attrs["tool.name"]; hasToolName {
+		return domain.SpanKindTool
+	}
+
+	// Fall back to span-name pattern heuristics for common agent-framework
+	// conventions that don't set any of the attributes above.
+	lowerName := strings.ToLower(name)
+	switch {
+	case strings.HasSuffix(lowerName, ".step") || strings.Contains(lowerName, "agent"):
+		return domain.SpanKindAgent
+	case strings.HasSuffix(name, "Action") || strings.Contains(lowerName, "tool"):
 		return domain.SpanKindTool
 	}
 
@@ -372,6 +468,30 @@ func buildOverflowAttributes(attrs map[string]any, model string, inputTokens, ou
 		} else if _, ok := extractNumberedIndex(k, "llm.completion"); ok {
 			remove[k] = true
 		}
+	}
+
+	// Omneval SDK plain-string input/output attributes.
+	if _, ok := attrs["omneval.input"]; ok {
+		remove["omneval.input"] = true
+	}
+	if _, ok := attrs["omneval.output"]; ok {
+		remove["omneval.output"] = true
+	}
+
+	// Newer OTel GenAI semconv message-list attributes.
+	if _, ok := attrs["gen_ai.input.messages"]; ok {
+		remove["gen_ai.input.messages"] = true
+	}
+	if _, ok := attrs["gen_ai.output.messages"]; ok {
+		remove["gen_ai.output.messages"] = true
+	}
+
+	// OpenInference plain-value input/output attributes.
+	if _, ok := attrs["input.value"]; ok {
+		remove["input.value"] = true
+	}
+	if _, ok := attrs["output.value"]; ok {
+		remove["output.value"] = true
 	}
 
 	// Kind.

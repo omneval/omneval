@@ -284,6 +284,137 @@ func TestTranslate_KindDerivation_ExplicitOmnevalKind(t *testing.T) {
 	}
 }
 
+func TestTranslate_KindDerivation_OpenInferenceAgent(t *testing.T) {
+	rss := []ResourceSpans{
+		{
+			Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+			Spans: []*Span{{
+				SpanID:     "0123456789abcdef",
+				TraceID:    "0123456789abcdef0123456789abcdef",
+				Name:       "agent.step",
+				StartTime:  time.Now(),
+				EndTime:    time.Now(),
+				Attributes: map[string]any{"openinference.span.kind": "AGENT"},
+			}},
+		},
+	}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+
+	if spans[0].Kind != domain.SpanKindAgent {
+		t.Errorf("kind: got %q, want %q", spans[0].Kind, domain.SpanKindAgent)
+	}
+}
+
+func TestTranslate_KindDerivation_OpenInferenceChainAndRetriever(t *testing.T) {
+	tests := []struct {
+		oiKind string
+		want   domain.SpanKind
+	}{
+		{"CHAIN", domain.SpanKindChain},
+		{"RETRIEVER", domain.SpanKindChain},
+		{"EMBEDDING", domain.SpanKindChain},
+		{"RERANKER", domain.SpanKindChain},
+		{"GUARDRAIL", domain.SpanKindChain},
+		{"TOOL", domain.SpanKindTool},
+		{"LLM", domain.SpanKindLLM},
+	}
+
+	for _, tc := range tests {
+		rss := []ResourceSpans{
+			{
+				Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+				Spans: []*Span{{
+					SpanID:     "0123456789abcdef",
+					TraceID:    "0123456789abcdef0123456789abcdef",
+					Name:       "some-span",
+					StartTime:  time.Now(),
+					EndTime:    time.Now(),
+					Attributes: map[string]any{"openinference.span.kind": tc.oiKind},
+				}},
+			},
+		}
+
+		spans := translateTest(t, "proj-1", rss, Options{})
+
+		if spans[0].Kind != tc.want {
+			t.Errorf("openinference.span.kind=%q: kind got %q, want %q", tc.oiKind, spans[0].Kind, tc.want)
+		}
+	}
+}
+
+func TestTranslate_KindDerivation_GenAIOperationName(t *testing.T) {
+	tests := []struct {
+		operation string
+		want      domain.SpanKind
+	}{
+		{"invoke_agent", domain.SpanKindAgent},
+		{"create_agent", domain.SpanKindAgent},
+		{"execute_tool", domain.SpanKindTool},
+		{"chat", domain.SpanKindLLM},
+		{"text_completion", domain.SpanKindLLM},
+	}
+
+	for _, tc := range tests {
+		rss := []ResourceSpans{
+			{
+				Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+				Spans: []*Span{{
+					SpanID:     "0123456789abcdef",
+					TraceID:    "0123456789abcdef0123456789abcdef",
+					Name:       "some-span",
+					StartTime:  time.Now(),
+					EndTime:    time.Now(),
+					Attributes: map[string]any{"gen_ai.operation.name": tc.operation},
+				}},
+			},
+		}
+
+		spans := translateTest(t, "proj-1", rss, Options{})
+
+		if spans[0].Kind != tc.want {
+			t.Errorf("gen_ai.operation.name=%q: kind got %q, want %q", tc.operation, spans[0].Kind, tc.want)
+		}
+	}
+}
+
+func TestTranslate_KindDerivation_NameHeuristics(t *testing.T) {
+	tests := []struct {
+		name string
+		want domain.SpanKind
+	}{
+		{"agent.step", domain.SpanKindAgent},
+		{"planner.agent.step", domain.SpanKindAgent},
+		{"TerminalAction", domain.SpanKindTool},
+		{"FileEditorAction", domain.SpanKindTool},
+		{"InvokeSkillAction", domain.SpanKindTool},
+		{"search_tool_call", domain.SpanKindTool},
+		{"ThinkAction", domain.SpanKindTool},
+	}
+
+	for _, tc := range tests {
+		rss := []ResourceSpans{
+			{
+				Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+				Spans: []*Span{{
+					SpanID:     "0123456789abcdef",
+					TraceID:    "0123456789abcdef0123456789abcdef",
+					Name:       tc.name,
+					StartTime:  time.Now(),
+					EndTime:    time.Now(),
+					Attributes: map[string]any{},
+				}},
+			},
+		}
+
+		spans := translateTest(t, "proj-1", rss, Options{})
+
+		if spans[0].Kind != tc.want {
+			t.Errorf("name=%q: kind got %q, want %q", tc.name, spans[0].Kind, tc.want)
+		}
+	}
+}
+
 func TestTranslate_KindDerivation_DefaultInternal(t *testing.T) {
 	rss := []ResourceSpans{
 		{
@@ -478,6 +609,148 @@ func TestTranslate_StartTimeEndTimePreserved(t *testing.T) {
 	}
 	if !spans[0].EndTime.Equal(end) {
 		t.Errorf("EndTime: got %v, want %v", spans[0].EndTime, end)
+	}
+}
+
+func TestTranslate_InputOutputFromOmnevalAttributes(t *testing.T) {
+	rss := []ResourceSpans{{
+		Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+		Spans: []*Span{{
+			SpanID:    "0123456789abcdef",
+			TraceID:   "0123456789abcdef0123456789abcdef",
+			Name:      "my-function",
+			StartTime: time.Now(),
+			EndTime:   time.Now(),
+			Attributes: map[string]any{
+				"omneval.input":  "What is the capital of France?",
+				"omneval.output": "Paris.",
+			},
+		}},
+	}}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	if spans[0].Input == "" {
+		t.Fatal("input is empty")
+	}
+	var inputMessages []map[string]any
+	if err := json.Unmarshal([]byte(spans[0].Input), &inputMessages); err != nil {
+		t.Fatalf("input is not valid JSON: %v", err)
+	}
+	if len(inputMessages) != 1 || inputMessages[0]["content"] != "What is the capital of France?" {
+		t.Errorf("input messages: got %v, want content %q", inputMessages, "What is the capital of France?")
+	}
+
+	if spans[0].Output == "" {
+		t.Fatal("output is empty")
+	}
+	var outputMessages []map[string]any
+	if err := json.Unmarshal([]byte(spans[0].Output), &outputMessages); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	if len(outputMessages) != 1 || outputMessages[0]["content"] != "Paris." {
+		t.Errorf("output messages: got %v, want content %q", outputMessages, "Paris.")
+	}
+
+	// omneval.input/omneval.output should not leak into the overflow attributes.
+	if _, ok := spans[0].Attributes["omneval.input"]; ok {
+		t.Error("omneval.input should not be in overflow attributes")
+	}
+	if _, ok := spans[0].Attributes["omneval.output"]; ok {
+		t.Error("omneval.output should not be in overflow attributes")
+	}
+}
+
+func TestTranslate_InputOutputFromGenAIMessagesAttributes(t *testing.T) {
+	rss := []ResourceSpans{{
+		Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+		Spans: []*Span{{
+			SpanID:    "0123456789abcdef",
+			TraceID:   "0123456789abcdef0123456789abcdef",
+			Name:      "llm-call",
+			StartTime: time.Now(),
+			EndTime:   time.Now(),
+			Attributes: map[string]any{
+				"gen_ai.input.messages":  `[{"role":"user","content":"Hello"}]`,
+				"gen_ai.output.messages": `[{"role":"assistant","content":"Hi there"}]`,
+			},
+		}},
+	}}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	var inputMessages []map[string]any
+	if err := json.Unmarshal([]byte(spans[0].Input), &inputMessages); err != nil {
+		t.Fatalf("input is not valid JSON: %v (%q)", err, spans[0].Input)
+	}
+	if len(inputMessages) != 1 || inputMessages[0]["content"] != "Hello" {
+		t.Errorf("input messages: got %v", inputMessages)
+	}
+
+	var outputMessages []map[string]any
+	if err := json.Unmarshal([]byte(spans[0].Output), &outputMessages); err != nil {
+		t.Fatalf("output is not valid JSON: %v (%q)", err, spans[0].Output)
+	}
+	if len(outputMessages) != 1 || outputMessages[0]["content"] != "Hi there" {
+		t.Errorf("output messages: got %v", outputMessages)
+	}
+
+	if _, ok := spans[0].Attributes["gen_ai.input.messages"]; ok {
+		t.Error("gen_ai.input.messages should not be in overflow attributes")
+	}
+	if _, ok := spans[0].Attributes["gen_ai.output.messages"]; ok {
+		t.Error("gen_ai.output.messages should not be in overflow attributes")
+	}
+}
+
+func TestTranslate_InputOutputFromOpenInferenceAttributes(t *testing.T) {
+	rss := []ResourceSpans{{
+		Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+		Spans: []*Span{{
+			SpanID:    "0123456789abcdef",
+			TraceID:   "0123456789abcdef0123456789abcdef",
+			Name:      "llm-call",
+			StartTime: time.Now(),
+			EndTime:   time.Now(),
+			Attributes: map[string]any{
+				"input.value":  "What's the weather in Paris?",
+				"output.value": "It's sunny in Paris.",
+			},
+		}},
+	}}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	var inputMessages []map[string]any
+	if err := json.Unmarshal([]byte(spans[0].Input), &inputMessages); err != nil {
+		t.Fatalf("input is not valid JSON: %v (%q)", err, spans[0].Input)
+	}
+	if len(inputMessages) != 1 || inputMessages[0]["content"] != "What's the weather in Paris?" {
+		t.Errorf("input messages: got %v", inputMessages)
+	}
+
+	var outputMessages []map[string]any
+	if err := json.Unmarshal([]byte(spans[0].Output), &outputMessages); err != nil {
+		t.Fatalf("output is not valid JSON: %v (%q)", err, spans[0].Output)
+	}
+	if len(outputMessages) != 1 || outputMessages[0]["content"] != "It's sunny in Paris." {
+		t.Errorf("output messages: got %v", outputMessages)
+	}
+
+	if _, ok := spans[0].Attributes["input.value"]; ok {
+		t.Error("input.value should not be in overflow attributes")
+	}
+	if _, ok := spans[0].Attributes["output.value"]; ok {
+		t.Error("output.value should not be in overflow attributes")
 	}
 }
 

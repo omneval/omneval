@@ -7,8 +7,19 @@ interface APIKey {
   key_id: string;
   kind: "project" | "service";
   service_name?: string;
+  name?: string;
   created_at: string;
   revoked_at?: string;
+}
+
+// keyDisplayName returns the best human-readable label for an API key:
+// the user-supplied name (or service_name for service keys) if set,
+// otherwise a fallback derived from the truncated key ID (#143).
+function keyDisplayName(keyData: APIKey): string {
+  if (keyData.name) return keyData.name;
+  if (keyData.kind === "service" && keyData.service_name) return keyData.service_name;
+  const suffix = keyData.key_id.slice(-4);
+  return keyData.kind === "service" ? `Service Key (...${suffix})` : `Project Key (...${suffix})`;
 }
 
 interface Project {
@@ -115,6 +126,8 @@ function AdminKeysSection({
   onDeleteKey: (keyId: string) => void;
 }) {
   const [deleteKeyId, setDeleteKeyId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
 
   const handleDelete = async () => {
     if (!deleteKeyId) return;
@@ -122,8 +135,31 @@ function AdminKeysSection({
     setDeleteKeyId(null);
   };
 
-  const projectKeys = allKeys.filter((k) => k.kind === "project");
-  const serviceKeys = allKeys.filter((k) => k.kind === "service");
+  const totalKeys = allKeys.length;
+
+  const filteredKeys = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    let keys = allKeys;
+    if (query) {
+      keys = keys.filter((k) => {
+        const name = (
+          k.service_name ?? (k.kind === "service" ? "Service Key" : "Project Key")
+        ).toLowerCase();
+        return (
+          k.key_id.toLowerCase().includes(query) || name.includes(query)
+        );
+      });
+    }
+    const sorted = [...keys].sort((a, b) => {
+      const aTime = new Date(a.created_at).getTime();
+      const bTime = new Date(b.created_at).getTime();
+      return sortOrder === "newest" ? bTime - aTime : aTime - bTime;
+    });
+    return sorted;
+  }, [allKeys, search, sortOrder]);
+
+  const projectKeys = filteredKeys.filter((k) => k.kind === "project");
+  const serviceKeys = filteredKeys.filter((k) => k.kind === "service");
 
   if (loading) {
     return (
@@ -135,7 +171,9 @@ function AdminKeysSection({
     );
   }
 
-  const totalKeys = projectKeys.length + serviceKeys.length;
+  const toggleSortOrder = () => {
+    setSortOrder((prev) => (prev === "newest" ? "oldest" : "newest"));
+  };
 
   return (
     <div>
@@ -144,9 +182,33 @@ function AdminKeysSection({
         description={`Delete project or service keys (${totalKeys} total). Revoked keys cannot be recovered.`}
       />
 
+      {totalKeys > 0 && (
+        <div className="flex items-center gap-2 mb-4">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name or key ID..."
+            className="flex-1 px-3 py-2 text-sm rounded-md border border-omneval-border bg-omneval-surface text-omneval-text-pure placeholder:text-omneval-text-muted focus:outline-none focus:ring-1 focus:ring-omneval-violet"
+          />
+          <button
+            type="button"
+            onClick={toggleSortOrder}
+            className="px-3 py-2 text-sm rounded-md border border-omneval-border bg-omneval-surface text-omneval-text-mid hover:text-omneval-text-pure transition-colors whitespace-nowrap"
+            title="Toggle sort order by Created date"
+          >
+            Created {sortOrder === "newest" ? "↓" : "↑"}
+          </button>
+        </div>
+      )}
+
       {totalKeys === 0 ? (
         <div className="text-sm text-omneval-text-muted py-8 text-center bg-omneval-depth/30 rounded-md border border-omneval-border">
           No API keys found.
+        </div>
+      ) : filteredKeys.length === 0 ? (
+        <div className="text-sm text-omneval-text-muted py-8 text-center bg-omneval-depth/30 rounded-md border border-omneval-border">
+          No matching API keys found.
         </div>
       ) : (
         <div className="space-y-3">
@@ -212,7 +274,7 @@ function KeyRow({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
           <span className="text-sm font-medium text-omneval-text-pure truncate">
-            {keyData.service_name ?? (keyData.kind === "service" ? "Service Key" : "Project Key")}
+            {keyDisplayName(keyData)}
           </span>
           <span
             className={`text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${

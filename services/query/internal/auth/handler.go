@@ -68,6 +68,7 @@ type CreateProjectResponse struct {
 type GenerateAPIKeyRequest struct {
 	Kind        domain.APIKeyKind `json:"kind"`
 	ServiceName string            `json:"service_name,omitempty"` // required for service-scoped keys
+	Name        string            `json:"name,omitempty"`         // optional display name (any kind)
 }
 
 // GenerateAPIKeyResponse is returned by POST /api/v1/projects/{id}/api-keys on success.
@@ -76,6 +77,7 @@ type GenerateAPIKeyResponse struct {
 	ProjectID   string            `json:"project_id"`
 	Kind        domain.APIKeyKind `json:"kind"`
 	ServiceName string            `json:"service_name,omitempty"`
+	Name        string            `json:"name,omitempty"`
 	RawKey      string            `json:"raw_key"` // shown only once
 	CreatedAt   time.Time         `json:"created_at"`
 }
@@ -94,11 +96,30 @@ type ProjectInfo struct {
 	Name      string `json:"name"`
 }
 
+// DisplayName returns the best human-readable label for an API key:
+// the user-supplied name if set, otherwise the service name for
+// service-scoped keys, otherwise a label derived from the key ID so
+// unnamed keys are still distinguishable in lists (#143).
+func DisplayName(k *domain.APIKey) string {
+	if k.Name != "" {
+		return k.Name
+	}
+	if k.Kind == domain.APIKeyKindService && k.ServiceName != "" {
+		return k.ServiceName
+	}
+	id := k.KeyID
+	if len(id) > 4 {
+		id = id[len(id)-4:]
+	}
+	return "Project Key (..." + id + ")"
+}
+
 // APIKeyInfo represents an API key as returned by list endpoints (never raw key).
 type APIKeyInfo struct {
 	KeyID       string            `json:"key_id"`
 	Kind        domain.APIKeyKind `json:"kind"`
 	ServiceName string            `json:"service_name,omitempty"`
+	Name        string            `json:"name,omitempty"`
 	CreatedAt   time.Time         `json:"created_at"`
 	RevokedAt   *time.Time        `json:"revoked_at,omitempty"`
 }
@@ -434,6 +455,7 @@ func (h *Handler) HandleGenerateAPIKey(w http.ResponseWriter, r *http.Request) {
 		ProjectID:   projectID,
 		Kind:        req.Kind,
 		ServiceName: req.ServiceName,
+		Name:        strings.TrimSpace(req.Name),
 		HashedKey:   hashedKey,
 		CreatedAt:   time.Now().UTC(),
 	}
@@ -448,6 +470,7 @@ func (h *Handler) HandleGenerateAPIKey(w http.ResponseWriter, r *http.Request) {
 		ProjectID:   projectID,
 		Kind:        req.Kind,
 		ServiceName: req.ServiceName,
+		Name:        apiKey.Name,
 		RawKey:      rawKey,
 		CreatedAt:   apiKey.CreatedAt,
 	})
@@ -492,6 +515,7 @@ func (h *Handler) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 			KeyID:       k.KeyID,
 			Kind:        k.Kind,
 			ServiceName: k.ServiceName,
+			Name:        DisplayName(k),
 			CreatedAt:   k.CreatedAt,
 			RevokedAt:   k.RevokedAt,
 		}

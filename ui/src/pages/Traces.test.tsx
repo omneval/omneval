@@ -5,6 +5,9 @@ import TracesPage from "./Traces";
 
 // ── Helper data ──────────────────────────────────────────────────
 
+// Post-#136: the Traces list returns one row per trace — the root span
+// annotated with trace-level rollups (span_count, kind_counts, summed
+// tokens/cost, max end_time) — not a flat list of every span.
 const mockSpans = [
   {
     span_id: "root-1",
@@ -16,61 +19,16 @@ const mockSpans = [
     model: "gpt-4",
     start_time: "2025-01-15T10:00:00Z",
     end_time: "2025-01-15T10:00:30Z",
-    cost_usd: 0.05,
-    input_tokens: 100,
-    output_tokens: 200,
+    cost_usd: 0.11,
+    input_tokens: 210,
+    output_tokens: 405,
     input: '{"message":"hello"}',
     output: '{"reply":"hi"}',
     status_code: "OK",
+    span_count: 4,
+    kind_counts: { chain: 1, llm: 2, tool: 1 },
   },
-  {
-    span_id: "child-llm-1",
-    trace_id: "trace-a",
-    parent_id: "root-1",
-    project_id: "test-project",
-    name: "llm-call-1",
-    kind: "llm",
-    model: "gpt-4",
-    start_time: "2025-01-15T10:00:01Z",
-    end_time: "2025-01-15T10:00:10Z",
-    cost_usd: 0.03,
-    input_tokens: 50,
-    output_tokens: 100,
-    input: '{"prompt":"a"}',
-    output: '{"completion":"b"}',
-    status_code: "OK",
-  },
-  {
-    span_id: "child-llm-2",
-    trace_id: "trace-a",
-    parent_id: "root-1",
-    project_id: "test-project",
-    name: "llm-call-2",
-    kind: "llm",
-    model: "gpt-4",
-    start_time: "2025-01-15T10:00:11Z",
-    end_time: "2025-01-15T10:00:20Z",
-    cost_usd: 0.02,
-    input_tokens: 50,
-    output_tokens: 100,
-    input: '{"prompt":"c"}',
-    output: '{"completion":"d"}',
-    status_code: "OK",
-  },
-  {
-    span_id: "child-tool-1",
-    trace_id: "trace-a",
-    parent_id: "root-1",
-    project_id: "test-project",
-    name: "tool-use",
-    kind: "tool",
-    start_time: "2025-01-15T10:00:21Z",
-    end_time: "2025-01-15T10:00:25Z",
-    cost_usd: 0.01,
-    input_tokens: 10,
-    output_tokens: 5,
-  },
-  // Second trace with only one child
+  // Second trace with only one LLM child
   {
     span_id: "root-2",
     trace_id: "trace-b",
@@ -81,23 +39,12 @@ const mockSpans = [
     model: "",
     start_time: "2025-01-15T11:00:00Z",
     end_time: "2025-01-15T11:00:10Z",
-    cost_usd: 0.01,
-    input_tokens: 10,
-    output_tokens: 20,
-  },
-  {
-    span_id: "child-llm-3",
-    trace_id: "trace-b",
-    parent_id: "root-2",
-    project_id: "test-project",
-    name: "llm-call",
-    kind: "llm",
-    model: "gpt-4",
-    start_time: "2025-01-15T11:00:01Z",
-    end_time: "2025-01-15T11:00:09Z",
-    cost_usd: 0.01,
-    input_tokens: 10,
-    output_tokens: 20,
+    cost_usd: 0.02,
+    input_tokens: 20,
+    output_tokens: 40,
+    status_code: "OK",
+    span_count: 2,
+    kind_counts: { chain: 1, llm: 1 },
   },
   // Third trace with no children (leaf span)
   {
@@ -113,6 +60,9 @@ const mockSpans = [
     cost_usd: 0.005,
     input_tokens: 5,
     output_tokens: 10,
+    status_code: "OK",
+    span_count: 1,
+    kind_counts: { llm: 1 },
   },
 ];
 
@@ -151,61 +101,59 @@ describe("ObservationPills component", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders a single badge when one kind of child exists", async () => {
+  it("renders a badge for each kind in kind_counts", async () => {
     renderTracesPage();
 
     await waitFor(() => {
       expect(screen.getByText("main-trace")).toBeInTheDocument();
     });
 
-    // trace-a root span has 2 llm children + 1 tool child
-    // trace-b root span has 1 llm child
-    // trace-c root span has 0 children (leaf)
-    // The first root row should show LLM and TOOL badges
+    // trace-a's kind_counts is {chain: 1, llm: 2, tool: 1} — the LLM and
+    // TOOL badges should be present (CHA/LLM/TOO are the 3-char prefixes).
     const llmBadges = screen.getAllByText(/LLM/);
     expect(llmBadges.length).toBeGreaterThan(0);
   });
 
-  it("shows multiple badges for mixed child kinds", async () => {
+  it("shows multiple badges for mixed kind_counts", async () => {
     renderTracesPage();
 
     await waitFor(() => {
       expect(screen.getByText("main-trace")).toBeInTheDocument();
     });
 
-    // trace-a has 2 LLM + 1 tool children, so should show both
-    const allText = screen.queryAllByText(/LLM|TOOL/);
+    // trace-a has kind_counts {chain: 1, llm: 2, tool: 1} — both LLM and
+    // TOOL pills should render.
+    const allText = screen.queryAllByText(/LLM|TOO/);
     expect(allText.length).toBeGreaterThan(1);
   });
 
-  it("shows single badge when all children are same kind", async () => {
+  it("shows single badge when kind_counts has one llm entry", async () => {
     renderTracesPage();
 
     await waitFor(() => {
       expect(screen.getByText("simple-trace")).toBeInTheDocument();
     });
 
-    // trace-b has only 1 LLM child, so should show just one badge
+    // trace-b's kind_counts is {chain: 1, llm: 1} — should show "LLM 1".
     const llmBadges = screen.queryAllByText(/LLM 1/);
     expect(llmBadges.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("shows nothing when a trace has no children", async () => {
+  it("shows a badge for a single-span trace with kind_counts", async () => {
     renderTracesPage();
 
     await waitFor(() => {
       expect(screen.getByText("leaf-span")).toBeInTheDocument();
     });
 
-    // leaf-span has no children, so ObservationPills renders nothing
+    // trace-c's kind_counts is {llm: 1} — even a single-span trace
+    // (span_count: 1) shows its own kind as a badge.
     const leafRow = screen.getByText("leaf-span").closest("tr");
     expect(leafRow).toBeInTheDocument();
-
-    // The observation levels cell should be empty (no badge text)
     const leafRowCells = leafRow?.querySelectorAll("td");
     // observationLevels is the 6th column (0-indexed = 5)
     const levelsCell = leafRowCells?.[5];
-    expect(levelsCell?.textContent).toBe("");
+    expect(levelsCell?.textContent).toContain("LLM 1");
   });
 });
 
@@ -696,7 +644,7 @@ describe("search", () => {
         ok: true,
         json: () =>
           Promise.resolve({
-            spans: mockSpans.filter((s) => s.name.toLowerCase().includes("llm")),
+            spans: mockSpans.filter((s) => s.kind === "llm"),
             next: "",
             limit: 25,
           }),
@@ -715,9 +663,9 @@ describe("search", () => {
       fireEvent.change(searchInput, { target: { value: "llm" } });
     });
 
-    // Should show LLM results
+    // Should show the leaf-span trace (kind: "llm")
     await waitFor(() => {
-      expect(screen.getByText("llm-call-1")).toBeInTheDocument();
+      expect(screen.getByText("leaf-span")).toBeInTheDocument();
     });
 
     vi.restoreAllMocks();
@@ -733,11 +681,16 @@ describe("fetch correctness", () => {
 
   it("every fetch after applying a filter includes the new filter state (no stale-closure fetch)", async () => {
     const fetchBodies: string[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
-      if (init?.body) fetchBodies.push(String(init.body));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      // The Model filter's distinct-models lookup (/api/v1/analytics/spans)
+      // is a separate, independent fetch — exclude it from the spans/query
+      // stale-closure check below.
+      if (init?.body && !String(url).includes("/api/v1/analytics/spans")) {
+        fetchBodies.push(String(init.body));
+      }
       return {
         ok: true,
-        json: () => Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+        json: () => Promise.resolve({ spans: mockSpans, next: "", limit: 25, rows: [] }),
       } as Response;
     });
 
@@ -1184,6 +1137,139 @@ describe("filters", () => {
     expect(modelBody).toContain("gpt-4");
   });
 
+  it("shows checkboxes for distinct models in the project alongside free-text search", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (String(url).includes("/api/v1/analytics/spans")) {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              rows: [{ model: "gpt-4" }, { model: "claude-3" }, { model: "unknown" }],
+            }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: () => Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response;
+    });
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // Expand the Model filter section
+    const modelHeader = screen.getByText("Model");
+    await act(async () => {
+      fireEvent.click(modelHeader);
+    });
+
+    const modelBorderDiv = modelHeader.closest("div.border-b") as HTMLElement;
+    const expandedContent = modelBorderDiv.querySelector("div.px-3") as HTMLElement;
+    expect(expandedContent).toBeInTheDocument();
+
+    // The distinct models returned by the analytics endpoint should render
+    // as checkboxes within the Model filter section.
+    await waitFor(() => {
+      expect(expandedContent.querySelector('input[type="checkbox"]')).toBeInTheDocument();
+    });
+
+    expect(expandedContent.textContent).toContain("gpt-4");
+    expect(expandedContent.textContent).toContain("claude-3");
+    expect(expandedContent.textContent).toContain("unknown");
+
+    // Free-text search box must still be present alongside the checkboxes.
+    expect(expandedContent.querySelector('input[type="text"]')).toBeInTheDocument();
+  });
+
+  it("sends model filter as 'in' operator when a known-model checkbox is toggled, and merges with free-text entries", async () => {
+    const fetchBodies: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      if (String(url).includes("/api/v1/analytics/spans")) {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              rows: [{ model: "gpt-4" }, { model: "claude-3" }],
+            }),
+        } as Response;
+      }
+      if (init?.body) {
+        fetchBodies.push(String(init.body));
+      }
+      return {
+        ok: true,
+        json: () => Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response;
+    });
+
+    renderTracesPage();
+
+    await waitFor(
+      () => { expect(fetchBodies.length).toBeGreaterThanOrEqual(1); },
+      { timeout: 2000 }
+    );
+
+    // Expand the Model filter section
+    const modelHeader = screen.getByText("Model");
+    await act(async () => {
+      fireEvent.click(modelHeader);
+    });
+
+    const modelBorderDiv = modelHeader.closest("div.border-b") as HTMLElement;
+    const expandedContent = modelBorderDiv.querySelector("div.px-3") as HTMLElement;
+
+    await waitFor(() => {
+      expect(expandedContent.querySelector('input[type="checkbox"]')).toBeInTheDocument();
+    });
+
+    // Toggle the "claude-3" checkbox.
+    const checkboxes = Array.from(
+      expandedContent.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    );
+    const claudeCheckbox = checkboxes.find(
+      (cb) => cb.closest("label")?.textContent?.includes("claude-3"),
+    );
+    expect(claudeCheckbox).toBeDefined();
+    await act(async () => {
+      fireEvent.click(claudeCheckbox!);
+    });
+
+    await waitFor(
+      () => { expect(fetchBodies.length).toBeGreaterThanOrEqual(2); },
+      { timeout: 2000 }
+    );
+
+    let modelBody = fetchBodies.find((b) => b.includes('"model"') && b.includes('"in"'));
+    expect(modelBody).toBeDefined();
+    expect(modelBody).toContain("claude-3");
+
+    // Now also enter a free-text model not in the known list — it should be
+    // unioned with the already-checked "claude-3" rather than replacing it.
+    const modelInput = expandedContent.querySelector<HTMLInputElement>('input[type="text"]');
+    expect(modelInput).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.change(modelInput!, { target: { value: "custom-model" } });
+    });
+
+    const applyBtn = expandedContent.querySelector('button');
+    expect(applyBtn).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(applyBtn as HTMLButtonElement);
+    });
+
+    await waitFor(
+      () => { expect(fetchBodies.length).toBeGreaterThanOrEqual(3); },
+      { timeout: 2000 }
+    );
+
+    modelBody = fetchBodies[fetchBodies.length - 1];
+    expect(modelBody).toContain("claude-3");
+    expect(modelBody).toContain("custom-model");
+  });
+
   it("sends kind filter when kind checkboxes are selected", async () => {
     const fetchBodies: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
@@ -1351,6 +1437,131 @@ describe("filters", () => {
       () => { expect(fetchBodies.length).toBeGreaterThanOrEqual(3); },
       { timeout: 2000 }
     );
+  });
+});
+
+describe("filter panel styling (#142)", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: mockSpans,
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("uses the shared omneval @theme tokens for the sidebar surface and dividers", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Filters")).toBeInTheDocument();
+    });
+
+    // Sidebar surface + border use the shared @theme tokens, not raw colors.ts values.
+    const heading = screen.getByText("Filters");
+    const sidebar = heading.closest("div.flex.flex-col") as HTMLElement;
+    expect(sidebar.className).toContain("bg-omneval-depth");
+    expect(sidebar.className).toContain("border-omneval-border");
+
+    // Each FilterSection is a bordered row using the shared border token.
+    const sections = sidebar.querySelectorAll("div.border-b");
+    expect(sections.length).toBeGreaterThan(0);
+    sections.forEach((section) => {
+      expect(section.className).toContain("border-omneval-border");
+    });
+  });
+
+  it("renders custom-styled checkboxes with the violet accent in the Kind filter", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Filters")).toBeInTheDocument();
+    });
+
+    const kindHeader = screen.getByText("Kind");
+    await act(async () => {
+      fireEvent.click(kindHeader);
+    });
+
+    const kindBorderDiv = kindHeader.closest("div.border-b") as HTMLElement;
+    const expandedContent = kindBorderDiv.querySelector("div.px-3") as HTMLElement;
+    const checkbox = expandedContent.querySelector<HTMLInputElement>('input[type="checkbox"]');
+
+    expect(checkbox).toBeInTheDocument();
+    expect(checkbox!.className).toContain("accent-omneval-violet");
+    expect(checkbox!.className).toContain("border-omneval-border");
+
+    // The label row gets a subtle violet hover background.
+    const label = checkbox!.closest("label") as HTMLElement;
+    expect(label.className).toContain("bg-violet-hover");
+  });
+
+  it("renders Apply buttons (TextFilter, RangeFilter) with the violet accent", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Filters")).toBeInTheDocument();
+    });
+
+    // Model filter (TextFilter) — Apply button
+    const modelHeader = screen.getByText("Model");
+    await act(async () => {
+      fireEvent.click(modelHeader);
+    });
+    const modelBorderDiv = modelHeader.closest("div.border-b") as HTMLElement;
+    const modelExpanded = modelBorderDiv.querySelector("div.px-3") as HTMLElement;
+    const modelApplyBtn = modelExpanded.querySelector("button") as HTMLButtonElement;
+    expect(modelApplyBtn).toHaveTextContent("Apply");
+    expect(modelApplyBtn.style.background).toBe("var(--color-omneval-violet)");
+
+    // Duration filter (RangeFilter) — Apply button
+    const durationHeader = screen.getByText("Duration");
+    await act(async () => {
+      fireEvent.click(durationHeader);
+    });
+    const durationBorderDiv = durationHeader.closest("div.border-b") as HTMLElement;
+    const durationExpanded = durationBorderDiv.querySelector("div.px-3") as HTMLElement;
+    const durationApplyBtn = durationExpanded.querySelector("button") as HTMLButtonElement;
+    expect(durationApplyBtn).toHaveTextContent("Apply");
+    expect(durationApplyBtn.style.background).toBe("var(--color-omneval-violet)");
+  });
+
+  it("renders text and number filter inputs with consistent focus styling", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Filters")).toBeInTheDocument();
+    });
+
+    const modelHeader = screen.getByText("Model");
+    await act(async () => {
+      fireEvent.click(modelHeader);
+    });
+    const modelBorderDiv = modelHeader.closest("div.border-b") as HTMLElement;
+    const modelExpanded = modelBorderDiv.querySelector("div.px-3") as HTMLElement;
+    const modelInput = modelExpanded.querySelector<HTMLInputElement>('input[type="text"]');
+
+    expect(modelInput!.className).toContain("input-focus");
+    expect(modelInput!.className).toContain("border-omneval-border");
+    expect(modelInput!.className).toContain("bg-omneval-surface");
+  });
+
+  it("renders the Clear All Filters button using the shared secondary button style", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Filters")).toBeInTheDocument();
+    });
+
+    const clearBtn = screen.getByRole("button", { name: "Clear All Filters" });
+    expect(clearBtn.className).toContain("btn-secondary");
   });
 });
 

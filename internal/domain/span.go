@@ -51,6 +51,18 @@ type Span struct {
 	StatusCode    string `json:"status_code"`
 	StatusMessage string `json:"status_message"`
 
+	// SpanCount is the number of spans in this span's trace. Populated only
+	// on trace-rollup rows (the Traces list, LakeSQL) — zero for span-level
+	// reads such as trace detail.
+	SpanCount int64 `json:"span_count,omitempty"`
+
+	// KindCounts maps each observation kind (e.g. "llm", "tool", "agent",
+	// "chain") present in this span's trace to the number of spans of that
+	// kind. Populated only on trace-rollup rows (the Traces list, LakeSQL) —
+	// nil for span-level reads such as trace detail. Drives the Traces list
+	// "Levels" column (observation pills) without requiring a flat span list.
+	KindCounts map[string]int64 `json:"kind_counts,omitempty"`
+
 	// Overflow bucket for all other OTel attributes.
 	Attributes map[string]any `json:"attributes"`
 
@@ -75,6 +87,11 @@ type TraceResponse struct {
 	ProjectID string  `json:"project_id"`
 	RootSpan  *Span   `json:"root_span"`
 	Spans     []*Span `json:"spans"`
+
+	// Trace-level rollups computed across all spans in the trace (see #137).
+	TotalInputTokens  int64   `json:"total_input_tokens"`
+	TotalOutputTokens int64   `json:"total_output_tokens"`
+	TotalCostUSD      float64 `json:"total_cost_usd"`
 }
 
 // Score is an evaluation result attached to a span (used by eval pipeline).

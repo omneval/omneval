@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { colors } from "@/theme";
 import { OnboardingEmptyState } from "@/components/OnboardingEmptyState";
 import { Skeleton } from "@/components/Skeleton";
@@ -42,6 +42,11 @@ interface Span {
   output?: string;
   status_code?: string;
   attributes?: Record<string, unknown>;
+  /** Number of spans in this trace (root span + rollups, issue #136). */
+  span_count?: number;
+  /** Per-kind span counts across the trace (e.g. {"llm": 2, "tool": 1}),
+   *  used to render the Levels column without a flat span list. */
+  kind_counts?: Record<string, number>;
 }
 
 interface SpanQueryResponse {
@@ -92,18 +97,11 @@ interface ConversationListResponse {
 // ── Observation Level Pills ────────────────────────────────────────
 
 interface ObservationPillsProps {
-  childSpans: Span[];
+  kindCounts?: Record<string, number>;
 }
 
-function ObservationPills({ childSpans }: ObservationPillsProps) {
-  if (childSpans.length === 0) return null;
-
-  // Aggregate child counts by kind.
-  const kindCounts: Record<string, number> = {};
-  childSpans.forEach((span) => {
-    const kind = span.kind ?? "span";
-    kindCounts[kind] = (kindCounts[kind] ?? 0) + 1;
-  });
+function ObservationPills({ kindCounts }: ObservationPillsProps) {
+  if (!kindCounts || Object.keys(kindCounts).length === 0) return null;
 
   return (
     <div className="flex items-center gap-1 flex-wrap">
@@ -290,15 +288,15 @@ function TextFilter({
         value={input}
         onChange={(e) => setInput(e.target.value)}
         placeholder={placeholder ?? "Enter values…"}
-        className="input-focus w-full text-sm px-2 py-1.5 rounded border border-omneval-border bg-omneval-surface text-omneval-text-pure placeholder-omneval-text-muted"
+        className="input-focus w-full text-sm px-2.5 py-1.5 rounded-md border border-omneval-border bg-omneval-surface text-omneval-text-pure placeholder-omneval-text-muted"
       />
       <button
         type="button"
         onClick={handleApply}
-        className="text-xs px-2 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
+        className="text-xs px-2.5 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
         style={{
-          background: colors.accents.emberFlare,
-          boxShadow: "0 1px 4px rgba(124, 58, 237, 0.25)",
+          background: "var(--color-omneval-violet)",
+          boxShadow: "0 1px 4px var(--omneval-focus-ring)",
         }}
       >
         Apply
@@ -307,14 +305,90 @@ function TextFilter({
   );
 }
 
+// ── ModelFilter: known-model checkboxes + free-text search ───────
+//
+// Combines a checkbox list of the distinct models seen in the current
+// project/time range (fetched via the Analytics DSL) with the existing
+// free-text search box, so users can quickly toggle known models on/off
+// while still being able to type a model that hasn't been seen yet.
+
+function ModelFilter({
+  value,
+  onApply,
+  activeProject,
+  timeRange,
+}: {
+  value: string[];
+  onApply: (vals: string[]) => void;
+  activeProject: string;
+  timeRange?: string;
+}) {
+  const [knownModels, setKnownModels] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchDistinctModels() {
+      try {
+        const { from, to } = presetToFromTo(timeRange);
+        const res = await fetch("/api/v1/analytics/spans", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: activeProject,
+            from,
+            to,
+            group_by: [{ field: "model" }],
+          }),
+        });
+        if (!res.ok) return;
+        const data: { rows?: Array<{ model?: string }> } = await res.json();
+        if (cancelled) return;
+        const models = (data.rows ?? [])
+          .map((row) => row.model)
+          .filter((m): m is string => !!m);
+        setKnownModels(models);
+      } catch {
+        // Network error — leave knownModels empty; free-text search still works.
+      }
+    }
+
+    fetchDistinctModels();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProject, timeRange]);
+
+  return (
+    <div className="space-y-3">
+      {knownModels.length > 0 && (
+        <CheckboxFilter options={knownModels} value={value} onApply={onApply} />
+      )}
+      <TextFilter
+        value={value}
+        onApply={(vals) => {
+          // Merge free-text entries with any currently-checked known models,
+          // deduping so the same model isn't listed twice.
+          const merged = Array.from(new Set([...value.filter((v) => knownModels.includes(v)), ...vals]));
+          onApply(merged);
+        }}
+        placeholder="e.g. gpt-4, claude-3…"
+      />
+    </div>
+  );
+}
+
 // ── CheckboxFilter: multi-select checkboxes ──────────────────────
 
 function CheckboxFilter({
   options,
+  labels,
   value,
   onApply,
 }: {
   options: string[];
+  /** Optional display-label overrides, keyed by option value. */
+  labels?: Record<string, string>;
   value: string[];
   onApply: (vals: string[]) => void;
 }) {
@@ -326,20 +400,20 @@ function CheckboxFilter({
   };
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       {options.map((option) => (
         <label
           key={option}
-          className="flex items-center gap-2 text-sm text-omneval-text-muted hover:text-omneval-text-pure cursor-pointer"
+          className="flex items-center gap-2.5 text-sm text-omneval-text-muted hover:text-omneval-text-pure cursor-pointer rounded-md px-1.5 py-1 -mx-1.5 transition-colors bg-violet-hover"
         >
           <input
             type="checkbox"
             checked={value.includes(option)}
             onChange={() => toggle(option)}
-            className="rounded"
-            style={{ accentColor: colors.accents.emberFlare }}
+            className="h-3.5 w-3.5 rounded border border-omneval-border bg-omneval-surface accent-omneval-violet cursor-pointer"
+            style={{ accentColor: "var(--color-omneval-violet)" }}
           />
-          <span className="capitalize">{option}</span>
+          <span className="capitalize">{labels?.[option] ?? option}</span>
         </label>
       ))}
     </div>
@@ -377,7 +451,7 @@ function RangeFilterField({
   const handleMax = makeRangeHandler("max", onApply, value);
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2.5">
       <div className="flex items-center gap-2">
         <div className="flex-1">
           <span className="text-xs text-omneval-text-muted mb-1 block">{minLabel}</span>
@@ -387,7 +461,7 @@ function RangeFilterField({
             onChange={handleMin}
             placeholder={placeholder}
             min={0}
-            className="input-focus w-full text-sm px-2 py-1.5 rounded border border-omneval-border bg-omneval-surface text-omneval-text-pure placeholder-omneval-text-muted"
+            className="input-focus w-full text-sm px-2.5 py-1.5 rounded-md border border-omneval-border bg-omneval-surface text-omneval-text-pure placeholder-omneval-text-muted"
           />
         </div>
         <span className="text-omneval-text-muted pt-5">—</span>
@@ -399,17 +473,17 @@ function RangeFilterField({
             onChange={handleMax}
             placeholder={placeholder}
             min={0}
-            className="input-focus w-full text-sm px-2 py-1.5 rounded border border-omneval-border bg-omneval-surface text-omneval-text-pure placeholder-omneval-text-muted"
+            className="input-focus w-full text-sm px-2.5 py-1.5 rounded-md border border-omneval-border bg-omneval-surface text-omneval-text-pure placeholder-omneval-text-muted"
           />
         </div>
       </div>
       <button
         type="button"
         onClick={() => onApply(value)}
-        className="text-xs px-2 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
+        className="text-xs px-2.5 py-1 rounded-md font-medium text-white transition-all duration-150 hover:brightness-110 active:brightness-90"
         style={{
-          background: colors.accents.emberFlare,
-          boxShadow: "0 1px 4px rgba(124, 58, 237, 0.25)",
+          background: "var(--color-omneval-violet)",
+          boxShadow: "0 1px 4px var(--omneval-focus-ring)",
         }}
       >
         Apply
@@ -427,6 +501,8 @@ function FilterSection({
   onToggle,
   onApply,
   value,
+  activeProject,
+  timeRange,
 }: {
   name: string;
   label: string;
@@ -434,47 +510,61 @@ function FilterSection({
   onToggle: () => void;
   onApply: (field: string, val: string[] | RangeFilter) => void;
   value: string[] | RangeFilter;
+  activeProject: string;
+  timeRange?: string;
 }) {
   const isRange = isRangeFilter(value);
 
   return (
-    <div
-      className="border-b"
-      style={{ borderColor: colors.backgrounds.caveWall }}
-    >
+    <div className="border-b border-omneval-border">
       <button
         onClick={onToggle}
-        className="flex items-center justify-between w-full px-3 py-2 text-sm font-medium text-omneval-text-pure hover:bg-omneval-violet-hover transition-colors"
+        className="flex items-center justify-between w-full px-3 py-2.5 text-sm font-medium text-omneval-text-pure hover:bg-omneval-violet-hover transition-colors"
       >
         <span>{label}</span>
-        {isRange && (
-          <span className="text-xs text-omneval-text-muted font-normal ml-2">
-            {formatRange(value.min, value.max)}
-          </span>
-        )}
-        {!isRange && Array.isArray(value) && value.length > 0 && (
-          <span className="text-xs text-omneval-text-muted font-normal ml-2">
-            {value.length} selected
-          </span>
-        )}
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          fill="none"
-          className={`transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
-        >
-          <path d="M4.5 3l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <span className="flex items-center gap-2 ml-2">
+          {isRange && (
+            <span className="text-xs text-omneval-text-muted font-normal">
+              {formatRange(value.min, value.max)}
+            </span>
+          )}
+          {!isRange && Array.isArray(value) && value.length > 0 && (
+            <span
+              className="text-xs font-medium px-1.5 py-0.5 rounded-full"
+              style={{
+                color: "var(--color-omneval-violet-pale)",
+                background: "var(--omneval-violet-hover-strong)",
+              }}
+            >
+              {value.length} selected
+            </span>
+          )}
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            fill="none"
+            className={`text-omneval-text-muted transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
+          >
+            <path d="M4.5 3l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
       </button>
 
       {expanded && (
-        <div className="px-3 pb-3">
-          {name === "trace_name" || name === "model" ? (
+        <div className="px-3 pb-3 pt-1">
+          {name === "model" ? (
+            <ModelFilter
+              value={Array.isArray(value) ? value : []}
+              onApply={(vals) => onApply(name, vals)}
+              activeProject={activeProject}
+              timeRange={timeRange}
+            />
+          ) : name === "trace_name" ? (
             <TextFilter
               value={Array.isArray(value) ? value : []}
               onApply={(vals) => onApply(name, vals)}
-              placeholder={name === "model" ? "e.g. gpt-4, claude-3…" : "Search trace names…"}
+              placeholder="Search trace names…"
             />
           ) : name === "kind" ? (
             <CheckboxFilter
@@ -484,7 +574,8 @@ function FilterSection({
             />
           ) : name === "status" ? (
             <CheckboxFilter
-              options={["OK", "ERROR"]}
+              options={["OK", "ERROR", "UNSET"]}
+              labels={{ UNSET: "Unset" }}
               value={Array.isArray(value) ? value : []}
               onApply={(vals) => onApply(name, vals)}
             />
@@ -515,7 +606,6 @@ function formatRange(min: number | "", max: number | ""): string {
 interface TableCellRendererProps {
   col: { key: string; label: string };
   span: Span;
-  childSpans: Span[];
   bookmarks: Set<string>;
   onToggleBookmark: (traceId: string) => void;
   onNavigateToTrace: (traceId: string) => void;
@@ -525,7 +615,6 @@ interface TableCellRendererProps {
 function TableCellRenderer({
   col,
   span,
-  childSpans,
   bookmarks,
   onToggleBookmark,
   onNavigateToTrace,
@@ -576,7 +665,7 @@ function TableCellRenderer({
         </div>
       );
     case "observationLevels":
-      return <ObservationPills key={col.key} childSpans={childSpans} />;
+      return <ObservationPills key={col.key} kindCounts={span.kind_counts} />;
     case "latency":
       return (
         <span key={col.key} className="text-omneval-text-muted">
@@ -880,27 +969,14 @@ export default function TracesPage({
     }));
   };
 
-  // Reconstruct parent-child relationships from the flat span list.
-  const traceGroups = useMemo<Record<string, Span[]>>(() => {
-    const groups: Record<string, Span[]> = {};
-    spans.forEach((span) => (groups[span.trace_id] ??= []).push(span));
-    return groups;
-  }, [spans]);
-
   const visibleColumns = columns.filter((c) => c.visible);
 
   return (
     <div className="flex h-full" style={{ background: colors.backgrounds.abyssBlack }}>
       {/* ── Filter Sidebar ── */}
-      <div
-        className="flex flex-col w-64 border-r overflow-y-auto"
-        style={{
-          background: colors.backgrounds.charcoalDepth,
-          borderColor: colors.backgrounds.caveWall,
-        }}
-      >
-        <div className="px-3 py-3 border-b" style={{ borderColor: colors.backgrounds.caveWall }}>
-          <h3 className="text-sm font-medium text-omneval-text-pure">Filters</h3>
+      <div className="flex flex-col w-64 border-r border-omneval-border bg-omneval-depth overflow-y-auto">
+        <div className="px-3 py-3 border-b border-omneval-border">
+          <h3 className="text-sm font-semibold tracking-wide text-omneval-text-pure uppercase">Filters</h3>
         </div>
         <div className="flex-1 py-1">
           {FILTER_SECTIONS.map((section) => (
@@ -912,28 +988,18 @@ export default function TracesPage({
               onToggle={() => toggleFilter(section)}
               onApply={(field, vals) => applyFilter(field, vals)}
               value={filterState[section] ?? []}
+              activeProject={activeProject}
+              timeRange={timeRange}
             />
           ))}
         </div>
-        <div className="px-3 py-2 border-t" style={{ borderColor: colors.backgrounds.caveWall }}>
+        <div className="px-3 py-3 border-t border-omneval-border">
           <button
             onClick={() => {
               setFilterState(DEFAULT_FILTERS);
               setExpandedFilters({ trace_name: true });
             }}
-            className="w-full text-center text-sm py-1.5 rounded transition-colors"
-            style={{
-              border: `1px solid ${colors.backgrounds.caveWall}`,
-              color: colors.typography.ashGrey,
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.borderColor = colors.accents.emberFlare;
-              (e.currentTarget as HTMLElement).style.color = colors.accents.emberFlare;
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.borderColor = colors.backgrounds.caveWall;
-              (e.currentTarget as HTMLElement).style.color = colors.typography.ashGrey;
-            }}
+            className="btn-secondary w-full text-center text-sm"
           >
             Clear All Filters
           </button>
@@ -1134,41 +1200,35 @@ export default function TracesPage({
                 </tr>
               </thead>
               <tbody>
-                {spans.map((span) => {
-                  const childSpans = (
-                    traceGroups[span.trace_id] ?? []
-                  ).filter((s) => s.parent_id === span.span_id);
-                  return (
-                    <tr
-                      key={span.span_id}
-                      className="cursor-pointer transition-colors duration-150"
-                      style={{
-                        borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
-                      }}
-                      onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLElement).style.background =
-                          "rgba(124, 58, 237, 0.12)";
-                      }}
-                      onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLElement).style.background = "transparent";
-                      }}
-                    >
-                      {visibleColumns.map((col) => (
-                        <td key={col.key} className="px-3 py-2.5 whitespace-nowrap">
-                          <TableCellRenderer
-                            col={col}
-                            span={span}
-                            childSpans={childSpans}
-                            bookmarks={bookmarks}
-                            onToggleBookmark={toggleBookmark}
-                            onNavigateToTrace={onNavigateToTrace}
-                            onNavigateToTraceDetail={onNavigateToTraceDetail}
-                          />
-                        </td>
-                      ))}
-                    </tr>
-                  );
-                })}
+                {spans.map((span) => (
+                  <tr
+                    key={span.span_id}
+                    className="cursor-pointer transition-colors duration-150"
+                    style={{
+                      borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLElement).style.background =
+                        "rgba(124, 58, 237, 0.12)";
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLElement).style.background = "transparent";
+                    }}
+                  >
+                    {visibleColumns.map((col) => (
+                      <td key={col.key} className="px-3 py-2.5 whitespace-nowrap">
+                        <TableCellRenderer
+                          col={col}
+                          span={span}
+                          bookmarks={bookmarks}
+                          onToggleBookmark={toggleBookmark}
+                          onNavigateToTrace={onNavigateToTrace}
+                          onNavigateToTraceDetail={onNavigateToTraceDetail}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
               </tbody>
             </table>
           )}

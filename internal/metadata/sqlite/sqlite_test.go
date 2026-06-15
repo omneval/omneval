@@ -271,6 +271,37 @@ func TestAPIKey_CreateAndGetByHash(t *testing.T) {
 	}
 }
 
+// TestAPIKey_NameRoundTrip verifies that the optional display name (#143)
+// is persisted and returned by both GetAPIKeyByHash and ListAPIKeys.
+func TestAPIKey_NameRoundTrip(t *testing.T) {
+	s, _ := openTestStore(t)
+	defer s.Close()
+
+	s.CreateOrganization(context.Background(), &domain.Organization{OrgID: "org-1", Name: "Test Corp"})
+	s.CreateProject(context.Background(), &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1"})
+
+	key := &domain.APIKey{KeyID: "key-1", ProjectID: "proj-1", Kind: domain.APIKeyKindProject, Name: "CI ingest", HashedKey: "sha256hash"}
+	if err := s.CreateAPIKey(context.Background(), key); err != nil {
+		t.Fatalf("create api key: %v", err)
+	}
+
+	got, err := s.GetAPIKeyByHash(context.Background(), "sha256hash")
+	if err != nil {
+		t.Fatalf("get api key by hash: %v", err)
+	}
+	if got.Name != "CI ingest" {
+		t.Errorf("name: got %q, want %q", got.Name, "CI ingest")
+	}
+
+	keys, err := s.ListAPIKeys(context.Background(), "proj-1")
+	if err != nil {
+		t.Fatalf("list api keys: %v", err)
+	}
+	if len(keys) != 1 || keys[0].Name != "CI ingest" {
+		t.Errorf("listed key name: got %v", keys)
+	}
+}
+
 func TestAPIKey_Revoke(t *testing.T) {
 	s, _ := openTestStore(t)
 	defer s.Close()

@@ -219,6 +219,75 @@ describe("waterfall view renders with loaded trace data", () => {
   });
 });
 
+// ── Header pill token rollup (#137) ──────────────────────────────
+
+describe("header pill token rollup", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows the trace-level token rollup, not just the root span's own tokens", async () => {
+    // The root span (an orchestration span) has 0 tokens of its own; the
+    // actual usage lives on descendant llm spans. The API response carries
+    // a precomputed trace-level rollup.
+    const tracePayload = {
+      trace_id: "rollup-trace",
+      project_id: "test-project",
+      total_input_tokens: 35000,
+      total_output_tokens: 11795,
+      total_cost_usd: 0.6,
+      root_span: {
+        span_id: "root-span",
+        trace_id: "rollup-trace",
+        parent_id: "",
+        project_id: "test-project",
+        name: "conversation",
+        kind: "chain",
+        start_time: "2025-01-15T10:00:00Z",
+        end_time: "2025-01-15T10:00:30Z",
+        cost_usd: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        children: [
+          {
+            span_id: "llm-span-1",
+            trace_id: "rollup-trace",
+            parent_id: "root-span",
+            project_id: "test-project",
+            name: "litellm.completion",
+            kind: "llm",
+            model: "gpt-4",
+            start_time: "2025-01-15T10:00:01Z",
+            end_time: "2025-01-15T10:00:10Z",
+            cost_usd: 0.6,
+            input_tokens: 35000,
+            output_tokens: 11795,
+          },
+        ],
+      },
+    };
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(tracePayload),
+    } as Response);
+
+    renderWithProvider(
+      <TraceDetailPage
+        traceId="rollup-trace"
+        activeProject="test-project"
+        onBack={() => {}}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText("conversation").length).toBeGreaterThan(0);
+    });
+
+    expect(screen.getByText("46,795 tokens")).toBeInTheDocument();
+  });
+});
+
 describe("tree view renders with loaded trace data", () => {
   beforeEach(() => {
     mockFetchSuccess();
@@ -494,5 +563,163 @@ describe("hook ordering with loaded data", () => {
 
     expect(found).toBeNull();
     restore();
+  });
+});
+
+describe("tool/action span details in tree view", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const toolTraceData = {
+    trace_id: "tool-trace-123",
+    project_id: "test-project",
+    root_span: {
+      span_id: "root-span",
+      trace_id: "tool-trace-123",
+      parent_id: "",
+      project_id: "test-project",
+      name: "agent.step",
+      kind: "agent",
+      start_time: "2025-01-15T10:00:00Z",
+      end_time: "2025-01-15T10:00:30Z",
+      cost_usd: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      children: [
+        {
+          span_id: "terminal-span",
+          trace_id: "tool-trace-123",
+          parent_id: "root-span",
+          project_id: "test-project",
+          name: "TerminalAction",
+          kind: "tool",
+          start_time: "2025-01-15T10:00:01Z",
+          end_time: "2025-01-15T10:00:05Z",
+          cost_usd: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          input: JSON.stringify({ command: "npm test" }),
+          output: JSON.stringify({ output: "All 44 tests passed", exit_code: 0 }),
+        },
+        {
+          span_id: "fileeditor-span",
+          trace_id: "tool-trace-123",
+          parent_id: "root-span",
+          project_id: "test-project",
+          name: "FileEditorAction",
+          kind: "tool",
+          start_time: "2025-01-15T10:00:06Z",
+          end_time: "2025-01-15T10:00:08Z",
+          cost_usd: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          input: JSON.stringify({ path: "/src/utils/formatters.ts", diff: "+export function getToolSummary() {}" }),
+          output: JSON.stringify({ status: "ok" }),
+        },
+        {
+          span_id: "generic-span",
+          trace_id: "tool-trace-123",
+          parent_id: "root-span",
+          project_id: "test-project",
+          name: "InvokeSkillAction",
+          kind: "tool",
+          start_time: "2025-01-15T10:00:09Z",
+          end_time: "2025-01-15T10:00:10Z",
+          cost_usd: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          input: JSON.stringify({ skill: "diagnose", args: { issue: "flaky test" } }),
+        },
+      ],
+    },
+  };
+
+  function mockToolFetchSuccess() {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(toolTraceData),
+    } as Response);
+  }
+
+  it("shows a TerminalAction command summary inline in the tree row", async () => {
+    mockToolFetchSuccess();
+
+    renderWithProvider(
+      <TraceDetailPage
+        traceId="tool-trace-123"
+        activeProject="test-project"
+        onBack={() => {}}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText("agent.step").length).toBeGreaterThan(0);
+    });
+
+    const treeTab = screen.getByText("Tree");
+    await act(async () => {
+      fireEvent.click(treeTab);
+    });
+
+    expect(screen.getByText("TerminalAction")).toBeInTheDocument();
+    expect(screen.getByText(/npm test/)).toBeInTheDocument();
+  });
+
+  it("shows the FileEditorAction file path inline and diff in expanded detail", async () => {
+    mockToolFetchSuccess();
+
+    renderWithProvider(
+      <TraceDetailPage
+        traceId="tool-trace-123"
+        activeProject="test-project"
+        onBack={() => {}}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText("agent.step").length).toBeGreaterThan(0);
+    });
+
+    const treeTab = screen.getByText("Tree");
+    await act(async () => {
+      fireEvent.click(treeTab);
+    });
+
+    expect(screen.getByText("FileEditorAction")).toBeInTheDocument();
+    expect(screen.getByText(/\/src\/utils\/formatters\.ts/)).toBeInTheDocument();
+
+    // Expand the FileEditorAction row to reveal the diff detail
+    const showDetailButtons = screen.getAllByLabelText("Show details");
+    // root, terminal, fileeditor, generic — fileeditor is index 2
+    await act(async () => {
+      fireEvent.click(showDetailButtons[2]);
+    });
+
+    expect(screen.getAllByText(/getToolSummary/).length).toBeGreaterThan(0);
+  });
+
+  it("falls back to a generic JSON preview for unrecognized action input", async () => {
+    mockToolFetchSuccess();
+
+    renderWithProvider(
+      <TraceDetailPage
+        traceId="tool-trace-123"
+        activeProject="test-project"
+        onBack={() => {}}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText("agent.step").length).toBeGreaterThan(0);
+    });
+
+    const treeTab = screen.getByText("Tree");
+    await act(async () => {
+      fireEvent.click(treeTab);
+    });
+
+    expect(screen.getByText("InvokeSkillAction")).toBeInTheDocument();
+    expect(screen.getByText(/diagnose/)).toBeInTheDocument();
   });
 });

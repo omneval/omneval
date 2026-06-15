@@ -242,6 +242,101 @@ describe("SettingsPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows an optional name input for project key generation (#143)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveKeys([]));
+
+    renderWithToast(<SettingsPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("+ New Project Key")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("+ New Project Key"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByPlaceholderText("e.g. CI ingest, local dev")
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("sends the supplied name when generating a project key (#143)", async () => {
+    let callCount = 0;
+    let postBody: Record<string, unknown> | null = null;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve(resolveKeys([]));
+      }
+      postBody = JSON.parse((init?.body as string) ?? "{}");
+      return Promise.resolve({
+        ok: true,
+        status: 201,
+        json: () =>
+          Promise.resolve({
+            key_id: "key-123",
+            project_id: "proj-1",
+            kind: "project",
+            name: "CI ingest",
+            raw_key: "oev_proj_abc",
+            created_at: new Date().toISOString(),
+          }),
+      } as Response);
+    });
+
+    renderWithToast(<SettingsPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("+ New Project Key")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("+ New Project Key"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByPlaceholderText("e.g. CI ingest, local dev")
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. CI ingest, local dev"), {
+      target: { value: "CI ingest" },
+    });
+
+    fireEvent.click(screen.getByText("Generate Key"));
+
+    await waitFor(() => {
+      expect(postBody).toEqual({ kind: "project", name: "CI ingest" });
+    });
+  });
+
+  it("shows the user-supplied name for a project key, falling back to a truncated key ID when unnamed (#143)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      resolveKeys([
+        {
+          key_id: "oev_proj_named1234",
+          kind: "project",
+          name: "CI ingest",
+          created_at: "2026-05-13T10:00:00Z",
+        },
+        {
+          key_id: "oev_proj_unnamed5678",
+          kind: "project",
+          created_at: "2026-05-13T10:00:00Z",
+        },
+      ])
+    );
+
+    renderWithToast(<SettingsPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("CI ingest")).toBeInTheDocument();
+      // Unnamed key falls back to a label derived from the key ID, not the
+      // generic "Project Key" string.
+      expect(screen.getByText(/Project Key \(\.\.\.5678\)/)).toBeInTheDocument();
+    });
+  });
+
   it("closes dialog when clicking Cancel", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveKeys([]));
 

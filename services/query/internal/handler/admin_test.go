@@ -334,6 +334,56 @@ func TestAdminHandler_APIKeysList_ReturnsAllOrgKeys(t *testing.T) {
 	}
 }
 
+// TestAdminHandler_APIKeysList_IncludesNameWithFallback verifies that the
+// admin API keys endpoint includes a non-empty "name" for every key (#143):
+// the user-supplied name when set, and a derived fallback (never the
+// generic "Project Key" / "Service Key" label) when not.
+func TestAdminHandler_APIKeysList_IncludesNameWithFallback(t *testing.T) {
+	db := setupTestDB(t)
+
+	store := newFakeAdminStore()
+	now := time.Now().UTC()
+	store.keys = []*domain.APIKey{
+		{KeyID: "key-1", ProjectID: "proj-1", Kind: domain.APIKeyKindProject, Name: "CI ingest", CreatedAt: now},
+		{KeyID: "key-2", ProjectID: "proj-1", Kind: domain.APIKeyKindProject, CreatedAt: now},
+	}
+
+	handler := &AdminHandler{
+		DB:    db,
+		Store: store,
+		SessionStore: &FakeSessionStore{
+			userProjects: []*domain.Project{
+				{ProjectID: "proj-1"},
+			},
+		},
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/api-keys", nil)
+	req = withAdminContext(req, "admin@test.com")
+
+	w := httptest.NewRecorder()
+	handler.HandleAdminAPIKeysList(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var keys []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &keys); err != nil {
+		t.Fatalf("decode response: %v (body: %q)", err, w.Body.String())
+	}
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 keys, got %d: %v", len(keys), keys)
+	}
+	if keys[0]["name"] != "CI ingest" {
+		t.Errorf("named key: got name %v, want %q", keys[0]["name"], "CI ingest")
+	}
+	name, _ := keys[1]["name"].(string)
+	if name == "" || name == "Project Key" {
+		t.Errorf("unnamed key fallback name: got %q, want a non-empty derived label", name)
+	}
+}
+
 // TestAdminHandler_APIKeysList_EmptyWhenNoKeys verifies the admin endpoint
 // returns an empty array (not null/error) when there are no keys.
 func TestAdminHandler_APIKeysList_EmptyWhenNoKeys(t *testing.T) {
