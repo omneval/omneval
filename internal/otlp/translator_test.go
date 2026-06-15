@@ -284,6 +284,137 @@ func TestTranslate_KindDerivation_ExplicitOmnevalKind(t *testing.T) {
 	}
 }
 
+func TestTranslate_KindDerivation_OpenInferenceAgent(t *testing.T) {
+	rss := []ResourceSpans{
+		{
+			Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+			Spans: []*Span{{
+				SpanID:     "0123456789abcdef",
+				TraceID:    "0123456789abcdef0123456789abcdef",
+				Name:       "agent.step",
+				StartTime:  time.Now(),
+				EndTime:    time.Now(),
+				Attributes: map[string]any{"openinference.span.kind": "AGENT"},
+			}},
+		},
+	}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+
+	if spans[0].Kind != domain.SpanKindAgent {
+		t.Errorf("kind: got %q, want %q", spans[0].Kind, domain.SpanKindAgent)
+	}
+}
+
+func TestTranslate_KindDerivation_OpenInferenceChainAndRetriever(t *testing.T) {
+	tests := []struct {
+		oiKind string
+		want   domain.SpanKind
+	}{
+		{"CHAIN", domain.SpanKindChain},
+		{"RETRIEVER", domain.SpanKindChain},
+		{"EMBEDDING", domain.SpanKindChain},
+		{"RERANKER", domain.SpanKindChain},
+		{"GUARDRAIL", domain.SpanKindChain},
+		{"TOOL", domain.SpanKindTool},
+		{"LLM", domain.SpanKindLLM},
+	}
+
+	for _, tc := range tests {
+		rss := []ResourceSpans{
+			{
+				Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+				Spans: []*Span{{
+					SpanID:     "0123456789abcdef",
+					TraceID:    "0123456789abcdef0123456789abcdef",
+					Name:       "some-span",
+					StartTime:  time.Now(),
+					EndTime:    time.Now(),
+					Attributes: map[string]any{"openinference.span.kind": tc.oiKind},
+				}},
+			},
+		}
+
+		spans := translateTest(t, "proj-1", rss, Options{})
+
+		if spans[0].Kind != tc.want {
+			t.Errorf("openinference.span.kind=%q: kind got %q, want %q", tc.oiKind, spans[0].Kind, tc.want)
+		}
+	}
+}
+
+func TestTranslate_KindDerivation_GenAIOperationName(t *testing.T) {
+	tests := []struct {
+		operation string
+		want      domain.SpanKind
+	}{
+		{"invoke_agent", domain.SpanKindAgent},
+		{"create_agent", domain.SpanKindAgent},
+		{"execute_tool", domain.SpanKindTool},
+		{"chat", domain.SpanKindLLM},
+		{"text_completion", domain.SpanKindLLM},
+	}
+
+	for _, tc := range tests {
+		rss := []ResourceSpans{
+			{
+				Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+				Spans: []*Span{{
+					SpanID:     "0123456789abcdef",
+					TraceID:    "0123456789abcdef0123456789abcdef",
+					Name:       "some-span",
+					StartTime:  time.Now(),
+					EndTime:    time.Now(),
+					Attributes: map[string]any{"gen_ai.operation.name": tc.operation},
+				}},
+			},
+		}
+
+		spans := translateTest(t, "proj-1", rss, Options{})
+
+		if spans[0].Kind != tc.want {
+			t.Errorf("gen_ai.operation.name=%q: kind got %q, want %q", tc.operation, spans[0].Kind, tc.want)
+		}
+	}
+}
+
+func TestTranslate_KindDerivation_NameHeuristics(t *testing.T) {
+	tests := []struct {
+		name string
+		want domain.SpanKind
+	}{
+		{"agent.step", domain.SpanKindAgent},
+		{"planner.agent.step", domain.SpanKindAgent},
+		{"TerminalAction", domain.SpanKindTool},
+		{"FileEditorAction", domain.SpanKindTool},
+		{"InvokeSkillAction", domain.SpanKindTool},
+		{"search_tool_call", domain.SpanKindTool},
+		{"ThinkAction", domain.SpanKindTool},
+	}
+
+	for _, tc := range tests {
+		rss := []ResourceSpans{
+			{
+				Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+				Spans: []*Span{{
+					SpanID:     "0123456789abcdef",
+					TraceID:    "0123456789abcdef0123456789abcdef",
+					Name:       tc.name,
+					StartTime:  time.Now(),
+					EndTime:    time.Now(),
+					Attributes: map[string]any{},
+				}},
+			},
+		}
+
+		spans := translateTest(t, "proj-1", rss, Options{})
+
+		if spans[0].Kind != tc.want {
+			t.Errorf("name=%q: kind got %q, want %q", tc.name, spans[0].Kind, tc.want)
+		}
+	}
+}
+
 func TestTranslate_KindDerivation_DefaultInternal(t *testing.T) {
 	rss := []ResourceSpans{
 		{
