@@ -1354,3 +1354,128 @@ describe("filters", () => {
   });
 });
 
+describe("filter panel styling (#142)", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: mockSpans,
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("uses the shared omneval @theme tokens for the sidebar surface and dividers", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Filters")).toBeInTheDocument();
+    });
+
+    // Sidebar surface + border use the shared @theme tokens, not raw colors.ts values.
+    const heading = screen.getByText("Filters");
+    const sidebar = heading.closest("div.flex.flex-col") as HTMLElement;
+    expect(sidebar.className).toContain("bg-omneval-depth");
+    expect(sidebar.className).toContain("border-omneval-border");
+
+    // Each FilterSection is a bordered row using the shared border token.
+    const sections = sidebar.querySelectorAll("div.border-b");
+    expect(sections.length).toBeGreaterThan(0);
+    sections.forEach((section) => {
+      expect(section.className).toContain("border-omneval-border");
+    });
+  });
+
+  it("renders custom-styled checkboxes with the violet accent in the Kind filter", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Filters")).toBeInTheDocument();
+    });
+
+    const kindHeader = screen.getByText("Kind");
+    await act(async () => {
+      fireEvent.click(kindHeader);
+    });
+
+    const kindBorderDiv = kindHeader.closest("div.border-b") as HTMLElement;
+    const expandedContent = kindBorderDiv.querySelector("div.px-3") as HTMLElement;
+    const checkbox = expandedContent.querySelector<HTMLInputElement>('input[type="checkbox"]');
+
+    expect(checkbox).toBeInTheDocument();
+    expect(checkbox!.className).toContain("accent-omneval-violet");
+    expect(checkbox!.className).toContain("border-omneval-border");
+
+    // The label row gets a subtle violet hover background.
+    const label = checkbox!.closest("label") as HTMLElement;
+    expect(label.className).toContain("bg-violet-hover");
+  });
+
+  it("renders Apply buttons (TextFilter, RangeFilter) with the violet accent", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Filters")).toBeInTheDocument();
+    });
+
+    // Model filter (TextFilter) — Apply button
+    const modelHeader = screen.getByText("Model");
+    await act(async () => {
+      fireEvent.click(modelHeader);
+    });
+    const modelBorderDiv = modelHeader.closest("div.border-b") as HTMLElement;
+    const modelExpanded = modelBorderDiv.querySelector("div.px-3") as HTMLElement;
+    const modelApplyBtn = modelExpanded.querySelector("button") as HTMLButtonElement;
+    expect(modelApplyBtn).toHaveTextContent("Apply");
+    expect(modelApplyBtn.style.background).toBe("var(--color-omneval-violet)");
+
+    // Duration filter (RangeFilter) — Apply button
+    const durationHeader = screen.getByText("Duration");
+    await act(async () => {
+      fireEvent.click(durationHeader);
+    });
+    const durationBorderDiv = durationHeader.closest("div.border-b") as HTMLElement;
+    const durationExpanded = durationBorderDiv.querySelector("div.px-3") as HTMLElement;
+    const durationApplyBtn = durationExpanded.querySelector("button") as HTMLButtonElement;
+    expect(durationApplyBtn).toHaveTextContent("Apply");
+    expect(durationApplyBtn.style.background).toBe("var(--color-omneval-violet)");
+  });
+
+  it("renders text and number filter inputs with consistent focus styling", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Filters")).toBeInTheDocument();
+    });
+
+    const modelHeader = screen.getByText("Model");
+    await act(async () => {
+      fireEvent.click(modelHeader);
+    });
+    const modelBorderDiv = modelHeader.closest("div.border-b") as HTMLElement;
+    const modelExpanded = modelBorderDiv.querySelector("div.px-3") as HTMLElement;
+    const modelInput = modelExpanded.querySelector<HTMLInputElement>('input[type="text"]');
+
+    expect(modelInput!.className).toContain("input-focus");
+    expect(modelInput!.className).toContain("border-omneval-border");
+    expect(modelInput!.className).toContain("bg-omneval-surface");
+  });
+
+  it("renders the Clear All Filters button using the shared secondary button style", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Filters")).toBeInTheDocument();
+    });
+
+    const clearBtn = screen.getByRole("button", { name: "Clear All Filters" });
+    expect(clearBtn.className).toContain("btn-secondary");
+  });
+});
+
