@@ -901,6 +901,108 @@ func TestHandler_GenerateAPIKey_ProjectKey(t *testing.T) {
 	}
 }
 
+// TestHandler_GenerateAPIKey_ProjectKeyWithName verifies that an optional
+// display name can be supplied when creating a project-scoped key (#143),
+// mirroring the service_name UX already available for service keys.
+func TestHandler_GenerateAPIKey_ProjectKeyWithName(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+
+	_ = store.CreateOrganization(nil, &domain.Organization{OrgID: "org-1", Name: "Test Org"})
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "user-1",
+		OrgID:        "org-1",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
+	})
+	_ = store.CreateProject(nil, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "Test Project"})
+
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
+
+	keyPayload, _ := json.Marshal(map[string]string{"kind": "project", "name": "CI ingest"})
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/projects/proj-1/api-keys", bytes.NewReader(keyPayload))
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("generate key request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d: %s", resp.StatusCode, http.StatusCreated, readBody(t, resp))
+	}
+
+	var body auth.GenerateAPIKeyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Name != "CI ingest" {
+		t.Errorf("name: got %q, want %q", body.Name, "CI ingest")
+	}
+
+	// The name should also be reflected when listing keys.
+	listReq, _ := http.NewRequest("GET", ts.URL+"/api/v1/projects/proj-1/api-keys", nil)
+	listReq.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
+	listResp, err := http.DefaultClient.Do(listReq)
+	if err != nil {
+		t.Fatalf("list keys request failed: %v", err)
+	}
+	defer listResp.Body.Close()
+
+	var keys []auth.APIKeyInfo
+	if err := json.NewDecoder(listResp.Body).Decode(&keys); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 key, got %d", len(keys))
+	}
+	if keys[0].Name != "CI ingest" {
+		t.Errorf("listed key name: got %q, want %q", keys[0].Name, "CI ingest")
+	}
+}
+
+// TestHandler_ListAPIKeys_UnnamedProjectKeyHasFallbackName verifies that a
+// project key created without a name still gets a non-empty, distinguishing
+// display name derived from its key ID (#143).
+func TestHandler_ListAPIKeys_UnnamedProjectKeyHasFallbackName(t *testing.T) {
+	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
+
+	_ = store.CreateOrganization(nil, &domain.Organization{OrgID: "org-1", Name: "Test Org"})
+	_ = store.CreateUser(nil, &domain.User{
+		UserID:       "user-1",
+		OrgID:        "org-1",
+		Email:        "alice@example.com",
+		PasswordHash: "password",
+	})
+	_ = store.CreateProject(nil, &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "Test Project"})
+
+	_, hashedKey, _ := internalauth.Generate(domain.APIKeyKindProject)
+	_ = store.CreateAPIKey(nil, &domain.APIKey{KeyID: "unnamed-key-1234", ProjectID: "proj-1", Kind: domain.APIKeyKindProject, HashedKey: hashedKey})
+
+	sessionID := loginAndGetCookie(t, ts, "alice@example.com", "password")
+
+	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/projects/proj-1/api-keys", nil)
+	req.AddCookie(&http.Cookie{Name: "omneval_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("list keys request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var keys []auth.APIKeyInfo
+	if err := json.NewDecoder(resp.Body).Decode(&keys); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 key, got %d", len(keys))
+	}
+	if keys[0].Name == "" {
+		t.Error("expected a non-empty fallback display name for an unnamed project key")
+	}
+	if keys[0].Name == "Project Key" {
+		t.Error("fallback name should not be the generic 'Project Key' label")
+	}
+}
+
 func TestHandler_GenerateAPIKey_ServiceKey(t *testing.T) {
 	store, ts := setupAuthServerWithAllMiddleware(t, "admin@example.com")
 	_ = store.CreateOrganization(nil, &domain.Organization{OrgID: "org-1", Name: "Test Org"})

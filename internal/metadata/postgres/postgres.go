@@ -342,9 +342,9 @@ func (s *Store) CreateAPIKey(ctx context.Context, key *domain.APIKey) error {
 		revokedAt = key.RevokedAt
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO api_keys (key_id, project_id, kind, service_name, hashed_key, created_at, revoked_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		key.KeyID, key.ProjectID, string(key.Kind), key.ServiceName, key.HashedKey, key.CreatedAt, revokedAt,
+		`INSERT INTO api_keys (key_id, project_id, kind, service_name, name, hashed_key, created_at, revoked_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		key.KeyID, key.ProjectID, string(key.Kind), key.ServiceName, key.Name, key.HashedKey, key.CreatedAt, revokedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: create api key: %w", err)
@@ -354,13 +354,13 @@ func (s *Store) CreateAPIKey(ctx context.Context, key *domain.APIKey) error {
 
 func (s *Store) GetAPIKeyByHash(ctx context.Context, hashedKey string) (*domain.APIKey, error) {
 	var keyID, projectID, kindStr string
-	var serviceName sql.NullString
+	var serviceName, name sql.NullString
 	var createdAt time.Time
 	var revokedAt *time.Time
 	err := s.db.QueryRowContext(ctx,
-		`SELECT key_id, project_id, kind, service_name, created_at, revoked_at
+		`SELECT key_id, project_id, kind, service_name, name, created_at, revoked_at
 		 FROM api_keys WHERE hashed_key = $1`, hashedKey,
-	).Scan(&keyID, &projectID, &kindStr, &serviceName, &createdAt, &revokedAt)
+	).Scan(&keyID, &projectID, &kindStr, &serviceName, &name, &createdAt, &revokedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrNotFound
@@ -372,6 +372,7 @@ func (s *Store) GetAPIKeyByHash(ctx context.Context, hashedKey string) (*domain.
 		ProjectID:   projectID,
 		Kind:        domain.APIKeyKind(kindStr),
 		ServiceName: serviceName.String,
+		Name:        name.String,
 		HashedKey:   hashedKey,
 		CreatedAt:   createdAt,
 		RevokedAt:   revokedAt,
@@ -391,7 +392,7 @@ func (s *Store) RevokeAPIKey(ctx context.Context, keyID string) error {
 
 func (s *Store) ListAPIKeys(ctx context.Context, projectID string) ([]*domain.APIKey, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT key_id, project_id, kind, service_name, hashed_key, created_at, revoked_at
+		`SELECT key_id, project_id, kind, service_name, name, hashed_key, created_at, revoked_at
 		 FROM api_keys WHERE project_id = $1 ORDER BY key_id`, projectID,
 	)
 	if err != nil {
@@ -403,14 +404,15 @@ func (s *Store) ListAPIKeys(ctx context.Context, projectID string) ([]*domain.AP
 	for rows.Next() {
 		var k domain.APIKey
 		var kindStr string
-		var serviceName sql.NullString
+		var serviceName, name sql.NullString
 		var createdAt time.Time
 		var revokedAt *time.Time
-		if err := rows.Scan(&k.KeyID, &k.ProjectID, &kindStr, &serviceName, &k.HashedKey, &createdAt, &revokedAt); err != nil {
+		if err := rows.Scan(&k.KeyID, &k.ProjectID, &kindStr, &serviceName, &name, &k.HashedKey, &createdAt, &revokedAt); err != nil {
 			return nil, fmt.Errorf("postgres: scan api key: %w", err)
 		}
 		k.Kind = domain.APIKeyKind(kindStr)
 		k.ServiceName = serviceName.String
+		k.Name = name.String
 		k.CreatedAt = createdAt
 		keys = append(keys, &k)
 	}

@@ -10,6 +10,7 @@ interface APIKey {
   key_id: string;
   kind: "project" | "service";
   service_name?: string;
+  name?: string;
   created_at: string;
   revoked_at?: string;
 }
@@ -31,6 +32,16 @@ function SectionHeader({ title, description }: { title: string; description: str
   );
 }
 
+// displayName returns the best human-readable label for an API key:
+// the user-supplied name (or service_name for service keys) if set,
+// otherwise a fallback derived from the truncated key ID (#143).
+function displayName(apiKey: APIKey): string {
+  if (apiKey.name) return apiKey.name;
+  if (apiKey.kind === "service" && apiKey.service_name) return apiKey.service_name;
+  const suffix = apiKey.key_id.slice(-4);
+  return apiKey.kind === "service" ? `Service Key (...${suffix})` : `Project Key (...${suffix})`;
+}
+
 function KeyCard({
   apiKey,
   onRevoke,
@@ -50,9 +61,9 @@ function KeyCard({
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
-          {/* Primary display name: service_name for service keys, kind label for project keys */}
+          {/* Primary display name: user-supplied name, service_name, or a fallback derived from the key ID */}
           <span className="text-sm font-medium text-omneval-text-pure truncate">
-            {apiKey.service_name ?? (apiKey.kind === "service" ? "Service Key" : "Project Key")}
+            {displayName(apiKey)}
           </span>
           <span
             className={`text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${
@@ -109,6 +120,7 @@ function GenerateKeyDialog({
 }) {
   const { addToast } = useToast();
   const [serviceName, setServiceName] = useState("");
+  const [keyName, setKeyName] = useState("");
   const [loading, setLoading] = useState(false);
   const [rawKey, setRawKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -121,6 +133,7 @@ function GenerateKeyDialog({
     try {
       const body: Record<string, string> = { kind };
       if (kind === "service") body.service_name = serviceName.trim();
+      if (kind === "project" && keyName.trim() !== "") body.name = keyName.trim();
 
       const res = await fetch(`/api/v1/projects/${projectId}/api-keys`, {
         method: "POST",
@@ -162,6 +175,7 @@ function GenerateKeyDialog({
   const handleClose = () => {
     setRawKey(null);
     setServiceName("");
+    setKeyName("");
     setCopied(false);
     onClose();
   };
@@ -237,6 +251,21 @@ function GenerateKeyDialog({
                 placeholder="e.g. my-agent"
                 className="input-focus w-full px-3 py-2 rounded-md border border-omneval-border bg-omneval-void text-omneval-text-pure placeholder-omneval-text-muted/50 text-sm"
                 required
+                autoFocus
+              />
+            </div>
+          )}
+          {kind === "project" && (
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-omneval-text-pure mb-1">
+                Name <span className="text-omneval-text-muted">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={keyName}
+                onChange={(e) => setKeyName(e.target.value)}
+                placeholder="e.g. CI ingest, local dev"
+                className="input-focus w-full px-3 py-2 rounded-md border border-omneval-border bg-omneval-void text-omneval-text-pure placeholder-omneval-text-muted/50 text-sm"
                 autoFocus
               />
             </div>

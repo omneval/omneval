@@ -518,9 +518,9 @@ func (s *Store) CreateAPIKey(ctx context.Context, key *domain.APIKey) error {
 		revokedAt = &s
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO api_keys (key_id, project_id, kind, service_name, hashed_key, created_at, revoked_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		key.KeyID, key.ProjectID, string(key.Kind), key.ServiceName, key.HashedKey, now, revokedAt,
+		`INSERT INTO api_keys (key_id, project_id, kind, service_name, name, hashed_key, created_at, revoked_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		key.KeyID, key.ProjectID, string(key.Kind), key.ServiceName, key.Name, key.HashedKey, now, revokedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("sqlite: create api key: %w", err)
@@ -530,11 +530,12 @@ func (s *Store) CreateAPIKey(ctx context.Context, key *domain.APIKey) error {
 
 func (s *Store) GetAPIKeyByHash(ctx context.Context, hashedKey string) (*domain.APIKey, error) {
 	var keyID, projectID, kind, serviceName, createdAt string
+	var name sql.NullString
 	var revokedAtStr *string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT key_id, project_id, kind, service_name, created_at, revoked_at
+		`SELECT key_id, project_id, kind, service_name, name, created_at, revoked_at
 		 FROM api_keys WHERE hashed_key = ?`, hashedKey,
-	).Scan(&keyID, &projectID, &kind, &serviceName, &createdAt, &revokedAtStr)
+	).Scan(&keyID, &projectID, &kind, &serviceName, &name, &createdAt, &revokedAtStr)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrNotFound
@@ -552,6 +553,7 @@ func (s *Store) GetAPIKeyByHash(ctx context.Context, hashedKey string) (*domain.
 		ProjectID:   projectID,
 		Kind:        domain.APIKeyKind(kind),
 		ServiceName: serviceName,
+		Name:        name.String,
 		HashedKey:   hashedKey,
 		CreatedAt:   t,
 		RevokedAt:   revokedAt,
@@ -571,7 +573,7 @@ func (s *Store) RevokeAPIKey(ctx context.Context, keyID string) error {
 
 func (s *Store) ListAPIKeys(ctx context.Context, projectID string) ([]*domain.APIKey, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT key_id, project_id, kind, service_name, hashed_key, created_at, revoked_at
+		`SELECT key_id, project_id, kind, service_name, name, hashed_key, created_at, revoked_at
 		 FROM api_keys WHERE project_id = ? ORDER BY key_id`, projectID,
 	)
 	if err != nil {
@@ -583,11 +585,13 @@ func (s *Store) ListAPIKeys(ctx context.Context, projectID string) ([]*domain.AP
 	for rows.Next() {
 		var k domain.APIKey
 		var kind, createdAt string
+		var name sql.NullString
 		var revokedAtStr *string
-		if err := rows.Scan(&k.KeyID, &k.ProjectID, &kind, &k.ServiceName, &k.HashedKey, &createdAt, &revokedAtStr); err != nil {
+		if err := rows.Scan(&k.KeyID, &k.ProjectID, &kind, &k.ServiceName, &name, &k.HashedKey, &createdAt, &revokedAtStr); err != nil {
 			return nil, fmt.Errorf("sqlite: scan api key: %w", err)
 		}
 		k.Kind = domain.APIKeyKind(kind)
+		k.Name = name.String
 		k.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		if revokedAtStr != nil {
 			rt, _ := time.Parse(time.RFC3339, *revokedAtStr)
