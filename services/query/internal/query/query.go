@@ -717,9 +717,9 @@ kind_rollups AS (
     trace_id,
     to_json(MAP(LIST(kind), LIST(kind_count))) AS kind_counts
   FROM (
-    SELECT trace_id, kind, CAST(COUNT(*) AS BIGINT) AS kind_count
+    SELECT trace_id, COALESCE(kind, 'unknown') AS kind, CAST(COUNT(*) AS BIGINT) AS kind_count
     FROM filtered
-    GROUP BY trace_id, kind
+    GROUP BY trace_id, COALESCE(kind, 'unknown')
   )
   GROUP BY trace_id
 )
@@ -757,7 +757,9 @@ WHERE r.rn = 1`)
 // row per pair — the read-time residual-duplicate policy from ADR-0004
 // (duplicates survive only a crash between Lake commit and ledger insert).
 func (q *SpanQuery) LakeTraceSpansSQL(traceID string) (sql string, args []any) {
-	sql = "SELECT * FROM (" +
+	sql = "SELECT span_id, trace_id, parent_id, conversation_id, project_id, service_name, name, kind, " +
+		"start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, " +
+		"prompt_name, prompt_version, status_code, status_message FROM (" +
 		"SELECT *, ROW_NUMBER() OVER (PARTITION BY trace_id, span_id ORDER BY start_time DESC) AS rn" +
 		" FROM lake.spans WHERE trace_id = ? AND project_id = ?" +
 		") AS deduped WHERE rn = 1 ORDER BY start_time ASC"
