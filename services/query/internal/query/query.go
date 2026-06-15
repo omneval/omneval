@@ -370,7 +370,18 @@ func compileFilter(f SpanQueryFilter) (sql string, args []any, err error) {
 			placeholders[i] = "?"
 			args = append(args, slice[i])
 		}
-		return fmt.Sprintf("%s IN (%s)", field, strings.Join(placeholders, ", ")), args, nil
+		inClause := fmt.Sprintf("%s IN (%s)", field, strings.Join(placeholders, ", "))
+
+		// status_code is special-cased: pre-#135 data never populates the
+		// column, so "Unset" spans are stored as NULL/'' rather than the
+		// literal string "UNSET". When the caller filters for "UNSET",
+		// also match NULL and empty-string status_code so the "Unset"
+		// filter option isn't silently empty for existing data.
+		if field == fieldStatusCode && containsUnset(slice) {
+			return fmt.Sprintf("(%s OR %s IS NULL OR %s = '')", inClause, field, field), args, nil
+		}
+
+		return inClause, args, nil
 	}
 
 	// Contains operator: LIKE '%value%'
@@ -383,6 +394,18 @@ func compileFilter(f SpanQueryFilter) (sql string, args []any, err error) {
 	opSymbol := operatorSQL[op]
 	args = append(args, f.Value)
 	return fmt.Sprintf("%s %s ?", field, opSymbol), args, nil
+}
+
+// containsUnset reports whether slice contains the string "UNSET",
+// case-insensitively. Used to detect when a status_code IN filter should
+// also match NULL/empty-string rows (see compileFilter).
+func containsUnset(slice []any) bool {
+	for _, v := range slice {
+		if s, ok := v.(string); ok && strings.EqualFold(s, "UNSET") {
+			return true
+		}
+	}
+	return false
 }
 
 // durationMsExpr returns the DuckDB SQL expression for the duration_ms

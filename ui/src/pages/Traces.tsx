@@ -309,10 +309,13 @@ function TextFilter({
 
 function CheckboxFilter({
   options,
+  labels,
   value,
   onApply,
 }: {
   options: string[];
+  /** Optional display-label overrides, keyed by option value. */
+  labels?: Record<string, string>;
   value: string[];
   onApply: (vals: string[]) => void;
 }) {
@@ -337,7 +340,7 @@ function CheckboxFilter({
             className="rounded"
             style={{ accentColor: colors.accents.emberFlare }}
           />
-          <span className="capitalize">{option}</span>
+          <span className="capitalize">{labels?.[option] ?? option}</span>
         </label>
       ))}
     </div>
@@ -482,7 +485,8 @@ function FilterSection({
             />
           ) : name === "status" ? (
             <CheckboxFilter
-              options={["OK", "ERROR"]}
+              options={["OK", "ERROR", "UNSET"]}
+              labels={{ UNSET: "Unset" }}
               value={Array.isArray(value) ? value : []}
               onApply={(vals) => onApply(name, vals)}
             />

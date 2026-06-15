@@ -322,6 +322,204 @@ func TestCompileFilter_StringSliceIn(t *testing.T) {
 	}
 }
 
+// TestBuildWhereClause_StatusCodeIn_OK verifies that filtering by
+// status_code = "OK" compiles to a plain IN clause on the status_code
+// column — no special-casing needed when "UNSET" is not among the values.
+func TestBuildWhereClause_StatusCodeIn_OK(t *testing.T) {
+	q, err := NewSpanQuery("proj-1", SpanQueryRequest{
+		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Filters: []SpanQueryFilter{
+			{Field: "status_code", Op: "in", Value: []any{"OK"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	args, where := q.buildWhereClause()
+
+	if !strings.Contains(where, "status_code IN (?)") {
+		t.Errorf("expected where clause to contain 'status_code IN (?)', got: %s", where)
+	}
+	if strings.Contains(where, "IS NULL") {
+		t.Errorf("did not expect NULL handling for OK-only filter, got: %s", where)
+	}
+
+	found := false
+	for _, a := range args {
+		if a == "OK" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected args to contain %q, got: %v", "OK", args)
+	}
+}
+
+// TestBuildWhereClause_StatusCodeIn_UNSET verifies that filtering by
+// status_code = "UNSET" also matches rows where status_code is NULL or the
+// empty string. Pre-#135 data never populates status_code, so it is stored
+// as NULL/'' rather than the literal string "UNSET"; the filter must treat
+// those as "Unset" too, or selecting "Unset" would show zero traces for all
+// existing data.
+func TestBuildWhereClause_StatusCodeIn_UNSET(t *testing.T) {
+	q, err := NewSpanQuery("proj-1", SpanQueryRequest{
+		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Filters: []SpanQueryFilter{
+			{Field: "status_code", Op: "in", Value: []any{"UNSET"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	args, where := q.buildWhereClause()
+
+	if !strings.Contains(where, "status_code IN (?)") {
+		t.Errorf("expected where clause to still match literal 'UNSET' rows, got: %s", where)
+	}
+	if !strings.Contains(where, "status_code IS NULL") {
+		t.Errorf("expected where clause to also match NULL status_code, got: %s", where)
+	}
+	if !strings.Contains(where, "status_code = ''") {
+		t.Errorf("expected where clause to also match empty-string status_code, got: %s", where)
+	}
+
+	found := false
+	for _, a := range args {
+		if a == "UNSET" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected args to contain %q, got: %v", "UNSET", args)
+	}
+}
+
+// TestBuildWhereClause_StatusCodeIn_OKAndUnset verifies that combining "OK"
+// with "UNSET" ORs the NULL/empty handling together with the literal value
+// match, all within a single parenthesized predicate so it ANDs correctly
+// with other filters (e.g. project_id, time range).
+func TestBuildWhereClause_StatusCodeIn_OKAndUnset(t *testing.T) {
+	q, err := NewSpanQuery("proj-1", SpanQueryRequest{
+		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Filters: []SpanQueryFilter{
+			{Field: "status_code", Op: "in", Value: []any{"OK", "UNSET"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	args, where := q.buildWhereClause()
+
+	if !strings.Contains(where, "status_code IN (?, ?)") {
+		t.Errorf("expected where clause to contain 'status_code IN (?, ?)', got: %s", where)
+	}
+	if !strings.Contains(where, "status_code IS NULL") {
+		t.Errorf("expected where clause to also match NULL status_code, got: %s", where)
+	}
+	if !strings.Contains(where, "status_code = ''") {
+		t.Errorf("expected where clause to also match empty-string status_code, got: %s", where)
+	}
+
+	// The combined predicate must be wrapped in parentheses so it ANDs
+	// correctly with the surrounding project_id / time-range clauses.
+	if !strings.Contains(where, "(status_code IN (?, ?) OR status_code IS NULL OR status_code = '')") {
+		t.Errorf("expected status_code predicate to be a single OR-wrapped group, got: %s", where)
+	}
+
+	wantArgs := map[string]bool{"OK": false, "UNSET": false}
+	for _, a := range args {
+		if s, ok := a.(string); ok {
+			if _, exists := wantArgs[s]; exists {
+				wantArgs[s] = true
+			}
+		}
+	}
+	for v, found := range wantArgs {
+		if !found {
+			t.Errorf("expected args to contain %q, got: %v", v, args)
+		}
+	}
+}
+
+// TestBuildWhereClause_StatusCodeIn_ERROR verifies the ERROR-only filter
+// compiles to a plain IN clause without NULL/empty-string handling.
+func TestBuildWhereClause_StatusCodeIn_ERROR(t *testing.T) {
+	q, err := NewSpanQuery("proj-1", SpanQueryRequest{
+		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Filters: []SpanQueryFilter{
+			{Field: "status_code", Op: "in", Value: []any{"ERROR"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	args, where := q.buildWhereClause()
+
+	if !strings.Contains(where, "status_code IN (?)") {
+		t.Errorf("expected where clause to contain 'status_code IN (?)', got: %s", where)
+	}
+	if strings.Contains(where, "IS NULL") {
+		t.Errorf("did not expect NULL handling for ERROR-only filter, got: %s", where)
+	}
+
+	found := false
+	for _, a := range args {
+		if a == "ERROR" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected args to contain %q, got: %v", "ERROR", args)
+	}
+}
+
+// TestBuildWhereClause_StatusCodeIn_OKAndError verifies that combining "OK"
+// and "ERROR" (no "UNSET") compiles to a plain IN clause without NULL/empty
+// handling — existing behavior should be unchanged for this common case.
+func TestBuildWhereClause_StatusCodeIn_OKAndError(t *testing.T) {
+	q, err := NewSpanQuery("proj-1", SpanQueryRequest{
+		From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Filters: []SpanQueryFilter{
+			{Field: "status_code", Op: "in", Value: []any{"OK", "ERROR"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	args, where := q.buildWhereClause()
+
+	if !strings.Contains(where, "status_code IN (?, ?)") {
+		t.Errorf("expected where clause to contain 'status_code IN (?, ?)', got: %s", where)
+	}
+	if strings.Contains(where, "IS NULL") {
+		t.Errorf("did not expect NULL handling for OK+ERROR filter, got: %s", where)
+	}
+
+	wantArgs := map[string]bool{"OK": false, "ERROR": false}
+	for _, a := range args {
+		if s, ok := a.(string); ok {
+			if _, exists := wantArgs[s]; exists {
+				wantArgs[s] = true
+			}
+		}
+	}
+	for v, found := range wantArgs {
+		if !found {
+			t.Errorf("expected args to contain %q, got: %v", v, args)
+		}
+	}
+}
+
 func TestMarshalResponse(t *testing.T) {
 	resp := SpanResponse{
 		Spans: []*domain.Span{},
