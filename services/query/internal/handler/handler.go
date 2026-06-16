@@ -316,6 +316,9 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 
 // querySpansForTrace fetches all spans for a given trace_id and project_id
 // using LakeTraceSpansSQL with dedupe on (trace_id, span_id) (per ADR-0004).
+// No explicit Limit is needed: LakeTraceSpansSQL enforces a hard cap of 10 000
+// at the DuckDB query level (#152), so the request struct field would be dead
+// code — see internal/query/query.go#LakeTraceSpansSQL.
 func (h *SpanHandler) querySpansForTrace(projectID, traceID string) ([]*domain.Span, error) {
 	req := query.SpanQueryRequest{
 		From: time.Time{},
@@ -323,7 +326,8 @@ func (h *SpanHandler) querySpansForTrace(projectID, traceID string) ([]*domain.S
 		Filters: []query.SpanQueryFilter{
 			{Field: "trace_id", Op: "eq", Value: traceID},
 		},
-		Limit: 10000,
+		// Limit omitted — LakeTraceSpansSQL applies a hard cap of 10 000 at the
+		// DuckDB query level; see internal/query/query.go#LakeTraceSpansSQL.
 	}
 
 	q, err := query.NewSpanQuery(projectID, req)
