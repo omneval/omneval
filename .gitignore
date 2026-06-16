@@ -261,3 +261,4 @@ __marimo__/
 internal/duckdb/test_*.db
 
 **/.DS_Store
+
