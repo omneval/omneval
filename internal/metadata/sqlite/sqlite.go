@@ -68,19 +68,39 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return nil
 	}
 
+	// Acquire a specific connection and use BEGIN IMMEDIATE to get a RESERVED
+	// write lock before checking applied migrations. This serializes concurrent
+	// Migrate() calls across multiple connections to the same file, preventing
+	// the check-then-act race where two processes both see "not applied" and
+	// both attempt to INSERT the same version row.
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("sqlite: acquire connection for migration: %w", err)
+	}
+	defer conn.Close()
+
+	// BEGIN IMMEDIATE acquires a RESERVED lock, blocking other writers.
+	// Other connections calling Migrate() will block on their BEGIN IMMEDIATE
+	// until this one commits.
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return fmt.Errorf("sqlite: begin immediate migration tx: %w", err)
+	}
+
 	// Create schema_migrations table
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := conn.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS _schema_migrations (
 			version INTEGER PRIMARY KEY,
 			applied_at TEXT NOT NULL DEFAULT (datetime('now'))
 		)
 	`); err != nil {
+		conn.ExecContext(ctx, "ROLLBACK") //nolint:errcheck
 		return fmt.Errorf("sqlite: create migrations table: %w", err)
 	}
 
 	// Get already-applied versions
-	rows, err := s.db.QueryContext(ctx, "SELECT version FROM _schema_migrations ORDER BY version")
+	rows, err := conn.QueryContext(ctx, "SELECT version FROM _schema_migrations ORDER BY version")
 	if err != nil {
+		conn.ExecContext(ctx, "ROLLBACK") //nolint:errcheck
 		return fmt.Errorf("sqlite: list applied migrations: %w", err)
 	}
 
@@ -89,6 +109,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		var v int
 		if err := rows.Scan(&v); err != nil {
 			rows.Close()
+			conn.ExecContext(ctx, "ROLLBACK") //nolint:errcheck
 			return fmt.Errorf("sqlite: scan migration version: %w", err)
 		}
 		applied[v] = true
@@ -98,6 +119,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	// Collect migration files
 	files, err := migrationsFS.ReadDir("migrations")
 	if err != nil {
+		conn.ExecContext(ctx, "ROLLBACK") //nolint:errcheck
 		return fmt.Errorf("sqlite: read migrations: %w", err)
 	}
 
@@ -118,44 +140,47 @@ func (s *Store) Migrate(ctx context.Context) error {
 
 		data, err := migrationsFS.ReadFile("migrations/" + f.Name())
 		if err != nil {
+			conn.ExecContext(ctx, "ROLLBACK") //nolint:errcheck
 			return fmt.Errorf("sqlite: read migration %s: %w", f.Name(), err)
 		}
 
-		// Wrap each statement in a transaction
-		if err := s.execMigration(ctx, v, string(data)); err != nil {
+		// Execute statements within the outer transaction
+		if err := execMigrationInConn(ctx, conn, v, string(data)); err != nil {
+			conn.ExecContext(ctx, "ROLLBACK") //nolint:errcheck
 			return fmt.Errorf("sqlite: apply migration %s: %w", f.Name(), err)
 		}
+	}
+
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return fmt.Errorf("sqlite: commit migrations: %w", err)
 	}
 
 	s.migrated = true
 	return nil
 }
 
-func (s *Store) execMigration(ctx context.Context, version int, sql string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("sqlite: begin migration tx: %w", err)
-	}
-
-	// Execute each statement separately (SQLite driver may not support multi-statement)
+// execMigrationInConn executes a migration's SQL statements within an
+// existing connection-level transaction (started by BEGIN IMMEDIATE).
+func execMigrationInConn(ctx context.Context, conn *sql.Conn, version int, sql string) error {
 	statements := splitStatements(sql)
 	for _, stmt := range statements {
 		stmt = strings.TrimSpace(stmt)
 		if stmt == "" {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, stmt); err != nil {
-			tx.Rollback()
+		if _, err := conn.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("sqlite: execute stmt: %w", err)
 		}
 	}
 
-	if _, err := tx.ExecContext(ctx, "INSERT INTO _schema_migrations (version) VALUES (?)", version); err != nil {
-		tx.Rollback()
+	// Use INSERT OR IGNORE so that if another process somehow applied
+	// this version concurrently, we don't crash with a duplicate-key error.
+	if _, err := conn.ExecContext(ctx,
+		"INSERT OR IGNORE INTO _schema_migrations (version) VALUES (?)", version,
+	); err != nil {
 		return fmt.Errorf("sqlite: record migration version: %w", err)
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 // splitStatements splits SQL on semicolons, respecting quoted strings.

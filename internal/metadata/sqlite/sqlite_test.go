@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -65,6 +66,75 @@ func TestMigrate_Idempotent(t *testing.T) {
 	// Calling Migrate again should be a no-op
 	if err := s.Migrate(context.Background()); err != nil {
 		t.Fatalf("second migrate call: %v", err)
+	}
+}
+
+func TestMigrate_Concurrent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "concurrent.db")
+
+	const concurrency = 8
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, concurrency)
+	var stores []*sqlite.Store
+
+	// Open all stores first (fresh database, no migrations yet)
+	for i := 0; i < concurrency; i++ {
+		s, err := sqlite.New(path)
+		if err != nil {
+			t.Fatalf("open store %d: %v", i, err)
+		}
+		stores = append(stores, s)
+	}
+	t.Cleanup(func() {
+		for _, s := range stores {
+			s.Close() //nolint:errcheck
+		}
+	})
+
+	// Run Migrate() concurrently from all stores
+	var wg sync.WaitGroup
+	for _, s := range stores {
+		s := s
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errCh <- s.Migrate(ctx)
+		}()
+	}
+
+	// Wait for all to complete
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("concurrent migration timed out")
+	}
+
+	// Check results: every call should succeed (no duplicate-key errors)
+	for i := 0; i < concurrency; i++ {
+		if err := <-errCh; err != nil {
+			t.Errorf("concurrent migrate %d: %v", i, err)
+		}
+	}
+
+	// Verify migrations were applied exactly once
+	var count int
+	err := stores[0].DB().QueryRowContext(ctx,
+		"SELECT count(DISTINCT version) FROM _schema_migrations",
+	).Scan(&count)
+	if err != nil {
+		t.Fatalf("count migrations: %v", err)
+	}
+	if count == 0 {
+		t.Fatal("expected at least one migration to be applied")
 	}
 }
 

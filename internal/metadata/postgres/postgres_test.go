@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -151,6 +152,157 @@ func TestMigrate_Idempotent(t *testing.T) {
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatalf("second migrate call: %v", err)
 	}
+}
+
+func TestMigrate_Concurrent(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Obtain a fresh DSN: use CI postgres service if available, otherwise testcontainers.
+	var dsn string
+	var cleanup func()
+
+	adminDSN := os.Getenv("TEST_POSTGRES_ADMIN_DSN")
+	if adminDSN != "" {
+		var err error
+		dsn, cleanup, err = freshConcurrentDSN(ctx, t, adminDSN)
+		if err != nil {
+			t.Fatalf("fresh concurrent DSN: %v", err)
+		}
+	} else {
+		var err error
+		dsn, cleanup, err = freshConcurrentDSNLocal(ctx, t)
+		if err != nil {
+			t.Skipf("postgres container unavailable: %v", err)
+			return
+		}
+	}
+	defer cleanup()
+
+	const concurrency = 8
+	errCh := make(chan error, concurrency)
+	var stores []*postgres.Store
+
+	// Open all stores first (fresh database, no migrations yet)
+	for i := 0; i < concurrency; i++ {
+		s, err := postgres.New(dsn)
+		if err != nil {
+			t.Fatalf("open store %d: %v", i, err)
+		}
+		stores = append(stores, s)
+	}
+	t.Cleanup(func() {
+		for _, s := range stores {
+			s.Close() //nolint:errcheck
+		}
+	})
+
+	// Run Migrate() concurrently from all stores
+	var wg sync.WaitGroup
+	for _, s := range stores {
+		s := s
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errCh <- s.Migrate(ctx)
+		}()
+	}
+
+	// Wait for all to complete
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("concurrent migration timed out")
+	}
+
+	// Check results: every call should succeed (no duplicate-key errors)
+	for i := 0; i < concurrency; i++ {
+		if err := <-errCh; err != nil {
+			t.Errorf("concurrent migrate %d: %v", i, err)
+		}
+	}
+
+	// Verify migrations were applied exactly once
+	var count int
+	err := stores[0].DB().QueryRowContext(ctx,
+		"SELECT count(DISTINCT version) FROM _schema_migrations",
+	).Scan(&count)
+	if err != nil {
+		t.Fatalf("count migrations: %v", err)
+	}
+	if count == 0 {
+		t.Fatal("expected at least one migration to be applied")
+	}
+}
+
+// freshConcurrentDSN creates a fresh database on the CI postgres service
+// (no migrations applied) and returns its DSN plus a cleanup function.
+func freshConcurrentDSN(ctx context.Context, t *testing.T, adminDSN string) (string, func(), error) {
+	t.Helper()
+
+	n := testDBSeq.Add(1)
+	dbName := fmt.Sprintf("omneval_t%d", n)
+
+	adminDB, err := sql.Open("pgx", adminDSN)
+	if err != nil {
+		return "", nil, fmt.Errorf("open admin db: %w", err)
+	}
+	if _, err := adminDB.ExecContext(ctx, "CREATE DATABASE "+dbName); err != nil {
+		adminDB.Close()
+		return "", nil, fmt.Errorf("create test db %s: %w", dbName, err)
+	}
+	adminDB.Close()
+
+	u, err := url.Parse(adminDSN)
+	if err != nil {
+		return "", nil, fmt.Errorf("parse admin DSN: %w", err)
+	}
+	u.Path = "/" + dbName
+	dsn := u.String()
+
+	cleanup := func() {
+		adb, err := sql.Open("pgx", adminDSN)
+		if err != nil {
+			return
+		}
+		defer adb.Close()
+		adb.ExecContext(ctx, fmt.Sprintf( //nolint:errcheck
+			"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '%s'", dbName,
+		))
+		adb.ExecContext(ctx, "DROP DATABASE IF EXISTS "+dbName) //nolint:errcheck
+	}
+
+	return dsn, cleanup, nil
+}
+
+// freshConcurrentDSNLocal spins up a throwaway Postgres container and returns
+// its DSN plus a cleanup function. Skips the test if Docker is unavailable.
+func freshConcurrentDSNLocal(ctx context.Context, t *testing.T) (string, func(), error) {
+	t.Helper()
+
+	pc, err := testpg.RunContainer(ctx,
+		testpg.WithDatabase("omneval"),
+		testpg.WithUsername("postgres"),
+		testpg.WithPassword("postgres"),
+	)
+	if err != nil {
+		return "", nil, err
+	}
+
+	dsn, err := pc.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		pc.Terminate(ctx) //nolint:errcheck
+		return "", nil, err
+	}
+
+	cleanup := func() { pc.Terminate(ctx) } //nolint:errcheck
+	return dsn, cleanup, nil
 }
 
 // ---- Organizations ----

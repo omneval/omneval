@@ -177,4 +177,5 @@ See the [ROADMAP](ROADMAP.md) for detailed progress on each component.
 
 ## License
 
-Apache 2.0
+Apache 2.0 — Open source under the Apache License, Version 2.0.
+
