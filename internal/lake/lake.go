@@ -306,6 +306,65 @@ func (l *Lake) ensureTables(ctx context.Context) error {
 // catalog "lake".
 func (l *Lake) DB() *sql.DB { return l.db }
 
+// QueryContext executes a query that returns rows against the Lake. On a
+// stale Quack Server connection ("Invalid connection id") the Lake
+// reconnects and retries once. Satisfies handler.DBHandle.
+func (l *Lake) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	rows, err := l.db.QueryContext(ctx, query, args...)
+	if isStaleConn(err) {
+		if rerr := l.reconnect(ctx); rerr != nil {
+			return nil, fmt.Errorf("lake: reconnect: %w", rerr)
+		}
+		rows, err = l.db.QueryContext(ctx, query, args...)
+	}
+	return rows, err
+}
+
+// Query executes a query that returns rows. Satisfies handler.DBHandle.
+func (l *Lake) Query(query string, args ...any) (*sql.Rows, error) {
+	return l.QueryContext(context.Background(), query, args...)
+}
+
+// ExecContext executes a query without returning rows. On a stale Quack
+// Server connection the Lake reconnects and retries once. Satisfies
+// handler.DBHandle.
+func (l *Lake) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	res, err := l.db.ExecContext(ctx, query, args...)
+	if isStaleConn(err) {
+		if rerr := l.reconnect(ctx); rerr != nil {
+			return nil, fmt.Errorf("lake: reconnect: %w", rerr)
+		}
+		res, err = l.db.ExecContext(ctx, query, args...)
+	}
+	return res, err
+}
+
+// Exec executes a query without returning rows. Satisfies handler.DBHandle.
+func (l *Lake) Exec(query string, args ...any) (sql.Result, error) {
+	return l.ExecContext(context.Background(), query, args...)
+}
+
+// QueryRowContext executes a query expected to return at most one row.
+// Unlike QueryContext, transparent reconnection is not possible here because
+// *sql.Row defers the error to Scan. The call is serialised under the Lake
+// mutex so any reconnect by a concurrent Ping provides a fresh connection
+// before this call proceeds. Satisfies handler.DBHandle.
+func (l *Lake) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.db.QueryRowContext(ctx, query, args...)
+}
+
+// QueryRow executes a query expected to return at most one row. Satisfies
+// handler.DBHandle.
+func (l *Lake) QueryRow(query string, args ...any) *sql.Row {
+	return l.QueryRowContext(context.Background(), query, args...)
+}
+
 // Close releases the DuckDB instance.
 func (l *Lake) Close() error { return l.db.Close() }
 
