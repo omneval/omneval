@@ -58,6 +58,9 @@ const migrateLockKey = "omneval_metadata_migrate"
 
 // Migrate applies pending SQL migrations.
 // Applies migration 1 (init) and migration 2 (add reset token) if not already applied.
+//
+// Concurrent calls are serialized via a session-level advisory lock to prevent
+// duplicate _schema_migrations inserts (fixes #147).
 func (s *Store) Migrate(ctx context.Context) error {
 	if s.migrated {
 		return nil
