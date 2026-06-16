@@ -797,7 +797,8 @@ func (q *SpanQuery) LakeTraceSpansSQL(traceID string) (sql string, args []any) {
 		"prompt_name, prompt_version, status_code, status_message, attributes FROM (" +
 		"SELECT *, ROW_NUMBER() OVER (PARTITION BY trace_id, span_id ORDER BY start_time DESC) AS rn" +
 		" FROM lake.spans WHERE trace_id = ? AND project_id = ?" +
+		" AND start_time >= ? AND start_time <= ?" +
 		") AS deduped WHERE rn = 1 ORDER BY start_time ASC" +
 		" LIMIT ?"
-	return sql, []any{traceID, q.projectID, limit}
+	return sql, []any{traceID, q.projectID, q.from, q.to, limit}
 }

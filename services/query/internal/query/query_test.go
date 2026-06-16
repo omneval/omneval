@@ -714,9 +714,9 @@ func TestLakeTraceSpansSQL_Dedupes(t *testing.T) {
 	if !strings.Contains(sql, "ROW_NUMBER() OVER (PARTITION BY trace_id, span_id") {
 		t.Errorf("trace detail must dedupe on (trace_id, span_id), got:\n%s", sql)
 	}
-	// args: traceID, projectID, limit.
-	if len(args) != 3 || args[0] != "trace-1" || args[1] != "proj-abc" {
-		t.Errorf("args: got %v, want [trace-1 proj-abc <limit>]", args)
+	// args: traceID, projectID, from, to, limit.
+	if len(args) != 5 || args[0] != "trace-1" || args[1] != "proj-abc" {
+		t.Errorf("args: got %v, want [trace-1 proj-abc <from> <to> <limit>]", args)
 	}
 }
 
@@ -730,9 +730,9 @@ func TestLakeTraceSpansSQL_HasLimitClause(t *testing.T) {
 	if !strings.Contains(sql, "LIMIT ?") {
 		t.Errorf("trace detail SQL must include LIMIT clause, got:\n%s", sql)
 	}
-	// args: traceID, projectID, limit.
-	if len(args) != 3 || args[2] != 100 {
-		t.Errorf("limit argument: got %v, want [trace-1 proj-abc 100]", args)
+	// args: traceID, projectID, from, to, limit.
+	if len(args) != 5 || args[4] != 100 {
+		t.Errorf("limit argument: got %v, want [trace-1 proj-abc <from> <to> 100]", args)
 	}
 }
 
@@ -748,8 +748,8 @@ func TestLakeTraceSpansSQL_FallbackToHardCapWhenZero(t *testing.T) {
 	_, args := q.LakeTraceSpansSQL("trace-1")
 	// When q.limit == 0, effective limit falls back to MaxTraceSpansLimit (10000)
 	// so trace detail queries don't load unbounded spans into memory.
-	if len(args) != 3 || args[2] != MaxTraceSpansLimit {
-		t.Errorf("limit argument with zero limit: got %v, want [trace-1 proj-abc %d]", args, MaxTraceSpansLimit)
+	if len(args) != 5 || args[4] != MaxTraceSpansLimit {
+		t.Errorf("limit argument with zero limit: got %v, want [trace-1 proj-abc <from> <to> %d]", args, MaxTraceSpansLimit)
 	}
 }
 
@@ -762,8 +762,75 @@ func TestLakeTraceSpansSQL_CappedAtHardLimit(t *testing.T) {
 	}
 
 	_, args := q.LakeTraceSpansSQL("trace-1")
-	if len(args) != 3 || args[2] != 10000 {
+	if len(args) != 5 || args[4] != 10000 {
 		t.Errorf("limit argument capped at 10000: got %v", args)
+	}
+}
+
+// TestLakeTraceSpansSQL_HasTimeBounds verifies that when a SpanQuery
+// carries from/to bounds, LakeTraceSpansSQL includes them in the generated
+// SQL so that DuckDB can prune partitions during execution (issue #153).
+func TestLakeTraceSpansSQL_HasTimeBounds(t *testing.T) {
+	now := time.Now()
+	req := SpanQueryRequest{
+		From: now.Add(-24 * time.Hour),
+		To:   now,
+		Limit: 100,
+	}
+
+	q, err := NewSpanQuery("proj-abc", req)
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, args := q.LakeTraceSpansSQL("trace-1")
+
+	if !strings.Contains(sql, "start_time >= ?") {
+		t.Errorf("trace detail SQL must include start_time >= bound, got:\n%s", sql)
+	}
+	if !strings.Contains(sql, "start_time <= ?") {
+		t.Errorf("trace detail SQL must include start_time <= bound, got:\n%s", sql)
+	}
+	// args: traceID, projectID, from, to, limit.
+	if len(args) != 5 {
+		t.Errorf("args: got %d args, want 5 (traceID, projectID, from, to, limit)", len(args))
+	}
+	if len(args) >= 5 && !args[2].(time.Time).Equal(q.from) {
+		t.Errorf("from arg: got %v, want %v", args[2], q.from)
+	}
+	if len(args) >= 5 && !args[3].(time.Time).Equal(q.to) {
+		t.Errorf("to arg: got %v, want %v", args[3], q.to)
+	}
+}
+
+// TestLakeTraceSpansSQL_TimeBoundsWithDedup checks that time bounds appear
+// before the ORDER BY and LIMIT — i.e. they are part of the WHERE clause
+// inside the subquery, not after dedup.
+func TestLakeTraceSpansSQL_TimeBoundsBeforeDedup(t *testing.T) {
+	now := time.Now()
+	q, err := NewSpanQuery("proj-abc", SpanQueryRequest{
+		From: now.Add(-1 * time.Hour),
+		To:   now,
+	})
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, _ := q.LakeTraceSpansSQL("trace-abc")
+
+	// The WHERE clause must be inside the subquery (before the outer
+	// "AS deduped WHERE rn = 1"), not after it.  Check that "start_time >="
+	// appears before "AS deduped".
+	beforeDedup := strings.Index(sql, "start_time >=")
+	dedupIdx := strings.Index(sql, "AS deduped")
+	if beforeDedup < 0 {
+		t.Fatal("expected start_time >= bound in SQL")
+	}
+	if dedupIdx < 0 {
+		t.Fatal("expected AS deduped in SQL")
+	}
+	if beforeDedup > dedupIdx {
+		t.Errorf("start_time bound appears after dedup alias; must be in the inner WHERE, got:\n%s", sql)
 	}
 }
 

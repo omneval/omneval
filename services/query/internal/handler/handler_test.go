@@ -763,7 +763,7 @@ func TestHandleTraceDetail_SingleSpan(t *testing.T) {
 		t.Fatalf("create table: %v", err)
 	}
 
-	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	baseTime := time.Now().Add(-2 * time.Hour)
 	if _, err := db.ExecContext(context.Background(),
 		`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, model, start_time, end_time, input, output, input_tokens, output_tokens, cost_usd, status_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		"span-001", "trace-abc", "", "test-proj", "root span", "gpt-4",
@@ -821,7 +821,7 @@ func TestHandleTraceDetail_MultiLevelTree(t *testing.T) {
 		t.Fatalf("create table: %v", err)
 	}
 
-	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	baseTime := time.Now().Add(-2 * time.Hour)
 
 	// Insert a 3-level tree: root -> child1 -> grandchild
 	_, err = db.ExecContext(context.Background(),
@@ -907,7 +907,7 @@ func TestHandleTraceDetail_TokenRollup(t *testing.T) {
 		t.Fatalf("create table: %v", err)
 	}
 
-	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	baseTime := time.Now().Add(-2 * time.Hour)
 
 	// Root span: an orchestration span with no tokens/cost of its own.
 	_, err = db.ExecContext(context.Background(),
@@ -985,7 +985,7 @@ func TestHandleTraceDetail_SiblingChildren(t *testing.T) {
 		t.Fatalf("create table: %v", err)
 	}
 
-	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	baseTime := time.Now().Add(-2 * time.Hour)
 
 	// Root with two children.
 	_, err = db.ExecContext(context.Background(),
@@ -1060,7 +1060,7 @@ func TestHandleTraceDetail_NoParentFallback(t *testing.T) {
 		t.Fatalf("create table: %v", err)
 	}
 
-	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	baseTime := time.Now().Add(-2 * time.Hour)
 
 	// All spans have non-empty parent_id — no root. The first span (by start_time) becomes root.
 	_, err = db.ExecContext(context.Background(),
@@ -1124,7 +1124,7 @@ func TestHandleTraceDetail_ScoresAttached(t *testing.T) {
 		t.Fatalf("create scores table: %v", err)
 	}
 
-	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	baseTime := time.Now().Add(-2 * time.Hour)
 
 	_, err = db.ExecContext(context.Background(),
 		`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, model, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1190,7 +1190,7 @@ func TestHandleTraceDetail_ProjectIsolation(t *testing.T) {
 		t.Fatalf("create table: %v", err)
 	}
 
-	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	baseTime := time.Now().Add(-2 * time.Hour)
 
 	// Insert spans for different projects with the same trace_id.
 	_, err = db.ExecContext(context.Background(),
