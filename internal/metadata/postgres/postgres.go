@@ -87,9 +87,14 @@ func (s *Store) Migrate(ctx context.Context) error {
 	// on acquire, then see count == 1 and skip.
 	var lockID int64
 	if err := conn.QueryRowContext(ctx,
-		"SELECT hashtext($1)::bigint, pg_advisory_lock(hashtext($2)::bigint)",
-		migrateLockKey, migrateLockKey,
+		"SELECT hashtext($1)::bigint",
+		migrateLockKey,
 	).Scan(&lockID); err != nil {
+		return fmt.Errorf("postgres: compute migration lock id: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx,
+		"SELECT pg_advisory_lock($1)", lockID,
+	); err != nil {
 		return fmt.Errorf("postgres: acquire migration lock: %w", err)
 	}
 	defer func() { _, _ = conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", lockID) }() //nolint:errcheck
