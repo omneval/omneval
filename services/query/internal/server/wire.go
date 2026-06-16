@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -32,10 +31,10 @@ type WiredDeps struct {
 	QueryMetrics *metrics.QueryMetrics
 	Prober       *probe.Prober
 
-	// Lake is the DuckDB handle attached read-only to the Lake (DuckLake via
-	// the Postgres Catalog). All span reads compile against this handle
-	// (ADR-0004).
-	Lake *sql.DB
+	// Lake is the read-only Lake attachment. All span reads compile against
+	// this handle (ADR-0004). It implements handler.DBHandle with transparent
+	// reconnection on Quack Server restarts.
+	Lake *lake.Lake
 
 	// AdminLake is a separate read-write Lake attachment used for durable
 	// admin deletes (#91) and score writes.
@@ -61,7 +60,7 @@ type WiredDeps struct {
 // ordering itself.
 func (d *WiredDeps) Close() {
 	if d.Lake != nil {
-		d.Lake.Close()
+		d.Lake.Close() //nolint:errcheck
 	}
 	if d.AdminLake != nil {
 		d.AdminLake.Close()
@@ -191,38 +190,33 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		return nil, fmt.Errorf("query: open admin lake: %w", err)
 	}
 	deps.AdminLake = adminLake
-	if _, err := adminLake.DB().ExecContext(context.Background(),
+	if _, err := adminLake.ExecContext(context.Background(),
 		"CREATE OR REPLACE VIEW spans AS SELECT * FROM lake.spans"); err != nil {
 		deps.Close()
 		return nil, fmt.Errorf("query: create admin lake view: %w", err)
 	}
-	deps.Admin.DB = adminLake.DB()
+	deps.Admin.DB = adminLake
 	deps.Admin.LakeRW = adminLake
 
 	// Attach read-only to the Lake and gate readiness on Catalog
-	// reachability (ADR-0004).
-	lakeHandle, err := openLakeDB(cfg)
+	// reachability (ADR-0004). The returned *lake.Lake implements
+	// handler.DBHandle with transparent reconnection on Quack Server restarts.
+	lk, err := openLakeDB(cfg)
 	if err != nil {
 		deps.Close()
 		return nil, fmt.Errorf("query: open lake: %w", err)
 	}
-	deps.Lake = lakeHandle
-	deps.Span.Lake = lakeHandle
-	deps.Conversation.Lake = lakeHandle
+	deps.Lake = lk
+	deps.Span.Lake = lk
+	deps.Conversation.Lake = lk
 	// Eval-rule preview reads `spans` unqualified; the views
 	// openLakeDB creates resolve that against the Lake.
-	deps.EvalRule.DB = lakeHandle
+	deps.EvalRule.DB = lk
 
-	p.AddCheck("catalog", &probe.CatalogReachable{
-		Ping: func(ctx context.Context) error {
-			// A metadata-only scan of lake.spans forces a round trip
-			// to the Catalog; pinging the in-memory DuckDB would not.
-			var n int64
-			return lakeHandle.
-				QueryRowContext(ctx, "SELECT COUNT(*) FROM lake.spans WHERE 1 = 0").
-				Scan(&n)
-		},
-	})
+	// Ping is catalog-touching and reconnect-aware (lake.go); on stale
+	// connection it re-attaches and retries so the pod self-heals after a
+	// Quack Server restart without a manual rollout restart.
+	p.AddCheck("catalog", &probe.CatalogReachable{Ping: lk.Ping})
 	slog.Info("query: routing all span reads to lake.spans")
 	deps.Prober = p
 
@@ -230,8 +224,9 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 }
 
 // openLakeDB attaches read-only to the Lake (DuckLake via the Catalog) and
-// returns the underlying *sql.DB.
-func openLakeDB(cfg *config.Config) (*sql.DB, error) {
+// returns the *lake.Lake, which implements handler.DBHandle with transparent
+// reconnection on Quack Server restarts.
+func openLakeDB(cfg *config.Config) (*lake.Lake, error) {
 	lc := lake.ConfigFromApp(cfg)
 	lc.ReadOnly = true
 	lk, err := lake.Open(context.Background(), lc)
@@ -246,10 +241,10 @@ func openLakeDB(cfg *config.Config) (*sql.DB, error) {
 		"CREATE OR REPLACE VIEW spans AS SELECT * FROM lake.spans",
 		"CREATE OR REPLACE VIEW scores AS SELECT * FROM lake.scores",
 	} {
-		if _, err := lk.DB().ExecContext(context.Background(), stmt); err != nil {
+		if _, err := lk.ExecContext(context.Background(), stmt); err != nil {
 			lk.Close()
 			return nil, fmt.Errorf("create lake view: %w", err)
 		}
 	}
-	return lk.DB(), nil
+	return lk, nil
 }

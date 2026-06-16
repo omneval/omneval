@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   BarChart,
   Bar,
@@ -54,6 +54,26 @@ interface Span {
   output?: string;
   status_code?: string;
   scores?: { eval_name: string; value: number }[];
+  attributes?: Record<string, unknown>;
+}
+
+// hasRealContent returns true when a span's input/output field contains at
+// least one message with non-empty text content. Filters out the normalizer's
+// empty-wrapper pattern ([{"role":"user","content":""}]) that appears for
+// non-LLM spans whose actual data lives in the attributes overflow map.
+function hasRealContent(val: string | undefined): boolean {
+  if (!val || val.trim().length === 0) return false;
+  try {
+    const parsed = JSON.parse(val);
+    if (Array.isArray(parsed)) {
+      return parsed.some(
+        (m) => m && typeof m.content === "string" && m.content.trim().length > 0,
+      );
+    }
+  } catch {
+    // not JSON — treat non-empty string as real content
+  }
+  return val.trim().length > 0;
 }
 
 interface Score {
@@ -82,6 +102,14 @@ export interface WaterfallEntry {
 
 // ── Trace Detail Page ──────────────────────────────────────────────
 
+const LIVE_POLL_INTERVAL_MS = 5_000;
+const DEFAULT_WORD_WRAP = import.meta.env.VITE_DEFAULT_WORD_WRAP !== "false";
+const LIVE_TIMEOUT_MS = (() => {
+  const raw = import.meta.env.VITE_LIVE_TRACE_TIMEOUT_MINUTES;
+  const parsed = Number(raw);
+  return (Number.isFinite(parsed) && parsed > 0 ? parsed : 20) * 60 * 1000;
+})();
+
 export default function TraceDetailPage({
   traceId,
   activeProject,
@@ -101,33 +129,74 @@ export default function TraceDetailPage({
     input: string;
     output?: string;
   } | null>(null);
+  const [liveStatus, setLiveStatus] = useState<"live" | "stalled" | null>(null);
+  const liveStartRef = useRef<number | null>(null);
 
-  // Fetch trace detail
+  // Fetch trace detail and start live polling while the root span is absent.
+  // The root span (parent_id = "") is only committed when the agent session
+  // ends; until then the server returns a child span as a fallback root and
+  // we poll at the Commit Cadence to pick up new spans as they arrive.
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
-    fetch(
-      `/api/v1/traces/${traceId}?project_id=${encodeURIComponent(activeProject)}`,
-      { signal: controller.signal },
-    )
-      .then((res) => {
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const loadTrace = () =>
+      fetch(
+        `/api/v1/traces/${traceId}?project_id=${encodeURIComponent(activeProject)}`,
+        { signal: controller.signal },
+      ).then((res) => {
         if (!res.ok) {
-          if (res.status === 404) {
-            throw new Error("Trace not found");
-          }
+          if (res.status === 404) throw new Error("Trace not found");
           throw new Error(`Failed to load trace (${res.status})`);
         }
-        return res.json();
-      })
-      .then((data: TraceResponse) => {
-        setTrace(data.root_span);
-        setTraceRollup({
-          inputTokens: data.total_input_tokens ?? 0,
-          outputTokens: data.total_output_tokens ?? 0,
-          costUsd: data.total_cost_usd ?? 0,
-        });
+        return res.json() as Promise<TraceResponse>;
+      });
+
+    const applyData = (data: TraceResponse) => {
+      setTrace(data.root_span);
+      setTraceRollup({
+        inputTokens: data.total_input_tokens ?? 0,
+        outputTokens: data.total_output_tokens ?? 0,
+        costUsd: data.total_cost_usd ?? 0,
+      });
+    };
+
+    setLoading(true);
+    setError(null);
+    setLiveStatus(null);
+    liveStartRef.current = null;
+
+    loadTrace()
+      .then((data) => {
+        applyData(data);
         setLoading(false);
+        // Session is in progress when the real root span (parent_id = "") has
+        // not been committed yet — the server falls back to a child span as root.
+        const rootArrived = !data.root_span?.parent_id;
+        if (!rootArrived) {
+          setLiveStatus("live");
+          liveStartRef.current = Date.now();
+          intervalId = setInterval(() => {
+            if (
+              liveStartRef.current !== null &&
+              Date.now() - liveStartRef.current > LIVE_TIMEOUT_MS
+            ) {
+              setLiveStatus("stalled");
+              if (intervalId !== null) clearInterval(intervalId);
+              return;
+            }
+            loadTrace()
+              .then((pollData) => {
+                applyData(pollData);
+                if (pollData.root_span?.parent_id) return; // still in progress
+                setLiveStatus(null);
+                if (intervalId !== null) clearInterval(intervalId);
+              })
+              .catch(() => {
+                // Non-fatal: retry next tick
+              });
+          }, LIVE_POLL_INTERVAL_MS);
+        }
       })
       .catch((err) => {
         if (err.name !== "AbortError") {
@@ -135,8 +204,10 @@ export default function TraceDetailPage({
           setLoading(false);
         }
       });
+
     return () => {
       controller.abort();
+      if (intervalId !== null) clearInterval(intervalId);
     };
   }, [traceId, activeProject]);
 
@@ -245,6 +316,32 @@ export default function TraceDetailPage({
             Back
           </button>
           <div className="flex-1" />
+          {liveStatus !== null && (
+            <div
+              className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs"
+              style={{
+                background:
+                  liveStatus === "live"
+                    ? "rgba(139, 92, 246, 0.15)"
+                    : "rgba(107, 114, 128, 0.15)",
+                color:
+                  liveStatus === "live"
+                    ? colors.accents.flicker
+                    : colors.typography.ashGrey,
+              }}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${liveStatus === "live" ? "animate-pulse" : ""}`}
+                style={{
+                  background:
+                    liveStatus === "live"
+                      ? colors.accents.flicker
+                      : colors.typography.ashGrey,
+                }}
+              />
+              {liveStatus === "live" ? "Live" : "Stalled"}
+            </div>
+          )}
           <span className="text-xs text-omneval-text-muted">
             <span className="font-mono text-omneval-text-pure">{traceId}</span>
           </span>
@@ -380,7 +477,7 @@ const ROLE_COLORS: Record<string, string> = {
   tool: colors.accents.amberWarning,
 };
 
-function ChatTurnsView({ value, label }: { value: string; label: string }) {
+function ChatTurnsView({ value, label, wordWrap }: { value: string; label: string; wordWrap: boolean }) {
   const turns = parseChatTurns(value);
 
   if (!turns) {
@@ -415,7 +512,12 @@ function ChatTurnsView({ value, label }: { value: string; label: string }) {
             >
               {turn.role}
             </span>
-            <span className="text-omneval-text-pure whitespace-pre-wrap">{turn.content}</span>
+            <span
+              className={`text-omneval-text-pure ${wordWrap ? "whitespace-pre-wrap" : "whitespace-pre"}`}
+              style={wordWrap ? undefined : { display: "block", overflowX: "auto" }}
+            >
+              {turn.content}
+            </span>
           </div>
         ))}
       </div>
@@ -594,8 +696,11 @@ function SlideInDetailPanel({
   onClose: () => void;
   onSave: () => void;
 }) {
-  const hasInput = span.input && span.input.length > 0;
-  const hasOutput = span.output && span.output.length > 0;
+  const [wordWrap, setWordWrap] = useState(DEFAULT_WORD_WRAP);
+  const hasInput = hasRealContent(span.input);
+  const hasOutput = hasRealContent(span.output);
+  const hasAttributes =
+    span.attributes != null && Object.keys(span.attributes).length > 0;
 
   return (
     <>
@@ -639,18 +744,33 @@ function SlideInDetailPanel({
               )}
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="flex-shrink-0 p-1.5 rounded-md transition-colors"
-            style={{ color: colors.typography.ashGrey }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.backgrounds.slightIllumination)}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-            aria-label="Close detail panel"
-          >
-            <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
-              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setWordWrap((w) => !w)}
+              className="flex-shrink-0 p-1.5 rounded-md transition-colors"
+              style={{ color: wordWrap ? colors.accents.flicker : colors.typography.ashGrey }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.backgrounds.slightIllumination)}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+              aria-label={wordWrap ? "Disable word wrap" : "Enable word wrap"}
+              title={wordWrap ? "Word wrap: on" : "Word wrap: off"}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M2 4h12M2 8h8a2 2 0 010 4H8m0 0l2-2m-2 2l2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              onClick={onClose}
+              className="flex-shrink-0 p-1.5 rounded-md transition-colors"
+              style={{ color: colors.typography.ashGrey }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.backgrounds.slightIllumination)}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+              aria-label="Close detail panel"
+            >
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* Content */}
@@ -693,12 +813,26 @@ function SlideInDetailPanel({
 
           {/* Input */}
           {hasInput && (
-            <ChatTurnsView value={span.input!} label="Input" />
+            <ChatTurnsView value={span.input!} label="Input" wordWrap={wordWrap} />
           )}
 
           {/* Output */}
           {hasOutput && (
-            <ChatTurnsView value={span.output!} label="Output" />
+            <ChatTurnsView value={span.output!} label="Output" wordWrap={wordWrap} />
+          )}
+
+          {/* Attributes — shown when non-empty; primary content for non-LLM spans */}
+          {hasAttributes && (
+            <div>
+              <div className="text-xs font-medium text-omneval-text-muted mb-2 uppercase tracking-wider">
+                Attributes
+              </div>
+              <JsonCodeBlock
+                value={JSON.stringify(span.attributes, null, 2)}
+                label="Attributes"
+                maxHeight={hasInput || hasOutput ? 200 : 400}
+              />
+            </div>
           )}
 
           {hasInput && (

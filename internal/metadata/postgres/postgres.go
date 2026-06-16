@@ -153,13 +153,7 @@ func applyMigrationOnConn(ctx context.Context, conn *sql.Conn, version int64, sq
 		return fmt.Errorf("postgres: apply migration %d: %w", version, err)
 	}
 
-	// Use ON CONFLICT DO NOTHING so that if another process somehow
-	// applied this migration concurrently (e.g. before the advisory
-	// lock was fully effective), we don't crash with a duplicate-key error.
-	if _, err := tx.ExecContext(ctx,
-		"INSERT INTO _schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING",
-		version,
-	); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO _schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING", version); err != nil {
 		return fmt.Errorf("postgres: record migration %d version: %w", version, err)
 	}
 

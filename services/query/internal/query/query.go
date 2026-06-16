@@ -582,11 +582,9 @@ func parseKindCounts(v any) (map[string]int64, error) {
 // input_tokens, output_tokens, cost_usd, prompt_name, prompt_version,
 // status_code, status_message
 //
-// Trace-rollup reads (LakeSQL, issue #136) append a 21st and 22nd column,
-// span_count and kind_counts — the number of spans in the row's trace, and
-// a JSON object mapping each observation kind present in the trace to its
-// count. Span-level reads (e.g. LakeTraceSpansSQL) produce exactly 20
-// columns and leave SpanCount/KindCounts at their zero values.
+// Column 21 varies by query and is disambiguated by type at scan time:
+//   - LakeSQL (trace list): int64 span_count, then string kind_counts at column 22.
+//   - LakeTraceSpansSQL (trace detail): string attributes JSON at column 21.
 func ScanRows(rows [][]any) ([]*domain.Span, error) {
 	spans := make([]*domain.Span, len(rows))
 	for i, row := range rows {
@@ -627,15 +625,32 @@ func ScanRows(rows [][]any) ([]*domain.Span, error) {
 		s.StatusCode = strVal(row[18])
 		s.StatusMessage = strVal(row[19])
 		if len(row) >= 21 {
-			if v, ok := row[20].(int64); ok {
+			switch v := row[20].(type) {
+			case int64:
+				// LakeSQL: span_count at column 21, kind_counts at column 22.
 				s.SpanCount = v
-			}
-		}
-		if len(row) >= 22 {
-			if kc, err := parseKindCounts(row[21]); err != nil {
-				return nil, fmt.Errorf("scan: kind_counts: %w", err)
-			} else if kc != nil {
-				s.KindCounts = kc
+				if len(row) >= 22 {
+					if kc, err := parseKindCounts(row[21]); err != nil {
+						return nil, fmt.Errorf("scan: kind_counts: %w", err)
+					} else if kc != nil {
+						s.KindCounts = kc
+					}
+				}
+			case string:
+				// LakeTraceSpansSQL: attributes JSON at column 21.
+				if v != "" {
+					attrs := make(map[string]any)
+					if json.Unmarshal([]byte(v), &attrs) == nil {
+						s.Attributes = attrs
+					}
+				}
+			case []byte:
+				if len(v) > 0 {
+					attrs := make(map[string]any)
+					if json.Unmarshal(v, &attrs) == nil {
+						s.Attributes = attrs
+					}
+				}
 			}
 		}
 		spans[i] = s
@@ -756,10 +771,11 @@ WHERE r.rn = 1`)
 // trace from the Lake table, deduplicated on (trace_id, span_id) keeping one
 // row per pair — the read-time residual-duplicate policy from ADR-0004
 // (duplicates survive only a crash between Lake commit and ledger insert).
+// Returns 21 columns: the 20 base columns plus attributes at column 21.
 func (q *SpanQuery) LakeTraceSpansSQL(traceID string) (sql string, args []any) {
 	sql = "SELECT span_id, trace_id, parent_id, conversation_id, project_id, service_name, name, kind, " +
 		"start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, " +
-		"prompt_name, prompt_version, status_code, status_message FROM (" +
+		"prompt_name, prompt_version, status_code, status_message, attributes FROM (" +
 		"SELECT *, ROW_NUMBER() OVER (PARTITION BY trace_id, span_id ORDER BY start_time DESC) AS rn" +
 		" FROM lake.spans WHERE trace_id = ? AND project_id = ?" +
 		") AS deduped WHERE rn = 1 ORDER BY start_time ASC"
