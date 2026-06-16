@@ -714,8 +714,56 @@ func TestLakeTraceSpansSQL_Dedupes(t *testing.T) {
 	if !strings.Contains(sql, "ROW_NUMBER() OVER (PARTITION BY trace_id, span_id") {
 		t.Errorf("trace detail must dedupe on (trace_id, span_id), got:\n%s", sql)
 	}
-	if len(args) != 2 || args[0] != "trace-1" || args[1] != "proj-abc" {
-		t.Errorf("args: got %v, want [trace-1 proj-abc]", args)
+	// args: traceID, projectID, limit.
+	if len(args) != 3 || args[0] != "trace-1" || args[1] != "proj-abc" {
+		t.Errorf("args: got %v, want [trace-1 proj-abc <limit>]", args)
+	}
+}
+
+func TestLakeTraceSpansSQL_HasLimitClause(t *testing.T) {
+	q, err := NewSpanQuery("proj-abc", SpanQueryRequest{Limit: 100})
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, args := q.LakeTraceSpansSQL("trace-1")
+	if !strings.Contains(sql, "LIMIT ?") {
+		t.Errorf("trace detail SQL must include LIMIT clause, got:\n%s", sql)
+	}
+	// args: traceID, projectID, limit.
+	if len(args) != 3 || args[2] != 100 {
+		t.Errorf("limit argument: got %v, want [trace-1 proj-abc 100]", args)
+	}
+}
+
+func TestLakeTraceSpansSQL_FallbackToHardCapWhenZero(t *testing.T) {
+	// Construct the query directly (bypassing NewSpanQuery's DefaultLimit
+	// assignment) to verify LakeTraceSpansSQL falls back to MaxTraceSpansLimit
+	// when q.limit is 0.
+	q := &SpanQuery{
+		projectID: "proj-abc",
+		limit:     0,
+	}
+
+	_, args := q.LakeTraceSpansSQL("trace-1")
+	// When q.limit == 0, effective limit falls back to MaxTraceSpansLimit (10000)
+	// so trace detail queries don't load unbounded spans into memory.
+	if len(args) != 3 || args[2] != MaxTraceSpansLimit {
+		t.Errorf("limit argument with zero limit: got %v, want [trace-1 proj-abc %d]", args, MaxTraceSpansLimit)
+	}
+}
+
+func TestLakeTraceSpansSQL_CappedAtHardLimit(t *testing.T) {
+	// Construct the query directly (bypassing NewSpanQuery's MaxLimit validation)
+	// to verify LakeTraceSpansSQL caps at MaxTraceSpansLimit regardless.
+	q := &SpanQuery{
+		projectID: "proj-abc",
+		limit:     50000, // exceeds MaxTraceSpansLimit
+	}
+
+	_, args := q.LakeTraceSpansSQL("trace-1")
+	if len(args) != 3 || args[2] != 10000 {
+		t.Errorf("limit argument capped at 10000: got %v", args)
 	}
 }
 

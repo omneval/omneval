@@ -224,6 +224,11 @@ const (
 	DefaultLimit = 50
 	// MaxLimit is the maximum page size allowed.
 	MaxLimit = 500
+	// MaxTraceSpansLimit is the maximum number of spans a single trace
+	// detail query will fetch from DuckDB. This hard cap prevents OOMKilled
+	// pods when a trace contains an unbounded number of spans (e.g. long-
+	// running agent loops) — see issue #152.
+	MaxTraceSpansLimit = 10000
 )
 
 // defaultTimeRange is the time range applied when from and to are omitted
@@ -772,12 +777,27 @@ WHERE r.rn = 1`)
 // row per pair — the read-time residual-duplicate policy from ADR-0004
 // (duplicates survive only a crash between Lake commit and ledger insert).
 // Returns 21 columns: the 20 base columns plus attributes at column 21.
+//
+// A LIMIT clause (ADR-0004/#152) is appended to the query so that traces with
+// an unbounded number of spans (e.g. long-running agent loops) cannot exhaust
+// the DuckDB process memory. The limit is the query's effective limit from
+// SpanQueryRequest.Limit when > 0, falling back to MaxTraceSpansLimit (10000) when 0,
+// and capped at MaxTraceSpansLimit.
 func (q *SpanQuery) LakeTraceSpansSQL(traceID string) (sql string, args []any) {
+	limit := q.limit
+	if limit <= 0 {
+		limit = MaxTraceSpansLimit
+	}
+	if limit > MaxTraceSpansLimit {
+		limit = MaxTraceSpansLimit
+	}
+
 	sql = "SELECT span_id, trace_id, parent_id, conversation_id, project_id, service_name, name, kind, " +
 		"start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, " +
 		"prompt_name, prompt_version, status_code, status_message, attributes FROM (" +
 		"SELECT *, ROW_NUMBER() OVER (PARTITION BY trace_id, span_id ORDER BY start_time DESC) AS rn" +
 		" FROM lake.spans WHERE trace_id = ? AND project_id = ?" +
-		") AS deduped WHERE rn = 1 ORDER BY start_time ASC"
-	return sql, []any{traceID, q.projectID}
+		") AS deduped WHERE rn = 1 ORDER BY start_time ASC" +
+		" LIMIT ?"
+	return sql, []any{traceID, q.projectID, limit}
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/lake/lakeservertest"
 	"github.com/omneval/omneval/services/query/internal/auth"
+	"github.com/omneval/omneval/services/query/internal/query"
 )
 
 const spansTableDDL = `
@@ -2328,5 +2329,77 @@ func TestHandleTraceDetail_DedupeOnLake(t *testing.T) {
 	// Verify the returned span has the correct ID.
 	if spans[0].SpanID != "span-001" {
 		t.Errorf("span_id: got %q, want %q", spans[0].SpanID, "span-001")
+	}
+}
+
+// TestHandleTraceDetail_LimitedSpans verifies that LakeTraceSpansSQL applies
+// LIMIT so a trace with > limit spans only returns limit rows from the
+// executed query (not just the SQL string).
+func TestHandleTraceDetail_LimitedSpans(t *testing.T) {
+	ctx := context.Background()
+
+	cfg, _ := lakeservertest.NewLocal(t)
+
+	lk, err := lake.Open(ctx, cfg)
+	if err != nil {
+		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
+	}
+	defer lk.Close()
+
+	baseTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	numSpans := 150
+	limit := 100
+
+	// Insert 150 spans for the same trace.
+	spans := make([]*domain.Span, 0, numSpans)
+	for i := 0; i < numSpans; i++ {
+		spans = append(spans, &domain.Span{
+			SpanID:      fmt.Sprintf("span-%03d", i),
+			TraceID:     "trace-limited",
+			ProjectID:   "proj-limited",
+			ServiceName: "svc",
+			Name:        fmt.Sprintf("span-%d", i),
+			Kind:        domain.SpanKind("default"),
+			StartTime:   baseTime.Add(time.Duration(i) * time.Millisecond),
+			EndTime:     baseTime.Add(time.Duration(i) * time.Millisecond).Add(time.Millisecond),
+		})
+	}
+	if err := lk.InsertSpans(ctx, spans); err != nil {
+		t.Fatalf("insert spans: %v", err)
+	}
+
+	// The handler uses LakeTraceSpansSQL which caps at MaxTraceSpansLimit (10000),
+	// so 150 spans should all return. Test with a smaller limit by constructing
+	// a direct SQL query with a LIMIT.
+	q, err := query.NewSpanQuery("proj-limited", query.SpanQueryRequest{
+		From:  time.Time{},
+		To:    time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC),
+		Filters: []query.SpanQueryFilter{
+			{Field: "trace_id", Op: "eq", Value: "trace-limited"},
+		},
+		Limit: limit,
+	})
+	if err != nil {
+		t.Fatalf("NewSpanQuery: %v", err)
+	}
+
+	sqlStr, args := q.LakeTraceSpansSQL("trace-limited")
+	rows, err := lk.DB().Query(sqlStr, args...)
+	if err != nil {
+		t.Fatalf("execute lake trace spans query: %v", err)
+	}
+	defer rows.Close()
+
+	var count int
+	for rows.Next() {
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows iteration: %v", err)
+	}
+
+	// With limit=100 and 150 spans, only 100 rows should be returned.
+	if count != limit {
+		t.Errorf("span count with limit %d: got %d, want %d", limit, count, limit)
 	}
 }
