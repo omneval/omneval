@@ -153,11 +153,40 @@ func (l *Lake) attach(ctx context.Context, cfg Config) error {
 	return nil
 }
 
-// isStaleConn reports whether err is the DuckLake "Invalid connection id"
-// error that occurs when the Quack Server restarts and the client's
-// catalog attachment becomes invalid.
+// isStaleConn reports whether err is a Quack-connectivity error that indicates
+// a stale catalog attachment — the Quack Server restarted, went down, or the
+// DuckDB operation was interrupted. These are all transient: reconnecting
+// the Lake to a fresh DuckDB instance re-establishes the attachment.
 func isStaleConn(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "Invalid connection id")
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	// Invalid connection id: the classic DuckLake stale-attachment signal.
+	if strings.Contains(msg, "Invalid connection id") {
+		return true
+	}
+	// Could not connect to server: Quack is completely down during restart.
+	if strings.Contains(msg, "Could not connect to server") {
+		return true
+	}
+	// Authentication failed: token mismatch on Quack restart.
+	if strings.Contains(msg, "Authentication failed") {
+		return true
+	}
+	// Context canceled: interrupted DuckDB operations (LOAD httpfs, ATTACH, etc.).
+	if strings.Contains(msg, "context canceled") {
+		return true
+	}
+	// ATTACH failures: reattaching the DuckLake catalog.
+	if strings.Contains(msg, "ATTACH") {
+		return true
+	}
+	// INTERRUPT: DuckDB operation was aborted during Quack downtime.
+	if strings.Contains(msg, "INTERRUPT") {
+		return true
+	}
+	return false
 }
 
 // reconnect closes the current DuckDB in-memory instance, opens a fresh one,
