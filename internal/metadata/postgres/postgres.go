@@ -61,6 +61,7 @@ const migrateLockKey = "omneval_metadata_migrate"
 //
 // Concurrent calls are serialized via a session-level advisory lock to prevent
 // duplicate _schema_migrations inserts (fixes #147).
+// Reference: issue #147
 func (s *Store) Migrate(ctx context.Context) error {
 	if s.migrated {
 		return nil
