@@ -47,6 +47,10 @@ The `committed_batches` table in Postgres recording every Batch ID already commi
 ### Commit Cadence
 How often a writer commits its accumulated batch to the Lake: up to ~5 seconds or ~16MB, whichever comes first. This is the user-visible freshness bound for new spans.
 
+### In-Progress Trace
+A Trace whose root span (the Span with no `ParentID`) has not yet been committed to the Lake. Agent SDKs following OTel conventions emit the root span only when the session ends, so child spans arrive and are committed at the Commit Cadence while the root span is absent. A Trace is considered in-progress when `GET /api/v1/traces/:traceId` returns a span with a non-empty `parent_id` as the fallback root. The Trace Detail UI polls at the Commit Cadence while in-progress and stops once the real root span arrives. The polling timeout is configurable via `VITE_LIVE_TRACE_TIMEOUT_MINUTES` (default 20 minutes).
+_Avoid_: active trace, live trace (use "in-progress trace")
+
 ### Table Maintenance
 The scheduled compaction duty of the Quack Server (ADR-0005): flush inlined data (`ducklake_flush_inlined_data`), merge adjacent small Parquet files, expire old DuckLake snapshots, and clean orphaned/rewritten files. Required because frequent small commits fragment the Lake and DuckLake 1.5 inlines small writes/deletes into Catalog metadata until flushed. Replaces the former leader-elected-Writer duty — there is no leader election after ADR-0005 (`internal/leader` retired).
 _Avoid_: leader-elected writer, leader writer
