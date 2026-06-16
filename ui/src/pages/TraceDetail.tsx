@@ -54,6 +54,26 @@ interface Span {
   output?: string;
   status_code?: string;
   scores?: { eval_name: string; value: number }[];
+  attributes?: Record<string, unknown>;
+}
+
+// hasRealContent returns true when a span's input/output field contains at
+// least one message with non-empty text content. Filters out the normalizer's
+// empty-wrapper pattern ([{"role":"user","content":""}]) that appears for
+// non-LLM spans whose actual data lives in the attributes overflow map.
+function hasRealContent(val: string | undefined): boolean {
+  if (!val || val.trim().length === 0) return false;
+  try {
+    const parsed = JSON.parse(val);
+    if (Array.isArray(parsed)) {
+      return parsed.some(
+        (m) => m && typeof m.content === "string" && m.content.trim().length > 0,
+      );
+    }
+  } catch {
+    // not JSON — treat non-empty string as real content
+  }
+  return val.trim().length > 0;
 }
 
 interface Score {
@@ -83,6 +103,7 @@ export interface WaterfallEntry {
 // ── Trace Detail Page ──────────────────────────────────────────────
 
 const LIVE_POLL_INTERVAL_MS = 5_000;
+const DEFAULT_WORD_WRAP = import.meta.env.VITE_DEFAULT_WORD_WRAP !== "false";
 const LIVE_TIMEOUT_MS = (() => {
   const raw = import.meta.env.VITE_LIVE_TRACE_TIMEOUT_MINUTES;
   const parsed = Number(raw);
@@ -456,7 +477,7 @@ const ROLE_COLORS: Record<string, string> = {
   tool: colors.accents.amberWarning,
 };
 
-function ChatTurnsView({ value, label }: { value: string; label: string }) {
+function ChatTurnsView({ value, label, wordWrap }: { value: string; label: string; wordWrap: boolean }) {
   const turns = parseChatTurns(value);
 
   if (!turns) {
@@ -491,7 +512,12 @@ function ChatTurnsView({ value, label }: { value: string; label: string }) {
             >
               {turn.role}
             </span>
-            <span className="text-omneval-text-pure whitespace-pre-wrap">{turn.content}</span>
+            <span
+              className={`text-omneval-text-pure ${wordWrap ? "whitespace-pre-wrap" : "whitespace-pre"}`}
+              style={wordWrap ? undefined : { display: "block", overflowX: "auto" }}
+            >
+              {turn.content}
+            </span>
           </div>
         ))}
       </div>
@@ -670,8 +696,11 @@ function SlideInDetailPanel({
   onClose: () => void;
   onSave: () => void;
 }) {
-  const hasInput = span.input && span.input.length > 0;
-  const hasOutput = span.output && span.output.length > 0;
+  const [wordWrap, setWordWrap] = useState(DEFAULT_WORD_WRAP);
+  const hasInput = hasRealContent(span.input);
+  const hasOutput = hasRealContent(span.output);
+  const hasAttributes =
+    span.attributes != null && Object.keys(span.attributes).length > 0;
 
   return (
     <>
@@ -715,18 +744,33 @@ function SlideInDetailPanel({
               )}
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="flex-shrink-0 p-1.5 rounded-md transition-colors"
-            style={{ color: colors.typography.ashGrey }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.backgrounds.slightIllumination)}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-            aria-label="Close detail panel"
-          >
-            <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
-              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setWordWrap((w) => !w)}
+              className="flex-shrink-0 p-1.5 rounded-md transition-colors"
+              style={{ color: wordWrap ? colors.accents.flicker : colors.typography.ashGrey }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.backgrounds.slightIllumination)}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+              aria-label={wordWrap ? "Disable word wrap" : "Enable word wrap"}
+              title={wordWrap ? "Word wrap: on" : "Word wrap: off"}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M2 4h12M2 8h8a2 2 0 010 4H8m0 0l2-2m-2 2l2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              onClick={onClose}
+              className="flex-shrink-0 p-1.5 rounded-md transition-colors"
+              style={{ color: colors.typography.ashGrey }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.backgrounds.slightIllumination)}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+              aria-label="Close detail panel"
+            >
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* Content */}
@@ -769,12 +813,26 @@ function SlideInDetailPanel({
 
           {/* Input */}
           {hasInput && (
-            <ChatTurnsView value={span.input!} label="Input" />
+            <ChatTurnsView value={span.input!} label="Input" wordWrap={wordWrap} />
           )}
 
           {/* Output */}
           {hasOutput && (
-            <ChatTurnsView value={span.output!} label="Output" />
+            <ChatTurnsView value={span.output!} label="Output" wordWrap={wordWrap} />
+          )}
+
+          {/* Attributes — shown when non-empty; primary content for non-LLM spans */}
+          {hasAttributes && (
+            <div>
+              <div className="text-xs font-medium text-omneval-text-muted mb-2 uppercase tracking-wider">
+                Attributes
+              </div>
+              <JsonCodeBlock
+                value={JSON.stringify(span.attributes, null, 2)}
+                label="Attributes"
+                maxHeight={hasInput || hasOutput ? 200 : 400}
+              />
+            </div>
           )}
 
           {hasInput && (
