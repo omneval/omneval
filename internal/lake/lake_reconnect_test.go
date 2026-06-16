@@ -64,7 +64,36 @@ func TestIsStaleConn(t *testing.T) {
 	}{
 		{"nil", "", false},
 		{"unrelated IO error", "IO Error: no such file", false},
-		{"context canceled", "context canceled", false},
+		{
+			"Could not connect to server (Quack down)",
+			"HTTP Error: Could not connect to server",
+			true,
+		},
+		{
+			"Authentication failed (token mismatch on restart)",
+			"HTTP Error: Authentication failed",
+			true,
+		},
+		{
+			"context canceled (interrupted DuckDB op)",
+			"context canceled",
+			true,
+		},
+		{
+			"LOAD httpfs: context canceled",
+			"LOAD httpfs: context canceled",
+			true,
+		},
+		{
+			"ATTACH IF NOT EXISTS: context canceled",
+			"ATTACH IF NOT EXISTS: context canceled",
+			true,
+		},
+		{
+			"INTERRUPT Error: Interrupted!",
+			"INTERRUPT Error: Interrupted!",
+			true,
+		},
 		{
 			"exact DuckLake stale connection error",
 			"Invalid Input Error: Failed to query most recent snapshot for DuckLake: Invalid connection id",
@@ -74,6 +103,16 @@ func TestIsStaleConn(t *testing.T) {
 			"stale error wrapped by lake methods",
 			"lake: prepare: Invalid Input Error: Failed to query most recent snapshot for DuckLake: Invalid connection id",
 			true,
+		},
+		{
+			"malformed SQL does not trigger reconnect",
+			"Binder Error: Unknown column: nonexistent_column",
+			false,
+		},
+		{
+			"missing table does not trigger reconnect",
+			"Catalog Error: Table 'lake.spans' doesn't exist",
+			false,
 		},
 	}
 	for _, tt := range tests {
