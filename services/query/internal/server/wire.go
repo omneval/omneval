@@ -17,6 +17,7 @@ import (
 	"github.com/omneval/omneval/services/query/internal/handler"
 	"github.com/omneval/omneval/services/query/internal/metrics"
 	"github.com/omneval/omneval/services/query/internal/playground"
+	"github.com/omneval/omneval/services/query/internal/querybuild"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -39,6 +40,10 @@ type WiredDeps struct {
 	// AdminLake is a separate read-write Lake attachment used for durable
 	// admin deletes (#91) and score writes.
 	AdminLake *lake.Lake
+
+	// QueryBuilder encapsulates the full DSL → SQL → execute → scan pipeline
+	// for both span and analytics queries.
+	QueryBuilder *querybuild.QueryBuilder
 
 	// Handlers.
 	Auth            *auth.Handler
@@ -123,7 +128,16 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	deps.Auth = h
 
 	// Create handlers.
-	deps.Span = &handler.SpanHandler{SessionStore: h, BookmarkStore: store, ProjectResolver: h}
+	deps.QueryBuilder = &querybuild.QueryBuilder{
+		Lake:          deps.Lake,
+		BookmarkStore: store,
+	}
+	deps.Span = &handler.SpanHandler{
+		SessionStore: h,
+		ProjectResolver: h,
+		Lake:           deps.Lake,
+		QueryBuilder:   deps.QueryBuilder,
+	}
 	deps.Bookmark = &handler.BookmarkHandler{BookmarkStore: store, SessionStore: h, ProjectResolver: h}
 	deps.Conversation = &handler.ConversationHandler{SessionStore: h, ProjectResolver: h}
 
@@ -221,6 +235,7 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	}
 	deps.Lake = lk
 	deps.Span.Lake = lk
+	deps.Span.QueryBuilder = &querybuild.QueryBuilder{Lake: lk, BookmarkStore: store}
 	deps.Conversation.Lake = lk
 	// Eval-rule preview reads `spans` unqualified; the views
 	// openLakeDB creates resolve that against the Lake.
