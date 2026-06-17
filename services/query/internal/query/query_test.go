@@ -337,7 +337,10 @@ func TestBuildWhereClause_StatusCodeIn_OK(t *testing.T) {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
 
-	args, where := q.buildWhereClause()
+	args, where, err := q.buildWhereClause()
+	if err != nil {
+		t.Fatalf("buildWhereClause error: %v", err)
+	}
 
 	if !strings.Contains(where, "status_code IN (?)") {
 		t.Errorf("expected where clause to contain 'status_code IN (?)', got: %s", where)
@@ -375,7 +378,10 @@ func TestBuildWhereClause_StatusCodeIn_UNSET(t *testing.T) {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
 
-	args, where := q.buildWhereClause()
+	args, where, err := q.buildWhereClause()
+	if err != nil {
+		t.Fatalf("buildWhereClause error: %v", err)
+	}
 
 	if !strings.Contains(where, "status_code IN (?)") {
 		t.Errorf("expected where clause to still match literal 'UNSET' rows, got: %s", where)
@@ -414,7 +420,10 @@ func TestBuildWhereClause_StatusCodeIn_OKAndUnset(t *testing.T) {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
 
-	args, where := q.buildWhereClause()
+	args, where, err := q.buildWhereClause()
+	if err != nil {
+		t.Fatalf("buildWhereClause error: %v", err)
+	}
 
 	if !strings.Contains(where, "status_code IN (?, ?)") {
 		t.Errorf("expected where clause to contain 'status_code IN (?, ?)', got: %s", where)
@@ -461,7 +470,10 @@ func TestBuildWhereClause_StatusCodeIn_ERROR(t *testing.T) {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
 
-	args, where := q.buildWhereClause()
+	args, where, err := q.buildWhereClause()
+	if err != nil {
+		t.Fatalf("buildWhereClause error: %v", err)
+	}
 
 	if !strings.Contains(where, "status_code IN (?)") {
 		t.Errorf("expected where clause to contain 'status_code IN (?)', got: %s", where)
@@ -496,7 +508,10 @@ func TestBuildWhereClause_StatusCodeIn_OKAndError(t *testing.T) {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
 
-	args, where := q.buildWhereClause()
+	args, where, err := q.buildWhereClause()
+	if err != nil {
+		t.Fatalf("buildWhereClause error: %v", err)
+	}
 
 	if !strings.Contains(where, "status_code IN (?, ?)") {
 		t.Errorf("expected where clause to contain 'status_code IN (?, ?)', got: %s", where)

@@ -124,7 +124,10 @@ func TestSpanQuery_BookmarkedFilterInWhereClause(t *testing.T) {
 	}
 	q.SetBookmarkedTraceIDs([]string{"trace-a", "trace-b"})
 
-	args, where := q.buildWhereClause()
+	args, where, err := q.buildWhereClause()
+	if err != nil {
+		t.Fatalf("buildWhereClause error: %v", err)
+	}
 
 	wantClause := "spans.trace_id IN (?, ?)"
 	if !strings.Contains(where, wantClause) {
@@ -145,7 +148,10 @@ func TestSpanQuery_BookmarkedFalseFilterInWhereClause(t *testing.T) {
 	}
 	q.SetBookmarkedTraceIDs([]string{"trace-a"})
 
-	_, where := q.buildWhereClause()
+	_, where, err := q.buildWhereClause()
+	if err != nil {
+		t.Fatalf("buildWhereClause error: %v", err)
+	}
 
 	wantClause := "spans.trace_id NOT IN (?)"
 	if !strings.Contains(where, wantClause) {
