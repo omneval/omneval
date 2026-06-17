@@ -664,3 +664,25 @@ func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"score_id": scoreID})
 }
+
+// extractProjectID resolves the project ID for a request. It checks the
+// API-key context key first (for non-session-authenticated routes like
+// prompts/eval-rules), then falls back to the session store, then to the
+// ?project_id= query parameter (for backwards-compatible test usage).
+func extractProjectID(sess SessionStore, r *http.Request) (string, bool) {
+	// 1. API-key derived project ID (set by RequireSessionOrAPIKey middleware).
+	if pid, ok := r.Context().Value(APIKeyProjectIDKey).(string); ok && pid != "" {
+		return pid, true
+	}
+	// 2. Session store default project.
+	if sess != nil {
+		if projectID, ok := sess.ProjectID(r); ok && projectID != "" {
+			return projectID, true
+		}
+	}
+	// 3. Fallback: ?project_id= query parameter (test backwards-compat).
+	if pid := r.URL.Query().Get("project_id"); pid != "" {
+		return pid, true
+	}
+	return "", false
+}
