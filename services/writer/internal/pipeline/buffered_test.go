@@ -189,7 +189,7 @@ func TestProcessEntry_RedeliveryAddsZeroLakeRows(t *testing.T) {
 func TestProcessEntry_LakeFailureLeavesBatchReplayable(t *testing.T) {
 	ctx := context.Background()
 	p, _, rq, fetcher, ledger := bufferedTestPipeline(t)
-	p.lake = failingLake{}
+	p.WithLake(failingLake{})
 
 	fetcher.batches["b1"] = []*domain.Span{bufferedTestSpan("s1")}
 	entry := &queue.IngestEntry{Ref: &queue.BatchRef{BatchID: "b1"}, Raw: "raw-b1"}
