@@ -591,8 +591,8 @@ func (f *fakeAdminStore) Close() error                    { return nil }
 
 func withAdminContext(req *http.Request, email string) *http.Request {
 	ctx := req.Context()
-	ctx = context.WithValue(ctx, auth.AdminContextKey, email)
-	ctx = context.WithValue(ctx, auth.CurrentUserKey, &auth.CurrentUser{
+	ctx = context.WithValue(ctx, auth.AdminEmailContextKey, email)
+	ctx = context.WithValue(ctx, auth.UserIDContextKey, &auth.CurrentUser{
 		UserID: "test-user",
 		Email:  email,
 	})

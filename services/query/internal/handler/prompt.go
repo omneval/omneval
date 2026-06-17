@@ -24,10 +24,21 @@ import (
 //   PUT    /api/v1/prompts/:name/labels/:label   — reassign a label
 
 type PromptHandler struct {
-	PromptStore  metadata.PromptStore
-	Cache        *PromptCache
-	SessionStore SessionStore
-	Validator    auth.Validator
+	PromptStore   metadata.PromptStore
+	Cache         *PromptCache
+	SessionStore  SessionStore
+	ProjectResolver auth.ProjectResolver
+	Validator     auth.Validator
+}
+
+// resolveProjectID returns a ProjectResolver that chains h.ProjectResolver
+// (if non-nil) with a fallback to h.SessionStore.ProjectID.  When both are
+// nil it returns nil so callers still get the 401.
+func (h *PromptHandler) resolveProjectID() auth.ProjectResolver {
+	if h.ProjectResolver == nil && h.SessionStore != nil {
+		return auth.NewSessionStoreResolver(h.SessionStore)
+	}
+	return h.ProjectResolver
 }
 
 
@@ -40,7 +51,8 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -172,7 +184,8 @@ func (h *PromptHandler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) 
 	versionQuery := r.URL.Query().Get("version")
 	labelQuery := r.URL.Query().Get("label")
 
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -248,7 +261,8 @@ func (h *PromptHandler) HandleListPrompts(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -337,7 +351,8 @@ func (h *PromptHandler) HandleSetLabel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate the version exists.
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -393,7 +408,8 @@ func (h *PromptHandler) HandleListPromptVersions(w http.ResponseWriter, r *http.
 		return
 	}
 
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}

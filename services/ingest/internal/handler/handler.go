@@ -17,9 +17,6 @@ import (
 
 // --- Types ---
 
-// ValidatedKey holds the result of API key authentication.
-type ValidatedKey = auth.ValidatedKey
-
 // NativeSpan is the REST API request body for a single span.
 type NativeSpan struct {
 	SpanID         string         `json:"span_id,omitempty"`
@@ -43,11 +40,6 @@ type IngestRequest struct {
 	Spans []*NativeSpan `json:"spans"`
 }
 
-// Validator authenticates raw API key strings and returns a ValidatedKey.
-type Validator interface {
-	Validate(ctx context.Context, rawKey string) (*ValidatedKey, error)
-}
-
 // SpanQueue pushes and pops span batches to/from the ingest queue.
 type SpanQueue interface {
 	Enqueue(ctx context.Context, spans []*domain.Span) error
@@ -58,7 +50,7 @@ type SpanQueue interface {
 // NativeHandler handles POST /api/v1/spans for the native Omneval REST format.
 type NativeHandler struct {
 	queue       SpanQueue
-	validator   Validator
+	validator   auth.Validator
 	corsOrigins []string
 	metrics     *metrics.IngestMetrics
 	normalizer  domain.SpanNormalizer
@@ -66,7 +58,7 @@ type NativeHandler struct {
 
 // NewNativeHandler creates a NativeHandler with optional CORS origins.
 // Pass a non-empty corsOrigins slice to enable CORS middleware.
-func NewNativeHandler(queue SpanQueue, validator Validator, corsOrigins []string, m *metrics.IngestMetrics) *NativeHandler {
+func NewNativeHandler(queue SpanQueue, validator auth.Validator, corsOrigins []string, m *metrics.IngestMetrics) *NativeHandler {
 	return &NativeHandler{queue: queue, validator: validator, corsOrigins: corsOrigins, metrics: m, normalizer: normalizer.New()}
 }
 

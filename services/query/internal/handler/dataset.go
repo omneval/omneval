@@ -24,8 +24,19 @@ import (
 //   DELETE /api/v1/datasets/:id                   — delete a dataset and its items
 
 type DatasetHandler struct {
-	DatasetStore metadata.DatasetStore
-	SessionStore SessionStore
+	DatasetStore  metadata.DatasetStore
+	SessionStore  SessionStore
+	ProjectResolver auth.ProjectResolver
+}
+
+// resolveProjectID returns a ProjectResolver that chains h.ProjectResolver
+// (if non-nil) with a fallback to h.SessionStore.ProjectID.  When both are
+// nil it returns nil so callers still get the 401.
+func (h *DatasetHandler) resolveProjectID() auth.ProjectResolver {
+	if h.ProjectResolver == nil && h.SessionStore != nil {
+		return auth.NewSessionStoreResolver(h.SessionStore)
+	}
+	return h.ProjectResolver
 }
 
 // ---- Request / Response Types ----
@@ -102,7 +113,8 @@ func (h *DatasetHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 		if !ok {
 			return
 		}
@@ -142,7 +154,8 @@ func (h *DatasetHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 		if !ok {
 			return
 		}
@@ -174,7 +187,8 @@ func (h *DatasetHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 		if !ok {
 			return
 		}
@@ -209,7 +223,8 @@ func (h *DatasetHandler) HandleAddItems(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 		if !ok {
 			return
 		}
@@ -261,7 +276,8 @@ func (h *DatasetHandler) HandleAddItemsBatch(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 		if !ok {
 			return
 		}
@@ -319,7 +335,8 @@ func (h *DatasetHandler) HandleListItems(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 		if !ok {
 			return
 		}
@@ -378,7 +395,8 @@ func (h *DatasetHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 		if !ok {
 			return
 		}

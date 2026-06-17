@@ -21,12 +21,23 @@ import (
 //	DELETE /api/v1/eval-rules/:id      — delete an eval rule by ID
 //	POST   /api/v1/eval-rules/preview  — preview matching spans for a filter
 type EvalRuleHandler struct {
-	DB           DBHandle
+	DB            DBHandle
 	EvalRuleStore metadata.EvalRuleStore
 	SessionStore  SessionStore
+	ProjectResolver auth.ProjectResolver
 	// DefaultJudgeModel is the model used when the request omits judge_model.
 	// Wired from cfg.Eval.LLMModel at startup. Falls back to "gpt-4o-mini" when empty.
 	DefaultJudgeModel string
+}
+
+// resolveProjectID returns a ProjectResolver that chains h.ProjectResolver
+// (if non-nil) with a fallback to h.SessionStore.ProjectID.  When both are
+// nil it returns nil so callers still get the 401.
+func (h *EvalRuleHandler) resolveProjectID() auth.ProjectResolver {
+	if h.ProjectResolver == nil && h.SessionStore != nil {
+		return auth.NewSessionStoreResolver(h.SessionStore)
+	}
+	return h.ProjectResolver
 }
 
 
@@ -80,7 +91,8 @@ func (h *EvalRuleHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -153,7 +165,8 @@ func (h *EvalRuleHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -179,7 +192,8 @@ func (h *EvalRuleHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -235,7 +249,8 @@ func (h *EvalRuleHandler) HandlePreview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}

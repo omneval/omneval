@@ -68,6 +68,37 @@ func NewSessionStoreResolver(p ProjectIDProvider) *SessionStoreResolver {
 	return &SessionStoreResolver{ProjectIDProvider: p}
 }
 
+// MultiResolver chains multiple ProjectResolvers: it tries each in order and
+// returns the first non-empty project ID found. If the first resolver is nil,
+// it is skipped.
+type MultiResolver struct {
+	resolvers []ProjectResolver
+}
+
+// NewMultiResolver creates a ProjectResolver that tries each provided
+// resolver in order, returning the first non-empty project ID found.
+func NewMultiResolver(resolvers ...ProjectResolver) *MultiResolver {
+	// Filter out nil resolvers.
+	var filtered []ProjectResolver
+	for _, r := range resolvers {
+		if r != nil {
+			filtered = append(filtered, r)
+		}
+	}
+	return &MultiResolver{resolvers: filtered}
+}
+
+// ProjectID iterates through the chained resolvers and returns the first
+// non-empty project ID found.
+func (m *MultiResolver) ProjectID(r *http.Request) (string, bool) {
+	for _, resolver := range m.resolvers {
+		if pid, ok := resolver.ProjectID(r); ok {
+			return pid, true
+		}
+	}
+	return "", false
+}
+
 // ProjectID extracts the project ID from the request context. It first checks
 // the API-key derived project ID (set by RequireAuth/RequireSessionOrAPIKey
 // middleware), then the session store resolver, then the explicit project ID,
@@ -89,18 +120,20 @@ func ProjectID(r *http.Request) (string, bool) {
 	return "", false
 }
 
-// ResolveProjectID extracts the project ID from the request by delegating to a
-// ProjectResolver. If the request already carries a validated API-key project ID
-// in the context (set by RequireSessionOrAPIKey middleware), it is returned
-// immediately. Otherwise the resolver is consulted.
+// ResolveProjectID extracts the project ID from the request by
+// first checking the API-key context, then delegating to the provided resolver,
+// and finally falling back to the ?project_id query param. If resolver is nil,
+// it falls through to the query param fallback.
 func ResolveProjectID(r *http.Request, resolver ProjectResolver, explicitID string) (string, bool) {
 	// 1. Check API-key derived project ID from context first.
 	if pid, ok := r.Context().Value(APIKeyProjectIDContextKey).(string); ok && pid != "" {
 		return pid, true
 	}
-	// 2. Use the resolver.
-	if pid, ok := resolver.ProjectID(r); ok {
-		return pid, true
+	// 2. Use the resolver if non-nil.
+	if resolver != nil {
+		if pid, ok := resolver.ProjectID(r); ok {
+			return pid, true
+		}
 	}
 	// 3. Fall back to explicit project ID from router path parameters.
 	if explicitID != "" {
@@ -113,16 +146,63 @@ func ResolveProjectID(r *http.Request, resolver ProjectResolver, explicitID stri
 	return "", false
 }
 
-// ProjectIDWithError is like ProjectID but writes a 401 "project ID not found"
-// response to the provided ResponseWriter on failure. Handlers call this
-// instead of their own resolveProjectID methods to ensure a single, consistent
-// project-ID extraction pattern across all services.
+// ProjectIDError is the status code and message returned when project ID
+// resolution fails.
+type ProjectIDError struct {
+	StatusCode int
+	Message    string
+}
+
+// projectIDErrors maps resolution outcomes to appropriate HTTP status codes
+// and messages.
+var (
+	projectIDUnauthorized = ProjectIDError{http.StatusUnauthorized, "project ID not found"}
+	projectIDForbidden    = ProjectIDError{http.StatusForbidden, "project access denied"}
+)
+
+// ProjectIDWithError is like ProjectID but writes an error response to the
+// provided ResponseWriter on failure.  Returns 401 for unauthenticated users
+// and 400 for authenticated users with no project.
 func ProjectIDWithError(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if pid, ok := ProjectID(r); ok {
 		return pid, true
 	}
-	http.Error(w, "project ID not found", http.StatusUnauthorized)
+	if CurrentUserFromContext(r) != nil {
+		http.Error(w, "no project found, contact your administrator", http.StatusBadRequest)
+	} else {
+		http.Error(w, "project ID not found", http.StatusUnauthorized)
+	}
 	return "", false
+}
+
+// ProjectIDWithErrorWithResolver is like ProjectIDWithError but also consults
+// the provided ProjectResolver. When resolver is nil, it behaves exactly like
+// ProjectIDWithError (for backwards compatibility with tests that inject API-key
+// context directly). When resolver is non-nil, it tries the resolver as an
+// additional fallback source before giving up.
+func ProjectIDWithErrorWithResolver(w http.ResponseWriter, r *http.Request, resolver ProjectResolver) (string, bool) {
+	if pid, ok := ResolveProjectID(r, resolver, ""); ok {
+		return pid, true
+	}
+	if CurrentUserFromContext(r) != nil {
+		http.Error(w, "no project found, contact your administrator", http.StatusBadRequest)
+	} else {
+		http.Error(w, "project ID not found", http.StatusUnauthorized)
+	}
+	return "", false
+}
+
+// ProjectIDErrorWithResolver is like ProjectIDWithErrorWithResolver but returns
+// an error struct instead of writing the response directly, so callers can
+// customise the response body or status code.
+func ProjectIDErrorWithResolver(w http.ResponseWriter, r *http.Request, resolver ProjectResolver) *ProjectIDError {
+	if _, ok := ResolveProjectID(r, resolver, ""); ok {
+		return nil // resolution succeeded
+	}
+	if CurrentUserFromContext(r) != nil {
+		return &ProjectIDError{http.StatusBadRequest, "no project found, contact your administrator"}
+	}
+	return &projectIDUnauthorized
 }
 
 // WriteJSONError writes a JSON error response with the given status code.

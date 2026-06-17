@@ -123,9 +123,9 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	deps.Auth = h
 
 	// Create handlers.
-	deps.Span = &handler.SpanHandler{SessionStore: h, BookmarkStore: store}
-	deps.Bookmark = &handler.BookmarkHandler{BookmarkStore: store, SessionStore: h}
-	deps.Conversation = &handler.ConversationHandler{SessionStore: h}
+	deps.Span = &handler.SpanHandler{SessionStore: h, BookmarkStore: store, ProjectResolver: h}
+	deps.Bookmark = &handler.BookmarkHandler{BookmarkStore: store, SessionStore: h, ProjectResolver: h}
+	deps.Conversation = &handler.ConversationHandler{SessionStore: h, ProjectResolver: h}
 
 	// Prompt registry handler. A CachingValidator is wired in so that SDK
 	// callers can authenticate GET prompt endpoints using X-API-Key in
@@ -133,15 +133,17 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	deps.PromptCache = handler.NewPromptCache(store)
 	deps.APIKeyValidator = internalauth.NewCachingValidator(store)
 	deps.Prompt = &handler.PromptHandler{
-		PromptStore:  store,
-		Cache:        deps.PromptCache,
-		SessionStore: h,
-		Validator:    deps.APIKeyValidator,
+		PromptStore:   store,
+		Cache:         deps.PromptCache,
+		SessionStore:  h,
+		ProjectResolver: h,
+		Validator:     deps.APIKeyValidator,
 	}
 
 	deps.EvalRule = &handler.EvalRuleHandler{
 		EvalRuleStore: store,
 		SessionStore:  h,
+		ProjectResolver: h,
 		// DefaultJudgeModel is set below.
 	}
 
@@ -152,7 +154,7 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		SessionStore:  h,
 	}
 
-	deps.Dataset = &handler.DatasetHandler{DatasetStore: store, SessionStore: h}
+	deps.Dataset = &handler.DatasetHandler{DatasetStore: store, SessionStore: h, ProjectResolver: h}
 
 	// Dataset run handler — read endpoints are always available; POST
 	// (create run) additionally requires the judge LLM client (see routes).
@@ -160,6 +162,7 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		DatasetStore:  store,
 		EvalRuleStore: store,
 		SessionStore:  h,
+		ProjectResolver: h,
 	}
 	deps.EvalRule.DefaultJudgeModel = cfg.Eval.LLMModel
 	if cfg.Query.JudgeLLMBaseURL != "" && cfg.Query.JudgeLLMAPIKey != "" {

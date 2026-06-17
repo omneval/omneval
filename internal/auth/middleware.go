@@ -21,7 +21,8 @@ type authSessioner interface {
 }
 
 // currentUserIDKey is the context key for the current user.
-var currentUserIDKey any = "omneval_internal_current_user"
+// Deprecated: use UserIDContextKey directly.
+var currentUserIDKey any = UserIDContextKey
 
 // CurrentUser holds authenticated user info stored in the request context.
 type CurrentUser struct {
@@ -130,6 +131,9 @@ func RequireAdmin(store authSessioner, secure bool, sessionTTL time.Duration, ad
 				Email:  user.Email,
 			})
 			ctx = context.WithValue(ctx, AdminEmailContextKey, adminEmail)
+			// Also store under "admin_email" for backwards compatibility with
+			// code that checks that legacy key.
+			ctx = context.WithValue(ctx, "admin_email", adminEmail)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -221,4 +225,31 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// SetSessionCookie creates a Set-Cookie header for the session cookie.
+func SetSessionCookie(w http.ResponseWriter, sessionID string, secure bool, sessionTTL time.Duration) {
+	maxAge := int(sessionTTL.Seconds())
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    sessionID,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   maxAge,
+	})
+}
+
+// ClearSessionCookie clears the session cookie.
+func ClearSessionCookie(w http.ResponseWriter, secure bool) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
 }

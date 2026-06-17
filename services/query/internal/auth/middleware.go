@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strings"
 	"time"
 
 	internalauth "github.com/omneval/omneval/internal/auth"
@@ -12,19 +11,32 @@ import (
 )
 
 // ContextKey is the type used for context keys to avoid collisions.
+// Deprecated: use internalauth project/user context keys instead.
 type ContextKey string
 
 const (
 	// CurrentUserKey is the context key for the current authenticated user.
+	// Deprecated: use internalauth.UserIDContextKey.
 	CurrentUserKey ContextKey = "current_user"
 )
 
-// CurrentUser holds the authenticated user info, stored in the request context
-// by the session middleware.
-type CurrentUser struct {
-	UserID string
-	Email  string
-}
+// Re-export context keys from internalauth for backwards compatibility.
+var (
+	// ProjectIDContextKey is the context key for the project ID.
+	ProjectIDContextKey = internalauth.ProjectIDContextKey
+	// UserIDContextKey is the context key for the authenticated user's ID.
+	UserIDContextKey = internalauth.UserIDContextKey
+	// EmailContextKey is the context key for the authenticated user's email.
+	EmailContextKey = internalauth.EmailContextKey
+	// AdminEmailContextKey is the context key for the admin email.
+	AdminEmailContextKey = internalauth.AdminEmailContextKey
+	// APIKeyProjectIDContextKey is the context key for the project ID from an API key.
+	APIKeyProjectIDContextKey = internalauth.APIKeyProjectIDContextKey
+)
+
+// CurrentUser is the authenticated user stored in the request context.
+// Re-exports [internalauth.CurrentUser] for backwards compatibility.
+type CurrentUser = internalauth.CurrentUser
 
 // authSessioner is the minimal interface the auth middleware needs from metadata.
 // It is satisfied by the metadata.Store interface (which embeds SessionStore and AuthStore).
@@ -34,65 +46,12 @@ type authSessioner interface {
 	GetUserByID(ctx context.Context, userID string) (*domain.User, error)
 }
 
-// SessionMiddleware wraps an http.Handler with session validation from a cookie.
-type SessionMiddleware struct {
-	store      authSessioner
-	secure     bool
-	sessionTTL time.Duration
-}
-
-// NewSessionMiddleware creates a new session middleware.
-func NewSessionMiddleware(store authSessioner, secure bool, sessionTTL time.Duration) *SessionMiddleware {
-	return &SessionMiddleware{
-		store:      store,
-		secure:     secure,
-		sessionTTL: sessionTTL,
-	}
-}
-
-// Handler returns an http.Handler that wraps the next handler with session
-// validation. Returns 401 JSON if the session is missing or expired.
-func (m *SessionMiddleware) Handler(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie("omneval_session")
-		if err != nil {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-			return
-		}
-
-		session, err := m.store.GetSession(r.Context(), cookie.Value)
-		if err != nil {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-			return
-		}
-
-		// Check if session is expired
-		if time.Now().After(session.ExpiresAt) {
-			_ = m.store.DeleteSession(r.Context(), session.SessionID)
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-			return
-		}
-
-		// Fetch user
-		user, err := m.store.GetUserByID(r.Context(), session.UserID)
-		if err != nil {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-			return
-		}
-
-		ctx := context.WithValue(r.Context(), CurrentUserKey, &CurrentUser{
-			UserID: user.UserID,
-			Email:  user.Email,
-		})
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-// RequireAuth is a convenience function that returns middleware wrapping a
-// handler with session validation.
+// RequireAuth returns middleware that requires a valid session cookie or a
+// valid API key.  On API key success the project ID is written to the request
+// context under [internalauth.APIKeyProjectIDContextKey].
 func RequireAuth(store authSessioner, secure bool, sessionTTL time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return NewSessionMiddleware(store, secure, sessionTTL).Handler(next)
+		return internalauth.RequireAuth(store, nil, secure, sessionTTL)(next)
 	}
 }
 
@@ -108,24 +67,8 @@ func RequireSessionOrAPIKey(
 	sessionTTL time.Duration,
 	apiKeyCtxKey any,
 ) func(http.Handler) http.Handler {
-	sessionMw := NewSessionMiddleware(store, secure, sessionTTL)
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Try API key first.
-			if rawKey := r.Header.Get("X-API-Key"); rawKey != "" && validator != nil {
-				vk, err := validator.Validate(r.Context(), rawKey)
-				if err == nil && vk.ProjectID != "" {
-					ctx := context.WithValue(r.Context(), apiKeyCtxKey, vk.ProjectID)
-					next.ServeHTTP(w, r.WithContext(ctx))
-					return
-				}
-				// Invalid API key — 401 immediately (don't fall back to session).
-				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid API key"})
-				return
-			}
-			// No API key header — require session cookie.
-			sessionMw.Handler(next).ServeHTTP(w, r)
-		})
+		return internalauth.RequireSessionOrAPIKey(store, validator, secure, sessionTTL, apiKeyCtxKey)(next)
 	}
 }
 
@@ -137,49 +80,32 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 // SetSessionCookie creates a Set-Cookie header for the session cookie.
+// Re-exports [internalauth.SetSessionCookie] for backwards compatibility.
 func SetSessionCookie(w http.ResponseWriter, sessionID string, secure bool, sessionTTL time.Duration) {
-	maxAge := int(sessionTTL.Seconds())
-	http.SetCookie(w, &http.Cookie{
-		Name:     "omneval_session",
-		Value:    sessionID,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   maxAge,
-	})
+	internalauth.SetSessionCookie(w, sessionID, secure, sessionTTL)
 }
 
 // ClearSessionCookie clears the session cookie.
+// Re-exports [internalauth.ClearSessionCookie] for backwards compatibility.
 func ClearSessionCookie(w http.ResponseWriter, secure bool) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "omneval_session",
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   -1,
-	})
+	internalauth.ClearSessionCookie(w, secure)
 }
 
 // CurrentUserFromContext returns the current user from the request context,
 // or nil if no user is authenticated.
-func CurrentUserFromContext(r *http.Request) *CurrentUser {
-	user, _ := r.Context().Value(CurrentUserKey).(*CurrentUser)
-	return user
+// Re-exports [internalauth.CurrentUserFromContext] for backwards compatibility.
+func CurrentUserFromContext(r *http.Request) *internalauth.CurrentUser {
+	return internalauth.CurrentUserFromContext(r)
 }
 
-// IsAdmin checks if the current user's email matches the admin email (case-insensitive).
+// IsAdmin checks if the current user's email matches the admin email
+// (case-insensitive). Re-exports [internalauth.IsAdmin] for backwards compatibility.
 func IsAdmin(r *http.Request, adminEmail string) bool {
-	user := CurrentUserFromContext(r)
-	if user == nil || adminEmail == "" {
-		return false
-	}
-	return user.Email != "" && strings.EqualFold(user.Email, adminEmail)
+	return internalauth.IsAdmin(r, adminEmail)
 }
 
 // AdminContextKey is the context key for the admin email.
+// Deprecated: use [internalauth.AdminEmailContextKey] directly.
 var AdminContextKey ContextKey = "admin_email"
 
 // AdminEmailFromContext returns the admin email from the request context.
@@ -191,51 +117,15 @@ func AdminEmailFromContext(r *http.Request) string {
 // IsAdminUser checks if the current user is an admin (email matches admin email
 // stored in context). Returns false if no admin email is configured or no user
 // is authenticated.
+// Re-exports [internalauth.IsAdminUser] for backwards compatibility.
 func IsAdminUser(r *http.Request) bool {
-	adminEmail := AdminEmailFromContext(r)
-	return IsAdmin(r, adminEmail)
+	return internalauth.IsAdminUser(r)
 }
 
-// RequireAdmin wraps an http.Handler with session validation and admin check.
+// RequireAdmin returns middleware that requires a valid session cookie AND a
+// user whose email matches the admin email (case-insensitive).
 func RequireAdmin(store authSessioner, secure bool, sessionTTL time.Duration, adminEmail string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// First validate session
-			cookie, err := r.Cookie("omneval_session")
-			if err != nil {
-				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-				return
-			}
-
-			session, err := store.GetSession(r.Context(), cookie.Value)
-			if err != nil {
-				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-				return
-			}
-
-			if time.Now().After(session.ExpiresAt) {
-				_ = store.DeleteSession(r.Context(), session.SessionID)
-				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-				return
-			}
-
-			user, err := store.GetUserByID(r.Context(), session.UserID)
-			if err != nil {
-				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-				return
-			}
-
-			if !strings.EqualFold(user.Email, adminEmail) {
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden: admin access required"})
-				return
-			}
-
-			ctx := context.WithValue(r.Context(), CurrentUserKey, &CurrentUser{
-				UserID: user.UserID,
-				Email:  user.Email,
-			})
-			ctx = context.WithValue(ctx, AdminContextKey, adminEmail)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
+		return internalauth.RequireAdmin(store, secure, sessionTTL, adminEmail)(next)
 	}
 }

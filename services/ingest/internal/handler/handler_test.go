@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/buffer"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/queue"
@@ -29,20 +30,20 @@ func (f *fakeIngestQueue) Enqueue(_ context.Context, spans []*domain.Span) error
 	return nil
 }
 
-// fakeValidator is a minimal Validator for testing.
+// fakeValidator is a minimal auth.Validator for testing.
 type fakeValidator struct {
 	key *domain.APIKey
 }
 
-func (f *fakeValidator) Validate(_ context.Context, rawKey string) (*handler.ValidatedKey, error) {
+func (f *fakeValidator) Validate(_ context.Context, rawKey string) (*auth.ValidatedKey, error) {
 	if rawKey == "valid_project_key" {
-		return &handler.ValidatedKey{
+		return &auth.ValidatedKey{
 			ProjectID: "proj-1",
 			Kind:      domain.APIKeyKindProject,
 		}, nil
 	}
 	if rawKey == "valid_service_key" {
-		return &handler.ValidatedKey{
+		return &auth.ValidatedKey{
 			ProjectID:   "proj-2",
 			Kind:        domain.APIKeyKindService,
 			ServiceName: "my-service",

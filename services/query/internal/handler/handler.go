@@ -21,8 +21,9 @@ import (
 // GET /api/v1/traces/:traceId (single-trace waterfall detail),
 // and GET /api/v1/projects (project list for the UI project switcher).
 type SpanHandler struct {
-	SessionStore SessionStore
-	Metrics      *metrics.QueryMetrics
+	SessionStore    SessionStore
+	ProjectResolver auth.ProjectResolver
+	Metrics         *metrics.QueryMetrics
 	// Lake is the DuckDB handle attached read-only to the Lake. All span
 	// reads compile against lake.spans (ADR-0004).
 	Lake DBHandle
@@ -114,7 +115,11 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	if bodyProjectID != "" {
+		r = auth.WithExplicitProjectID(r, bodyProjectID)
+	}
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -214,7 +219,8 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 
 	// Resolve project_id: honor an explicit ?project_id= (the UI project
 	// switcher) after an org-membership check, else the session default.
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -375,7 +381,11 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 	// project switcher), validated against the user's org; otherwise fall back
 	// to the session default. Shared with the span list / trace detail
 	// endpoints so all read paths resolve to the same project.
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	if req.ProjectID != "" {
+		r = auth.WithExplicitProjectID(r, req.ProjectID)
+	}
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -648,4 +658,14 @@ func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"score_id": scoreID})
+}
+
+// resolveProjectID returns a ProjectResolver that chains h.ProjectResolver
+// (if non-nil) with a fallback to h.SessionStore.ProjectID.  When both are
+// nil it returns nil so callers still get the 401.
+func (h *SpanHandler) resolveProjectID() auth.ProjectResolver {
+	if h.ProjectResolver == nil && h.SessionStore != nil {
+		return auth.NewSessionStoreResolver(h.SessionStore)
+	}
+	return h.ProjectResolver
 }

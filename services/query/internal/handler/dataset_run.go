@@ -27,8 +27,19 @@ type DatasetRunHandler struct {
 	DatasetStore  metadata.DatasetStore
 	EvalRuleStore metadata.EvalRuleStore
 	SessionStore  SessionStore
+	ProjectResolver auth.ProjectResolver
 	JudgeClient   judge.LLMClient
 	Cache         *PromptCache
+}
+
+// resolveProjectID returns a ProjectResolver that chains h.ProjectResolver
+// (if non-nil) with a fallback to h.SessionStore.ProjectID.  When both are
+// nil it returns nil so callers still get the 401.
+func (h *DatasetRunHandler) resolveProjectID() auth.ProjectResolver {
+	if h.ProjectResolver == nil && h.SessionStore != nil {
+		return auth.NewSessionStoreResolver(h.SessionStore)
+	}
+	return h.ProjectResolver
 }
 
 
@@ -516,7 +527,8 @@ func (e *authDatasetError) Error() string { return e.Message }
 // If the resolver fails, it writes the response directly and returns
 // ("", "", nil); callers must check projectID == "" before proceeding.
 func (h *DatasetRunHandler) authDataset(w http.ResponseWriter, r *http.Request) (string, string, error) {
-	projectID, ok := auth.ProjectIDWithError(w, r)
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return "", "", nil
 	}
