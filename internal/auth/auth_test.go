@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -430,3 +432,227 @@ func (f *FakeMetadataStore) IsBookmarked(_ context.Context, _, _ string) (bool, 
 func (f *FakeMetadataStore) ListBookmarkedTraceIDs(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }
+
+// ---- Context Keys Tests ----
+
+func TestContextKeys_NotNil(t *testing.T) {
+	if ProjectIDContextKey == nil {
+		t.Fatal("ProjectIDContextKey must not be nil")
+	}
+	if UserIDContextKey == nil {
+		t.Fatal("UserIDContextKey must not be nil")
+	}
+	if EmailContextKey == nil {
+		t.Fatal("EmailContextKey must not be nil")
+	}
+	if AdminEmailContextKey == nil {
+		t.Fatal("AdminEmailContextKey must not be nil")
+	}
+}
+
+func TestContextKeys_Uniqueness(t *testing.T) {
+	keys := []any{ProjectIDContextKey, UserIDContextKey, EmailContextKey, AdminEmailContextKey}
+	for i := 0; i < len(keys); i++ {
+		for j := i + 1; j < len(keys); j++ {
+			if keys[i] == keys[j] {
+				t.Errorf("context keys %d and %d are the same pointer: %v", i, j, keys[i])
+			}
+		}
+	}
+}
+
+func TestContextKeys_StringValues(t *testing.T) {
+	if ProjectIDContextKey != "omneval_project_id" {
+		t.Errorf("ProjectIDContextKey: got %q, want %q", ProjectIDContextKey, "omneval_project_id")
+	}
+	if UserIDContextKey != "omneval_user_id" {
+		t.Errorf("UserIDContextKey: got %q, want %q", UserIDContextKey, "omneval_user_id")
+	}
+	if EmailContextKey != "omneval_email" {
+		t.Errorf("EmailContextKey: got %q, want %q", EmailContextKey, "omneval_email")
+	}
+	if AdminEmailContextKey != "omneval_admin_email" {
+		t.Errorf("AdminEmailContextKey: got %q, want %q", AdminEmailContextKey, "omneval_admin_email")
+	}
+	if APIKeyProjectIDContextKey != "omneval_api_key_project_id" {
+		t.Errorf("APIKeyProjectIDContextKey: got %q, want %q", APIKeyProjectIDContextKey, "omneval_api_key_project_id")
+	}
+}
+
+// ---- ResolveProjectID Tests ----
+
+// fakeResolver is a test double that always returns a fixed project ID.
+type fakeResolver struct {
+	id string
+	ok bool
+}
+
+func (f *fakeResolver) ProjectID(_ *http.Request) (string, bool) {
+	return f.id, f.ok
+}
+
+func TestResolveProjectID_APIKeyContext(t *testing.T) {
+	ctx := context.WithValue(context.Background(), APIKeyProjectIDContextKey, "apikey-proj")
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r = r.WithContext(ctx)
+	resolver := &fakeResolver{id: "other-proj", ok: true}
+	proj, ok := ResolveProjectID(r, resolver, "")
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if proj != "apikey-proj" {
+		t.Errorf("got %q, want %q", proj, "apikey-proj")
+	}
+}
+
+func TestResolveProjectID_DelegatesToResolver(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	resolver := &fakeResolver{id: "resolver-proj", ok: true}
+	proj, ok := ResolveProjectID(r, resolver, "")
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if proj != "resolver-proj" {
+		t.Errorf("got %q, want %q", proj, "resolver-proj")
+	}
+}
+
+func TestResolveProjectID_ExplicitFallback(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	resolver := &fakeResolver{id: "", ok: false}
+	proj, ok := ResolveProjectID(r, resolver, "explicit-proj")
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if proj != "explicit-proj" {
+		t.Errorf("got %q, want %q", proj, "explicit-proj")
+	}
+}
+
+func TestResolveProjectID_QueryParamFallback(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/?project_id=query-proj", nil)
+	resolver := &fakeResolver{id: "", ok: false}
+	proj, ok := ResolveProjectID(r, resolver, "")
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if proj != "query-proj" {
+		t.Errorf("got %q, want %q", proj, "query-proj")
+	}
+}
+
+func TestResolveProjectID_APIKeyWinsOverExplicit(t *testing.T) {
+	ctx := context.WithValue(context.Background(), APIKeyProjectIDContextKey, "apikey-proj")
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r = r.WithContext(ctx)
+	resolver := &fakeResolver{id: "resolver-proj", ok: true}
+	proj, ok := ResolveProjectID(r, resolver, "explicit-proj")
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if proj != "apikey-proj" {
+		t.Errorf("got %q, want %q", proj, "apikey-proj")
+	}
+}
+
+func TestResolveProjectID_EmptyContextValueIgnoresAPIKey(t *testing.T) {
+	ctx := context.WithValue(context.Background(), APIKeyProjectIDContextKey, "")
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r = r.WithContext(ctx)
+	resolver := &fakeResolver{id: "resolver-proj", ok: true}
+	proj, ok := ResolveProjectID(r, resolver, "")
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if proj != "resolver-proj" {
+		t.Errorf("got %q, want %q", proj, "resolver-proj")
+	}
+}
+
+func TestResolveProjectID_NoFallback(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	resolver := &fakeResolver{id: "", ok: false}
+	_, ok := ResolveProjectID(r, resolver, "")
+	if ok {
+		t.Error("expected not ok when nothing resolves")
+	}
+}
+
+// ---- fakeKeyValidator ---
+
+// fakeKeyValidator is a test double for auth.Validator.
+type fakeKeyValidator struct {
+	projectID string
+	valid     bool
+}
+
+func (v *fakeKeyValidator) Validate(_ context.Context, _ string) (*ValidatedKey, error) {
+	if !v.valid {
+		return nil, fmt.Errorf("invalid key")
+	}
+	return &ValidatedKey{ProjectID: v.projectID}, nil
+}
+
+// ---- Middleware Factory Tests ----
+
+func TestRequireSessionOrAPIKey_APIKeyValid(t *testing.T) {
+	validator := &fakeKeyValidator{projectID: "apikey-proj", valid: true}
+	factory := RequireSessionOrAPIKey(nil, validator, false, time.Minute, APIKeyProjectIDContextKey)
+	handler := factory(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pid, ok := r.Context().Value(APIKeyProjectIDContextKey).(string)
+		if !ok || pid != "apikey-proj" {
+			t.Errorf("expected api-key project ID in context, got ok=%v pid=%q", ok, pid)
+		}
+	}))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-API-Key", "abc123")
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestRequireSessionOrAPIKey_APIKeyInvalid(t *testing.T) {
+	validator := &fakeKeyValidator{projectID: "", valid: false}
+	factory := RequireSessionOrAPIKey(nil, validator, false, time.Minute, APIKeyProjectIDContextKey)
+	handler := factory(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called for invalid key")
+	}))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-API-Key", "bad")
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestRequireAuth_NoAuth(t *testing.T) {
+	validator := &fakeKeyValidator{projectID: "", valid: false}
+	factory := RequireAuth(nil, validator, false, time.Minute)
+	handler := factory(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called when not authenticated")
+	}))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestRequireAdmin_NoAuth(t *testing.T) {
+	factory := RequireAdmin(nil, false, time.Minute, "admin@example.com")
+	handler := factory(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called when not authenticated")
+	}))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+
