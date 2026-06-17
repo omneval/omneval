@@ -20,12 +20,21 @@ type playgroundHandler interface {
 }
 
 // defaultResolveProjectID is the fallback used by tests that create handlers
-// directly without going through NewRouter. It uses the SessionStore passed
-// as the first argument to resolve the project ID, or returns an error if the
-// user is not authenticated.
+// directly without going through NewRouter. It mirrors the Router's
+// canonicalResolveProjectID: API-key context → explicit/ session project with
+// org-membership validation → ?project_id= query param. On failure it writes
+// an error response (the unified callers rely on the resolver to write the
+// error).
 func defaultResolveProjectID(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool) {
 	hasUser := auth.CurrentUserFromContext(r) != nil
 
+	// 1. Check API-key derived project ID from context (set by
+	//    RequireSessionOrAPIKey middleware or injected directly in tests).
+	if pid, ok := r.Context().Value(APIKeyProjectIDKey).(string); ok && pid != "" {
+		return pid, true
+	}
+
+	// 2. Session store resolution.
 	if sess != nil {
 		if explicitID != "" {
 			// Explicit project ID: verify user is authenticated and the
@@ -34,13 +43,13 @@ func defaultResolveProjectID(sess SessionStore, w http.ResponseWriter, r *http.R
 				writeJSONError(w, "unauthorized", http.StatusUnauthorized)
 				return "", false
 			}
-			// In tests the fake store's ListProjects isn't wired, so allow
-			// the explicit project ID if the session's default matches it.
+			// In tests the fake store's ListProjects may not be wired, so
+			// allow the explicit project ID if the session's default matches
+			// it (common test pattern).
 			if projID, ok := sess.ProjectID(r); ok && projID == explicitID {
 				return explicitID, true
 			}
-			// Fallback: if explicit ID differs from session default, check
-			// org membership via ListProjects (available only in full tests).
+			// Validate via ListProjects (full test setup).
 			projects, err := sess.ListProjects(r)
 			if err == nil {
 				for _, p := range projects {
@@ -55,8 +64,7 @@ func defaultResolveProjectID(sess SessionStore, w http.ResponseWriter, r *http.R
 		if projectID, ok := sess.ProjectID(r); ok && projectID != "" {
 			return projectID, true
 		}
-		// Distinguish: authenticated user with no project → 400,
-		// completely unauthenticated → 401.
+		// Session store present but no default: distinguish auth state.
 		if hasUser {
 			writeJSONError(w, "no project found — create a project first via POST /api/v1/projects", http.StatusBadRequest)
 		} else {
@@ -64,25 +72,17 @@ func defaultResolveProjectID(sess SessionStore, w http.ResponseWriter, r *http.R
 		}
 		return "", false
 	}
-	// No session store: check context auth.
-	if !hasUser {
-		// Test backwards-compat: allow ?project_id= query param when no auth
-		// and no session store is configured (handlers created directly in tests).
-		if pid := r.URL.Query().Get("project_id"); pid != "" {
-			return pid, true
-		}
-		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
-		return "", false
-	}
-	// Authenticated but no session store wired — fall back to explicit or
-	// ?project_id= query param for tests that create handlers directly.
+
+	// 3. No session store: fall back to explicit or ?project_id= query param.
 	if explicitID != "" {
 		return explicitID, true
 	}
 	if pid := r.URL.Query().Get("project_id"); pid != "" {
 		return pid, true
 	}
-	writeJSONError(w, "no session store", http.StatusInternalServerError)
+
+	// Nothing resolved — write 401 (unauthenticated).
+	writeJSONError(w, "unauthorized", http.StatusUnauthorized)
 	return "", false
 }
 

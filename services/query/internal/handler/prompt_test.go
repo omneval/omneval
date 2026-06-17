@@ -1060,8 +1060,10 @@ func TestPromptHandler_ListPrompts_MissingProjectID(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.HandleListPrompts(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	// The canonical resolver always writes a 401 when no project ID can be
+	// resolved without a session store or auth context.
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusUnauthorized)
 	}
 }
 
@@ -1288,8 +1290,10 @@ func TestPromptHandler_ListPromptVersions_NoSessionNoProjectID(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.HandleListPromptVersions(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	// The canonical resolver always writes a 401 when no project ID can be
+	// resolved without a session store or auth context.
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusUnauthorized)
 	}
 }
 
