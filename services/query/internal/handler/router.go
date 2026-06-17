@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -19,22 +17,6 @@ import (
 // Defined here to avoid importing the playground package (which imports handler).
 type playgroundHandler interface {
 	HandleRun(http.ResponseWriter, *http.Request)
-}
-
-// resolveProjectID is the package-level function used by all handlers to
-// determine the project_id a request should query. It defaults to a simple
-// session-only resolver (used by tests) and is overridden by NewRouter with
-// the full canonical implementation that includes org-verification for
-// explicit project IDs.
-//
-// The canonical implementation is installed by NewRouter from the Router's
-// canonicalResolveProjectID method. Handlers pass their own SessionStore so
-// the function can resolve the project ID via session or API-key context,
-// while the Router owns the resolution logic (no duplication).
-var resolveProjectID func(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool)
-
-func init() {
-	resolveProjectID = defaultResolveProjectID
 }
 
 // defaultResolveProjectID is the fallback used by tests that create handlers
@@ -140,8 +122,8 @@ type Router struct {
 	apiValidator internalauth.Validator
 }
 
-// NewRouter creates a Router from the provided dependencies and installs the
-// canonical project ID resolver as the package-level resolveProjectID function.
+// NewRouter creates a Router from the provided dependencies and injects the
+// canonical project ID resolver into all handlers that need it.
 func NewRouter(deps *RouterDeps) *Router {
 	r := &Router{
 		cfg:          deps.Cfg,
@@ -160,9 +142,10 @@ func NewRouter(deps *RouterDeps) *Router {
 		sessionTTL:   deps.SessionTTL,
 		apiValidator: deps.APIKeyValidator,
 	}
-	// Install the canonical project ID resolver so all handlers share a single
+	// Inject the canonical project ID resolver so all handlers share a single
 	// source of truth (no duplication of the pattern).
-	resolveProjectID = r.canonicalResolveProjectID
+	r.span.ResolveProjectID = r.canonicalResolveProjectID
+	r.conversation.ResolveProjectID = r.canonicalResolveProjectID
 	return r
 }
 
@@ -253,6 +236,7 @@ func (rt *Router) RegisterRoutes(mux *http.ServeMux) http.Handler {
 // through the correct auth layer.
 func (rt *Router) buildMiddleware(mux *http.ServeMux) http.Handler {
 	sessionMw := auth.RequireAuth(rt.store, rt.cfg.Auth.SecureCookie, rt.sessionTTL)
+	adminMw := auth.RequireAdmin(rt.store, rt.cfg.Auth.SecureCookie, rt.sessionTTL, rt.cfg.Auth.AdminEmail)
 	promptGetMw := auth.RequireSessionOrAPIKey(rt.store, rt.apiValidator, rt.cfg.Auth.SecureCookie, rt.sessionTTL, APIKeyProjectIDKey)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -261,6 +245,12 @@ func (rt *Router) buildMiddleware(mux *http.ServeMux) http.Handler {
 		// Public routes bypass authentication entirely.
 		if isPublicPath(path) {
 			mux.ServeHTTP(w, req)
+			return
+		}
+
+		// Admin routes require admin-level auth (email must match config).
+		if strings.HasPrefix(path, "/api/v1/admin") {
+			adminMw(mux).ServeHTTP(w, req)
 			return
 		}
 
@@ -309,9 +299,7 @@ func isPublicPath(path string) bool {
 // session-derived default, which returns the org's first project.
 //
 // On failure it writes the appropriate HTTP error and returns ok=false; callers
-// should return immediately. This method is installed as the package-level
-// resolveProjectID function during NewRouter so that all handlers share a
-// single source of truth.
+// should return immediately.
 //
 // The sessionStore parameter is the caller's own SessionStore reference; when
 // the Router delegates to handlers, the handler passes its own SessionStore
@@ -370,41 +358,6 @@ func (rt *Router) resolveProjectIDWithExplicit(w http.ResponseWriter, req *http.
 	}
 	writeJSONError(w, "project_id not found in user's organizations", http.StatusForbidden)
 	return "", false
-}
-
-// resolveProjectIDSimple returns the project ID from context (API-key) or session.
-func (rt *Router) resolveProjectIDSimple(w http.ResponseWriter, req *http.Request) (string, bool) {
-	pid, ok := extractProjectID(rt.auth, req)
-	if !ok || pid == "" {
-		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
-		return "", false
-	}
-	return pid, true
-}
-
-// extractProjectID extracts the authenticated project ID from the request.
-// It checks (in order):
-//  1. API-key project injected into context by RequireSessionOrAPIKey middleware
-//  2. Session store (cookie-based auth)
-//
-// Returns an empty string and false when neither is available.
-func extractProjectID(sess SessionStore, r *http.Request) (string, bool) {
-	if pid, ok := r.Context().Value(APIKeyProjectIDKey).(string); ok && pid != "" {
-		return pid, true
-	}
-	if sess == nil {
-		return "", false
-	}
-	return sess.ProjectID(r)
-}
-
-// writeJSONResponse serializes a value to JSON with the given status code.
-func (rt *Router) writeJSONResponse(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		slog.Warn("query: encode response", "err", err)
-	}
 }
 
 // serveUI is the embedded UI server, injected by the server package at init.

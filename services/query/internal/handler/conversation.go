@@ -15,6 +15,10 @@ type ConversationHandler struct {
 	// Lake is the DuckDB handle attached read-only to the Lake.
 	// Conversation reads compile against lake.spans (ADR-0004).
 	Lake DBHandle
+	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
+	// When nil (e.g. handlers created directly in tests), defaults to
+	// defaultResolveProjectID for backwards compatibility.
+	ResolveProjectID func(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool)
 }
 
 // ConversationListItem represents a single conversation in the paginated
@@ -65,7 +69,11 @@ type ConversationDetailResponse struct {
 // metadata, ordered by most recent start_time descending.
 // Supports keyset pagination via from/to/limit/cursor query parameters.
 func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := resolveProjectID(h.SessionStore, w, r, r.URL.Query().Get("project_id"))
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, r.URL.Query().Get("project_id"))
 	if !ok {
 		return
 	}
@@ -167,7 +175,11 @@ func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *
 // HandleConversationDetail returns ordered trace list with root span metadata
 // for a single conversation.
 func (h *ConversationHandler) HandleConversationDetail(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := resolveProjectID(h.SessionStore, w, r, r.URL.Query().Get("project_id"))
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, r.URL.Query().Get("project_id"))
 	if !ok {
 		return
 	}

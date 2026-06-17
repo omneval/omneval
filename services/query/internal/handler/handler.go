@@ -28,6 +28,10 @@ type SpanHandler struct {
 	// Meta resolves bookmarked trace IDs for "bookmarked" filters —
 	// bookmarks live in the Metadata Store, not DuckDB (ADR-0004).
 	Meta metadata.Store
+	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
+	// When nil (e.g. handlers created directly in tests), defaults to
+	// defaultResolveProjectID for backwards compatibility.
+	ResolveProjectID func(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool)
 }
 
 // SessionStore abstracts session lookup for project ID extraction.
@@ -113,7 +117,11 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	projectID, ok := resolveProjectID(h.SessionStore, w, r, bodyProjectID)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, bodyProjectID)
 	if !ok {
 		return
 	}
@@ -213,7 +221,11 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 
 	// Resolve project_id: honor an explicit ?project_id= (the UI project
 	// switcher) after an org-membership check, else the session default.
-	projectID, ok := resolveProjectID(h.SessionStore, w, r, r.URL.Query().Get("project_id"))
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, r.URL.Query().Get("project_id"))
 	if !ok {
 		return
 	}
@@ -374,7 +386,11 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 	// project switcher), validated against the user's org; otherwise fall back
 	// to the session default. Shared with the span list / trace detail
 	// endpoints so all read paths resolve to the same project.
-	projectID, ok := resolveProjectID(h.SessionStore, w, r, req.ProjectID)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, req.ProjectID)
 	if !ok {
 		return
 	}
