@@ -21,24 +21,6 @@ type APIKeyProjectIDContextKey struct{}
 // extractProjectID which checks this before falling back to session auth.
 var APIKeyProjectIDKey APIKeyProjectIDContextKey
 
-// extractProjectID extracts the authenticated project ID from the request.
-// It checks (in order):
-//  1. API-key project injected into context by RequireSessionOrAPIKey middleware
-//  2. Session store (cookie-based auth)
-//
-// Returns an empty string and false when neither is available.
-func extractProjectID(SessionStore SessionStore, r *http.Request) (string, bool) {
-	// 1. Check API-key project from context (set by API-key middleware).
-	if pid, ok := r.Context().Value(APIKeyProjectIDKey).(string); ok && pid != "" {
-		return pid, true
-	}
-	// 2. Fall back to session-based auth.
-	if SessionStore == nil {
-		return "", false
-	}
-	return SessionStore.ProjectID(r)
-}
-
 // EvalRuleHandler handles eval rule CRUD endpoints:
 //
 //	POST   /api/v1/eval-rules          — create an eval rule
