@@ -20,6 +20,7 @@ import (
 	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/lake/lakeservertest"
 	"github.com/omneval/omneval/services/query/internal/auth"
+	"github.com/omneval/omneval/services/query/internal/cursor"
 	"github.com/omneval/omneval/services/query/internal/query"
 )
 
@@ -2401,5 +2402,210 @@ func TestHandleTraceDetail_LimitedSpans(t *testing.T) {
 	// With limit=100 and 150 spans, only 100 rows should be returned.
 	if count != limit {
 		t.Errorf("span count with limit %d: got %d, want %d", limit, count, limit)
+	}
+}
+
+// TestLakeSQL_Integration verifies the traces-list query (LakeSQL) through
+// the handler endpoint with real data — i.e. it exercises the full query path
+// end-to-end against an in-process Lake, not just the SQL string.
+func TestLakeSQL_Integration(t *testing.T) {
+	ctx := context.Background()
+
+	cfg, _ := lakeservertest.NewLocal(t)
+
+	lk, err := lake.Open(ctx, cfg)
+	if err != nil {
+		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
+	}
+	defer lk.Close()
+
+	// Insert two traces with known span counts and costs.
+	// Trace "A": 2 spans, cost 0.05 + 0.10 = 0.15
+	// Trace "B": 3 spans, cost 0.20 + 0.30 + 0.40 = 0.90
+	baseTime := time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC)
+	spans := []*domain.Span{
+		{SpanID: "a-1", TraceID: "trace-a", ProjectID: "proj-int", ServiceName: "svc", Name: "s1", Kind: domain.SpanKind("llm"), StartTime: baseTime, CostUSD: 0.05, InputTokens: 100, OutputTokens: 50, StatusCode: "ok"},
+		{SpanID: "a-2", TraceID: "trace-a", ProjectID: "proj-int", ServiceName: "svc", Name: "s2", Kind: domain.SpanKind("llm"), ParentID: "a-1", StartTime: baseTime.Add(time.Second), CostUSD: 0.10, InputTokens: 200, OutputTokens: 100, StatusCode: "ok"},
+		{SpanID: "b-1", TraceID: "trace-b", ProjectID: "proj-int", ServiceName: "svc", Name: "s3", Kind: domain.SpanKind("llm"), StartTime: baseTime.Add(2 * time.Second), CostUSD: 0.20, InputTokens: 50, OutputTokens: 25, StatusCode: "error"},
+		{SpanID: "b-2", TraceID: "trace-b", ProjectID: "proj-int", ServiceName: "svc", Name: "s4", Kind: domain.SpanKind("tool"), ParentID: "b-1", StartTime: baseTime.Add(3 * time.Second), CostUSD: 0.30, InputTokens: 10, OutputTokens: 5, StatusCode: "ok"},
+		{SpanID: "b-3", TraceID: "trace-b", ProjectID: "proj-int", ServiceName: "svc", Name: "s5", Kind: domain.SpanKind("llm"), ParentID: "b-1", StartTime: baseTime.Add(4 * time.Second), CostUSD: 0.40, InputTokens: 30, OutputTokens: 15, StatusCode: "ok"},
+	}
+	if err := lk.InsertSpans(ctx, spans); err != nil {
+		t.Fatalf("insert spans: %v", err)
+	}
+
+	// Build the traces-list query via the LakeSQL path.
+	q, err := query.NewSpanQuery("proj-int", query.SpanQueryRequest{
+		From:  baseTime.Add(-time.Hour),
+		To:    baseTime.Add(time.Hour),
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("NewSpanQuery: %v", err)
+	}
+
+	sqlStr, args, err := q.LakeSQL()
+	if err != nil {
+		t.Fatalf("LakeSQL: %v", err)
+	}
+
+	rows, err := lk.DB().Query(sqlStr, args...)
+	if err != nil {
+		t.Fatalf("execute lake traces list query: %v (sql=%s)", err, sqlStr)
+	}
+	defer rows.Close()
+
+	// We should get exactly 2 rows — one per trace.
+	var rowCount int
+	for rows.Next() {
+		rowCount++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows iteration: %v", err)
+	}
+
+	if rowCount != 2 {
+		t.Fatalf("expected 2 trace rows, got %d", rowCount)
+	}
+
+	// Now verify rollup values by reading columns more carefully.
+	rows, err = lk.DB().Query(sqlStr, args...)
+	if err != nil {
+		t.Fatalf("execute lake traces list query (second pass): %v", err)
+	}
+	defer rows.Close()
+
+	type traceRow struct {
+		traceID   string
+		spanCount int64
+	}
+	var results []traceRow
+	for rows.Next() {
+		var row [22]any
+		err = rows.Scan(&row[0], &row[1], &row[2], &row[3], &row[4], &row[5], &row[6], &row[7], &row[8], &row[9], &row[10], &row[11], &row[12], &row[13], &row[14], &row[15], &row[16], &row[17], &row[18], &row[19], &row[20], &row[21])
+		if err != nil {
+			t.Fatalf("scan row: %v", err)
+		}
+		traceID := row[1].(string)
+		spanCount := row[20].(int64)
+		results = append(results, traceRow{
+			traceID:   traceID,
+			spanCount: spanCount,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows iteration: %v", err)
+	}
+
+	// Build a map keyed by trace_id for easy lookup.
+	traceMap := make(map[string]traceRow)
+	for _, r := range results {
+		traceMap[r.traceID] = r
+	}
+
+	// Verify rollup: trace-a has 2 spans.
+	if row, ok := traceMap["trace-a"]; !ok {
+		t.Fatal("missing trace-a in results")
+	} else if row.spanCount != 2 {
+		t.Errorf("trace-a span_count: got %d, want 2", row.spanCount)
+	}
+
+	// Verify rollup: trace-b has 3 spans.
+	if row, ok := traceMap["trace-b"]; !ok {
+		t.Fatal("missing trace-b in results")
+	} else if row.spanCount != 3 {
+		t.Errorf("trace-b span_count: got %d, want 3", row.spanCount)
+	}
+
+	// Verify keyset pagination: add a third trace with a later start_time
+	// and verify it appears after trace-b when querying with limit=1.
+	spans2 := []*domain.Span{
+		{SpanID: "c-1", TraceID: "trace-c", ProjectID: "proj-int", ServiceName: "svc", Name: "s6", Kind: domain.SpanKind("llm"), StartTime: baseTime.Add(10 * time.Second), CostUSD: 0.50, InputTokens: 60, OutputTokens: 30, StatusCode: "ok"},
+	}
+	if err := lk.InsertSpans(ctx, spans2); err != nil {
+		t.Fatalf("insert extra span: %v", err)
+	}
+
+	q2, err := query.NewSpanQuery("proj-int", query.SpanQueryRequest{
+		From:  baseTime.Add(-time.Hour),
+		To:    baseTime.Add(time.Hour),
+		Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("NewSpanQuery: %v", err)
+	}
+
+	sql2, args2, err := q2.LakeSQL()
+	if err != nil {
+		t.Fatalf("LakeSQL: %v", err)
+	}
+
+	rows2, err := lk.DB().Query(sql2, args2...)
+	if err != nil {
+		t.Fatalf("execute lake traces list query (keyset): %v", err)
+	}
+	defer rows2.Close()
+
+	var firstTraceID string
+	for rows2.Next() {
+		var row [22]any
+		err = rows2.Scan(&row[0], &row[1], &row[2], &row[3], &row[4], &row[5], &row[6], &row[7], &row[8], &row[9], &row[10], &row[11], &row[12], &row[13], &row[14], &row[15], &row[16], &row[17], &row[18], &row[19], &row[20], &row[21])
+		if err != nil {
+			t.Fatalf("scan keyset row: %v", err)
+		}
+		if firstTraceID == "" {
+			firstTraceID = row[1].(string)
+		}
+	}
+	if err := rows2.Err(); err != nil {
+		t.Fatalf("rows iteration (keyset): %v", err)
+	}
+
+	// The most recent trace should be "trace-c" (start_time at +10s).
+	if firstTraceID != "trace-c" {
+		t.Errorf("first trace with limit=1: got %q, want %q", firstTraceID, "trace-c")
+	}
+
+	// Now verify that using keyset pagination from trace-c returns trace-b.
+	// Parse trace-c's start_time to build the cursor predicate.
+	q3, err := query.NewSpanQuery("proj-int", query.SpanQueryRequest{
+		From:    baseTime.Add(-time.Hour),
+		To:      baseTime.Add(time.Hour),
+		Limit:   1,
+		Cursor:  cursor.Encode(cursor.Cursor{StartTime: baseTime.Add(10 * time.Second), SpanID: "c-1"}),
+	})
+	if err != nil {
+		t.Fatalf("NewSpanQuery with cursor: %v", err)
+	}
+
+	sql3, args3, err := q3.LakeSQL()
+	if err != nil {
+		t.Fatalf("LakeSQL with cursor: %v", err)
+	}
+
+	rows3, err := lk.DB().Query(sql3, args3...)
+	if err != nil {
+		t.Fatalf("execute lake traces list query (cursor): %v", err)
+	}
+	defer rows3.Close()
+
+	var cursorTraceID string
+	for rows3.Next() {
+		var row [22]any
+		err = rows3.Scan(&row[0], &row[1], &row[2], &row[3], &row[4], &row[5], &row[6], &row[7], &row[8], &row[9], &row[10], &row[11], &row[12], &row[13], &row[14], &row[15], &row[16], &row[17], &row[18], &row[19], &row[20], &row[21])
+		if err != nil {
+			t.Fatalf("scan cursor row: %v", err)
+		}
+		if cursorTraceID == "" {
+			cursorTraceID = row[1].(string)
+		}
+	}
+	if err := rows3.Err(); err != nil {
+		t.Fatalf("rows iteration (cursor): %v", err)
+	}
+
+	// After trace-c, the next trace should be "trace-b" (start_time at +2s).
+	if cursorTraceID != "trace-b" {
+		t.Errorf("next trace after trace-c: got %q, want %q", cursorTraceID, "trace-b")
 	}
 }

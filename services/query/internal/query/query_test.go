@@ -337,7 +337,10 @@ func TestBuildWhereClause_StatusCodeIn_OK(t *testing.T) {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
 
-	args, where := q.buildWhereClause()
+	args, where, err := q.buildWhereClause()
+	if err != nil {
+		t.Fatalf("buildWhereClause error: %v", err)
+	}
 
 	if !strings.Contains(where, "status_code IN (?)") {
 		t.Errorf("expected where clause to contain 'status_code IN (?)', got: %s", where)
@@ -375,7 +378,10 @@ func TestBuildWhereClause_StatusCodeIn_UNSET(t *testing.T) {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
 
-	args, where := q.buildWhereClause()
+	args, where, err := q.buildWhereClause()
+	if err != nil {
+		t.Fatalf("buildWhereClause error: %v", err)
+	}
 
 	if !strings.Contains(where, "status_code IN (?)") {
 		t.Errorf("expected where clause to still match literal 'UNSET' rows, got: %s", where)
@@ -414,7 +420,10 @@ func TestBuildWhereClause_StatusCodeIn_OKAndUnset(t *testing.T) {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
 
-	args, where := q.buildWhereClause()
+	args, where, err := q.buildWhereClause()
+	if err != nil {
+		t.Fatalf("buildWhereClause error: %v", err)
+	}
 
 	if !strings.Contains(where, "status_code IN (?, ?)") {
 		t.Errorf("expected where clause to contain 'status_code IN (?, ?)', got: %s", where)
@@ -461,7 +470,10 @@ func TestBuildWhereClause_StatusCodeIn_ERROR(t *testing.T) {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
 
-	args, where := q.buildWhereClause()
+	args, where, err := q.buildWhereClause()
+	if err != nil {
+		t.Fatalf("buildWhereClause error: %v", err)
+	}
 
 	if !strings.Contains(where, "status_code IN (?)") {
 		t.Errorf("expected where clause to contain 'status_code IN (?)', got: %s", where)
@@ -496,7 +508,10 @@ func TestBuildWhereClause_StatusCodeIn_OKAndError(t *testing.T) {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
 
-	args, where := q.buildWhereClause()
+	args, where, err := q.buildWhereClause()
+	if err != nil {
+		t.Fatalf("buildWhereClause error: %v", err)
+	}
 
 	if !strings.Contains(where, "status_code IN (?, ?)") {
 		t.Errorf("expected where clause to contain 'status_code IN (?, ?)', got: %s", where)
@@ -653,18 +668,37 @@ func TestLakeSQL_FirstPage(t *testing.T) {
 	if strings.Contains(sql, "UNION") {
 		t.Errorf("Lake reads must not UNION hot+cold, got:\n%s", sql)
 	}
-	// The traces-list query (issue #136) filters the underlying spans in the
-	// "filtered" CTE WHERE clause, then selects rn=1 (root span) rows from
-	// "ranked" with a second WHERE — two WHERE clauses is expected here.
-	if got := strings.Count(sql, "WHERE"); got != 2 {
-		t.Errorf("expected two WHERE clauses (filtered CTE + root-span selection), got %d:\n%s", got, sql)
+	// Issue #154: query uses inline subqueries (no CTEs). Three filtered
+	// subqueries (ranked, rollups, kind_rollups) each carry the full WHERE,
+	// plus one outer WHERE for rn=1 selection = 4 WHERE clauses.
+	if got := strings.Count(sql, "WHERE"); got != 4 {
+		t.Errorf("expected four WHERE clauses (3 filtered subqueries + root-span selection), got %d:\n%s", got, sql)
 	}
 	if !strings.Contains(sql, "GROUP BY trace_id") {
 		t.Errorf("expected trace-level rollup aggregation, got:\n%s", sql)
 	}
-	// args: project_id, from, to, limit+1.
-	if len(args) != 4 {
-		t.Fatalf("expected 4 args, got %d: %v", len(args), args)
+	if !strings.Contains(sql, "ROW_NUMBER() OVER") {
+		t.Errorf("expected window function for root-span selection, got:\n%s", sql)
+	}
+	if !strings.Contains(sql, "FROM (\n  SELECT *,\n    ROW_NUMBER() OVER") {
+		t.Errorf("expected ranked inline subquery with window function, got:\n%s", sql)
+	}
+	if !strings.Contains(sql, ") r\n") {
+		t.Errorf("expected ranked alias 'r', got:\n%s", sql)
+	}
+	if !strings.Contains(sql, ") ru ON r.trace_id = ru.trace_id") {
+		t.Errorf("expected rollups alias 'ru' joined on trace_id, got:\n%s", sql)
+	}
+	if !strings.Contains(sql, ") kr ON r.trace_id = kr.trace_id") {
+		t.Errorf("expected kind_rollups alias 'kr' joined on trace_id, got:\n%s", sql)
+	}
+	if !strings.Contains(sql, "WHERE r.rn = 1") {
+		t.Errorf("expected root-span selection WHERE r.rn = 1, got:\n%s", sql)
+	}
+	// Each of the 3 filtered subqueries carries [project_id, from, to].
+	// No cursor args. +1 for limit.
+	if len(args) != 10 {
+		t.Fatalf("expected 10 args (3 filtered subqueries x 3 filters + 1 limit), got %d: %v", len(args), args)
 	}
 	if args[len(args)-1] != 11 {
 		t.Errorf("last arg should be limit+1 (11), got %v", args[len(args)-1])
@@ -690,17 +724,133 @@ func TestLakeSQL_CursorPage(t *testing.T) {
 	}
 
 	// The cursor predicate is ANDed onto the root-span selection WHERE
-	// (r.rn = 1), the second of the two WHERE clauses (see
-	// TestLakeSQL_FirstPage for why two are expected post-#136).
-	if got := strings.Count(sql, "WHERE"); got != 2 {
-		t.Errorf("expected two WHERE clauses (filtered CTE + root-span selection), got %d:\n%s", got, sql)
+	// (r.rn = 1).
+	if got := strings.Count(sql, "WHERE"); got != 4 {
+		t.Errorf("expected four WHERE clauses (3 filtered subqueries + root-span selection), got %d:\n%s", got, sql)
 	}
 	if !strings.Contains(sql, "AND (r.start_time < ? OR (r.start_time = ? AND r.span_id < ?))") {
 		t.Errorf("expected keyset cursor predicate ANDed into root-span WHERE, got:\n%s", sql)
 	}
-	// args: project_id, from, to, cursor start_time x2, cursor span_id, limit+1.
-	if len(args) != 7 {
-		t.Fatalf("expected 7 args, got %d: %v", len(args), args)
+	// Each of the 3 filtered subqueries carries [project_id, from, to].
+	// +3 cursor args + 1 limit = 3*3 + 3 + 1 = 13 args.
+	if len(args) != 13 {
+		t.Fatalf("expected 13 args (3 filtered subqueries x 3 filters + 3 cursor + 1 limit), got %d: %v", len(args), args)
+	}
+}
+
+// TestLakeSQL_NoCTEs verifies that the traces-list query (LakeSQL) uses
+// inline subqueries (derived tables) rather than CTEs — so that DuckDB
+// does NOT materialize the full filtered span set before applying the LIMIT
+// (issue #154). The query must not contain the "WITH" keyword.
+func TestLakeSQL_NoCTEs(t *testing.T) {
+	req := SpanQueryRequest{
+		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Limit: 10,
+	}
+
+	q, err := NewSpanQuery("proj-abc", req)
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, _, err := q.LakeSQL()
+	if err != nil {
+		t.Fatalf("LakeSQL error: %v", err)
+	}
+
+	if strings.Contains(strings.ToUpper(sql), "WITH ") {
+		t.Errorf("query must not use CTEs (no WITH clause); got:\n%s", sql)
+	}
+	// Verify the query starts with SELECT (no CTE preamble).
+	if !strings.HasPrefix(strings.TrimSpace(sql), "SELECT") {
+		t.Errorf("query should start directly with SELECT, got:\n%s", sql)
+	}
+}
+
+// TestLakeSQL_NoFilteredCTE verifies that the old "filtered" CTE has been
+// inlined — there is no standalone CTE named filtered in the generated SQL.
+func TestLakeSQL_NoFilteredCTE(t *testing.T) {
+	req := SpanQueryRequest{
+		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Limit: 10,
+	}
+
+	q, err := NewSpanQuery("proj-abc", req)
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, _, err := q.LakeSQL()
+	if err != nil {
+		t.Fatalf("LakeSQL error: %v", err)
+	}
+
+	// The old query had: "WITH filtered AS (SELECT * FROM lake.spans WHERE ...)"
+	// The new query should have: "SELECT * FROM lake.spans" inside inline
+	// subqueries, not as a named CTE.
+	if strings.Contains(sql, "WITH filtered") ||
+		strings.Contains(sql, "filtered AS") {
+		t.Errorf("query must not have a named 'filtered' CTE; got:\n%s", sql)
+	}
+}
+
+// TestLakeSQL_NoRankedCTE verifies that the "ranked" CTE has been replaced
+// with an inline subquery alias.
+func TestLakeSQL_NoRankedCTE(t *testing.T) {
+	req := SpanQueryRequest{
+		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Limit: 10,
+	}
+
+	q, err := NewSpanQuery("proj-abc", req)
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, _, err := q.LakeSQL()
+	if err != nil {
+		t.Fatalf("LakeSQL error: %v", err)
+	}
+
+	if strings.Contains(sql, "ranked AS") {
+		t.Errorf("query must not have a named 'ranked' CTE; got:\n%s", sql)
+	}
+	if !strings.Contains(sql, "AS rn\n  FROM (\n") {
+		t.Errorf("expected rn window alias in inline subquery; got:\n%s", sql)
+	}
+}
+
+// TestLakeSQL_NoRollupCTEs verifies that "rollups" and "kind_rollups" are
+// inline subqueries, not CTEs.
+func TestLakeSQL_NoRollupCTEs(t *testing.T) {
+	req := SpanQueryRequest{
+		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Limit: 10,
+	}
+
+	q, err := NewSpanQuery("proj-abc", req)
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, _, err := q.LakeSQL()
+	if err != nil {
+		t.Fatalf("LakeSQL error: %v", err)
+	}
+
+	if strings.Contains(sql, "rollups AS") {
+		t.Errorf("query must not have a named 'rollups' CTE; got:\n%s", sql)
+	}
+	if strings.Contains(sql, "kind_rollups AS") {
+		t.Errorf("query must not have a named 'kind_rollups' CTE; got:\n%s", sql)
+	}
+	// Verify they appear as JOIN subqueries with proper aliases.
+	if !strings.Contains(sql, "JOIN (") {
+		t.Errorf("expected rollup and kind_rollup JOIN subqueries; got:\n%s", sql)
 	}
 }
 

@@ -278,9 +278,10 @@ func (q *SpanQuery) EffectiveLimit() int {
 }
 
 // buildWhereClause assembles the WHERE clause from filters.
-func (q *SpanQuery) buildWhereClause() ([]any, string) {
+func (q *SpanQuery) buildWhereClause() ([]any, string, error) {
 	var clauses []string
 	var args []any
+	var firstErr error
 
 	// project_id is always injected from the session.
 	clauses = append(clauses, "project_id = ?")
@@ -315,14 +316,17 @@ func (q *SpanQuery) buildWhereClause() ([]any, string) {
 		}
 		compiled, a, err := compileFilter(f)
 		if err != nil {
-			continue // Skip invalid filters rather than failing the whole query.
+			if firstErr == nil {
+				firstErr = err // Skip invalid filters rather than failing the whole query.
+			}
+			continue
 		}
 		clauses = append(clauses, compiled)
 		args = append(args, a...)
 	}
 
 	where := "\n  WHERE " + strings.Join(clauses, " AND ")
-	return args, where
+	return args, where, firstErr
 }
 
 // operatorSQL maps FilterOp names to SQL operator symbols.
@@ -699,67 +703,51 @@ func MarshalResponse(r SpanResponse) ([]byte, error) {
 // Like the prior flat-span query, this reads only from the single Lake
 // table (lake.spans, ADR-0004) — no hot+cold UNION — and does not dedupe
 // residual duplicate spans (tolerated outside trace detail).
+//
+// The query uses inline subqueries (derived tables) instead of CTEs to avoid
+// DuckDB's default CTE materialization (issue #154). In DuckDB, CTEs are
+// materialized by default, which means the entire filtered span set is loaded
+// into memory before any LIMIT is applied. By using inline subqueries, DuckDB
+// can push down filters and limits more aggressively, reducing memory pressure
+// and improving query performance for large datasets.
 func (q *SpanQuery) LakeSQL() (sql string, args []any, err error) {
 	// buildWhereClause always emits a WHERE clause — project_id is
 	// unconditionally injected.
-	whereArgs, where := q.buildWhereClause()
+	filteredArgs, where, err := q.buildWhereClause()
+	if err != nil {
+		return "", nil, fmt.Errorf("buildWhereClause: %w", err)
+	}
 
 	var sb strings.Builder
-	sb.WriteString("WITH filtered AS (\n")
-	sb.WriteString("  SELECT * FROM lake.spans")
+	// Build the SELECT clause for readability — one column per line.
+	sb.WriteString("SELECT\n")
+	sb.WriteString("  r.span_id, r.trace_id, r.parent_id, r.conversation_id, r.project_id,\n")
+	sb.WriteString("  r.service_name, r.name, r.kind, r.start_time,\n")
+	sb.WriteString("  ru.trace_end_time AS end_time,\n")
+	sb.WriteString("  r.model, r.input, r.output,\n")
+	sb.WriteString("  ru.total_input_tokens AS input_tokens,\n")
+	sb.WriteString("  ru.total_output_tokens AS output_tokens,\n")
+	sb.WriteString("  ru.total_cost_usd AS cost_usd,\n")
+	sb.WriteString("  r.prompt_name, r.prompt_version,\n")
+	sb.WriteString("  CASE WHEN ru.has_error = 1 THEN 'error' ELSE r.status_code END AS status_code,\n")
+	sb.WriteString("  r.status_message,\n")
+	sb.WriteString("  ru.span_count,\n")
+	sb.WriteString("  kr.kind_counts\n")
+	// ranked: inline subquery with ROW_NUMBER for root-span selection.
+	sb.WriteString("FROM (\n  SELECT *,\n    ROW_NUMBER() OVER (\n      PARTITION BY trace_id\n      ORDER BY (CASE WHEN parent_id IS NULL OR parent_id = '' THEN 0 ELSE 1 END), start_time ASC, span_id ASC\n    ) AS rn\n  FROM (\n    SELECT * FROM lake.spans")
 	sb.WriteString(where)
-	sb.WriteString("\n)")
-	args = append(args, whereArgs...)
-
-	sb.WriteString(`,
-ranked AS (
-  SELECT *,
-    ROW_NUMBER() OVER (
-      PARTITION BY trace_id
-      ORDER BY (CASE WHEN parent_id IS NULL OR parent_id = '' THEN 0 ELSE 1 END), start_time ASC, span_id ASC
-    ) AS rn
-  FROM filtered
-),
-rollups AS (
-  SELECT
-    trace_id,
-    CAST(COUNT(*) AS BIGINT) AS span_count,
-    CAST(COALESCE(SUM(input_tokens), 0) AS BIGINT) AS total_input_tokens,
-    CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT) AS total_output_tokens,
-    COALESCE(SUM(cost_usd), 0) AS total_cost_usd,
-    MAX(end_time) AS trace_end_time,
-    MAX(CASE WHEN status_code = 'error' THEN 1 ELSE 0 END) AS has_error
-  FROM filtered
-  GROUP BY trace_id
-),
-kind_rollups AS (
-  SELECT
-    trace_id,
-    to_json(MAP(LIST(kind), LIST(kind_count))) AS kind_counts
-  FROM (
-    SELECT trace_id, COALESCE(kind, 'unknown') AS kind, CAST(COUNT(*) AS BIGINT) AS kind_count
-    FROM filtered
-    GROUP BY trace_id, COALESCE(kind, 'unknown')
-  )
-  GROUP BY trace_id
-)
-SELECT
-  r.span_id, r.trace_id, r.parent_id, r.conversation_id, r.project_id,
-  r.service_name, r.name, r.kind, r.start_time,
-  ru.trace_end_time AS end_time,
-  r.model, r.input, r.output,
-  ru.total_input_tokens AS input_tokens,
-  ru.total_output_tokens AS output_tokens,
-  ru.total_cost_usd AS cost_usd,
-  r.prompt_name, r.prompt_version,
-  CASE WHEN ru.has_error = 1 THEN 'error' ELSE r.status_code END AS status_code,
-  r.status_message,
-  ru.span_count,
-  kr.kind_counts
-FROM ranked r
-JOIN rollups ru USING (trace_id)
-JOIN kind_rollups kr USING (trace_id)
-WHERE r.rn = 1`)
+	sb.WriteString("\n  )\n) r\n")
+	args = append(args, filteredArgs...)
+	// rollups: inline subquery computing per-trace aggregates.
+	sb.WriteString("JOIN (\n  SELECT\n    trace_id,\n    CAST(COUNT(*) AS BIGINT) AS span_count,\n    CAST(COALESCE(SUM(input_tokens), 0) AS BIGINT) AS total_input_tokens,\n    CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT) AS total_output_tokens,\n    COALESCE(SUM(cost_usd), 0) AS total_cost_usd,\n    MAX(end_time) AS trace_end_time,\n    MAX(CASE WHEN status_code = 'error' THEN 1 ELSE 0 END) AS has_error\n  FROM lake.spans")
+	sb.WriteString(where)
+	sb.WriteString("\n  GROUP BY trace_id\n) ru ON r.trace_id = ru.trace_id\n")
+	args = append(args, filteredArgs...)
+	// kind_rollups: inline subquery computing per-trace kind counts.
+	sb.WriteString("JOIN (\n  SELECT\n    trace_id,\n    to_json(MAP(LIST(kind), LIST(kind_count))) AS kind_counts\n  FROM (\n    SELECT trace_id, COALESCE(kind, 'unknown') AS kind, CAST(COUNT(*) AS BIGINT) AS kind_count\n    FROM lake.spans")
+	sb.WriteString(where)
+	sb.WriteString("\n    GROUP BY trace_id, COALESCE(kind, 'unknown')\n  )\n  GROUP BY trace_id\n) kr ON r.trace_id = kr.trace_id\nWHERE r.rn = 1")
+	args = append(args, filteredArgs...)
 
 	if !q.cursor.StartTime.IsZero() || q.cursor.SpanID != "" {
 		sb.WriteString(" AND (r.start_time < ? OR (r.start_time = ? AND r.span_id < ?))")
