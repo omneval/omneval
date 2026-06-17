@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	internalauth "github.com/omneval/omneval/internal/auth"
+	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/metadata"
 )
@@ -24,21 +24,24 @@ import (
 //   PUT    /api/v1/prompts/:name/labels/:label   — reassign a label
 
 type PromptHandler struct {
-	PromptStore  metadata.PromptStore
-	Cache        *PromptCache
-	SessionStore SessionStore
-	// Validator is optional. When set, GET prompt endpoints accept
-	// X-API-Key authentication in addition to session cookies.
-	// The middleware (RequireSessionOrAPIKey) injects the validated
-	// project ID into the request context; this field is kept for
-	// documentation/wiring purposes only — the handler itself reads
-	// from context via the canonical resolver.
-	Validator internalauth.Validator
-	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
-	// When nil (e.g. handlers created directly in tests), defaults to
-	// defaultResolveProjectID for backwards compatibility.
-	ResolveProjectID func(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool)
+	PromptStore   metadata.PromptStore
+	Cache         *PromptCache
+	SessionStore  SessionStore
+	ProjectResolver auth.ProjectResolver
+	Validator     auth.Validator
 }
+
+// resolveProjectID returns a ProjectResolver that chains h.ProjectResolver
+// (if non-nil) with a fallback to h.SessionStore.ProjectID.  When both are
+// nil it returns nil so callers still get the 401.
+func (h *PromptHandler) resolveProjectID() auth.ProjectResolver {
+	if h.ProjectResolver == nil && h.SessionStore != nil {
+		return auth.NewSessionStoreResolver(h.SessionStore)
+	}
+	return h.ProjectResolver
+}
+
+
 
 // HandleCreatePrompt handles POST /api/v1/prompts.
 // Creates an immutable prompt version. Re-posting the same version returns 409.
@@ -48,12 +51,8 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Extract project_id from the canonical resolver.
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, "")
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -185,12 +184,11 @@ func (h *PromptHandler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) 
 	versionQuery := r.URL.Query().Get("version")
 	labelQuery := r.URL.Query().Get("label")
 
-	// Resolve project_id from the canonical resolver.
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
+	if !ok {
+		return
 	}
-	projectID, _ := resolver(h.SessionStore, w, r, "")
 
 	var pv *domain.PromptVersion
 	var getErr error
@@ -263,11 +261,8 @@ func (h *PromptHandler) HandleListPrompts(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, "")
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -356,11 +351,11 @@ func (h *PromptHandler) HandleSetLabel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate the version exists.
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
+	if !ok {
+		return
 	}
-	projectID, _ := resolver(h.SessionStore, w, r, "")
 	_, err := h.PromptStore.GetPromptVersion(r.Context(), projectID, name, req.Version)
 	if err != nil {
 		if errors.Is(err, metadata.ErrNotFound) {
@@ -413,12 +408,8 @@ func (h *PromptHandler) HandleListPromptVersions(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Extract project_id from the canonical resolver.
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, "")
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}

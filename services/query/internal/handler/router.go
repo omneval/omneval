@@ -19,73 +19,6 @@ type playgroundHandler interface {
 	HandleRun(http.ResponseWriter, *http.Request)
 }
 
-// defaultResolveProjectID is the fallback used by tests that create handlers
-// directly without going through NewRouter. It mirrors the Router's
-// canonicalResolveProjectID: API-key context → explicit/ session project with
-// org-membership validation → ?project_id= query param. On failure it writes
-// an error response (the unified callers rely on the resolver to write the
-// error).
-func defaultResolveProjectID(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool) {
-	hasUser := auth.CurrentUserFromContext(r) != nil
-
-	// 1. Check API-key derived project ID from context (set by
-	//    RequireSessionOrAPIKey middleware or injected directly in tests).
-	if pid, ok := r.Context().Value(APIKeyProjectIDKey).(string); ok && pid != "" {
-		return pid, true
-	}
-
-	// 2. Session store resolution.
-	if sess != nil {
-		if explicitID != "" {
-			// Explicit project ID: verify user is authenticated and the
-			// project belongs to their org.
-			if !hasUser {
-				writeJSONError(w, "unauthorized", http.StatusUnauthorized)
-				return "", false
-			}
-			// In tests the fake store's ListProjects may not be wired, so
-			// allow the explicit project ID if the session's default matches
-			// it (common test pattern).
-			if projID, ok := sess.ProjectID(r); ok && projID == explicitID {
-				return explicitID, true
-			}
-			// Validate via ListProjects (full test setup).
-			projects, err := sess.ListProjects(r)
-			if err == nil {
-				for _, p := range projects {
-					if p.ProjectID == explicitID {
-						return explicitID, true
-					}
-				}
-			}
-			writeJSONError(w, "project_id not found in user's organizations", http.StatusForbidden)
-			return "", false
-		}
-		if projectID, ok := sess.ProjectID(r); ok && projectID != "" {
-			return projectID, true
-		}
-		// Session store present but no default: distinguish auth state.
-		if hasUser {
-			writeJSONError(w, "no project found — create a project first via POST /api/v1/projects", http.StatusBadRequest)
-		} else {
-			writeJSONError(w, "unauthorized", http.StatusUnauthorized)
-		}
-		return "", false
-	}
-
-	// 3. No session store: fall back to explicit or ?project_id= query param.
-	if explicitID != "" {
-		return explicitID, true
-	}
-	if pid := r.URL.Query().Get("project_id"); pid != "" {
-		return pid, true
-	}
-
-	// Nothing resolved — write 401 (unauthenticated).
-	writeJSONError(w, "unauthorized", http.StatusUnauthorized)
-	return "", false
-}
-
 // RouterDeps collects the dependencies the Router needs. The server package
 // populates this struct from WiredDeps before passing it to NewRouter, keeping
 // the handler package from importing the server package (no circular dependency).
@@ -135,10 +68,10 @@ type Router struct {
 	apiValidator internalauth.Validator
 }
 
-// NewRouter creates a Router from the provided dependencies and injects the
-// canonical project ID resolver into all handlers that need it.
+// NewRouter creates a Router from the provided dependencies. All handlers use
+// the shared auth module for project ID extraction.
 func NewRouter(deps *RouterDeps) *Router {
-	r := &Router{
+	return &Router{
 		cfg:          deps.Cfg,
 		store:        deps.Store,
 		auth:         deps.Auth,
@@ -155,15 +88,6 @@ func NewRouter(deps *RouterDeps) *Router {
 		sessionTTL:   deps.SessionTTL,
 		apiValidator: deps.APIKeyValidator,
 	}
-	// Inject the canonical project ID resolver so all handlers share a single
-	// source of truth (no duplication of the pattern).
-	r.span.ResolveProjectID = r.canonicalResolveProjectID
-	r.conversation.ResolveProjectID = r.canonicalResolveProjectID
-	r.dataset.ResolveProjectID = r.canonicalResolveProjectID
-	r.evalRule.ResolveProjectID = r.canonicalResolveProjectID
-	r.prompt.ResolveProjectID = r.canonicalResolveProjectID
-	r.datasetRun.ResolveProjectID = r.canonicalResolveProjectID
-	return r
 }
 
 // RegisterRoutes registers all query-service routes on the given ServeMux
@@ -254,7 +178,7 @@ func (rt *Router) RegisterRoutes(mux *http.ServeMux) http.Handler {
 func (rt *Router) buildMiddleware(mux *http.ServeMux) http.Handler {
 	sessionMw := auth.RequireAuth(rt.store, rt.cfg.Auth.SecureCookie, rt.sessionTTL)
 	adminMw := auth.RequireAdmin(rt.store, rt.cfg.Auth.SecureCookie, rt.sessionTTL, rt.cfg.Auth.AdminEmail)
-	promptGetMw := auth.RequireSessionOrAPIKey(rt.store, rt.apiValidator, rt.cfg.Auth.SecureCookie, rt.sessionTTL, APIKeyProjectIDKey)
+	promptGetMw := auth.RequireSessionOrAPIKey(rt.store, rt.apiValidator, rt.cfg.Auth.SecureCookie, rt.sessionTTL, internalauth.APIKeyProjectIDContextKey)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		path := req.URL.Path
@@ -308,74 +232,7 @@ func isPublicPath(path string) bool {
 	return false
 }
 
-// canonicalResolveProjectID determines the project_id a request should query.
-//
-// When explicitID is non-empty (the UI project switcher includes it in the
-// request body / query string), it is honored after verifying it belongs to
-// the authenticated user's org. When it is empty, we fall back to the
-// session-derived default, which returns the org's first project.
-//
-// On failure it writes the appropriate HTTP error and returns ok=false; callers
-// should return immediately.
-//
-// The sessionStore parameter is the caller's own SessionStore reference; when
-// the Router delegates to handlers, the handler passes its own SessionStore
-// so the function can fall back to session-based resolution if needed.
-func (rt *Router) canonicalResolveProjectID(sessionStore SessionStore, w http.ResponseWriter, req *http.Request, explicitID string) (string, bool) {
-	// In production, the auth middleware has already validated the user, so
-	// CurrentUserFromContext is always non-nil. If it's nil, the handler was
-	// called directly without the Router — delegate to the default resolver
-	// (used by tests that create handlers without going through NewRouter).
-	if auth.CurrentUserFromContext(req) == nil {
-		return defaultResolveProjectID(sessionStore, w, req, explicitID)
-	}
 
-	if explicitID == "" {
-		// Prefer the handler's own SessionStore's default project.
-		if sessionStore != nil {
-			if projectID, ok := sessionStore.ProjectID(req); ok && projectID != "" {
-				return projectID, true
-			}
-		}
-		return rt.resolveProjectIDFromSession(w, req)
-	}
-	return rt.resolveProjectIDWithExplicit(w, req, explicitID)
-}
-
-// resolveProjectIDFromSession returns the session-derived project ID.
-func (rt *Router) resolveProjectIDFromSession(w http.ResponseWriter, req *http.Request) (string, bool) {
-	projectID, ok := rt.auth.ProjectID(req)
-	if !ok || projectID == "" {
-		if auth.CurrentUserFromContext(req) != nil {
-			writeJSONError(w, "no project found — create a project first via POST /api/v1/projects", http.StatusBadRequest)
-		} else {
-			writeJSONError(w, "unauthorized", http.StatusUnauthorized)
-		}
-		return "", false
-	}
-	return projectID, true
-}
-
-// resolveProjectIDWithExplicit validates that an explicit project_id belongs to
-// the authenticated user's org and returns it.
-func (rt *Router) resolveProjectIDWithExplicit(w http.ResponseWriter, req *http.Request, explicitID string) (string, bool) {
-	if auth.CurrentUserFromContext(req) == nil {
-		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
-		return "", false
-	}
-	userProjects, err := rt.auth.ListProjects(req)
-	if err != nil {
-		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
-		return "", false
-	}
-	for _, p := range userProjects {
-		if p.ProjectID == explicitID {
-			return explicitID, true
-		}
-	}
-	writeJSONError(w, "project_id not found in user's organizations", http.StatusForbidden)
-	return "", false
-}
 
 // serveUI is the embedded UI server, injected by the server package at init.
 // By default it returns 404 — the real handler is wired via InitServeUI.

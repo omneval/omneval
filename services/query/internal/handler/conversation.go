@@ -5,20 +5,29 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/omneval/omneval/internal/auth"
 )
 
 // ConversationHandler handles conversation-related endpoints:
 //   - GET /api/v1/conversations
 //   - GET /api/v1/conversations/:conversationId
 type ConversationHandler struct {
-	SessionStore SessionStore
+	SessionStore    SessionStore
+	ProjectResolver auth.ProjectResolver
 	// Lake is the DuckDB handle attached read-only to the Lake.
 	// Conversation reads compile against lake.spans (ADR-0004).
 	Lake DBHandle
-	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
-	// When nil (e.g. handlers created directly in tests), defaults to
-	// defaultResolveProjectID for backwards compatibility.
-	ResolveProjectID func(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool)
+}
+
+// resolveProjectID returns a ProjectResolver that chains h.ProjectResolver
+// (if non-nil) with a fallback to h.SessionStore.ProjectID.  When both are
+// nil it returns nil so callers still get the 401.
+func (h *ConversationHandler) resolveProjectID() auth.ProjectResolver {
+	if h.ProjectResolver == nil && h.SessionStore != nil {
+		return auth.NewSessionStoreResolver(h.SessionStore)
+	}
+	return h.ProjectResolver
 }
 
 // ConversationListItem represents a single conversation in the paginated
@@ -69,11 +78,8 @@ type ConversationDetailResponse struct {
 // metadata, ordered by most recent start_time descending.
 // Supports keyset pagination via from/to/limit/cursor query parameters.
 func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *http.Request) {
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, r.URL.Query().Get("project_id"))
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -175,11 +181,8 @@ func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *
 // HandleConversationDetail returns ordered trace list with root span metadata
 // for a single conversation.
 func (h *ConversationHandler) HandleConversationDetail(w http.ResponseWriter, r *http.Request) {
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, r.URL.Query().Get("project_id"))
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}

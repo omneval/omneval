@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/metadata"
 )
@@ -1865,7 +1866,7 @@ func TestPromptHandler_GetPrompt_APIKeyProjectID(t *testing.T) {
 
 	// Inject the API-key project ID into context (what middleware would do).
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/greeting", nil)
-	req = req.WithContext(context.WithValue(req.Context(), APIKeyProjectIDKey, "apikey-proj"))
+	req = req.WithContext(context.WithValue(req.Context(), auth.APIKeyProjectIDContextKey, "apikey-proj"))
 	w := httptest.NewRecorder()
 	h.HandleGetPrompt(w, req)
 
@@ -1900,7 +1901,7 @@ func TestPromptHandler_GetPrompt_VersionAPIKeyProjectID(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/system?version=3", nil)
-	req = req.WithContext(context.WithValue(req.Context(), APIKeyProjectIDKey, "apikey-proj"))
+	req = req.WithContext(context.WithValue(req.Context(), auth.APIKeyProjectIDContextKey, "apikey-proj"))
 	w := httptest.NewRecorder()
 	h.HandleGetPrompt(w, req)
 
@@ -1928,7 +1929,7 @@ func TestPromptHandler_GetPrompt_LabelAPIKeyProjectID(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/system?label=production", nil)
-	req = req.WithContext(context.WithValue(req.Context(), APIKeyProjectIDKey, "apikey-proj"))
+	req = req.WithContext(context.WithValue(req.Context(), auth.APIKeyProjectIDContextKey, "apikey-proj"))
 	w := httptest.NewRecorder()
 	h.HandleGetPrompt(w, req)
 

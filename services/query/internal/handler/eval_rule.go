@@ -9,17 +9,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/metadata"
 )
-
-// APIKeyProjectIDContextKey is the type for the API-key project ID context key.
-type APIKeyProjectIDContextKey struct{}
-
-// APIKeyProjectIDKey is the context key under which middleware stores the
-// project ID derived from a validated X-API-Key header. Handlers call
-// extractProjectID which checks this before falling back to session auth.
-var APIKeyProjectIDKey APIKeyProjectIDContextKey
 
 // EvalRuleHandler handles eval rule CRUD endpoints:
 //
@@ -28,17 +21,26 @@ var APIKeyProjectIDKey APIKeyProjectIDContextKey
 //	DELETE /api/v1/eval-rules/:id      — delete an eval rule by ID
 //	POST   /api/v1/eval-rules/preview  — preview matching spans for a filter
 type EvalRuleHandler struct {
-	DB           DBHandle
+	DB            DBHandle
 	EvalRuleStore metadata.EvalRuleStore
-	SessionStore SessionStore
+	SessionStore  SessionStore
+	ProjectResolver auth.ProjectResolver
 	// DefaultJudgeModel is the model used when the request omits judge_model.
 	// Wired from cfg.Eval.LLMModel at startup. Falls back to "gpt-4o-mini" when empty.
 	DefaultJudgeModel string
-	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
-	// When nil (e.g. handlers created directly in tests), defaults to
-	// defaultResolveProjectID for backwards compatibility.
-	ResolveProjectID func(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool)
 }
+
+// resolveProjectID returns a ProjectResolver that chains h.ProjectResolver
+// (if non-nil) with a fallback to h.SessionStore.ProjectID.  When both are
+// nil it returns nil so callers still get the 401.
+func (h *EvalRuleHandler) resolveProjectID() auth.ProjectResolver {
+	if h.ProjectResolver == nil && h.SessionStore != nil {
+		return auth.NewSessionStoreResolver(h.SessionStore)
+	}
+	return h.ProjectResolver
+}
+
+
 
 // ---- Request / Response Types ----
 
@@ -89,11 +91,8 @@ func (h *EvalRuleHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, "")
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -166,11 +165,8 @@ func (h *EvalRuleHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, "")
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -196,11 +192,8 @@ func (h *EvalRuleHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, "")
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -256,11 +249,8 @@ func (h *EvalRuleHandler) HandlePreview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, "")
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}

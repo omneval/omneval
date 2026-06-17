@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/judge"
 	"github.com/omneval/omneval/internal/metadata"
@@ -26,13 +27,22 @@ type DatasetRunHandler struct {
 	DatasetStore  metadata.DatasetStore
 	EvalRuleStore metadata.EvalRuleStore
 	SessionStore  SessionStore
+	ProjectResolver auth.ProjectResolver
 	JudgeClient   judge.LLMClient
 	Cache         *PromptCache
-	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
-	// When nil (e.g. handlers created directly in tests), defaults to
-	// defaultResolveProjectID for backwards compatibility.
-	ResolveProjectID func(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool)
 }
+
+// resolveProjectID returns a ProjectResolver that chains h.ProjectResolver
+// (if non-nil) with a fallback to h.SessionStore.ProjectID.  When both are
+// nil it returns nil so callers still get the 401.
+func (h *DatasetRunHandler) resolveProjectID() auth.ProjectResolver {
+	if h.ProjectResolver == nil && h.SessionStore != nil {
+		return auth.NewSessionStoreResolver(h.SessionStore)
+	}
+	return h.ProjectResolver
+}
+
+
 
 // RunDatasetRequest is the body accepted by POST /api/v1/datasets/:id/runs.
 type RunDatasetRequest struct {
@@ -510,20 +520,16 @@ type authDatasetError struct {
 
 func (e *authDatasetError) Error() string { return e.Message }
 
-// authDataset resolves the project ID from the request using the canonical
-// resolver, then resolves the dataset ID from the URL and verifies the
-// dataset belongs to the requesting project. Returns project ID,
-// dataset ID, and nil on success. Returns an authDatasetError on failure.
+// authDataset resolves the project ID from the request via the shared auth
+// module, then resolves the dataset ID from the URL and verifies the dataset
+// belongs to the requesting project. Returns project ID, dataset ID, and nil
+// on success. Returns an authDatasetError on failure.
 // If the resolver fails, it writes the response directly and returns
 // ("", "", nil); callers must check projectID == "" before proceeding.
 func (h *DatasetRunHandler) authDataset(w http.ResponseWriter, r *http.Request) (string, string, error) {
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, "")
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
-		// Resolver already wrote the error response.
 		return "", "", nil
 	}
 

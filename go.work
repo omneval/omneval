@@ -5,7 +5,7 @@ use (
 	./sdk/go
 	./services/eval
 	./services/ingest
-	./services/query
 	./services/quack
+	./services/query
 	./services/writer
 )

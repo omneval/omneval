@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/metadata"
 )
@@ -15,8 +16,19 @@ import (
 // Bookmarks are mutable user state and live in the Metadata Store
 // (ADR-0004 moved them out of the hot DuckDB store).
 type BookmarkHandler struct {
-	BookmarkStore metadata.BookmarkStore
-	SessionStore  SessionStore
+	BookmarkStore   metadata.BookmarkStore
+	SessionStore    SessionStore
+	ProjectResolver auth.ProjectResolver
+}
+
+// resolveProjectID returns a ProjectResolver that chains h.ProjectResolver
+// (if non-nil) with a fallback to h.SessionStore.ProjectID.  When both are
+// nil it returns nil so callers still get the 401.
+func (h *BookmarkHandler) resolveProjectID() auth.ProjectResolver {
+	if h.ProjectResolver == nil && h.SessionStore != nil {
+		return auth.NewSessionStoreResolver(h.SessionStore)
+	}
+	return h.ProjectResolver
 }
 
 // HandleBookmark handles POST /api/v1/traces/{traceId}/bookmark.
@@ -44,9 +56,10 @@ func (h *BookmarkHandler) HandleBookmark(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	projectID, ok := h.SessionStore.ProjectID(r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	// Resolve project ID using the shared resolver (API-key context → session → query param).
+	resolver := h.resolveProjectID()
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
+	if !ok {
 		return
 	}
 
