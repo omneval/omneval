@@ -131,7 +131,25 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, "query builder not configured", http.StatusServiceUnavailable)
 		return
 	}
-	resp, err := h.QueryBuilder.ExecuteSpan(r.Context(), req, projectID)
+	// Convert the decoded SpanQueryRequest into a dsl.Query so that
+	// Execute can dispatch to the span pipeline.
+	dslQuery := &dsl.Query{
+		From:      req.From,
+		To:        req.To,
+		Limit:     req.Limit,
+		Cursor:    req.Cursor,
+		ProjectID: projectID,
+		QueryType: dsl.QueryTypeSpan,
+	}
+	for _, f := range req.Filters {
+		dslQuery.Filters = append(dslQuery.Filters, dsl.Filter{
+			Field: f.Field,
+			Op:    dsl.FilterOp(f.Op),
+			Value: f.Value,
+		})
+	}
+
+	result, err := h.QueryBuilder.Execute(r.Context(), dslQuery)
 	if err != nil {
 		if querybuild.IsValidationError(err) {
 			writeJSONError(w, err.Error(), http.StatusBadRequest)
@@ -139,6 +157,12 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, err.Error(), http.StatusInternalServerError)
 		}
 		return
+	}
+
+	resp := &query.SpanResponse{
+		Spans: result.Spans,
+		Next:  result.Next,
+		Limit: result.Limit,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -347,7 +371,10 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 		writeJSONError(w, "query builder not configured", http.StatusServiceUnavailable)
 		return
 	}
-	result, err := h.QueryBuilder.ExecuteAnalytics(r.Context(), req, projectID)
+	req.ProjectID = projectID
+	req.QueryType = dsl.QueryTypeAnalytics
+
+	result, err := h.QueryBuilder.Execute(r.Context(), &req)
 	if err != nil {
 		if querybuild.IsValidationError(err) {
 			writeJSONError(w, err.Error(), http.StatusBadRequest)

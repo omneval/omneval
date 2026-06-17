@@ -980,3 +980,216 @@ func TestHandlerRefactoring_CompileExecuteScanVerified(t *testing.T) {
 		}
 	}
 }
+
+// TestUnifiedExecute_Analytics verifies that the unified Execute method
+// correctly dispatches analytics queries: validates, compiles SQL,
+// executes against the Lake, scans rows, and returns a QueryResult.
+func TestUnifiedExecute_Analytics(t *testing.T) {
+	db := testLakeDB(t)
+	qb := &QueryBuilder{Lake: db}
+
+	baseTime := time.Now().UTC()
+	models := []string{"gpt-4", "gpt-3.5", "gpt-4"}
+	for i, model := range models {
+		if _, err := db.ExecContext(context.Background(),
+			`INSERT INTO spans (span_id, trace_id, project_id, start_time, model) VALUES (?, ?, ?, ?, ?)`,
+			fmt.Sprintf("span-%d", i), "trace-"+fmt.Sprint(i), "test-proj",
+			baseTime.Add(time.Duration(i)*time.Second), model); err != nil {
+			t.Fatalf("insert span: %v", err)
+		}
+	}
+
+	// Build a dsl.Query with type "analytics" — this is what the handler
+	// would construct from the incoming JSON payload.
+	req := dsl.Query{
+		From:    baseTime.Add(-time.Minute),
+		To:      baseTime.Add(3 * time.Second),
+		ProjectID: "test-proj",
+		QueryType: dsl.QueryTypeAnalytics,
+		Aggregations: []dsl.Aggregation{
+			{Function: dsl.AggCount, Field: "*", Alias: "count"},
+		},
+		GroupBy: []dsl.GroupByField{
+			{Field: "model"},
+		},
+	}
+
+	// Call the unified Execute method.
+	result, err := qb.Execute(context.Background(), &req)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// Verify the result has rows and they are in QueryResult.
+	if result == nil {
+		t.Fatal("Execute returned nil QueryResult")
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("rows: got %d, want 2 (gpt-4 and gpt-3.5)", len(result.Rows))
+	}
+
+	// Build a map from model -> count.
+	modelCounts := make(map[string]int64)
+	for _, row := range result.Rows {
+		model := row["model"].(string)
+		count := row["count"].(int64)
+		modelCounts[model] = count
+	}
+
+	if modelCounts["gpt-4"] != 2 {
+		t.Errorf("gpt-4 count: got %d, want 2", modelCounts["gpt-4"])
+	}
+	if modelCounts["gpt-3.5"] != 1 {
+		t.Errorf("gpt-3.5 count: got %d, want 1", modelCounts["gpt-3.5"])
+	}
+
+	// SpanQueryResult fields should be zero for analytics.
+	if len(result.Spans) != 0 {
+		t.Errorf("spans: got %d, want 0 (analytics query returns no spans)", len(result.Spans))
+	}
+}
+
+// TestUnifiedExecute_Span verifies that the unified Execute method
+// correctly dispatches span queries: builds a SpanQuery, compiles SQL,
+// executes against the Lake, scans rows, computes cursor, and returns
+// a QueryResult with populated spans.
+func TestUnifiedExecute_Span(t *testing.T) {
+	db := testLakeDB(t)
+	qb := &QueryBuilder{Lake: db}
+
+	baseTime := time.Now().UTC()
+	for i := 0; i < 3; i++ {
+		if _, err := db.ExecContext(context.Background(),
+			`INSERT INTO spans (span_id, trace_id, project_id, start_time, status_code) VALUES (?, ?, ?, ?, ?)`,
+			fmt.Sprintf("span-%d", i), "trace-"+fmt.Sprint(i), "test-proj",
+			baseTime.Add(time.Duration(i)*time.Second), "ok"); err != nil {
+			t.Fatalf("insert span: %v", err)
+		}
+	}
+
+	// Build a dsl.Query with type "span" — the handler converts the
+	// SpanQueryRequest into a dsl.Query before calling Execute.
+	req := dsl.Query{
+		From:      baseTime.Add(-time.Minute),
+		To:        baseTime.Add(3 * time.Second),
+		ProjectID: "test-proj",
+		QueryType: dsl.QueryTypeSpan,
+		Filters: []dsl.Filter{
+			{Field: "status_code", Op: dsl.OpEq, Value: "ok"},
+		},
+		Limit: 50,
+	}
+
+	result, err := qb.Execute(context.Background(), &req)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("Execute returned nil QueryResult")
+	}
+
+	// Verify spans are populated.
+	if len(result.Spans) != 3 {
+		t.Fatalf("spans: got %d, want 3", len(result.Spans))
+	}
+
+	// Verify Next cursor is empty when results < limit (no more pages).
+	if result.Next != "" {
+		t.Errorf("Next cursor: got %q, want empty (results < limit)", result.Next)
+	}
+
+	// Verify Limit is populated.
+	if result.Limit != 50 {
+		t.Errorf("Limit: got %d, want 50", result.Limit)
+	}
+
+	// Rows should be empty for span queries.
+	if len(result.Rows) != 0 {
+		t.Errorf("rows: got %d, want 0 (span query returns spans)", len(result.Rows))
+	}
+}
+
+// TestUnifiedExecute_SpanWithNextCursor verifies that Next is set when there
+// are more results than the effective limit.
+func TestUnifiedExecute_SpanWithNextCursor(t *testing.T) {
+	db := testLakeDB(t)
+	qb := &QueryBuilder{Lake: db}
+
+	baseTime := time.Now().UTC()
+	for i := 0; i < 5; i++ {
+		if _, err := db.ExecContext(context.Background(),
+			`INSERT INTO spans (span_id, trace_id, project_id, start_time, status_code) VALUES (?, ?, ?, ?, ?)`,
+			fmt.Sprintf("span-%d", i), "trace-"+fmt.Sprint(i), "test-proj",
+			baseTime.Add(time.Duration(i)*time.Second), "ok"); err != nil {
+			t.Fatalf("insert span: %v", err)
+		}
+	}
+
+	req := dsl.Query{
+		From:      baseTime.Add(-time.Minute),
+		To:        baseTime.Add(5 * time.Second),
+		ProjectID: "test-proj",
+		QueryType: dsl.QueryTypeSpan,
+		Limit:     2,
+	}
+
+	result, err := qb.Execute(context.Background(), &req)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// Should have exactly limit=2 spans, but Next is non-empty because 5 total > 2 limit.
+	if len(result.Spans) != 2 {
+		t.Fatalf("spans: got %d, want 2", len(result.Spans))
+	}
+	if result.Next == "" {
+		t.Fatal("Next cursor should be set when results exceed limit")
+	}
+	if result.Limit != 2 {
+		t.Errorf("Limit: got %d, want 2", result.Limit)
+	}
+}
+
+// TestUnifiedExecute_UnknownType verifies that Execute returns a
+// ValidationError when the QueryType is not recognized.
+func TestUnifiedExecute_UnknownType(t *testing.T) {
+	db := testLakeDB(t)
+	qb := &QueryBuilder{Lake: db}
+
+	req := dsl.Query{
+		QueryType: dsl.QueryType("unknown"),
+	}
+
+	_, err := qb.Execute(context.Background(), &req)
+	if err == nil {
+		t.Fatal("Execute: expected error for unknown query type")
+	}
+	if !IsValidationError(err) {
+		t.Errorf("expected ValidationError for unknown query type, got %T: %v", err, err)
+	}
+}
+
+// TestUnifiedExecute_AnalyticsValidation verifies that Execute propagates
+// validation errors from analytics queries (e.g. from after to).
+func TestUnifiedExecute_AnalyticsValidation(t *testing.T) {
+	db := testLakeDB(t)
+	qb := &QueryBuilder{Lake: db}
+
+	req := dsl.Query{
+		QueryType: dsl.QueryTypeAnalytics,
+		From:      time.Date(2025, 2, 1, 0, 0, 0, 0, time.UTC),
+		To:        time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Aggregations: []dsl.Aggregation{
+			{Function: dsl.AggCount, Field: "*", Alias: "count"},
+		},
+	}
+
+	_, err := qb.Execute(context.Background(), &req)
+	if err == nil {
+		t.Fatal("expected ValidationError for from after to")
+	}
+	if !IsValidationError(err) {
+		t.Errorf("expected ValidationError, got %T: %v", err, err)
+	}
+}

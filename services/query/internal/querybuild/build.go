@@ -60,6 +60,17 @@ type AnalyticsQueryResult struct {
 	Rows []map[string]any
 }
 
+// QueryResult is the unified result returned by Execute.  For span queries the
+// Spans, Next, and Limit fields are populated; for analytics queries the Rows
+// field is populated.  The caller inspects which fields are non-zero to
+// determine the result type.
+type QueryResult struct {
+	Spans []*domain.Span
+	Rows  []map[string]any
+	Next  string
+	Limit int
+}
+
 // ExecuteSpan handles the full span query pipeline:
 //
 //	1. Build SpanQuery from request and projectID (handles validation, default time range, cursor decode)
@@ -209,4 +220,65 @@ func scanAllRows(rows *sql.Rows) ([][]any, error) {
 		return nil, fmt.Errorf("scan: rows iteration: %w", err)
 	}
 	return result, nil
+}
+
+// Execute is the unified entry point that dispatches to the correct
+// pipeline (span or analytics) based on the query's QueryType.  It
+// encapsulates the full DSL → SQL → execute → scan pipeline and returns
+// a single QueryResult type regardless of the underlying query kind.
+func (qb *QueryBuilder) Execute(ctx context.Context, q *dsl.Query) (*QueryResult, error) {
+	switch q.QueryType {
+	case dsl.QueryTypeSpan:
+		return qb.executeSpan(ctx, q)
+	case dsl.QueryTypeAnalytics:
+		return qb.executeAnalytics(ctx, q)
+	default:
+		return nil, &ValidationError{Message: fmt.Sprintf("querybuild: unknown query type %q", q.QueryType)}
+	}
+}
+
+// executeSpan handles the span query pipeline using a dsl.Query directly.
+// It converts the dsl.Query fields (From, To, Filters, Limit, Cursor) into
+// a SpanQueryRequest and delegates to ExecuteSpan, then wraps the result.
+func (qb *QueryBuilder) executeSpan(ctx context.Context, q *dsl.Query) (*QueryResult, error) {
+	// Convert dsl.Query → SpanQueryRequest.
+	req := query.SpanQueryRequest{
+		From:  q.From,
+		To:    q.To,
+		Limit: q.Limit,
+		Cursor: q.Cursor,
+	}
+
+	// Convert dsl.Filter → query.SpanQueryFilter.
+	for _, f := range q.Filters {
+		req.Filters = append(req.Filters, query.SpanQueryFilter{
+			Field: f.Field,
+			Op:    string(f.Op),
+			Value: f.Value,
+		})
+	}
+
+	resp, err := qb.ExecuteSpan(ctx, req, q.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &QueryResult{
+		Spans: resp.Spans,
+		Next:  resp.Next,
+		Limit: resp.Limit,
+	}, nil
+}
+
+// executeAnalytics handles the analytics query pipeline by delegating to
+// ExecuteAnalytics and wrapping the result in a QueryResult.
+func (qb *QueryBuilder) executeAnalytics(ctx context.Context, q *dsl.Query) (*QueryResult, error) {
+	result, err := qb.ExecuteAnalytics(ctx, *q, q.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &QueryResult{
+		Rows: result.Rows,
+	}, nil
 }
