@@ -23,7 +23,7 @@ import (
 //   DELETE /api/v1/datasets/:id                   — delete a dataset and its items
 
 type DatasetHandler struct {
-	DatasetStore metadata.DatasetStore
+	Store        metadata.Store
 	SessionStore SessionStore
 	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
 	// When nil (e.g. handlers created directly in tests), defaults to
@@ -132,7 +132,7 @@ func (h *DatasetHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: time.Now().UTC(),
 	}
 
-	if err := h.DatasetStore.CreateDataset(r.Context(), ds); err != nil {
+	if err := h.Store.CreateDataset(r.Context(), ds); err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
 	}
@@ -158,7 +158,7 @@ func (h *DatasetHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	datasets, err := h.DatasetStore.ListDatasets(r.Context(), projectID)
+	datasets, err := h.Store.ListDatasets(r.Context(), projectID)
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
@@ -170,7 +170,7 @@ func (h *DatasetHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			DatasetID: ds.DatasetID,
 			Name:      ds.Name,
 			CreatedAt: ds.CreatedAt.Format(time.RFC3339),
-			ItemCount: countItemsForDataset(r.Context(), h.DatasetStore, ds.DatasetID),
+			ItemCount: countItemsForDataset(r.Context(), h.Store, ds.DatasetID),
 		})
 	}
 
@@ -210,7 +210,7 @@ func (h *DatasetHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 		ProjectID: ds.ProjectID,
 		Name:      ds.Name,
 		CreatedAt: ds.CreatedAt.Format(time.RFC3339),
-		ItemCount: countItemsForDataset(r.Context(), h.DatasetStore, ds.DatasetID),
+		ItemCount: countItemsForDataset(r.Context(), h.Store, ds.DatasetID),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -263,7 +263,7 @@ func (h *DatasetHandler) HandleAddItems(w http.ResponseWriter, r *http.Request) 
 		CreatedAt:      time.Now().UTC(),
 	}
 
-	if err := h.DatasetStore.CreateDatasetItem(r.Context(), item); err != nil {
+	if err := h.Store.CreateDatasetItem(r.Context(), item); err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
 	}
@@ -323,7 +323,7 @@ func (h *DatasetHandler) HandleAddItemsBatch(w http.ResponseWriter, r *http.Requ
 			ExpectedOutput: itemReq.ExpectedOutput,
 			CreatedAt:      time.Now().UTC(),
 		}
-		if err := h.DatasetStore.CreateDatasetItem(r.Context(), item); err != nil {
+		if err := h.Store.CreateDatasetItem(r.Context(), item); err != nil {
 			http.Error(w, "store error", http.StatusInternalServerError)
 			return
 		}
@@ -371,7 +371,7 @@ func (h *DatasetHandler) HandleListItems(w http.ResponseWriter, r *http.Request)
 	}
 
 	cursorStr := r.URL.Query().Get("cursor")
-	items, nextCursor, err := h.DatasetStore.ListDatasetItemsPaginated(r.Context(), datasetID, cursorStr, limit)
+	items, nextCursor, err := h.Store.ListDatasetItemsPaginated(r.Context(), datasetID, cursorStr, limit)
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
@@ -424,7 +424,7 @@ func (h *DatasetHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.DatasetStore.DeleteDataset(r.Context(), datasetID); err != nil {
+	if err := h.Store.DeleteDataset(r.Context(), datasetID); err != nil {
 		if errors.Is(err, metadata.ErrNotFound) {
 			http.Error(w, "dataset not found", http.StatusNotFound)
 			return
@@ -444,7 +444,7 @@ func (h *DatasetHandler) requireDataset(w http.ResponseWriter, r *http.Request, 
 		return nil
 	}
 
-	ds, err := h.DatasetStore.GetDataset(r.Context(), datasetID)
+	ds, err := h.Store.GetDataset(r.Context(), datasetID)
 	if err != nil {
 		if errors.Is(err, metadata.ErrNotFound) {
 			http.Error(w, "dataset not found", http.StatusNotFound)
@@ -463,7 +463,7 @@ func (h *DatasetHandler) requireDataset(w http.ResponseWriter, r *http.Request, 
 // ---- Helpers ----
 
 // countItemsForDataset counts the number of dataset items.
-func countItemsForDataset(ctx context.Context, store metadata.DatasetStore, datasetID string) int {
+func countItemsForDataset(ctx context.Context, store metadata.Store, datasetID string) int {
 	items, err := store.ListDatasetItems(ctx, datasetID)
 	if err != nil {
 		return 0

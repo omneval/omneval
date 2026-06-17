@@ -15,28 +15,6 @@ var (
 	_ Store = (*postgres.Store)(nil)
 )
 
-// Compile-time checks that every driver satisfies each focused interface.
-var (
-	_ ProjectStore     = (*sqlite.Store)(nil)
-	_ ProjectStore     = (*postgres.Store)(nil)
-	_ PromptStore      = (*sqlite.Store)(nil)
-	_ PromptStore      = (*postgres.Store)(nil)
-	_ BookmarkStore    = (*sqlite.Store)(nil)
-	_ BookmarkStore    = (*postgres.Store)(nil)
-	_ EvalRuleStore    = (*sqlite.Store)(nil)
-	_ EvalRuleStore    = (*postgres.Store)(nil)
-	_ DatasetStore     = (*sqlite.Store)(nil)
-	_ DatasetStore     = (*postgres.Store)(nil)
-	_ AuthStore        = (*sqlite.Store)(nil)
-	_ AuthStore        = (*postgres.Store)(nil)
-	_ SessionStore     = (*sqlite.Store)(nil)
-	_ SessionStore     = (*postgres.Store)(nil)
-	_ APIKeyStore      = (*sqlite.Store)(nil)
-	_ APIKeyStore      = (*postgres.Store)(nil)
-	_ BatchLedgerStore = (*sqlite.Store)(nil)
-	_ BatchLedgerStore = (*postgres.Store)(nil)
-)
-
 // DefaultSQLiteDSN is the SQLite database path used when no DSN is configured.
 const DefaultSQLiteDSN = "omneval.db"
 

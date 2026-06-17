@@ -77,7 +77,7 @@ func TestOTLP_EndToEndProto(t *testing.T) {
 	ts := httptest.NewServer(router)
 	defer ts.Close()
 
-	go pipeline.New(ingestQ, nil, nil, nil, nil, nil).WithLake(lk).Run(ctx)
+	go pipeline.New(ingestQ, nil, nil, nil, nil).WithLake(lk).Run(ctx)
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -200,7 +200,7 @@ func TestOTLP_EndToEndJSON(t *testing.T) {
 	ts := httptest.NewServer(router)
 	defer ts.Close()
 
-	go pipeline.New(ingestQ, nil, nil, nil, nil, nil).WithLake(lk).Run(ctx)
+	go pipeline.New(ingestQ, nil, nil, nil, nil).WithLake(lk).Run(ctx)
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -291,7 +291,7 @@ func TestOTLP_UnknownModelZeroCost(t *testing.T) {
 	ts := httptest.NewServer(router)
 	defer ts.Close()
 
-	go pipeline.New(ingestQ, nil, nil, nil, nil, nil).WithLake(lk).Run(ctx)
+	go pipeline.New(ingestQ, nil, nil, nil, nil).WithLake(lk).Run(ctx)
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -376,7 +376,7 @@ func TestOTLP_NativeHandlerStillWorks(t *testing.T) {
 	ts := httptest.NewServer(nativeH.Router())
 	defer ts.Close()
 
-	go pipeline.New(ingestQ, nil, nil, nil, nil, nil).WithLake(lk).Run(ctx)
+	go pipeline.New(ingestQ, nil, nil, nil, nil).WithLake(lk).Run(ctx)
 
 	time.Sleep(100 * time.Millisecond)
 

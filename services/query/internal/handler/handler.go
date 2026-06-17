@@ -25,9 +25,9 @@ type SpanHandler struct {
 	// Lake is the DuckDB handle attached read-only to the Lake. All span
 	// reads compile against lake.spans (ADR-0004).
 	Lake DBHandle
-	// BookmarkStore resolves bookmarked trace IDs for "bookmarked" filters —
+	// Meta resolves bookmarked trace IDs for "bookmarked" filters —
 	// bookmarks live in the Metadata Store, not DuckDB (ADR-0004).
-	BookmarkStore metadata.BookmarkStore
+	Meta metadata.Store
 	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
 	// When nil (e.g. handlers created directly in tests), defaults to
 	// defaultResolveProjectID for backwards compatibility.
@@ -136,8 +136,8 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 
 	// "bookmarked" filters need the project's starred trace IDs from the
 	// Metadata Store before SQL compilation.
-	if q.NeedsBookmarks() && h.BookmarkStore != nil {
-		ids, err := h.BookmarkStore.ListBookmarkedTraceIDs(r.Context(), projectID)
+	if q.NeedsBookmarks() && h.Meta != nil {
+		ids, err := h.Meta.ListBookmarkedTraceIDs(r.Context(), projectID)
 		if err != nil {
 			writeJSONError(w, "bookmark lookup error: "+err.Error(), http.StatusInternalServerError)
 			return

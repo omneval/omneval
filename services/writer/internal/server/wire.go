@@ -125,7 +125,7 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	// Create queue clients and the span pipeline.
 	ingestQ := qredis.NewIngestQueue(rc)
 	evalQ := qredis.NewEvalQueue(rc)
-	deps.Pipeline = pipeline.New(ingestQ, pricingTable, meta, meta, evalQ, metricsHelper)
+	deps.Pipeline = pipeline.New(ingestQ, pricingTable, meta, evalQ, metricsHelper)
 	if deps.Lake != nil {
 		deps.Pipeline.WithLake(deps.Lake)
 	}

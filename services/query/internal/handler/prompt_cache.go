@@ -32,15 +32,15 @@ func labelCacheKey(projectID, name, label string) string {
 //   - Label cache: 30-second TTL expiry
 type PromptCache struct {
 	mu           sync.RWMutex
-	PromptStore  metadata.PromptStore
+	Store        metadata.Store
 	versionCache map[string]*cacheEntry
 	labelCache   map[string]*cacheEntry
 }
 
-// NewPromptCache creates a new PromptCache backed by the given PromptStore.
-func NewPromptCache(store metadata.PromptStore) *PromptCache {
+// NewPromptCache creates a new PromptCache backed by the given Store.
+func NewPromptCache(store metadata.Store) *PromptCache {
 	return &PromptCache{
-		PromptStore:  store,
+		Store:        store,
 		versionCache: make(map[string]*cacheEntry),
 		labelCache:   make(map[string]*cacheEntry),
 	}
@@ -59,7 +59,7 @@ func (c *PromptCache) GetVersion(ctx context.Context, projectID, name string, ve
 	c.mu.RUnlock()
 
 	// Cache miss — fetch from store.
-	pv, err := c.PromptStore.GetPromptVersion(ctx, projectID, name, version)
+	pv, err := c.Store.GetPromptVersion(ctx, projectID, name, version)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +93,7 @@ func (c *PromptCache) GetLabel(ctx context.Context, projectID, name, label strin
 	c.mu.RUnlock()
 
 	// Cache miss or expired — fetch from store.
-	pv, err := c.PromptStore.GetPromptByLabel(ctx, projectID, name, label)
+	pv, err := c.Store.GetPromptByLabel(ctx, projectID, name, label)
 	if err != nil {
 		return nil, err
 	}

@@ -47,7 +47,7 @@ func (s *erroringEvalRuleStore) DeleteEvalRule(ctx context.Context, ruleID strin
 func TestEvalRuleHandler_CreateEvalRule(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -93,7 +93,7 @@ func TestEvalRuleHandler_CreateEvalRule(t *testing.T) {
 func TestEvalRuleHandler_CreateEvalRule_InvalidSampleRate(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -113,7 +113,7 @@ func TestEvalRuleHandler_CreateEvalRule_InvalidSampleRate(t *testing.T) {
 func TestEvalRuleHandler_CreateEvalRule_InvalidSampleRateNegative(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -133,7 +133,7 @@ func TestEvalRuleHandler_CreateEvalRule_InvalidSampleRateNegative(t *testing.T) 
 func TestEvalRuleHandler_CreateEvalRule_MissingName(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -154,7 +154,7 @@ func TestEvalRuleHandler_CreateEvalRule_MissingName(t *testing.T) {
 func TestEvalRuleHandler_CreateEvalRule_MissingJudgeModel(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:             store,
 		SessionStore:      &FakeSessionStore{projectID: "test-proj"},
 		DefaultJudgeModel: "gpt-4o-mini",
 	}
@@ -186,7 +186,7 @@ func TestEvalRuleHandler_CreateEvalRule_MissingJudgeModel(t *testing.T) {
 func TestEvalRuleHandler_CreateEvalRule_MissingJudgeModel_GlobalFallback(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		// DefaultJudgeModel intentionally left empty — hardcoded fallback should apply.
 	}
@@ -216,7 +216,7 @@ func TestEvalRuleHandler_CreateEvalRule_MissingJudgeModel_GlobalFallback(t *test
 func TestEvalRuleHandler_ListEvalRules_EmptyListReturnsArray(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "empty-proj"},
 	}
 
@@ -257,7 +257,7 @@ func TestEvalRuleHandler_ListEvalRules_EmptyListReturnsArray(t *testing.T) {
 func TestEvalRuleHandler_CreateEvalRule_AuthRequired(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store: store,
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
@@ -275,7 +275,7 @@ func TestEvalRuleHandler_CreateEvalRule_AuthRequired(t *testing.T) {
 func TestEvalRuleHandler_CreateEvalRule_MethodNotAllowed(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -291,7 +291,7 @@ func TestEvalRuleHandler_CreateEvalRule_MethodNotAllowed(t *testing.T) {
 func TestEvalRuleHandler_CreateEvalRule_InvalidJSON(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -307,7 +307,7 @@ func TestEvalRuleHandler_CreateEvalRule_InvalidJSON(t *testing.T) {
 func TestEvalRuleHandler_ListEvalRules(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -349,7 +349,7 @@ func TestEvalRuleHandler_ListEvalRules(t *testing.T) {
 func TestEvalRuleHandler_ListEvalRules_AuthRequired(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store: store,
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/eval-rules", nil)
@@ -364,7 +364,7 @@ func TestEvalRuleHandler_ListEvalRules_AuthRequired(t *testing.T) {
 func TestEvalRuleHandler_ListEvalRules_EmptyList(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "empty-proj"},
 	}
 
@@ -399,7 +399,7 @@ func TestEvalRuleHandler_DeleteEvalRule(t *testing.T) {
 	store.CreateEvalRule(context.Background(), rule)
 
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -420,7 +420,7 @@ func TestEvalRuleHandler_DeleteEvalRule(t *testing.T) {
 func TestEvalRuleHandler_DeleteEvalRule_NotFound(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -436,7 +436,7 @@ func TestEvalRuleHandler_DeleteEvalRule_NotFound(t *testing.T) {
 func TestEvalRuleHandler_DeleteEvalRule_AuthRequired(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store: store,
 	}
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/eval-rules/some-id", nil)
@@ -451,7 +451,7 @@ func TestEvalRuleHandler_DeleteEvalRule_AuthRequired(t *testing.T) {
 func TestEvalRuleHandler_DeleteEvalRule_MethodNotAllowed(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -467,7 +467,7 @@ func TestEvalRuleHandler_DeleteEvalRule_MethodNotAllowed(t *testing.T) {
 func TestEvalRuleHandler_ListEvalRules_MethodNotAllowed(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -483,7 +483,7 @@ func TestEvalRuleHandler_ListEvalRules_MethodNotAllowed(t *testing.T) {
 func TestEvalRuleHandler_CreateEvalRule_Filter(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -535,7 +535,7 @@ func TestEvalRuleHandler_CreateEvalRule_Filter(t *testing.T) {
 func TestEvalRuleHandler_CreateEvalRule_DefaultSampleRate(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -563,7 +563,7 @@ func TestEvalRuleHandler_CreateEvalRule_DefaultSampleRate(t *testing.T) {
 func TestEvalRuleHandler_CreateEvalRule_DefaultEnabled(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -591,7 +591,7 @@ func TestEvalRuleHandler_CreateEvalRule_DefaultEnabled(t *testing.T) {
 func TestEvalRuleHandler_CreateEvalRule_StoreError(t *testing.T) {
 	store := &erroringEvalRuleStore{FakeMetadataStore: fake.NewFakeMetadataStore()}
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -610,7 +610,7 @@ func TestEvalRuleHandler_CreateEvalRule_StoreError(t *testing.T) {
 func TestEvalRuleHandler_CreateEvalRule_AttributesMatch_TopLevel(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -634,7 +634,7 @@ func TestEvalRuleHandler_CreateEvalRule_AttributesMatch_TopLevel(t *testing.T) {
 func TestEvalRuleHandler_CreateEvalRule_AttributesMatch_NestedDotPath(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -658,7 +658,7 @@ func TestEvalRuleHandler_CreateEvalRule_AttributesMatch_NestedDotPath(t *testing
 func TestEvalRuleHandler_CreateEvalRule_AttributesMatch_DepthLimitExceeded(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -683,7 +683,7 @@ func TestEvalRuleHandler_CreateEvalRule_AttributesMatch_DepthLimitExceeded(t *te
 func TestEvalRuleHandler_CreateEvalRule_AttributesMatch_InvalidPattern(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -709,7 +709,7 @@ func TestEvalRuleHandler_CreateEvalRule_AttributesMatch_InvalidPattern(t *testin
 func TestEvalRuleHandler_CreateEvalRule_ResponseUsesSnakeCase(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -765,7 +765,7 @@ func TestEvalRuleHandler_ListEvalRules_ResponseUsesSnakeCase(t *testing.T) {
 	store.CreateEvalRule(context.Background(), rule)
 
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -801,7 +801,7 @@ func TestEvalRuleHandler_ListEvalRules_ResponseUsesSnakeCase(t *testing.T) {
 func TestEvalRuleHandler_HandlePreview_AuthRequired(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store: store,
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules/preview", strings.NewReader(`{
@@ -818,7 +818,7 @@ func TestEvalRuleHandler_HandlePreview_AuthRequired(t *testing.T) {
 func TestEvalRuleHandler_HandlePreview_MethodNotAllowed(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -834,7 +834,7 @@ func TestEvalRuleHandler_HandlePreview_MethodNotAllowed(t *testing.T) {
 func TestEvalRuleHandler_HandlePreview_InvalidJSON(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -850,7 +850,7 @@ func TestEvalRuleHandler_HandlePreview_InvalidJSON(t *testing.T) {
 func TestEvalRuleHandler_HandlePreview_EmptyFilter(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -892,7 +892,7 @@ func TestEvalRuleHandler_HandlePreview_MatchingSpans(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
 		DB:           db,
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -952,7 +952,7 @@ func TestEvalRuleHandler_HandlePreview_NoMatches(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
 		DB:           db,
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -1009,7 +1009,7 @@ func TestEvalRuleHandler_HandlePreview_MatchCount24h(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
 		DB:           db,
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -1046,7 +1046,7 @@ func TestEvalRuleHandler_HandlePreview_DBNil(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &EvalRuleHandler{
 		DB:           nil, // No DB connection
-		EvalRuleStore: store,
+		Store:        store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 

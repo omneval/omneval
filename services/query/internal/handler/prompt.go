@@ -24,7 +24,7 @@ import (
 //   PUT    /api/v1/prompts/:name/labels/:label   — reassign a label
 
 type PromptHandler struct {
-	PromptStore  metadata.PromptStore
+	Store        metadata.Store
 	Cache        *PromptCache
 	SessionStore SessionStore
 	// Validator is optional. When set, GET prompt endpoints accept
@@ -83,7 +83,7 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 
 	// Auto-increment version when not provided.
 	if req.Version <= 0 {
-		versions, listErr := h.PromptStore.ListPromptVersions(r.Context(), projectID, req.Name)
+		versions, listErr := h.Store.ListPromptVersions(r.Context(), projectID, req.Name)
 		if listErr != nil {
 			slog.Error("query: list prompt versions for auto-increment", "project_id", projectID, "name", req.Name, "err", listErr)
 			http.Error(w, "store error", http.StatusInternalServerError)
@@ -99,7 +99,7 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Check if version already exists (idempotency).
-	_, err := h.PromptStore.GetPromptVersion(r.Context(), projectID, req.Name, req.Version)
+	_, err := h.Store.GetPromptVersion(r.Context(), projectID, req.Name, req.Version)
 	if err == nil {
 		http.Error(w, "version already exists", http.StatusConflict)
 		return
@@ -131,7 +131,7 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 		CreatedAt:   time.Now().UTC(),
 	}
 
-	if err := h.PromptStore.CreatePromptVersion(r.Context(), pv); err != nil {
+	if err := h.Store.CreatePromptVersion(r.Context(), pv); err != nil {
 		// Duplicate key is also a conflict (409), not a generic error.
 		errStr := err.Error()
 		if strings.Contains(errStr, "UNIQUE") || strings.Contains(errStr, "duplicate") {
@@ -153,7 +153,7 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 			Version:   pv.Version,
 			UpdatedAt: time.Now().UTC(),
 		}
-		if labelErr := h.PromptStore.SetPromptLabel(r.Context(), pl); labelErr != nil {
+		if labelErr := h.Store.SetPromptLabel(r.Context(), pl); labelErr != nil {
 			slog.Warn("query: set initial prompt label", "name", pv.Name, "label", req.Label, "err", labelErr)
 		}
 		h.Cache.InvalidateLabel(projectID, req.Name, req.Label)
@@ -230,7 +230,7 @@ func (h *PromptHandler) getLatestVersion(ctx context.Context, name, projectID st
 		return nil, metadata.ErrNotFound
 	}
 
-	versions, err := h.PromptStore.ListPromptVersions(ctx, projectID, name)
+	versions, err := h.Store.ListPromptVersions(ctx, projectID, name)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +272,7 @@ func (h *PromptHandler) HandleListPrompts(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	names, err := h.PromptStore.ListPromptNames(r.Context(), projectID)
+	names, err := h.Store.ListPromptNames(r.Context(), projectID)
 	if err != nil {
 		slog.Error("query: list prompt names", "project_id", projectID, "err", err)
 		http.Error(w, "store error", http.StatusInternalServerError)
@@ -282,7 +282,7 @@ func (h *PromptHandler) HandleListPrompts(w http.ResponseWriter, r *http.Request
 	result := make([]promptListItem, 0, len(names))
 	for _, name := range names {
 		// Get all versions for this prompt to find the latest.
-		versions, err := h.PromptStore.ListPromptVersions(r.Context(), projectID, name)
+		versions, err := h.Store.ListPromptVersions(r.Context(), projectID, name)
 		if err != nil {
 			slog.Warn("query: list prompt versions", "project_id", projectID, "name", name, "err", err)
 			continue
@@ -298,7 +298,7 @@ func (h *PromptHandler) HandleListPrompts(w http.ResponseWriter, r *http.Request
 		// Get active labels for this prompt.
 		labels := make(map[string]int64)
 		for _, label := range []string{"production", "staging", "dev"} {
-			pv, err := h.PromptStore.GetPromptByLabel(r.Context(), projectID, name, label)
+			pv, err := h.Store.GetPromptByLabel(r.Context(), projectID, name, label)
 			if err == nil {
 				labels[label] = pv.Version
 			}
@@ -361,7 +361,7 @@ func (h *PromptHandler) HandleSetLabel(w http.ResponseWriter, r *http.Request) {
 		resolver = defaultResolveProjectID
 	}
 	projectID, _ := resolver(h.SessionStore, w, r, "")
-	_, err := h.PromptStore.GetPromptVersion(r.Context(), projectID, name, req.Version)
+	_, err := h.Store.GetPromptVersion(r.Context(), projectID, name, req.Version)
 	if err != nil {
 		if errors.Is(err, metadata.ErrNotFound) {
 			http.Error(w, "prompt version not found", http.StatusNotFound)
@@ -378,7 +378,7 @@ func (h *PromptHandler) HandleSetLabel(w http.ResponseWriter, r *http.Request) {
 		Version:   req.Version,
 	}
 
-	if setErr := h.PromptStore.SetPromptLabel(r.Context(), pl); setErr != nil {
+	if setErr := h.Store.SetPromptLabel(r.Context(), pl); setErr != nil {
 		slog.Error("query: set prompt label", "project_id", projectID, "name", name, "label", label, "err", setErr)
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
@@ -423,7 +423,7 @@ func (h *PromptHandler) HandleListPromptVersions(w http.ResponseWriter, r *http.
 		return
 	}
 
-	versions, err := h.PromptStore.ListPromptVersions(r.Context(), projectID, name)
+	versions, err := h.Store.ListPromptVersions(r.Context(), projectID, name)
 	if err != nil {
 		slog.Error("query: list prompt versions", "project_id", projectID, "name", name, "err", err)
 		http.Error(w, "store error", http.StatusInternalServerError)

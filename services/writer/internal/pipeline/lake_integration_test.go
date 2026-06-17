@@ -73,7 +73,7 @@ func TestLakeIntegration_PostgresCatalogMinIO(t *testing.T) {
 	}
 	defer lk.Close()
 
-	p := New(nil, testPricing, nil, nil, nil, nil).WithLake(lk)
+	p := New(nil, testPricing, nil, nil, nil).WithLake(lk)
 
 	span := &domain.Span{
 		SpanID:       "span-lake-1",

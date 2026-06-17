@@ -337,21 +337,6 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
 
-// SessionStore delegation methods — these allow auth.Handler to be passed
-// as SessionStore to downstream handlers.
-
-func (h *Handler) CreateSession(ctx context.Context, session *domain.Session) error {
-	return h.store.CreateSession(ctx, session)
-}
-
-func (h *Handler) GetSession(ctx context.Context, sessionID string) (*domain.Session, error) {
-	return h.store.GetSession(ctx, sessionID)
-}
-
-func (h *Handler) DeleteSession(ctx context.Context, sessionID string) error {
-	return h.store.DeleteSession(ctx, sessionID)
-}
-
 // HandleCreateProject handles POST /api/v1/projects.
 // Creates a new project for the authenticated user's organization.
 func (h *Handler) HandleCreateProject(w http.ResponseWriter, r *http.Request) {

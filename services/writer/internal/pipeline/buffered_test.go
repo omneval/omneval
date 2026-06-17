@@ -112,7 +112,7 @@ func bufferedTestPipeline(t *testing.T) (*Pipeline, *lake.Lake, *fakeReliableQue
 	rq := &fakeReliableQueue{}
 	fetcher := &fakeFetcher{batches: make(map[string][]*domain.Span)}
 	ledger := newFakeLedger()
-	p := New(nil, testPricing, nil, nil, nil, nil).
+	p := New(nil, testPricing, nil, nil, nil).
 		WithLake(lk).
 		WithBuffer(rq, fetcher, ledger)
 	return p, lk, rq, fetcher, ledger
