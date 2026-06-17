@@ -19,7 +19,7 @@ import (
 
 func TestAdminHandler_TracesCount(t *testing.T) {
 	db := setupTestDB(t)
-	handler := &AdminHandler{DB: db, Store: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}
+	handler := &AdminHandler{DB: db, APIKeyStore: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}
 
 	req := httptest.NewRequest("GET", "/api/v1/admin/traces/proj-1/count", nil)
 	req = withAdminContext(req, "admin@test.com")
@@ -40,7 +40,7 @@ func TestAdminHandler_TracesCount(t *testing.T) {
 
 func TestAdminHandler_TracesDelete(t *testing.T) {
 	lk := setupTestLake(t)
-	handler := &AdminHandler{DB: lk.DB(), Store: newFakeAdminStore(), LakeRW: lk, SessionStore: &FakeSessionStore{projectID: "proj-1"}}
+	handler := &AdminHandler{DB: lk.DB(), APIKeyStore: newFakeAdminStore(), LakeRW: lk, SessionStore: &FakeSessionStore{projectID: "proj-1"}}
 
 	req := httptest.NewRequest("DELETE", "/api/v1/admin/traces/proj-1", nil)
 	req = withAdminContext(req, "admin@test.com")
@@ -55,7 +55,7 @@ func TestAdminHandler_TracesDelete(t *testing.T) {
 
 func TestAdminHandler_ProjectsDelete(t *testing.T) {
 	lk := setupTestLake(t)
-	handler := &AdminHandler{DB: lk.DB(), Store: newFakeAdminStore(), LakeRW: lk, SessionStore: &FakeSessionStore{projectID: "proj-1"}}
+	handler := &AdminHandler{DB: lk.DB(), APIKeyStore: newFakeAdminStore(), LakeRW: lk, SessionStore: &FakeSessionStore{projectID: "proj-1"}}
 
 	req := httptest.NewRequest("DELETE", "/api/v1/admin/projects/proj-1", nil)
 	req = withAdminContext(req, "admin@test.com")
@@ -110,7 +110,7 @@ func setupTestLake(t *testing.T) *lake.Lake {
 func TestAdminHandler_TracesDelete_Lake(t *testing.T) {
 	lk := setupTestLake(t)
 	store := newFakeAdminStore()
-	handler := &AdminHandler{DB: lk.DB(), Store: store, LakeRW: lk, SessionStore: &FakeSessionStore{projectID: "proj-1"}}
+	handler := &AdminHandler{DB: lk.DB(), APIKeyStore: store, BookmarkStore: store, LakeRW: lk, SessionStore: &FakeSessionStore{projectID: "proj-1"}}
 
 	req := httptest.NewRequest("DELETE", "/api/v1/admin/traces/proj-1", nil)
 	req = withAdminContext(req, "admin@test.com")
@@ -161,7 +161,7 @@ func TestAdminHandler_TracesCount_Lake(t *testing.T) {
 		t.Fatalf("create spans view: %v", err)
 	}
 	store := newFakeAdminStore()
-	handler := &AdminHandler{DB: lk.DB(), Store: store, LakeRW: lk, SessionStore: &FakeSessionStore{projectID: "proj-1"}}
+	handler := &AdminHandler{DB: lk.DB(), APIKeyStore: store, BookmarkStore: store, LakeRW: lk, SessionStore: &FakeSessionStore{projectID: "proj-1"}}
 
 	countProj1 := func() int {
 		req := httptest.NewRequest("GET", "/api/v1/admin/traces/proj-1/count", nil)
@@ -194,7 +194,7 @@ func TestAdminHandler_TracesCount_Lake(t *testing.T) {
 
 func TestAdminHandler_MethodNotAllowed(t *testing.T) {
 	db := setupTestDB(t)
-	handler := &AdminHandler{DB: db, Store: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}
+	handler := &AdminHandler{DB: db, APIKeyStore: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}
 
 	req := httptest.NewRequest("POST", "/api/v1/admin/api-keys", nil)
 	req = withAdminContext(req, "admin@test.com")
@@ -209,7 +209,7 @@ func TestAdminHandler_MethodNotAllowed(t *testing.T) {
 
 func TestAdminHandler_NonAdminForbidden(t *testing.T) {
 	db := setupTestDB(t)
-	handler := &AdminHandler{DB: db, Store: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}
+	handler := &AdminHandler{DB: db, APIKeyStore: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}
 
 	req := httptest.NewRequest("GET", "/api/v1/admin/api-keys", nil)
 	// Set admin email to "admin@test.com" but user email to "non-admin@test.com"
@@ -231,7 +231,7 @@ func TestAdminHandler_NonAdminForbidden(t *testing.T) {
 
 func TestAdminHandler_TracesCountEmptyProjectID(t *testing.T) {
 	db := setupTestDB(t)
-	handler := &AdminHandler{DB: db, Store: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}
+	handler := &AdminHandler{DB: db, APIKeyStore: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}
 
 	req := httptest.NewRequest("GET", "/api/v1/admin/traces//count", nil)
 	req = withAdminContext(req, "admin@test.com")
@@ -246,7 +246,7 @@ func TestAdminHandler_TracesCountEmptyProjectID(t *testing.T) {
 
 func TestAdminHandler_TracesDeleteEmptyProjectID(t *testing.T) {
 	db := setupTestDB(t)
-	handler := &AdminHandler{DB: db, Store: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}
+	handler := &AdminHandler{DB: db, APIKeyStore: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}
 
 	req := httptest.NewRequest("DELETE", "/api/v1/admin/traces/", nil)
 	req = withAdminContext(req, "admin@test.com")
@@ -261,7 +261,7 @@ func TestAdminHandler_TracesDeleteEmptyProjectID(t *testing.T) {
 
 func TestAdminHandler_ProjectsDeleteEmptyProjectID(t *testing.T) {
 	db := setupTestDB(t)
-	handler := &AdminHandler{DB: db, Store: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}
+	handler := &AdminHandler{DB: db, APIKeyStore: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}
 
 	req := httptest.NewRequest("DELETE", "/api/v1/admin/projects/", nil)
 	req = withAdminContext(req, "admin@test.com")
@@ -276,7 +276,7 @@ func TestAdminHandler_ProjectsDeleteEmptyProjectID(t *testing.T) {
 
 func TestAdminHandler_KeyDeleteEmptyKeyID(t *testing.T) {
 	db := setupTestDB(t)
-	handler := &AdminHandler{DB: db, Store: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}
+	handler := &AdminHandler{DB: db, APIKeyStore: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}
 
 	req := httptest.NewRequest("DELETE", "/api/v1/admin/api-keys/", nil)
 	req = withAdminContext(req, "admin@test.com")
@@ -304,8 +304,8 @@ func TestAdminHandler_APIKeysList_ReturnsAllOrgKeys(t *testing.T) {
 	}
 
 	handler := &AdminHandler{
-		DB:    db,
-		Store: store,
+		DB:          db,
+		APIKeyStore: store,
 		SessionStore: &FakeSessionStore{
 			userProjects: []*domain.Project{
 				{ProjectID: "proj-1"},
@@ -349,8 +349,8 @@ func TestAdminHandler_APIKeysList_IncludesNameWithFallback(t *testing.T) {
 	}
 
 	handler := &AdminHandler{
-		DB:    db,
-		Store: store,
+		DB:          db,
+		APIKeyStore: store,
 		SessionStore: &FakeSessionStore{
 			userProjects: []*domain.Project{
 				{ProjectID: "proj-1"},
@@ -393,8 +393,8 @@ func TestAdminHandler_APIKeysList_EmptyWhenNoKeys(t *testing.T) {
 	// No keys inserted.
 
 	handler := &AdminHandler{
-		DB:    db,
-		Store: store,
+		DB:          db,
+		APIKeyStore: store,
 		SessionStore: &FakeSessionStore{
 			userProjects: []*domain.Project{
 				{ProjectID: "proj-1"},

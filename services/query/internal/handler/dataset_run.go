@@ -23,10 +23,11 @@ import (
 //	GET    /api/v1/datasets/:id/runs/:runId/status            — get run status (polling)
 
 type DatasetRunHandler struct {
-	Store        metadata.Store
-	SessionStore SessionStore
-	JudgeClient  judge.LLMClient
-	Cache        *PromptCache
+	DatasetStore  metadata.DatasetStore
+	EvalRuleStore metadata.EvalRuleStore
+	SessionStore  SessionStore
+	JudgeClient   judge.LLMClient
+	Cache         *PromptCache
 	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
 	// When nil (e.g. handlers created directly in tests), defaults to
 	// defaultResolveProjectID for backwards compatibility.
@@ -104,7 +105,7 @@ func (h *DatasetRunHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify the eval rule exists.
-	evalRule, err := h.Store.GetEvalRule(r.Context(), req.EvalRuleID)
+	evalRule, err := h.EvalRuleStore.GetEvalRule(r.Context(), req.EvalRuleID)
 	if err != nil {
 		if errors.Is(err, metadata.ErrNotFound) {
 			http.Error(w, "eval rule not found", http.StatusNotFound)
@@ -127,7 +128,7 @@ func (h *DatasetRunHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get dataset items.
-	items, err := h.Store.ListDatasetItems(r.Context(), datasetID)
+	items, err := h.DatasetStore.ListDatasetItems(r.Context(), datasetID)
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
@@ -153,7 +154,7 @@ func (h *DatasetRunHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 		Status:        domain.DatasetRunStatusRunning,
 		CreatedAt:     time.Now().UTC(),
 	}
-	if err := h.Store.CreateDatasetRun(r.Context(), run); err != nil {
+	if err := h.DatasetStore.CreateDatasetRun(r.Context(), run); err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
 	}
@@ -174,7 +175,7 @@ func (h *DatasetRunHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 	if firstErr != nil {
 		run.Status = domain.DatasetRunStatusError
 	}
-	_ = h.Store.UpdateDatasetRun(r.Context(), run) // best-effort
+	_ = h.DatasetStore.UpdateDatasetRun(r.Context(), run) // best-effort
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -240,7 +241,7 @@ func (h *DatasetRunHandler) scoreItem(
 		CreatedAt: time.Now().UTC(),
 	}
 
-	if err := h.Store.CreateDatasetRunItem(ctx, runItem); err != nil {
+	if err := h.DatasetStore.CreateDatasetRunItem(ctx, runItem); err != nil {
 		return fmt.Errorf("scoreItem: store: %w", err)
 	}
 
@@ -329,7 +330,7 @@ func (h *DatasetRunHandler) HandleListRuns(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	runs, err := h.Store.ListDatasetRuns(r.Context(), datasetID)
+	runs, err := h.DatasetStore.ListDatasetRuns(r.Context(), datasetID)
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
@@ -337,7 +338,7 @@ func (h *DatasetRunHandler) HandleListRuns(w http.ResponseWriter, r *http.Reques
 
 	result := make([]datasetRunListItem, 0, len(runs))
 	for _, run := range runs {
-		items, _ := h.Store.ListDatasetRunItems(r.Context(), run.RunID)
+		items, _ := h.DatasetStore.ListDatasetRunItems(r.Context(), run.RunID)
 		itemCount := len(items)
 		meanScore := 0.0
 		if itemCount > 0 {
@@ -388,7 +389,7 @@ func (h *DatasetRunHandler) HandleGetRun(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Get the run.
-	run, err := h.Store.GetDatasetRun(r.Context(), runID)
+	run, err := h.DatasetStore.GetDatasetRun(r.Context(), runID)
 	if err != nil {
 		if errors.Is(err, metadata.ErrNotFound) {
 			http.Error(w, "run not found", http.StatusNotFound)
@@ -405,7 +406,7 @@ func (h *DatasetRunHandler) HandleGetRun(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Get run items.
-	runItems, err := h.Store.ListDatasetRunItems(r.Context(), runID)
+	runItems, err := h.DatasetStore.ListDatasetRunItems(r.Context(), runID)
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
@@ -413,7 +414,7 @@ func (h *DatasetRunHandler) HandleGetRun(w http.ResponseWriter, r *http.Request)
 
 	// Build per-item responses with item details.
 	// First, get all dataset items for this dataset to look up input/expected_output.
-	datasetItems, err := h.Store.ListDatasetItems(r.Context(), datasetID)
+	datasetItems, err := h.DatasetStore.ListDatasetItems(r.Context(), datasetID)
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
@@ -476,7 +477,7 @@ func (h *DatasetRunHandler) HandleGetRunStatus(w http.ResponseWriter, r *http.Re
 	}
 
 	// Get the run.
-	run, err := h.Store.GetDatasetRun(r.Context(), runID)
+	run, err := h.DatasetStore.GetDatasetRun(r.Context(), runID)
 	if err != nil {
 		if errors.Is(err, metadata.ErrNotFound) {
 			http.Error(w, "run not found", http.StatusNotFound)
@@ -534,7 +535,7 @@ func (h *DatasetRunHandler) authDataset(w http.ResponseWriter, r *http.Request) 
 		return "", "", &authDatasetError{Message: "dataset ID is required", StatusCode: http.StatusBadRequest}
 	}
 
-	ds, err := h.Store.GetDataset(r.Context(), datasetID)
+	ds, err := h.DatasetStore.GetDataset(r.Context(), datasetID)
 	if err != nil {
 		if errors.Is(err, metadata.ErrNotFound) {
 			return "", "", &authDatasetError{Message: "dataset not found", StatusCode: http.StatusNotFound}

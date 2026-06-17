@@ -8,7 +8,7 @@ import (
 	"time"
 
 	internalauth "github.com/omneval/omneval/internal/auth"
-	"github.com/omneval/omneval/internal/metadata"
+	"github.com/omneval/omneval/internal/domain"
 )
 
 // ContextKey is the type used for context keys to avoid collisions.
@@ -26,15 +26,23 @@ type CurrentUser struct {
 	Email  string
 }
 
+// authSessioner is the minimal interface the auth middleware needs from metadata.
+// It is satisfied by the metadata.Store interface (which embeds SessionStore and AuthStore).
+type authSessioner interface {
+	GetSession(ctx context.Context, sessionID string) (*domain.Session, error)
+	DeleteSession(ctx context.Context, sessionID string) error
+	GetUserByID(ctx context.Context, userID string) (*domain.User, error)
+}
+
 // SessionMiddleware wraps an http.Handler with session validation from a cookie.
 type SessionMiddleware struct {
-	store      metadata.Store
+	store      authSessioner
 	secure     bool
 	sessionTTL time.Duration
 }
 
 // NewSessionMiddleware creates a new session middleware.
-func NewSessionMiddleware(store metadata.Store, secure bool, sessionTTL time.Duration) *SessionMiddleware {
+func NewSessionMiddleware(store authSessioner, secure bool, sessionTTL time.Duration) *SessionMiddleware {
 	return &SessionMiddleware{
 		store:      store,
 		secure:     secure,
@@ -82,7 +90,7 @@ func (m *SessionMiddleware) Handler(next http.Handler) http.Handler {
 
 // RequireAuth is a convenience function that returns middleware wrapping a
 // handler with session validation.
-func RequireAuth(store metadata.Store, secure bool, sessionTTL time.Duration) func(http.Handler) http.Handler {
+func RequireAuth(store authSessioner, secure bool, sessionTTL time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return NewSessionMiddleware(store, secure, sessionTTL).Handler(next)
 	}
@@ -94,7 +102,7 @@ func RequireAuth(store metadata.Store, secure bool, sessionTTL time.Duration) fu
 // (callers supply the same key that handler.extractProjectID reads from).
 // If neither credential is valid, returns 401.
 func RequireSessionOrAPIKey(
-	store metadata.Store,
+	store authSessioner,
 	validator internalauth.Validator,
 	secure bool,
 	sessionTTL time.Duration,
@@ -189,7 +197,7 @@ func IsAdminUser(r *http.Request) bool {
 }
 
 // RequireAdmin wraps an http.Handler with session validation and admin check.
-func RequireAdmin(store metadata.Store, secure bool, sessionTTL time.Duration, adminEmail string) func(http.Handler) http.Handler {
+func RequireAdmin(store authSessioner, secure bool, sessionTTL time.Duration, adminEmail string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// First validate session

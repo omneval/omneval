@@ -33,8 +33,9 @@ type adminAPIKeyInfo struct {
 // - DEL  /api/v1/admin/traces/:projId — delete all traces for a project
 type AdminHandler struct {
 	DB           DBHandle
-	Store        metadata.Store
-	SessionStore SessionStore
+	APIKeyStore  metadata.APIKeyStore
+	BookmarkStore metadata.BookmarkStore
+	SessionStore metadata.SessionStore
 
 	// LakeRW is a read-write Lake attachment used for durable admin deletes
 	// (ADR-0004 / #91). Always set in Lake mode (the only mode now).
@@ -62,7 +63,7 @@ func (h *AdminHandler) HandleAdminAPIKeysList(w http.ResponseWriter, r *http.Req
 
 	var allKeys []adminAPIKeyInfo
 	for _, p := range projects {
-		keys, err := h.Store.ListAPIKeys(r.Context(), p.ProjectID)
+		keys, err := h.APIKeyStore.ListAPIKeys(r.Context(), p.ProjectID)
 		if err != nil {
 			continue // skip projects that fail rather than aborting the whole response
 		}
@@ -107,7 +108,7 @@ func (h *AdminHandler) HandleAdminAPIKeyDelete(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if err := h.Store.RevokeAPIKey(r.Context(), keyID); err != nil {
+	if err := h.APIKeyStore.RevokeAPIKey(r.Context(), keyID); err != nil {
 		if err == metadata.ErrNotFound {
 			writeJSONError(w, "key not found", http.StatusNotFound)
 			return
@@ -178,7 +179,7 @@ func (h *AdminHandler) HandleAdminTracesDelete(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if err := h.Store.RemoveBookmarksForProject(r.Context(), projectID); err != nil {
+	if err := h.BookmarkStore.RemoveBookmarksForProject(r.Context(), projectID); err != nil {
 		writeJSONError(w, "failed to delete bookmarks", http.StatusInternalServerError)
 		return
 	}
@@ -211,20 +212,20 @@ func (h *AdminHandler) HandleAdminProjectsDelete(w http.ResponseWriter, r *http.
 		writeJSONError(w, "failed to delete traces", http.StatusInternalServerError)
 		return
 	}
-	if err := h.Store.RemoveBookmarksForProject(r.Context(), projectID); err != nil {
+	if err := h.BookmarkStore.RemoveBookmarksForProject(r.Context(), projectID); err != nil {
 		writeJSONError(w, "failed to delete bookmarks", http.StatusInternalServerError)
 		return
 	}
 
 	// Revoke all API keys for this project via the metadata store.
-	keys, err := h.Store.ListAPIKeys(r.Context(), projectID)
+	keys, err := h.APIKeyStore.ListAPIKeys(r.Context(), projectID)
 	if err != nil {
 		writeJSONError(w, "failed to list keys for revocation", http.StatusInternalServerError)
 		return
 	}
 	for _, k := range keys {
 		if k.RevokedAt == nil {
-			_ = h.Store.RevokeAPIKey(r.Context(), k.KeyID) // best-effort; log errors are not fatal
+			_ = h.APIKeyStore.RevokeAPIKey(r.Context(), k.KeyID) // best-effort; log errors are not fatal
 		}
 	}
 

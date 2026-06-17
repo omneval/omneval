@@ -19,7 +19,7 @@ import (
 func TestDatasetHandler_CreateDataset(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -54,7 +54,7 @@ func TestDatasetHandler_CreateDataset(t *testing.T) {
 func TestDatasetHandler_CreateDataset_SnakeCaseKeys(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	h := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -97,7 +97,7 @@ func keysOf(m map[string]interface{}) []string {
 func TestDatasetHandler_CreateDataset_MissingName(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -113,7 +113,7 @@ func TestDatasetHandler_CreateDataset_MissingName(t *testing.T) {
 func TestDatasetHandler_CreateDataset_AuthRequired(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store: store,
+		DatasetStore: store,
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/datasets", strings.NewReader(`{
@@ -130,7 +130,7 @@ func TestDatasetHandler_CreateDataset_AuthRequired(t *testing.T) {
 func TestDatasetHandler_CreateDataset_MethodNotAllowed(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -146,7 +146,7 @@ func TestDatasetHandler_CreateDataset_MethodNotAllowed(t *testing.T) {
 func TestDatasetHandler_CreateDataset_InvalidJSON(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -164,7 +164,7 @@ func TestDatasetHandler_CreateDataset_InvalidJSON(t *testing.T) {
 func TestDatasetHandler_ListDatasets(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -204,7 +204,7 @@ func TestDatasetHandler_ListDatasets(t *testing.T) {
 func TestDatasetHandler_ListDatasets_AuthRequired(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store: store,
+		DatasetStore: store,
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/datasets", nil)
@@ -219,7 +219,7 @@ func TestDatasetHandler_ListDatasets_AuthRequired(t *testing.T) {
 func TestDatasetHandler_ListDatasets_EmptyList(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "empty-proj"},
 	}
 
@@ -248,7 +248,7 @@ func TestDatasetHandler_ListDatasets_EmptyList(t *testing.T) {
 func TestDatasetHandler_ListDatasets_MethodNotAllowed(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -264,7 +264,7 @@ func TestDatasetHandler_ListDatasets_MethodNotAllowed(t *testing.T) {
 func TestDatasetHandler_ListDatasets_ItemCount(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -313,7 +313,7 @@ func TestDatasetHandler_ListDatasets_ItemCount(t *testing.T) {
 func TestDatasetHandler_GetDataset(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -347,7 +347,7 @@ func TestDatasetHandler_GetDataset(t *testing.T) {
 func TestDatasetHandler_GetDataset_NotFound(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -363,7 +363,7 @@ func TestDatasetHandler_GetDataset_NotFound(t *testing.T) {
 func TestDatasetHandler_GetDataset_Forbidden(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -383,7 +383,7 @@ func TestDatasetHandler_GetDataset_Forbidden(t *testing.T) {
 func TestDatasetHandler_GetDataset_AuthRequired(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store: store,
+		DatasetStore: store,
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/datasets/some-id", nil)
@@ -398,7 +398,7 @@ func TestDatasetHandler_GetDataset_AuthRequired(t *testing.T) {
 func TestDatasetHandler_GetDataset_MethodNotAllowed(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -416,7 +416,7 @@ func TestDatasetHandler_GetDataset_MethodNotAllowed(t *testing.T) {
 func TestDatasetHandler_AddItems(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -453,7 +453,7 @@ func TestDatasetHandler_AddItems(t *testing.T) {
 func TestDatasetHandler_AddItems_MissingInput(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -474,7 +474,7 @@ func TestDatasetHandler_AddItems_MissingInput(t *testing.T) {
 func TestDatasetHandler_AddItems_DatasetNotFound(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -492,7 +492,7 @@ func TestDatasetHandler_AddItems_DatasetNotFound(t *testing.T) {
 func TestDatasetHandler_AddItems_Forbidden(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -513,7 +513,7 @@ func TestDatasetHandler_AddItems_Forbidden(t *testing.T) {
 func TestDatasetHandler_AddItems_AuthRequired(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store: store,
+		DatasetStore: store,
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/datasets/some-id/items", strings.NewReader(`{
@@ -530,7 +530,7 @@ func TestDatasetHandler_AddItems_AuthRequired(t *testing.T) {
 func TestDatasetHandler_AddItems_MethodNotAllowed(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -549,7 +549,7 @@ func TestDatasetHandler_AddItems_MethodNotAllowed(t *testing.T) {
 func TestDatasetHandler_AddItems_WithSourceSpanID(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -581,7 +581,7 @@ func TestDatasetHandler_AddItems_WithSourceSpanID(t *testing.T) {
 func TestDatasetHandler_AddItems_InvalidJSON(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -602,7 +602,7 @@ func TestDatasetHandler_AddItems_InvalidJSON(t *testing.T) {
 func TestDatasetHandler_AddItemsBatch(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -635,7 +635,7 @@ func TestDatasetHandler_AddItemsBatch(t *testing.T) {
 func TestDatasetHandler_AddItemsBatch_EmptyItems(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -654,7 +654,7 @@ func TestDatasetHandler_AddItemsBatch_EmptyItems(t *testing.T) {
 func TestDatasetHandler_AddItemsBatch_SkipsEmptyInput(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -698,7 +698,7 @@ func TestDatasetHandler_AddItemsBatch_SkipsEmptyInput(t *testing.T) {
 func TestDatasetHandler_AddItemsBatch_AuthRequired(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store: store,
+		DatasetStore: store,
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/datasets/some-id/items/batch", strings.NewReader(`{"items": [{"input": "hello"}]}`))
@@ -713,7 +713,7 @@ func TestDatasetHandler_AddItemsBatch_AuthRequired(t *testing.T) {
 func TestDatasetHandler_AddItemsBatch_DatasetNotFound(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -729,7 +729,7 @@ func TestDatasetHandler_AddItemsBatch_DatasetNotFound(t *testing.T) {
 func TestDatasetHandler_AddItemsBatch_Forbidden(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -748,7 +748,7 @@ func TestDatasetHandler_AddItemsBatch_Forbidden(t *testing.T) {
 func TestDatasetHandler_AddItemsBatch_MethodNotAllowed(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -767,7 +767,7 @@ func TestDatasetHandler_AddItemsBatch_MethodNotAllowed(t *testing.T) {
 func TestDatasetHandler_AddItemsBatch_WithSourceSpanID(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -804,7 +804,7 @@ func TestDatasetHandler_AddItemsBatch_WithSourceSpanID(t *testing.T) {
 func TestDatasetHandler_ListItems(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -853,7 +853,7 @@ func TestDatasetHandler_ListItems(t *testing.T) {
 func TestDatasetHandler_ListItems_AuthRequired(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store: store,
+		DatasetStore: store,
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/datasets/some-id/items", nil)
@@ -868,7 +868,7 @@ func TestDatasetHandler_ListItems_AuthRequired(t *testing.T) {
 func TestDatasetHandler_ListItems_DatasetNotFound(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -884,7 +884,7 @@ func TestDatasetHandler_ListItems_DatasetNotFound(t *testing.T) {
 func TestDatasetHandler_ListItems_Forbidden(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -903,7 +903,7 @@ func TestDatasetHandler_ListItems_Forbidden(t *testing.T) {
 func TestDatasetHandler_ListItems_MethodNotAllowed(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -922,7 +922,7 @@ func TestDatasetHandler_ListItems_MethodNotAllowed(t *testing.T) {
 func TestDatasetHandler_ListItems_WithLimit(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -970,7 +970,7 @@ func TestDatasetHandler_ListItems_WithLimit(t *testing.T) {
 func TestDatasetHandler_ListItems_CursorPagination(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -1040,7 +1040,7 @@ func TestDatasetHandler_ListItems_CursorPagination(t *testing.T) {
 func TestDatasetHandler_DeleteDataset(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -1084,7 +1084,7 @@ func TestDatasetHandler_DeleteDataset(t *testing.T) {
 func TestDatasetHandler_DeleteDataset_NotFound(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -1100,7 +1100,7 @@ func TestDatasetHandler_DeleteDataset_NotFound(t *testing.T) {
 func TestDatasetHandler_DeleteDataset_Forbidden(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -1119,7 +1119,7 @@ func TestDatasetHandler_DeleteDataset_Forbidden(t *testing.T) {
 func TestDatasetHandler_DeleteDataset_AuthRequired(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store: store,
+		DatasetStore: store,
 	}
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/datasets/some-id", nil)
@@ -1134,7 +1134,7 @@ func TestDatasetHandler_DeleteDataset_AuthRequired(t *testing.T) {
 func TestDatasetHandler_DeleteDataset_MethodNotAllowed(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 

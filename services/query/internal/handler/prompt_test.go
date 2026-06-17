@@ -228,7 +228,7 @@ func TestPromptHandler_CreatePrompt(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -254,7 +254,7 @@ func TestPromptHandler_CreatePrompt_Conflict(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -290,7 +290,7 @@ func TestPromptHandler_GetPromptByVersion(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -333,7 +333,7 @@ func TestPromptHandler_GetPrompt_ByLabel(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -382,7 +382,7 @@ func TestPromptHandler_AssignLabel(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -580,7 +580,7 @@ func TestPromptHandler_CreatePrompt_AuthRequired(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -600,7 +600,7 @@ func TestPromptHandler_CreatePrompt_ResponseUsesSnakeCase(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -658,7 +658,7 @@ func TestPromptHandler_CreatePrompt_ModelConfigDeserialization(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -702,7 +702,7 @@ func TestPromptHandler_CreatePrompt_CreatedAtPopulated(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -748,7 +748,7 @@ func TestPromptHandler_GetPrompt_VersionResponseUsesSnakeCase(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -797,7 +797,7 @@ func TestPromptHandler_CreatePrompt_MethodNotAllowed(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -815,7 +815,7 @@ func TestPromptHandler_GetPrompt_MissingName(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -834,7 +834,7 @@ func TestPromptHandler_GetPrompt_NoParamsDefaultToLatest(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -871,7 +871,7 @@ func TestPromptHandler_GetPrompt_NotFound(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -889,7 +889,7 @@ func TestPromptHandler_SetLabel_MethodNotAllowed(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -907,7 +907,7 @@ func TestPromptHandler_SetLabel_BadRequest(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -926,7 +926,7 @@ func TestPromptHandler_ListPrompts(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -1008,7 +1008,7 @@ func TestPromptHandler_ListPrompts_Empty(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "empty-proj"},
 	}
@@ -1035,7 +1035,7 @@ func TestPromptHandler_ListPrompts_MethodNotAllowed(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -1052,7 +1052,7 @@ func TestPromptHandler_ListPrompts_MissingProjectID(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -1076,7 +1076,7 @@ func TestPromptHandler_GetPrompt_DefaultToLatestVersion(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -1127,7 +1127,7 @@ func TestPromptHandler_GetPrompt_SingleVersionNoParams(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -1161,7 +1161,7 @@ func TestPromptHandler_GetPrompt_NotFoundNoParams(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -1181,7 +1181,7 @@ func TestPromptHandler_GetPrompt_LabelNotFound(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -1208,7 +1208,7 @@ func TestPromptHandler_ListPromptVersions_InferProjectID(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -1248,7 +1248,7 @@ func TestPromptHandler_CreatePrompt_WithLabel(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -1282,7 +1282,7 @@ func TestPromptHandler_ListPromptVersions_NoSessionNoProjectID(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -1303,7 +1303,7 @@ func TestPromptHandler_ListPromptVersions_NoSessionWithProjectID(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -1329,7 +1329,7 @@ func TestPromptHandler_GetPrompt_DefaultProjectID(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj-123"},
 	}
@@ -1384,7 +1384,7 @@ func TestPromptHandler_ListPromptVersions_ProjectID(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj-456"},
 	}
@@ -1439,7 +1439,7 @@ func TestPromptHandler_CreatePrompt_ModelFieldsFlattenedIntoParent(t *testing.T)
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -1501,7 +1501,7 @@ func TestPromptHandler_GetPrompt_ModelFieldsFlattenedIntoParent(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -1551,7 +1551,7 @@ func TestPromptHandler_ListPromptVersions_ModelFieldsFlattened(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -1604,7 +1604,7 @@ func TestPromptHandler_CreatePrompt_LabelOverwrite(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -1653,7 +1653,7 @@ func TestPromptHandler_CreatePrompt_AutoIncrementVersion(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -1715,7 +1715,7 @@ func TestPromptHandler_CreatePrompt_NestedModelConfig(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	handler := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -1775,7 +1775,7 @@ func TestPromptHandler_GetPrompt_VersionUsesSessionProjectID(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	h := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "session-proj"},
 	}
@@ -1811,7 +1811,7 @@ func TestPromptHandler_GetPrompt_LabelUsesSessionProjectID(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	h := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "session-proj"},
 	}
@@ -1853,7 +1853,7 @@ func TestPromptHandler_GetPrompt_APIKeyProjectID(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	h := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 		// No SessionStore — simulates SDK call with API key only.
 	}
@@ -1890,7 +1890,7 @@ func TestPromptHandler_GetPrompt_VersionAPIKeyProjectID(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	h := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -1915,7 +1915,7 @@ func TestPromptHandler_GetPrompt_LabelAPIKeyProjectID(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	h := &PromptHandler{
-		Store: store,
+		PromptStore: store,
 		Cache: cache,
 	}
 
@@ -1946,7 +1946,7 @@ func TestPromptHandler_ListPromptVersions_ReturnsBareArray(t *testing.T) {
 	store := newFakePromptStore()
 	cache := NewPromptCache(store)
 	h := &PromptHandler{
-		Store:        store,
+		PromptStore: store,
 		Cache:        cache,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
