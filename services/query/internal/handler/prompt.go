@@ -32,8 +32,12 @@ type PromptHandler struct {
 	// The middleware (RequireSessionOrAPIKey) injects the validated
 	// project ID into the request context; this field is kept for
 	// documentation/wiring purposes only — the handler itself reads
-	// from context via extractProjectID.
+	// from context via the canonical resolver.
 	Validator internalauth.Validator
+	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
+	// When nil (e.g. handlers created directly in tests), defaults to
+	// defaultResolveProjectID for backwards compatibility.
+	ResolveProjectID func(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool)
 }
 
 // HandleCreatePrompt handles POST /api/v1/prompts.
@@ -44,10 +48,13 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Extract project_id from API-key context or session.
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	// Extract project_id from the canonical resolver.
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
@@ -178,12 +185,12 @@ func (h *PromptHandler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) 
 	versionQuery := r.URL.Query().Get("version")
 	labelQuery := r.URL.Query().Get("label")
 
-	// Resolve project_id from session first, fall back to ?project_id= query
-	// param (kept for backwards-compat with tests that omit a SessionStore).
-	projectID, _ := extractProjectID(h.SessionStore, r)
-	if projectID == "" {
-		projectID = r.URL.Query().Get("project_id")
+	// Resolve project_id from the canonical resolver.
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
 	}
+	projectID, _ := resolver(h.SessionStore, w, r, "")
 
 	var pv *domain.PromptVersion
 	var getErr error
@@ -256,16 +263,12 @@ func (h *PromptHandler) HandleListPrompts(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var projectID string
-	var ok bool
-	if h.SessionStore != nil {
-		projectID, ok = h.SessionStore.ProjectID(r)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
 	}
-	if !ok || projectID == "" {
-		projectID = r.URL.Query().Get("project_id")
-	}
-	if projectID == "" {
-		http.Error(w, "project_id is required", http.StatusBadRequest)
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
@@ -353,10 +356,11 @@ func (h *PromptHandler) HandleSetLabel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate the version exists.
-	projectID, _ := extractProjectID(h.SessionStore, r)
-	if projectID == "" {
-		projectID = r.URL.Query().Get("project_id")
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
 	}
+	projectID, _ := resolver(h.SessionStore, w, r, "")
 	_, err := h.Store.GetPromptVersion(r.Context(), projectID, name, req.Version)
 	if err != nil {
 		if errors.Is(err, metadata.ErrNotFound) {
@@ -409,12 +413,13 @@ func (h *PromptHandler) HandleListPromptVersions(w http.ResponseWriter, r *http.
 		return
 	}
 
-	projectID, _ := extractProjectID(h.SessionStore, r)
-	if projectID == "" {
-		projectID = r.URL.Query().Get("project_id")
+	// Extract project_id from the canonical resolver.
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
 	}
-	if projectID == "" {
-		http.Error(w, "project_id is required", http.StatusBadRequest)
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 

@@ -34,6 +34,10 @@ type EvalRuleHandler struct {
 	// DefaultJudgeModel is the model used when the request omits judge_model.
 	// Wired from cfg.Eval.LLMModel at startup. Falls back to "gpt-4o-mini" when empty.
 	DefaultJudgeModel string
+	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
+	// When nil (e.g. handlers created directly in tests), defaults to
+	// defaultResolveProjectID for backwards compatibility.
+	ResolveProjectID func(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool)
 }
 
 // ---- Request / Response Types ----
@@ -85,9 +89,12 @@ func (h *EvalRuleHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
@@ -159,9 +166,12 @@ func (h *EvalRuleHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
@@ -186,9 +196,12 @@ func (h *EvalRuleHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
@@ -243,9 +256,12 @@ func (h *EvalRuleHandler) HandlePreview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
