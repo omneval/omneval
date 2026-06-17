@@ -11,10 +11,10 @@ import (
 	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/idgen"
-	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/services/query/internal/dsl"
 	"github.com/omneval/omneval/services/query/internal/metrics"
 	"github.com/omneval/omneval/services/query/internal/query"
+	"github.com/omneval/omneval/services/query/internal/querybuild"
 )
 
 // SpanHandler handles POST /api/v1/spans/query (paginated span list),
@@ -25,11 +25,13 @@ type SpanHandler struct {
 	ProjectResolver auth.ProjectResolver
 	Metrics         *metrics.QueryMetrics
 	// Lake is the DuckDB handle attached read-only to the Lake. All span
-	// reads compile against lake.spans (ADR-0004).
+	// reads compile against lake.spans (ADR-0004). It is also used for
+	// trace tree score loading in buildTraceTree / withScores.
 	Lake DBHandle
-	// BookmarkStore resolves bookmarked trace IDs for "bookmarked" filters —
-	// bookmarks live in the Metadata Store, not DuckDB (ADR-0004).
-	BookmarkStore metadata.BookmarkStore
+	// QueryBuilder encapsulates the full DSL → SQL → execute → scan pipeline
+	// for span and analytics queries. It owns the Lake connection, query
+	// compilation, row scanning, and cursor computation.
+	QueryBuilder *querybuild.QueryBuilder
 }
 
 // SessionStore abstracts session lookup for project ID extraction.
@@ -39,8 +41,8 @@ type SessionStore interface {
 }
 
 // HandleSpansQuery handles POST /api/v1/spans/query.
-// It extracts project_id from the authenticated session, builds the SQL query
-// with keyset cursor pagination, executes the hot+cold UNION, and returns
+// It extracts project_id from the authenticated session, delegates to the
+// QueryBuilder for the full DSL → SQL → execute → scan pipeline, and returns
 // a paginated span list with a next cursor.
 func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
@@ -124,69 +126,43 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build the query — projectID is validated server-side against the user's
-	// org; the raw client value is never trusted directly.
-	q, err := query.NewSpanQuery(projectID, req)
-	if err != nil {
-		writeJSONError(w, "bad request: "+err.Error(), http.StatusBadRequest)
+	// Delegate to the QueryBuilder for the full pipeline.
+	if h.QueryBuilder == nil {
+		writeJSONError(w, "query builder not configured", http.StatusServiceUnavailable)
 		return
 	}
+	// Convert the decoded SpanQueryRequest into a dsl.Query so that
+	// Execute can dispatch to the span pipeline.
+	dslQuery := &dsl.Query{
+		From:      req.From,
+		To:        req.To,
+		Limit:     req.Limit,
+		Cursor:    req.Cursor,
+		ProjectID: projectID,
+		QueryType: dsl.QueryTypeSpan,
+	}
+	for _, f := range req.Filters {
+		dslQuery.Filters = append(dslQuery.Filters, dsl.Filter{
+			Field: f.Field,
+			Op:    dsl.FilterOp(f.Op),
+			Value: f.Value,
+		})
+	}
 
-	// "bookmarked" filters need the project's starred trace IDs from the
-	// Metadata Store before SQL compilation.
-	if q.NeedsBookmarks() && h.BookmarkStore != nil {
-		ids, err := h.BookmarkStore.ListBookmarkedTraceIDs(r.Context(), projectID)
-		if err != nil {
-			writeJSONError(w, "bookmark lookup error: "+err.Error(), http.StatusInternalServerError)
-			return
+	result, err := h.QueryBuilder.Execute(r.Context(), dslQuery)
+	if err != nil {
+		if querybuild.IsValidationError(err) {
+			writeJSONError(w, err.Error(), http.StatusBadRequest)
+		} else {
+			writeJSONError(w, err.Error(), http.StatusInternalServerError)
 		}
-		q.SetBookmarkedTraceIDs(ids)
-	}
-
-	sqlStr, args, err := h.compileSpanQuery(q)
-	if err != nil {
-		writeJSONError(w, "query compilation error", http.StatusInternalServerError)
 		return
 	}
 
-	dbHandle := h.spanDB()
-	rows, err := dbHandle.Query(sqlStr, args...)
-	if err != nil {
-		writeJSONError(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	// Scan rows into domain spans.
-	spanRows, err := scanAllRows(rows)
-	if err != nil {
-		writeJSONError(w, "scan error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	spans, err := query.ScanRows(spanRows)
-	if err != nil {
-		writeJSONError(w, "row scan error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Compute next cursor using the effective limit from the query.
-	// This handles the case where req.Limit was 0 (unset) and the
-	// query defaulted to DefaultLimit.
-	// The SQL fetches limit+1 rows; NextCursor determines whether more
-	// pages exist based on whether we got more than limit results.
-	next := query.NextCursor(spans, q.EffectiveLimit())
-
-	// Truncate to the requested page size — the extra row was only used to
-	// detect whether a next page exists and must not be returned to callers.
-	if len(spans) > q.EffectiveLimit() {
-		spans = spans[:q.EffectiveLimit()]
-	}
-
-	resp := query.SpanResponse{
-		Spans: spans,
-		Next:  next,
-		Limit: q.EffectiveLimit(),
+	resp := &query.SpanResponse{
+		Spans: result.Spans,
+		Next:  result.Next,
+		Limit: result.Limit,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -363,8 +339,8 @@ func (h *SpanHandler) HandleProjects(w http.ResponseWriter, r *http.Request) {
 
 // HandleAnalyticsSpans handles POST /api/v1/analytics/spans.
 // Accepts a structured Query (filters, aggregations, group_by, order_by, limit),
-// compiles it to parameterized DuckDB SQL via the DSL compiler, executes
-// the hot+cold UNION, and returns the aggregated rows.
+// delegates to the QueryBuilder for the full DSL → SQL → execute → scan pipeline,
+// and returns the aggregated rows.
 func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -390,60 +366,26 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Validate and apply default time range (last 30 days when omitted).
-	if err := req.Validate(); err != nil {
-		writeJSONError(w, "bad request: "+err.Error(), http.StatusBadRequest)
+	// Delegate to the QueryBuilder for the full pipeline.
+	if h.QueryBuilder == nil {
+		writeJSONError(w, "query builder not configured", http.StatusServiceUnavailable)
 		return
 	}
+	req.ProjectID = projectID
+	req.QueryType = dsl.QueryTypeAnalytics
 
-	// Compile the query against the single Lake table set — all fields are
-	// validated against allowlists.
-	sqlStr, args, err := dsl.CompileLake(projectID, req)
+	result, err := h.QueryBuilder.Execute(r.Context(), &req)
 	if err != nil {
-		writeJSONError(w, "query compilation error: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	dbHandle := h.spanDB()
-	rows, err := dbHandle.Query(sqlStr, args...)
-	if err != nil {
-		writeJSONError(w, "query execution error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	// Scan rows into column headers + [][]any.
-	cols, err := rows.ColumnTypes()
-	if err != nil {
-		writeJSONError(w, "scan column types: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	var result []map[string]any
-	for rows.Next() {
-		values := make([]any, len(cols))
-		valuePtrs := make([]any, len(cols))
-		for i := range values {
-			valuePtrs[i] = &values[i]
+		if querybuild.IsValidationError(err) {
+			writeJSONError(w, err.Error(), http.StatusBadRequest)
+		} else {
+			writeJSONError(w, err.Error(), http.StatusInternalServerError)
 		}
-		if err := rows.Scan(valuePtrs...); err != nil {
-			writeJSONError(w, "scan row: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		row := make(map[string]any, len(cols))
-		for i, col := range cols {
-			row[col.Name()] = values[i]
-		}
-		result = append(result, row)
-	}
-	if err := rows.Err(); err != nil {
-		writeJSONError(w, "row iteration: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	resp := AnalyticsResponse{
-		Rows: result,
+		Rows: result.Rows,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -562,16 +504,6 @@ func writeJSONError(w http.ResponseWriter, message string, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
-}
-
-// compileSpanQuery compiles a SpanQuery against the Lake (ADR-0004).
-func (h *SpanHandler) compileSpanQuery(q *query.SpanQuery) (string, []any, error) {
-	return q.LakeSQL()
-}
-
-// spanDB returns the database handle for span reads: the Lake.
-func (h *SpanHandler) spanDB() DBHandle {
-	return h.Lake
 }
 
 // ScoreLakeWriter commits scores to the Lake (ADR-0004). Implemented by

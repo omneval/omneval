@@ -512,6 +512,18 @@ type OrderClause struct {
 // Default time range: when from/to are omitted (zero time.Time), the
 // analytics query defaults to the last 30 days (from = now - 30d, to = now)
 // after calling Validate(). Calling code should always call Validate() first.
+// QueryType identifies the kind of query the QueryBuilder should execute.
+type QueryType string
+
+const (
+	QueryTypeSpan       QueryType = "span"
+	QueryTypeAnalytics  QueryType = "analytics"
+)
+
+// Query represents an analytics query expressed in the domain-specific
+// language (DSL).  The QueryType field disambiguates whether the caller is
+// requesting a span listing or an analytics aggregation — the
+// QueryBuilder.Execute method dispatches based on this value.
 type Query struct {
 	From         time.Time      `json:"from"`
 	To           time.Time      `json:"to"`
@@ -521,6 +533,8 @@ type Query struct {
 	GroupBy      []GroupByField `json:"group_by"`
 	OrderBy      []OrderClause  `json:"order_by"`
 	Limit        int            `json:"limit"`
+	QueryType    QueryType      `json:"query_type,omitempty"`
+	Cursor       string         `json:"cursor,omitempty"`
 }
 
 // defaultTimeRange is the time range applied when from and to are omitted

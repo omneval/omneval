@@ -22,6 +22,7 @@ import (
 	"github.com/omneval/omneval/services/query/internal/auth"
 	"github.com/omneval/omneval/services/query/internal/cursor"
 	"github.com/omneval/omneval/services/query/internal/query"
+	"github.com/omneval/omneval/services/query/internal/querybuild"
 )
 
 const spansTableDDL = `
@@ -127,6 +128,7 @@ func TestHandleSpansQuery_InvalidCursor(t *testing.T) {
 
 	h := &SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+		QueryBuilder: &querybuild.QueryBuilder{},
 	}
 
 	h.HandleSpansQuery(w, req)
@@ -260,10 +262,11 @@ func TestHandleSpansQuery_WithDatabase(t *testing.T) {
 		t.Fatalf("insert span: %v", err)
 	}
 
-	// Create handler with real DB.
+	// Create handler with real DB and QueryBuilder.
 	h := &SpanHandler{
 		Lake:         db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
 	}
 
 	// Make request.
@@ -347,6 +350,7 @@ func TestHandleSpansQuery_StatusCodeFilter(t *testing.T) {
 	h := &SpanHandler{
 		Lake:         db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
 	}
 
 	query := func(t *testing.T, filterValue []string) []string {
@@ -466,6 +470,7 @@ func TestHandleSpansQuery_NoTimeRange_DefaultsTo30Days(t *testing.T) {
 	h := &SpanHandler{
 		Lake:         db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
 	}
 
 	// Request with no time range — should default to last 30 days.
@@ -544,6 +549,7 @@ func TestHandleAnalyticsSpans_NoTimeRange_DefaultsTo30Days(t *testing.T) {
 	h := &SpanHandler{
 		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
 	}
 
 	// Request with no time range — should default to last 30 days.
@@ -595,6 +601,7 @@ func TestHandleAnalyticsSpans_FromAfterTo_Returns400(t *testing.T) {
 	h := &SpanHandler{
 		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+		QueryBuilder:   &querybuild.QueryBuilder{Lake: db},
 	}
 
 	body := strings.NewReader(`{
@@ -1401,6 +1408,7 @@ func TestHandleSpansQuery_UnknownField(t *testing.T) {
 
 	h := &SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+		QueryBuilder: &querybuild.QueryBuilder{},
 	}
 
 	h.HandleSpansQuery(w, req)
@@ -1442,6 +1450,7 @@ func TestHandleSpansQuery_UnknownOp(t *testing.T) {
 
 	h := &SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+		QueryBuilder: &querybuild.QueryBuilder{},
 	}
 
 	h.HandleSpansQuery(w, req)
@@ -1581,6 +1590,7 @@ func TestHandleAnalyticsSpans_WithDatabase_ProjectFromSession(t *testing.T) {
 	h := &SpanHandler{
 		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
 	}
 
 	body := strings.NewReader(`{
@@ -1662,11 +1672,12 @@ func TestHandleAnalyticsSpans_ProjectIDOverride(t *testing.T) {
 
 	// Session returns proj-a, but the request overrides to proj-b.
 	h := &SpanHandler{
-		Lake: db,
+		Lake:         db,
 		SessionStore: &FakeSessionStore{
 			projectID:    "proj-a",
 			userProjects: userProjects,
 		},
+		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
 	}
 
 	body := strings.NewReader(`{
@@ -1723,13 +1734,14 @@ func TestHandleAnalyticsSpans_ProjectIDForbidden(t *testing.T) {
 	defer db.Close()
 
 	h := &SpanHandler{
-		Lake: db,
+		Lake:         db,
 		SessionStore: &FakeSessionStore{
 			projectID: "proj-a",
 			userProjects: []*domain.Project{
 				{ProjectID: "proj-a"},
 			},
 		},
+		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
 	}
 
 	body := strings.NewReader(`{
@@ -1783,8 +1795,9 @@ func TestHandleSpansQuery_ContainsFilter(t *testing.T) {
 	}
 
 	h := &SpanHandler{
-		Lake:           db,
+		Lake:         db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
 	}
 
 	body := strings.NewReader(`{
@@ -1864,8 +1877,9 @@ func TestHandleAnalyticsSpans_TimeBucketHour(t *testing.T) {
 	}
 
 	h := &SpanHandler{
-		Lake:           db,
+		Lake:         db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
 	}
 
 	body := strings.NewReader(`{
@@ -1944,6 +1958,7 @@ func TestHandleAnalyticsSpans_TimeBucketInvalidInterval(t *testing.T) {
 	h := &SpanHandler{
 		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+		QueryBuilder:   &querybuild.QueryBuilder{Lake: db},
 	}
 
 	body := strings.NewReader(`{
@@ -2006,11 +2021,12 @@ func TestHandleSpansQuery_ProjectIDOverride(t *testing.T) {
 
 	// Session default is proj-a, but the request selects proj-b.
 	h := &SpanHandler{
-		Lake: db,
+		Lake:         db,
 		SessionStore: &FakeSessionStore{
 			projectID:    "proj-a",
 			userProjects: []*domain.Project{{ProjectID: "proj-a"}, {ProjectID: "proj-b"}},
 		},
+		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
 	}
 
 	body := strings.NewReader(`{
@@ -2062,11 +2078,12 @@ func TestHandleSpansQuery_ProjectIDForbidden(t *testing.T) {
 	}
 
 	h := &SpanHandler{
-		Lake: db,
+		Lake:         db,
 		SessionStore: &FakeSessionStore{
 			projectID:    "proj-a",
 			userProjects: []*domain.Project{{ProjectID: "proj-a"}},
 		},
+		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
 	}
 
 	body := strings.NewReader(`{"project_id": "proj-unknown", "limit": 50}`)
