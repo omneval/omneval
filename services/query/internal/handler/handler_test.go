@@ -1678,7 +1678,7 @@ func TestHandleAnalyticsSpans_ProjectIDOverride(t *testing.T) {
 	}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", body)
 	// Add the current user to the request context (auth middleware normally does this).
-	req = req.WithContext(context.WithValue(req.Context(), auth.CurrentUserKey, &auth.CurrentUser{UserID: "user-1"}))
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserIDContextKey, &auth.CurrentUser{UserID: "user-1"}))
 	w := httptest.NewRecorder()
 
 	h.HandleAnalyticsSpans(w, req)
@@ -1738,7 +1738,7 @@ func TestHandleAnalyticsSpans_ProjectIDForbidden(t *testing.T) {
 		"project_id": "proj-unknown"
 	}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", body)
-	req = req.WithContext(context.WithValue(req.Context(), auth.CurrentUserKey, &auth.CurrentUser{UserID: "user-1"}))
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserIDContextKey, &auth.CurrentUser{UserID: "user-1"}))
 	w := httptest.NewRecorder()
 
 	h.HandleAnalyticsSpans(w, req)
@@ -2020,7 +2020,7 @@ func TestHandleSpansQuery_ProjectIDOverride(t *testing.T) {
 		"limit": 50
 	}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
-	req = req.WithContext(context.WithValue(req.Context(), auth.CurrentUserKey, &auth.CurrentUser{UserID: "user-1"}))
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserIDContextKey, &auth.CurrentUser{UserID: "user-1"}))
 	w := httptest.NewRecorder()
 
 	h.HandleSpansQuery(w, req)
@@ -2071,7 +2071,7 @@ func TestHandleSpansQuery_ProjectIDForbidden(t *testing.T) {
 
 	body := strings.NewReader(`{"project_id": "proj-unknown", "limit": 50}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
-	req = req.WithContext(context.WithValue(req.Context(), auth.CurrentUserKey, &auth.CurrentUser{UserID: "user-1"}))
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserIDContextKey, &auth.CurrentUser{UserID: "user-1"}))
 	w := httptest.NewRecorder()
 
 	h.HandleSpansQuery(w, req)
@@ -2098,6 +2098,19 @@ func (f *FakeSessionStore) ProjectID(r *http.Request) (string, bool) {
 		return f.userProjects[0].ProjectID, true
 	}
 	return "", false
+}
+
+// AuthorizeProject is a minimal ProjectAuthorizer implementation for tests.
+func (f *FakeSessionStore) AuthorizeProject(projectID string) bool {
+	if f.projectID == projectID {
+		return true
+	}
+	for _, p := range f.userProjects {
+		if p.ProjectID == projectID {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *FakeSessionStore) ListProjects(r *http.Request) ([]*domain.Project, error) {
@@ -2182,7 +2195,7 @@ func TestHandleProjects_ReturnsSnakeCaseJSON(t *testing.T) {
 func TestHandleSpansQuery_AuthenticatedButNoProject(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", strings.NewReader(`{}`))
 	// Inject a current user into context (simulates passing session middleware).
-	req = req.WithContext(context.WithValue(req.Context(), auth.CurrentUserKey, &auth.CurrentUser{UserID: "user-1"}))
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserIDContextKey, &auth.CurrentUser{UserID: "user-1"}))
 	w := httptest.NewRecorder()
 
 	h := &SpanHandler{
@@ -2233,7 +2246,7 @@ func TestHandleTraceDetail_AuthenticatedButNoProject(t *testing.T) {
 	mux.HandleFunc("GET /api/v1/traces/{traceId}", h.HandleTraceDetail)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/traces/trace-abc", nil)
-	req = req.WithContext(context.WithValue(req.Context(), auth.CurrentUserKey, &auth.CurrentUser{UserID: "user-1"}))
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserIDContextKey, &auth.CurrentUser{UserID: "user-1"}))
 	w := httptest.NewRecorder()
 
 	mux.ServeHTTP(w, req)
@@ -2255,7 +2268,7 @@ func TestHandleTraceDetail_AuthenticatedButNoProject(t *testing.T) {
 // user whose org has no projects receives 400 (not 401) from analytics spans.
 func TestHandleAnalyticsSpans_AuthenticatedButNoProject(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", strings.NewReader(`{}`))
-	req = req.WithContext(context.WithValue(req.Context(), auth.CurrentUserKey, &auth.CurrentUser{UserID: "user-1"}))
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserIDContextKey, &auth.CurrentUser{UserID: "user-1"}))
 	w := httptest.NewRecorder()
 
 	h := &SpanHandler{
