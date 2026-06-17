@@ -655,4 +655,52 @@ func TestRequireAdmin_NoAuth(t *testing.T) {
 	}
 }
 
+// ---- SessionStoreResolver Tests ----
+
+func TestSessionStoreResolver_ProjectID(t *testing.T) {
+	provider := &fakeSessionProvider{id: "resolved-proj", ok: true}
+	resolver := NewSessionStoreResolver(provider)
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	proj, ok := resolver.ProjectID(r)
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if proj != "resolved-proj" {
+		t.Errorf("got %q, want %q", proj, "resolved-proj")
+	}
+}
+
+func TestSessionStoreResolver_EmptyProjectID(t *testing.T) {
+	provider := &fakeSessionProvider{id: "", ok: false}
+	resolver := NewSessionStoreResolver(provider)
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	_, ok := resolver.ProjectID(r)
+	if ok {
+		t.Error("expected not ok for empty project ID")
+	}
+}
+
+func TestResolveProjectID_SessionStoreResolver(t *testing.T) {
+	provider := &fakeSessionProvider{id: "sess-proj", ok: true}
+	resolver := NewSessionStoreResolver(provider)
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	proj, ok := ResolveProjectID(r, resolver, "")
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if proj != "sess-proj" {
+		t.Errorf("got %q, want %q", proj, "sess-proj")
+	}
+}
+
+// fakeSessionProvider implements the ProjectIDProvider interface.
+type fakeSessionProvider struct {
+	id string
+	ok bool
+}
+
+func (f *fakeSessionProvider) ProjectID(_ *http.Request) (string, bool) {
+	return f.id, f.ok
+}
+
 

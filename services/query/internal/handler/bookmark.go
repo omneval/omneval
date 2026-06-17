@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/metadata"
 )
@@ -17,6 +18,11 @@ import (
 type BookmarkHandler struct {
 	BookmarkStore metadata.BookmarkStore
 	SessionStore  SessionStore
+}
+
+// ProjectID resolves the project ID from the request via the shared auth module.
+func (h *BookmarkHandler) ProjectID(r *http.Request) (string, bool) {
+	return auth.ProjectID(r)
 }
 
 // HandleBookmark handles POST /api/v1/traces/{traceId}/bookmark.
@@ -44,7 +50,8 @@ func (h *BookmarkHandler) HandleBookmark(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	projectID, ok := h.SessionStore.ProjectID(r)
+	// Resolve project ID using the shared resolver (API-key context → session → query param).
+	projectID, ok := h.ProjectID(r)
 	if !ok || projectID == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/metadata"
 )
@@ -25,10 +26,6 @@ import (
 type DatasetHandler struct {
 	DatasetStore metadata.DatasetStore
 	SessionStore SessionStore
-	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
-	// When nil (e.g. handlers created directly in tests), defaults to
-	// defaultResolveProjectID for backwards compatibility.
-	ResolveProjectID func(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool)
 }
 
 // ---- Request / Response Types ----
@@ -105,14 +102,10 @@ func (h *DatasetHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, "")
-	if !ok {
-		return
-	}
+	projectID, ok := auth.ProjectIDWithError(w, r)
+		if !ok {
+			return
+		}
 
 	var req CreateDatasetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -149,14 +142,10 @@ func (h *DatasetHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, "")
-	if !ok {
-		return
-	}
+	projectID, ok := auth.ProjectIDWithError(w, r)
+		if !ok {
+			return
+		}
 
 	datasets, err := h.DatasetStore.ListDatasets(r.Context(), projectID)
 	if err != nil {
@@ -185,14 +174,10 @@ func (h *DatasetHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, "")
-	if !ok {
-		return
-	}
+	projectID, ok := auth.ProjectIDWithError(w, r)
+		if !ok {
+			return
+		}
 
 	datasetID := r.PathValue("id")
 	if datasetID == "" {
@@ -224,14 +209,10 @@ func (h *DatasetHandler) HandleAddItems(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, "")
-	if !ok {
-		return
-	}
+	projectID, ok := auth.ProjectIDWithError(w, r)
+		if !ok {
+			return
+		}
 
 	datasetID := r.PathValue("id")
 	if datasetID == "" {
@@ -280,14 +261,10 @@ func (h *DatasetHandler) HandleAddItemsBatch(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, "")
-	if !ok {
-		return
-	}
+	projectID, ok := auth.ProjectIDWithError(w, r)
+		if !ok {
+			return
+		}
 
 	datasetID := r.PathValue("id")
 	if datasetID == "" {
@@ -342,14 +319,10 @@ func (h *DatasetHandler) HandleListItems(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, "")
-	if !ok {
-		return
-	}
+	projectID, ok := auth.ProjectIDWithError(w, r)
+		if !ok {
+			return
+		}
 
 	datasetID := r.PathValue("id")
 	if datasetID == "" {
@@ -405,14 +378,10 @@ func (h *DatasetHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, "")
-	if !ok {
-		return
-	}
+	projectID, ok := auth.ProjectIDWithError(w, r)
+		if !ok {
+			return
+		}
 
 	datasetID := r.PathValue("id")
 	if datasetID == "" {
@@ -483,3 +452,5 @@ func extractDatasetID(path string) string {
 	}
 	return ""
 }
+
+

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/idgen"
 	"github.com/omneval/omneval/internal/metadata"
@@ -28,10 +29,6 @@ type SpanHandler struct {
 	// BookmarkStore resolves bookmarked trace IDs for "bookmarked" filters —
 	// bookmarks live in the Metadata Store, not DuckDB (ADR-0004).
 	BookmarkStore metadata.BookmarkStore
-	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
-	// When nil (e.g. handlers created directly in tests), defaults to
-	// defaultResolveProjectID for backwards compatibility.
-	ResolveProjectID func(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool)
 }
 
 // SessionStore abstracts session lookup for project ID extraction.
@@ -117,11 +114,7 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, bodyProjectID)
+	projectID, ok := auth.ProjectIDWithError(w, r)
 	if !ok {
 		return
 	}
@@ -221,11 +214,7 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 
 	// Resolve project_id: honor an explicit ?project_id= (the UI project
 	// switcher) after an org-membership check, else the session default.
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, r.URL.Query().Get("project_id"))
+	projectID, ok := auth.ProjectIDWithError(w, r)
 	if !ok {
 		return
 	}
@@ -386,11 +375,7 @@ func (h *SpanHandler) HandleAnalyticsSpans(w http.ResponseWriter, r *http.Reques
 	// project switcher), validated against the user's org; otherwise fall back
 	// to the session default. Shared with the span list / trace detail
 	// endpoints so all read paths resolve to the same project.
-	resolver := h.ResolveProjectID
-	if resolver == nil {
-		resolver = defaultResolveProjectID
-	}
-	projectID, ok := resolver(h.SessionStore, w, r, req.ProjectID)
+	projectID, ok := auth.ProjectIDWithError(w, r)
 	if !ok {
 		return
 	}
@@ -663,26 +648,4 @@ func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"score_id": scoreID})
-}
-
-// extractProjectID resolves the project ID for a request. It checks the
-// API-key context key first (for non-session-authenticated routes like
-// prompts/eval-rules), then falls back to the session store, then to the
-// ?project_id= query parameter (for backwards-compatible test usage).
-func extractProjectID(sess SessionStore, r *http.Request) (string, bool) {
-	// 1. API-key derived project ID (set by RequireSessionOrAPIKey middleware).
-	if pid, ok := r.Context().Value(APIKeyProjectIDKey).(string); ok && pid != "" {
-		return pid, true
-	}
-	// 2. Session store default project.
-	if sess != nil {
-		if projectID, ok := sess.ProjectID(r); ok && projectID != "" {
-			return projectID, true
-		}
-	}
-	// 3. Fallback: ?project_id= query parameter (test backwards-compat).
-	if pid := r.URL.Query().Get("project_id"); pid != "" {
-		return pid, true
-	}
-	return "", false
 }
