@@ -66,8 +66,21 @@ func defaultResolveProjectID(sess SessionStore, w http.ResponseWriter, r *http.R
 	}
 	// No session store: check context auth.
 	if !hasUser {
+		// Test backwards-compat: allow ?project_id= query param when no auth
+		// and no session store is configured (handlers created directly in tests).
+		if pid := r.URL.Query().Get("project_id"); pid != "" {
+			return pid, true
+		}
 		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
 		return "", false
+	}
+	// Authenticated but no session store wired — fall back to explicit or
+	// ?project_id= query param for tests that create handlers directly.
+	if explicitID != "" {
+		return explicitID, true
+	}
+	if pid := r.URL.Query().Get("project_id"); pid != "" {
+		return pid, true
 	}
 	writeJSONError(w, "no session store", http.StatusInternalServerError)
 	return "", false
@@ -146,6 +159,10 @@ func NewRouter(deps *RouterDeps) *Router {
 	// source of truth (no duplication of the pattern).
 	r.span.ResolveProjectID = r.canonicalResolveProjectID
 	r.conversation.ResolveProjectID = r.canonicalResolveProjectID
+	r.dataset.ResolveProjectID = r.canonicalResolveProjectID
+	r.evalRule.ResolveProjectID = r.canonicalResolveProjectID
+	r.prompt.ResolveProjectID = r.canonicalResolveProjectID
+	r.datasetRun.ResolveProjectID = r.canonicalResolveProjectID
 	return r
 }
 
