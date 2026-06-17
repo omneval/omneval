@@ -29,7 +29,7 @@ var APIKeyProjectIDKey APIKeyProjectIDContextKey
 //	POST   /api/v1/eval-rules/preview  — preview matching spans for a filter
 type EvalRuleHandler struct {
 	DB           DBHandle
-	Store        metadata.Store
+	EvalRuleStore metadata.EvalRuleStore
 	SessionStore SessionStore
 	// DefaultJudgeModel is the model used when the request omits judge_model.
 	// Wired from cfg.Eval.LLMModel at startup. Falls back to "gpt-4o-mini" when empty.
@@ -149,7 +149,7 @@ func (h *EvalRuleHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:     time.Now().UTC(),
 	}
 
-	if err := h.Store.CreateEvalRule(r.Context(), rule); err != nil {
+	if err := h.EvalRuleStore.CreateEvalRule(r.Context(), rule); err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
 	}
@@ -175,7 +175,7 @@ func (h *EvalRuleHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rules, err := h.Store.ListEvalRules(r.Context(), projectID)
+	rules, err := h.EvalRuleStore.ListEvalRules(r.Context(), projectID)
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
@@ -219,7 +219,7 @@ func (h *EvalRuleHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify the rule exists and belongs to the project.
-	existing, err := h.Store.GetEvalRule(r.Context(), ruleID)
+	existing, err := h.EvalRuleStore.GetEvalRule(r.Context(), ruleID)
 	if err != nil {
 		if errors.Is(err, metadata.ErrNotFound) {
 			http.Error(w, "eval rule not found", http.StatusNotFound)
@@ -234,7 +234,7 @@ func (h *EvalRuleHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Store.DeleteEvalRule(r.Context(), ruleID); err != nil {
+	if err := h.EvalRuleStore.DeleteEvalRule(r.Context(), ruleID); err != nil {
 		if errors.Is(err, metadata.ErrNotFound) {
 			http.Error(w, "eval rule not found", http.StatusNotFound)
 			return

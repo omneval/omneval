@@ -17,7 +17,7 @@ func newBookmarkMux(t *testing.T, projectID string) (*http.ServeMux, *fake.FakeM
 
 	mux := http.NewServeMux()
 	bh := &BookmarkHandler{
-		Store:        store,
+		BookmarkStore: store,
 		SessionStore: &FakeSessionStore{projectID: projectID},
 	}
 	mux.HandleFunc("POST /api/v1/traces/{traceId}/bookmark", bh.HandleBookmark)

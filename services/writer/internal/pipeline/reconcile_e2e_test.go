@@ -107,7 +107,7 @@ func reconcileTestPipeline(t *testing.T) (*Pipeline, *lake.Lake, *fakeReliableQu
 	buf := buffer.New(store)
 	ledger := newFakeLedger()
 
-	p := New(nil, testPricing, nil, nil, nil).
+	p := New(nil, testPricing, nil, ledger, nil, nil).
 		WithLake(lk).
 		WithBuffer(rq, buf, ledger)
 

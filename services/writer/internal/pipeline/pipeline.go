@@ -50,11 +50,12 @@ type BatchLedger interface {
 // Pipeline drains the Redis ingest queue, computes cost, and commits
 // batches to the Lake (ADR-0004) — the sole storage tier.
 type Pipeline struct {
-	ingest  queue.IngestQueue
-	pricing *pricing.Table
-	store   metadata.Store
-	evalQ   queue.EvalQueue
-	metrics *metrics.WriterMetrics
+	ingest       queue.IngestQueue
+	pricing      *pricing.Table
+	evalRuleStore metadata.EvalRuleStore
+	batchLedger   BatchLedger
+	evalQ        queue.EvalQueue
+	metrics      *metrics.WriterMetrics
 	// lake is the Lake write path. Required when writer.lake.enabled
 	// (the default); a nil lake is a misconfiguration and Run returns an
 	// error at startup.
@@ -74,16 +75,18 @@ type Pipeline struct {
 func New(
 	ingest queue.IngestQueue,
 	pricing *pricing.Table,
-	store metadata.Store,
+	evalRuleStore metadata.EvalRuleStore,
+	batchLedger BatchLedger,
 	evalQ queue.EvalQueue,
 	m *metrics.WriterMetrics,
 ) *Pipeline {
 	return &Pipeline{
-		ingest:  ingest,
-		pricing: pricing,
-		store:   store,
-		evalQ:   evalQ,
-		metrics: m,
+		ingest:       ingest,
+		pricing:      pricing,
+		evalRuleStore: evalRuleStore,
+		batchLedger:  batchLedger,
+		evalQ:        evalQ,
+		metrics:      m,
 	}
 }
 
@@ -461,10 +464,10 @@ func (p *Pipeline) evalSpans(ctx context.Context, span *domain.Span, rules []dom
 
 // listEvalRules fetches all active eval rules for the project.
 func (p *Pipeline) listEvalRules(ctx context.Context) ([]domain.EvalRule, error) {
-	if p.store == nil {
+	if p.evalRuleStore == nil {
 		return nil, nil
 	}
-	raw, err := p.store.ListEvalRules(ctx, "") // all projects
+	raw, err := p.evalRuleStore.ListEvalRules(ctx, "") // all projects
 	if err != nil {
 		return nil, err
 	}

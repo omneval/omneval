@@ -123,8 +123,8 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	deps.Auth = h
 
 	// Create handlers.
-	deps.Span = &handler.SpanHandler{SessionStore: h, Meta: store}
-	deps.Bookmark = &handler.BookmarkHandler{Store: store, SessionStore: h}
+	deps.Span = &handler.SpanHandler{SessionStore: h, BookmarkStore: store}
+	deps.Bookmark = &handler.BookmarkHandler{BookmarkStore: store, SessionStore: h}
 	deps.Conversation = &handler.ConversationHandler{SessionStore: h}
 
 	// Prompt registry handler. A CachingValidator is wired in so that SDK
@@ -133,25 +133,35 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	deps.PromptCache = handler.NewPromptCache(store)
 	deps.APIKeyValidator = internalauth.NewCachingValidator(store)
 	deps.Prompt = &handler.PromptHandler{
-		Store:        store,
+		PromptStore:  store,
 		Cache:        deps.PromptCache,
 		SessionStore: h,
 		Validator:    deps.APIKeyValidator,
 	}
 
 	deps.EvalRule = &handler.EvalRuleHandler{
-		Store:             store,
-		SessionStore:      h,
-		DefaultJudgeModel: cfg.Eval.LLMModel,
+		EvalRuleStore: store,
+		SessionStore:  h,
+		// DefaultJudgeModel is set below.
 	}
 
-	deps.Admin = &handler.AdminHandler{Store: store, SessionStore: h}
+	deps.Admin = &handler.AdminHandler{
+		APIKeyStore:   store,
+		BookmarkStore: store,
+		ProjectStore:  store,
+		SessionStore:  h,
+	}
 
-	deps.Dataset = &handler.DatasetHandler{Store: store, SessionStore: h}
+	deps.Dataset = &handler.DatasetHandler{DatasetStore: store, SessionStore: h}
 
 	// Dataset run handler — read endpoints are always available; POST
 	// (create run) additionally requires the judge LLM client (see routes).
-	deps.DatasetRun = &handler.DatasetRunHandler{Store: store, SessionStore: h}
+	deps.DatasetRun = &handler.DatasetRunHandler{
+		DatasetStore:  store,
+		EvalRuleStore: store,
+		SessionStore:  h,
+	}
+	deps.EvalRule.DefaultJudgeModel = cfg.Eval.LLMModel
 	if cfg.Query.JudgeLLMBaseURL != "" && cfg.Query.JudgeLLMAPIKey != "" {
 		deps.DatasetRun.JudgeClient = playground.NewHTTPClient(cfg.Query.JudgeLLMBaseURL, cfg.Query.JudgeLLMAPIKey)
 		deps.DatasetRun.Cache = deps.PromptCache

@@ -102,7 +102,7 @@ func (f *fakeMetaStore) CreateProject(ctx context.Context, p *domain.Project) er
 func (f *fakeMetaStore) GetProject(ctx context.Context, projectID string) (*domain.Project, error) {
 	return nil, nil
 }
-func (f *fakeMetaStore) ListProjects(ctx context.Context, orgID string) ([]*domain.Project, error) {
+func (f *fakeMetaStore) ListProjects(ctx context.Context, projectID string) ([]*domain.Project, error) {
 	return nil, nil
 }
 func (f *fakeMetaStore) CreateUser(ctx context.Context, u *domain.User) error { return nil }
@@ -245,7 +245,7 @@ func TestPipeline_Run_continuesAfterDequeueError(t *testing.T) {
 		consumeAll: false,
 	}
 
-	pl := New(ingestQ, testPricing, &fakeMetaStore{}, &fakeEvalQueue{}, nil).WithLake(lk)
+	pl := New(ingestQ, testPricing, &fakeMetaStore{}, newFakeLedger(), nil, nil).WithLake(lk)
 
 	pipelineDone := make(chan error, 1)
 	go func() {
@@ -302,7 +302,7 @@ func TestPipeline_Run_continuesAfterWriteFailure(t *testing.T) {
 		dequeueErr: nil,
 		consumeAll: false,
 	}
-	pl := New(ingestQ, testPricing, &fakeMetaStore{}, &fakeEvalQueue{}, nil).WithLake(lk)
+	pl := New(ingestQ, testPricing, &fakeMetaStore{}, newFakeLedger(), nil, nil).WithLake(lk)
 
 	pipelineDone := make(chan error, 1)
 	go func() {
@@ -358,7 +358,7 @@ func TestPipeline_Run_continuesAfterWriteError(t *testing.T) {
 		consumeAll: false,
 	}
 	errWrite := fmt.Errorf("lake: constraint violation")
-	pl := New(ingestQ, testPricing, &fakeMetaStore{}, &fakeEvalQueue{}, nil).WithLake(lk)
+	pl := New(ingestQ, testPricing, &fakeMetaStore{}, newFakeLedger(), nil, nil).WithLake(lk)
 	pl.writeErr = errWrite // inject write error
 
 	pipelineDone := make(chan error, 1)

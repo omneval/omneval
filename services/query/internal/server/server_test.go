@@ -402,7 +402,7 @@ func TestDatasetRunsRoute_NoLLMConfig(t *testing.T) {
 	// Register dataset run endpoints with the real handler but without a
 	// judge LLM client — mirrors the server.go route registration.
 	readHandler := &handler.DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
 		SessionStore: h,
 	}
 	m2.HandleFunc("GET /api/v1/datasets/{id}/runs", readHandler.HandleListRuns)

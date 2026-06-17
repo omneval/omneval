@@ -136,7 +136,8 @@ func TestHandleRun_CreateRun(t *testing.T) {
 	store.CreateDatasetItem(context.Background(), item)
 
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: projectID},
 		JudgeClient:  fakeJudge,
 		Cache:        buildTestPromptCache(store, projectID, rule),
@@ -193,7 +194,8 @@ func TestHandleRun_MissingEvalRuleID(t *testing.T) {
 	store.CreateDataset(context.Background(), ds)
 
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		JudgeClient:  newFakeJudgeLLMClient(),
 	}
@@ -211,7 +213,8 @@ func TestHandleRun_DatasetNotFound(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	fakeJudge := newFakeJudgeLLMClient()
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		JudgeClient:  fakeJudge,
 	}
@@ -237,7 +240,8 @@ func TestHandleRun_EvalRuleNotFound(t *testing.T) {
 	store.CreateDataset(context.Background(), ds)
 
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		JudgeClient:  fakeJudge,
 	}
@@ -260,7 +264,8 @@ func TestHandleRun_JudgeLLMNotConfigured(t *testing.T) {
 	store.CreateEvalRule(context.Background(), rule)
 
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		JudgeClient:  nil, // not configured
 	}
@@ -284,7 +289,8 @@ func TestHandleRun_DatasetHasNoItems(t *testing.T) {
 	store.CreateEvalRule(context.Background(), rule)
 
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		JudgeClient:  fakeJudge,
 		Cache:        buildTestPromptCache(store, "test-proj", rule),
@@ -302,7 +308,8 @@ func TestHandleRun_DatasetHasNoItems(t *testing.T) {
 func TestHandleRun_AuthRequired(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: nil,
 	}
 
@@ -318,7 +325,8 @@ func TestHandleRun_AuthRequired(t *testing.T) {
 func TestHandleRun_MethodNotAllowed(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -368,7 +376,8 @@ func TestHandleListRuns_ReturnsRuns(t *testing.T) {
 
 	// Run evaluation.
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: projectID},
 		JudgeClient:  fakeJudge,
 		Cache:        buildTestPromptCache(store, projectID, rule),
@@ -423,7 +432,7 @@ func TestHandleListRuns_ReturnsRuns(t *testing.T) {
 
 func TestHandleListRuns_AuthRequired(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
-	handler := &DatasetRunHandler{Store: store}
+	handler := &DatasetRunHandler{DatasetStore: store, EvalRuleStore: store}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/datasets/some-id/runs", nil)
 	w := httptest.NewRecorder()
@@ -437,7 +446,8 @@ func TestHandleListRuns_AuthRequired(t *testing.T) {
 func TestHandleListRuns_DatasetNotFound(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -453,7 +463,8 @@ func TestHandleListRuns_DatasetNotFound(t *testing.T) {
 func TestHandleListRuns_MethodNotAllowed(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -469,7 +480,8 @@ func TestHandleListRuns_MethodNotAllowed(t *testing.T) {
 func TestHandleListRuns_EmptyList(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -502,7 +514,8 @@ func TestHandleListRuns_WithoutJudgeClient(t *testing.T) {
 
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		// JudgeClient is nil — simulating no LLM configured.
 	}
@@ -562,7 +575,8 @@ func TestHandleGetRun_ReturnsRunWithItems(t *testing.T) {
 	store.CreateDatasetRunItem(context.Background(), runItem)
 
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -608,7 +622,8 @@ func TestHandleGetRun_NotFound(t *testing.T) {
 	store.CreateDataset(context.Background(), ds)
 
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -623,7 +638,7 @@ func TestHandleGetRun_NotFound(t *testing.T) {
 
 func TestHandleGetRun_AuthRequired(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
-	handler := &DatasetRunHandler{Store: store}
+	handler := &DatasetRunHandler{DatasetStore: store, EvalRuleStore: store}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/datasets/some-id/runs/some-run", nil)
 	w := httptest.NewRecorder()
@@ -637,7 +652,8 @@ func TestHandleGetRun_AuthRequired(t *testing.T) {
 func TestHandleGetRun_MethodNotAllowed(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -666,7 +682,8 @@ func TestHandleGetRunStatus(t *testing.T) {
 	store.CreateDatasetRun(context.Background(), run)
 
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -691,7 +708,8 @@ func TestHandleGetRunStatus(t *testing.T) {
 func TestHandleGetRunStatus_NotFound(t *testing.T) {
 	store := fake.NewFakeMetadataStore()
 	handler := &DatasetRunHandler{
-		Store:        store,
+		DatasetStore: store,
+		EvalRuleStore: store,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -743,9 +761,9 @@ func TestParseJudgeResponse_Whitespace(t *testing.T) {
 // ---- Helpers ----
 
 // buildTestPromptCache creates a minimal prompt cache with the given prompt version.
-func buildTestPromptCache(store metadata.Store, projectID string, rule *domain.EvalRule) *PromptCache {
+func buildTestPromptCache(store metadata.PromptStore, projectID string, rule *domain.EvalRule) *PromptCache {
 	cache := &PromptCache{
-		Store:        store,
+		PromptStore:  store,
 		versionCache: make(map[string]*cacheEntry),
 	}
 	// Pre-seed the prompt version in the cache.

@@ -15,8 +15,8 @@ import (
 // Bookmarks are mutable user state and live in the Metadata Store
 // (ADR-0004 moved them out of the hot DuckDB store).
 type BookmarkHandler struct {
-	Store        metadata.Store
-	SessionStore SessionStore
+	BookmarkStore metadata.BookmarkStore
+	SessionStore  SessionStore
 }
 
 // HandleBookmark handles POST /api/v1/traces/{traceId}/bookmark.
@@ -57,7 +57,7 @@ func (h *BookmarkHandler) HandleBookmark(w http.ResponseWriter, r *http.Request)
 		wantBookmarked = *req.Bookmarked
 	} else {
 		// No body → toggle: check current state.
-		currently, err := h.Store.IsBookmarked(r.Context(), projectID, traceID)
+		currently, err := h.BookmarkStore.IsBookmarked(r.Context(), projectID, traceID)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("bookmark check error: %v", err), http.StatusInternalServerError)
 			return
@@ -66,7 +66,7 @@ func (h *BookmarkHandler) HandleBookmark(w http.ResponseWriter, r *http.Request)
 	}
 
 	if wantBookmarked {
-		err := h.Store.SetBookmark(r.Context(), &domain.Bookmark{
+		err := h.BookmarkStore.SetBookmark(r.Context(), &domain.Bookmark{
 			ProjectID: projectID,
 			TraceID:   traceID,
 		})
@@ -75,7 +75,7 @@ func (h *BookmarkHandler) HandleBookmark(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	} else {
-		if err := h.Store.RemoveBookmark(r.Context(), projectID, traceID); err != nil {
+		if err := h.BookmarkStore.RemoveBookmark(r.Context(), projectID, traceID); err != nil {
 			http.Error(w, fmt.Sprintf("unbookmark error: %v", err), http.StatusInternalServerError)
 			return
 		}
