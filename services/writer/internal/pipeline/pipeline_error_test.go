@@ -1,3 +1,5 @@
+//go:build lake
+
 package pipeline
 
 import (
