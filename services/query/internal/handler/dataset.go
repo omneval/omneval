@@ -170,7 +170,8 @@ func (h *DatasetHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			DatasetID: ds.DatasetID,
 			Name:      ds.Name,
 			CreatedAt: ds.CreatedAt.Format(time.RFC3339),
-			})
+			ItemCount: countItemsForDataset(r.Context(), h.DatasetStore, ds.DatasetID),
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -763,8 +763,7 @@ func TestParseJudgeResponse_Whitespace(t *testing.T) {
 // buildTestPromptCache creates a minimal prompt cache with the given prompt version.
 func buildTestPromptCache(store metadata.PromptStore, projectID string, rule *domain.EvalRule) *PromptCache {
 	cache := &PromptCache{
-		DatasetStore: store,
-		EvalRuleStore: store,
+		PromptStore:  store,
 		versionCache: make(map[string]*cacheEntry),
 	}
 	// Pre-seed the prompt version in the cache.

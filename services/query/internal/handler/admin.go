@@ -32,10 +32,11 @@ type adminAPIKeyInfo struct {
 // - GET  /api/v1/admin/traces/:projId/count — count traces for a project
 // - DEL  /api/v1/admin/traces/:projId — delete all traces for a project
 type AdminHandler struct {
-	DB           DBHandle
-	APIKeyStore  metadata.APIKeyStore
+	DB            DBHandle
+	APIKeyStore   metadata.APIKeyStore
 	BookmarkStore metadata.BookmarkStore
-	SessionStore metadata.SessionStore
+	ProjectStore  metadata.ProjectStore
+	SessionStore  metadata.SessionStore
 
 	// LakeRW is a read-write Lake attachment used for durable admin deletes
 	// (ADR-0004 / #91). Always set in Lake mode (the only mode now).
@@ -55,7 +56,7 @@ func (h *AdminHandler) HandleAdminAPIKeysList(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	projects, err := h.SessionStore.ListProjects(r)
+	projects, err := h.ProjectStore.ListProjects(r.Context(), "")
 	if err != nil {
 		writeJSONError(w, "failed to list projects", http.StatusInternalServerError)
 		return

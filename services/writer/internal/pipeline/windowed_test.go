@@ -85,7 +85,7 @@ func (q *sequenceReliableQueue) Requeue(_ context.Context, e *queue.IngestEntry)
 }
 
 func windowedTestPipeline(rq *sequenceReliableQueue, lk SpanLakeWriter) *Pipeline {
-	return New(nil, testPricing, nil, nil, nil).
+	return New(nil, testPricing, nil, newFakeLedger(), nil, nil).
 		WithLake(lk).
 		WithBuffer(rq, &fakeFetcher{batches: make(map[string][]*domain.Span)}, newFakeLedger())
 }

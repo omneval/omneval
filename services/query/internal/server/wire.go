@@ -148,6 +148,7 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	deps.Admin = &handler.AdminHandler{
 		APIKeyStore:   store,
 		BookmarkStore: store,
+		ProjectStore:  store,
 		SessionStore:  h,
 	}
 

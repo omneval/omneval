@@ -2110,6 +2110,20 @@ func (f *FakeSessionStore) ListProjects(r *http.Request) ([]*domain.Project, err
 	return f.userProjects, nil
 }
 
+// SessionStore methods — minimal stubs so FakeSessionStore implements metadata.SessionStore.
+
+func (f *FakeSessionStore) CreateSession(ctx context.Context, session *domain.Session) error {
+	return nil
+}
+
+func (f *FakeSessionStore) GetSession(ctx context.Context, sessionID string) (*domain.Session, error) {
+	return nil, nil
+}
+
+func (f *FakeSessionStore) DeleteSession(ctx context.Context, sessionID string) error {
+	return nil
+}
+
 func TestHandleProjects_ReturnsSnakeCaseJSON(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
 	w := httptest.NewRecorder()
