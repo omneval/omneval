@@ -25,6 +25,10 @@ import (
 type DatasetHandler struct {
 	Store        metadata.Store
 	SessionStore SessionStore
+	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
+	// When nil (e.g. handlers created directly in tests), defaults to
+	// defaultResolveProjectID for backwards compatibility.
+	ResolveProjectID func(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool)
 }
 
 // ---- Request / Response Types ----
@@ -101,9 +105,12 @@ func (h *DatasetHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
@@ -142,9 +149,12 @@ func (h *DatasetHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
@@ -175,9 +185,12 @@ func (h *DatasetHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
@@ -211,9 +224,12 @@ func (h *DatasetHandler) HandleAddItems(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
@@ -264,9 +280,12 @@ func (h *DatasetHandler) HandleAddItemsBatch(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
@@ -323,9 +342,12 @@ func (h *DatasetHandler) HandleListItems(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
@@ -383,9 +405,12 @@ func (h *DatasetHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 

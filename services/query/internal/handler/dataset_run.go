@@ -27,6 +27,10 @@ type DatasetRunHandler struct {
 	SessionStore SessionStore
 	JudgeClient  judge.LLMClient
 	Cache        *PromptCache
+	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
+	// When nil (e.g. handlers created directly in tests), defaults to
+	// defaultResolveProjectID for backwards compatibility.
+	ResolveProjectID func(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool)
 }
 
 // RunDatasetRequest is the body accepted by POST /api/v1/datasets/:id/runs.
@@ -79,10 +83,13 @@ func (h *DatasetRunHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, datasetID, authErr := h.authDataset(r)
+	projectID, datasetID, authErr := h.authDataset(w, r)
 	if authErr != nil {
 		ae, _ := authErr.(*authDatasetError)
 		http.Error(w, ae.Message, ae.StatusCode)
+		return
+	}
+	if projectID == "" {
 		return
 	}
 
@@ -312,10 +319,13 @@ func (h *DatasetRunHandler) HandleListRuns(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	_, datasetID, authErr := h.authDataset(r)
+	_, datasetID, authErr := h.authDataset(w, r)
 	if authErr != nil {
 		ae, _ := authErr.(*authDatasetError)
 		http.Error(w, ae.Message, ae.StatusCode)
+		return
+	}
+	if datasetID == "" {
 		return
 	}
 
@@ -358,10 +368,13 @@ func (h *DatasetRunHandler) HandleGetRun(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	_, datasetID, authErr := h.authDataset(r)
+	_, datasetID, authErr := h.authDataset(w, r)
 	if authErr != nil {
 		ae, _ := authErr.(*authDatasetError)
 		http.Error(w, ae.Message, ae.StatusCode)
+		return
+	}
+	if datasetID == "" {
 		return
 	}
 
@@ -443,10 +456,13 @@ func (h *DatasetRunHandler) HandleGetRunStatus(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	_, datasetID, authErr := h.authDataset(r)
+	_, datasetID, authErr := h.authDataset(w, r)
 	if authErr != nil {
 		ae, _ := authErr.(*authDatasetError)
 		http.Error(w, ae.Message, ae.StatusCode)
+		return
+	}
+	if datasetID == "" {
 		return
 	}
 
@@ -493,14 +509,21 @@ type authDatasetError struct {
 
 func (e *authDatasetError) Error() string { return e.Message }
 
-// authDataset extracts the project ID from the request session, resolves
-// the dataset ID from the URL, verifies the dataset exists, and confirms
-// the dataset belongs to the requesting project. Returns project ID,
+// authDataset resolves the project ID from the request using the canonical
+// resolver, then resolves the dataset ID from the URL and verifies the
+// dataset belongs to the requesting project. Returns project ID,
 // dataset ID, and nil on success. Returns an authDatasetError on failure.
-func (h *DatasetRunHandler) authDataset(r *http.Request) (string, string, error) {
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		return "", "", &authDatasetError{Message: "unauthorized", StatusCode: http.StatusUnauthorized}
+// If the resolver fails, it writes the response directly and returns
+// ("", "", nil); callers must check projectID == "" before proceeding.
+func (h *DatasetRunHandler) authDataset(w http.ResponseWriter, r *http.Request) (string, string, error) {
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
+		// Resolver already wrote the error response.
+		return "", "", nil
 	}
 
 	datasetID := r.PathValue("id")

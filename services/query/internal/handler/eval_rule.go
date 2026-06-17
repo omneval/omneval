@@ -21,24 +21,6 @@ type APIKeyProjectIDContextKey struct{}
 // extractProjectID which checks this before falling back to session auth.
 var APIKeyProjectIDKey APIKeyProjectIDContextKey
 
-// extractProjectID extracts the authenticated project ID from the request.
-// It checks (in order):
-//  1. API-key project injected into context by RequireSessionOrAPIKey middleware
-//  2. Session store (cookie-based auth)
-//
-// Returns an empty string and false when neither is available.
-func extractProjectID(SessionStore SessionStore, r *http.Request) (string, bool) {
-	// 1. Check API-key project from context (set by API-key middleware).
-	if pid, ok := r.Context().Value(APIKeyProjectIDKey).(string); ok && pid != "" {
-		return pid, true
-	}
-	// 2. Fall back to session-based auth.
-	if SessionStore == nil {
-		return "", false
-	}
-	return SessionStore.ProjectID(r)
-}
-
 // EvalRuleHandler handles eval rule CRUD endpoints:
 //
 //	POST   /api/v1/eval-rules          — create an eval rule
@@ -52,6 +34,10 @@ type EvalRuleHandler struct {
 	// DefaultJudgeModel is the model used when the request omits judge_model.
 	// Wired from cfg.Eval.LLMModel at startup. Falls back to "gpt-4o-mini" when empty.
 	DefaultJudgeModel string
+	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
+	// When nil (e.g. handlers created directly in tests), defaults to
+	// defaultResolveProjectID for backwards compatibility.
+	ResolveProjectID func(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool)
 }
 
 // ---- Request / Response Types ----
@@ -103,9 +89,12 @@ func (h *EvalRuleHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
@@ -177,9 +166,12 @@ func (h *EvalRuleHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
@@ -204,9 +196,12 @@ func (h *EvalRuleHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
@@ -261,9 +256,12 @@ func (h *EvalRuleHandler) HandlePreview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 

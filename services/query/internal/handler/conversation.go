@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"strconv"
 	"time"
-
-	"github.com/omneval/omneval/services/query/internal/auth"
 )
 
 // ConversationHandler handles conversation-related endpoints:
@@ -17,6 +15,10 @@ type ConversationHandler struct {
 	// Lake is the DuckDB handle attached read-only to the Lake.
 	// Conversation reads compile against lake.spans (ADR-0004).
 	Lake DBHandle
+	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
+	// When nil (e.g. handlers created directly in tests), defaults to
+	// defaultResolveProjectID for backwards compatibility.
+	ResolveProjectID func(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool)
 }
 
 // ConversationListItem represents a single conversation in the paginated
@@ -63,50 +65,16 @@ type ConversationDetailResponse struct {
 	Traces         []ConversationTraceItem `json:"traces"`
 }
 
-// resolveProjectID determines the project a request should query, mirroring
-// SpanHandler.resolveProjectID: an explicit ?project_id= (the UI project
-// switcher always sends one) is honored after verifying it belongs to the
-// authenticated user's org; otherwise the session default is used. It writes
-// the appropriate HTTP error and returns "" on failure.
-func (h *ConversationHandler) resolveProjectID(w http.ResponseWriter, r *http.Request) string {
-	explicitID := r.URL.Query().Get("project_id")
-	if explicitID == "" {
-		projectID, ok := h.SessionStore.ProjectID(r)
-		if !ok || projectID == "" {
-			if auth.CurrentUserFromContext(r) != nil {
-				writeJSONError(w, "no project found — create a project first via POST /api/v1/projects", http.StatusBadRequest)
-			} else {
-				writeJSONError(w, "unauthorized", http.StatusUnauthorized)
-			}
-			return ""
-		}
-		return projectID
-	}
-
-	if auth.CurrentUserFromContext(r) == nil {
-		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
-		return ""
-	}
-	userProjects, err := h.SessionStore.ListProjects(r)
-	if err != nil {
-		writeJSONError(w, "unauthorized", http.StatusUnauthorized)
-		return ""
-	}
-	for _, p := range userProjects {
-		if p.ProjectID == explicitID {
-			return explicitID
-		}
-	}
-	writeJSONError(w, "project_id not found in user's organizations", http.StatusForbidden)
-	return ""
-}
-
 // HandleListConversations returns paginated conversation list with aggregate
 // metadata, ordered by most recent start_time descending.
 // Supports keyset pagination via from/to/limit/cursor query parameters.
 func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *http.Request) {
-	projectID := h.resolveProjectID(w, r)
-	if projectID == "" {
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, r.URL.Query().Get("project_id"))
+	if !ok {
 		return
 	}
 
@@ -207,8 +175,12 @@ func (h *ConversationHandler) HandleListConversations(w http.ResponseWriter, r *
 // HandleConversationDetail returns ordered trace list with root span metadata
 // for a single conversation.
 func (h *ConversationHandler) HandleConversationDetail(w http.ResponseWriter, r *http.Request) {
-	projectID := h.resolveProjectID(w, r)
-	if projectID == "" {
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, r.URL.Query().Get("project_id"))
+	if !ok {
 		return
 	}
 

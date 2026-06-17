@@ -18,9 +18,7 @@ import (
 	"github.com/omneval/omneval/internal/config"
 	_ "github.com/omneval/omneval/internal/duckdbfix"
 	"github.com/omneval/omneval/internal/metadata"
-	"github.com/omneval/omneval/services/query/internal/auth"
 	"github.com/omneval/omneval/services/query/internal/handler"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 //go:embed ui/dist
@@ -165,117 +163,31 @@ func RunWired(deps *WiredDeps) error {
 }
 
 // buildRouter wires every route against the handlers in deps and wraps them
-// in the session/API-key auth middleware.
+// in the session/API-key auth middleware, using the unified Router module.
 func buildRouter(deps *WiredDeps) http.Handler {
-	cfg := deps.Cfg
-	store := deps.Store
-	h := deps.Auth
+	// Wire the UI server function into the router so it can serve static files.
+	handler.InitServeUI(serveUI)
 
-	mux := http.NewServeMux()
-
-	// Register auth routes (login, logout, invite, change password).
-	h.Register(mux)
-
-	// Admin routes (require admin session).
-	adminMw := auth.RequireAdmin(store, cfg.Auth.SecureCookie, deps.SessionTTL, cfg.Auth.AdminEmail)
-	mux.HandleFunc("GET /api/v1/admin/api-keys", adminMw(http.HandlerFunc(deps.Admin.HandleAdminAPIKeysList)).ServeHTTP)
-	mux.HandleFunc("DELETE /api/v1/admin/api-keys/", adminMw(http.HandlerFunc(deps.Admin.HandleAdminAPIKeyDelete)).ServeHTTP)
-	mux.HandleFunc("GET /api/v1/admin/traces/", adminMw(http.HandlerFunc(deps.Admin.HandleAdminTracesCount)).ServeHTTP)
-	mux.HandleFunc("DELETE /api/v1/admin/traces/", adminMw(http.HandlerFunc(deps.Admin.HandleAdminTracesDelete)).ServeHTTP)
-	mux.HandleFunc("DELETE /api/v1/admin/projects/", adminMw(http.HandlerFunc(deps.Admin.HandleAdminProjectsDelete)).ServeHTTP)
-
-	// Projects list for the UI project switcher.
-	mux.HandleFunc("GET /api/v1/projects", deps.Span.HandleProjects)
-
-	// Span list with keyset pagination.
-	mux.HandleFunc("POST /api/v1/spans/query", deps.Span.HandleSpansQuery)
-
-	// Analytics: parameterized SQL compilation from structured DSL queries.
-	mux.HandleFunc("POST /api/v1/analytics/spans", deps.Span.HandleAnalyticsSpans)
-
-	// Trace detail waterfall.
-	mux.HandleFunc("GET /api/v1/traces/{traceId}", deps.Span.HandleTraceDetail)
-
-	// Trace bookmark toggle.
-	mux.HandleFunc("POST /api/v1/traces/{traceId}/bookmark", deps.Bookmark.HandleBookmark)
-
-	// Conversation list and detail endpoints.
-	mux.HandleFunc("GET /api/v1/conversations", deps.Conversation.HandleListConversations)
-	mux.HandleFunc("GET /api/v1/conversations/{conversationId}", deps.Conversation.HandleConversationDetail)
-
-	// Prompt Registry endpoints.
-	mux.HandleFunc("GET /api/v1/prompts", deps.Prompt.HandleListPrompts)
-	mux.HandleFunc("POST /api/v1/prompts", deps.Prompt.HandleCreatePrompt)
-	mux.HandleFunc("GET /api/v1/prompts/{name}", deps.Prompt.HandleGetPrompt)
-	mux.HandleFunc("GET /api/v1/prompts/{name}/versions", deps.Prompt.HandleListPromptVersions)
-	mux.HandleFunc("PUT /api/v1/prompts/{name}/labels/{label}", deps.Prompt.HandleSetLabel)
-
-	// Eval rules endpoints.
-	mux.HandleFunc("POST /api/v1/eval-rules", deps.EvalRule.HandleCreate)
-	mux.HandleFunc("GET /api/v1/eval-rules", deps.EvalRule.HandleList)
-	mux.HandleFunc("POST /api/v1/eval-rules/preview", deps.EvalRule.HandlePreview)
-	mux.HandleFunc("DELETE /api/v1/eval-rules/{id}", deps.EvalRule.HandleDelete)
-
-	// Dataset endpoints.
-	mux.HandleFunc("POST /api/v1/datasets", deps.Dataset.HandleCreate)
-	mux.HandleFunc("GET /api/v1/datasets", deps.Dataset.HandleList)
-	mux.HandleFunc("GET /api/v1/datasets/{id}", deps.Dataset.HandleGet)
-	mux.HandleFunc("POST /api/v1/datasets/{id}/items", deps.Dataset.HandleAddItems)
-	mux.HandleFunc("POST /api/v1/datasets/{id}/items/batch", deps.Dataset.HandleAddItemsBatch)
-	mux.HandleFunc("GET /api/v1/datasets/{id}/items", deps.Dataset.HandleListItems)
-	mux.HandleFunc("DELETE /api/v1/datasets/{id}", deps.Dataset.HandleDelete)
-
-	// Dataset run endpoints — read endpoints (list, get, status) are always
-	// available. POST (create run) requires judge LLM config.
-	if deps.DatasetRun.JudgeClient != nil {
-		mux.HandleFunc("POST /api/v1/datasets/{id}/runs", deps.DatasetRun.HandleRun)
-	}
-	mux.HandleFunc("GET /api/v1/datasets/{id}/runs", deps.DatasetRun.HandleListRuns)
-	mux.HandleFunc("GET /api/v1/datasets/{id}/runs/{runId}", deps.DatasetRun.HandleGetRun)
-	mux.HandleFunc("GET /api/v1/datasets/{id}/runs/{runId}/status", deps.DatasetRun.HandleGetRunStatus)
-
-	// Playground endpoint (route always registered; the handler returns 503
-	// when the LLM is not configured).
-	mux.HandleFunc("POST /api/v1/playground/run", deps.Playground.HandleRun)
-
-	// Score write endpoint (for eval worker score write-back, no auth required).
-	// Scores are committed directly to the Lake via the AdminLake attachment
-	// (ADR-0004/#91); SpanDB resolves span_start_time for partitioning.
-	var spanDB handler.DBHandle = deps.AdminLake
-	mux.HandleFunc("POST /api/v1/scores", handler.NewScoreHandler(deps.AdminLake, spanDB).ServeHTTP)
-
-	// Prometheus metrics.
-	mux.HandleFunc("GET /metrics", promhttp.Handler().ServeHTTP)
-
-	// Serve embedded UI for all other routes (SPA fallback to index.html).
-	mux.HandleFunc("/", serveUI)
-
-	sessionMw := auth.RequireAuth(store, cfg.Auth.SecureCookie, deps.SessionTTL)
-	promptGetMw := auth.RequireSessionOrAPIKey(store, deps.APIKeyValidator, cfg.Auth.SecureCookie, deps.SessionTTL, handler.APIKeyProjectIDKey)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-
-		// Public routes bypass authentication entirely.
-		if IsPublicAPIPath(path) {
-			mux.ServeHTTP(w, r)
-			return
-		}
-
-		// Prompt and eval-rule endpoints accept X-API-Key (for SDKs) or session cookie.
-		if strings.HasPrefix(path, "/api/v1/prompts") || strings.HasPrefix(path, "/api/v1/eval-rules") {
-			promptGetMw(mux).ServeHTTP(w, r)
-			return
-		}
-
-		// All other protected API routes require a valid session cookie.
-		if strings.HasPrefix(path, "/api/v1/") {
-			sessionMw(mux).ServeHTTP(w, r)
-			return
-		}
-
-		// SPA fallback and anything else.
-		mux.ServeHTTP(w, r)
+	// Build the Router from wired deps and register all routes.
+	router := handler.NewRouter(&handler.RouterDeps{
+		Cfg:             deps.Cfg,
+		Store:           deps.Store,
+		Auth:            deps.Auth,
+		Span:            deps.Span,
+		Bookmark:        deps.Bookmark,
+		Conversation:    deps.Conversation,
+		Prompt:          deps.Prompt,
+		EvalRule:        deps.EvalRule,
+		Admin:           deps.Admin,
+		Dataset:         deps.Dataset,
+		DatasetRun:      deps.DatasetRun,
+		Playground:      deps.Playground,
+		AdminLake:       deps.AdminLake,
+		SessionTTL:      deps.SessionTTL,
+		APIKeyValidator: deps.APIKeyValidator,
 	})
+
+	return router.RegisterRoutes(http.NewServeMux())
 }
 
 // openMetadataStore opens the configured metadata store via the shared

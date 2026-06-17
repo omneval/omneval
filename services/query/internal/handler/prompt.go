@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,8 +32,12 @@ type PromptHandler struct {
 	// The middleware (RequireSessionOrAPIKey) injects the validated
 	// project ID into the request context; this field is kept for
 	// documentation/wiring purposes only — the handler itself reads
-	// from context via extractProjectID.
+	// from context via the canonical resolver.
 	Validator internalauth.Validator
+	// ResolveProjectID is the canonical project ID resolver, set by NewRouter.
+	// When nil (e.g. handlers created directly in tests), defaults to
+	// defaultResolveProjectID for backwards compatibility.
+	ResolveProjectID func(sess SessionStore, w http.ResponseWriter, r *http.Request, explicitID string) (string, bool)
 }
 
 // HandleCreatePrompt handles POST /api/v1/prompts.
@@ -46,10 +48,13 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Extract project_id from API-key context or session.
-	projectID, ok := extractProjectID(h.SessionStore, r)
-	if !ok || projectID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	// Extract project_id from the canonical resolver.
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
+	}
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
@@ -180,12 +185,12 @@ func (h *PromptHandler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) 
 	versionQuery := r.URL.Query().Get("version")
 	labelQuery := r.URL.Query().Get("label")
 
-	// Resolve project_id from session first, fall back to ?project_id= query
-	// param (kept for backwards-compat with tests that omit a SessionStore).
-	projectID, _ := extractProjectID(h.SessionStore, r)
-	if projectID == "" {
-		projectID = r.URL.Query().Get("project_id")
+	// Resolve project_id from the canonical resolver.
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
 	}
+	projectID, _ := resolver(h.SessionStore, w, r, "")
 
 	var pv *domain.PromptVersion
 	var getErr error
@@ -258,16 +263,12 @@ func (h *PromptHandler) HandleListPrompts(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var projectID string
-	var ok bool
-	if h.SessionStore != nil {
-		projectID, ok = h.SessionStore.ProjectID(r)
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
 	}
-	if !ok || projectID == "" {
-		projectID = r.URL.Query().Get("project_id")
-	}
-	if projectID == "" {
-		http.Error(w, "project_id is required", http.StatusBadRequest)
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
@@ -355,10 +356,11 @@ func (h *PromptHandler) HandleSetLabel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate the version exists.
-	projectID, _ := extractProjectID(h.SessionStore, r)
-	if projectID == "" {
-		projectID = r.URL.Query().Get("project_id")
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
 	}
+	projectID, _ := resolver(h.SessionStore, w, r, "")
 	_, err := h.Store.GetPromptVersion(r.Context(), projectID, name, req.Version)
 	if err != nil {
 		if errors.Is(err, metadata.ErrNotFound) {
@@ -393,120 +395,6 @@ func (h *PromptHandler) HandleSetLabel(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---- In-Process Caches ----
-
-// cacheEntry holds a cached prompt version with an optional expiration time.
-// A zero ExpiresAt means the entry never expires (used for the version cache).
-type cacheEntry struct {
-	PromptVersion *domain.PromptVersion
-	ExpiresAt     time.Time
-}
-
-// PromptCache provides in-process caching for prompt lookups:
-//   - Version cache: unbounded (no eviction)
-//   - Label cache: 30-second TTL expiry
-type PromptCache struct {
-	mu           sync.RWMutex
-	Store        metadata.Store
-	versionCache map[string]*cacheEntry
-	labelCache   map[string]*cacheEntry
-}
-
-// NewPromptCache creates a new PromptCache backed by the given Store.
-func NewPromptCache(store metadata.Store) *PromptCache {
-	return &PromptCache{
-		Store:        store,
-		versionCache: make(map[string]*cacheEntry),
-		labelCache:   make(map[string]*cacheEntry),
-	}
-}
-
-// versionCacheKey builds the cache key for a prompt version lookup.
-func versionCacheKey(projectID, name string, version int64) string {
-	return projectID + "|" + name + "|" + strconv.FormatInt(version, 10)
-}
-
-// labelCacheKey builds the cache key for a prompt label lookup.
-func labelCacheKey(projectID, name, label string) string {
-	return projectID + "|" + name + "|" + label
-}
-
-// GetVersion retrieves a prompt version from the cache or the store.
-// The version cache never evicts (unbounded) in Phase 1.
-func (c *PromptCache) GetVersion(ctx context.Context, projectID, name string, version int64) (*domain.PromptVersion, error) {
-	key := versionCacheKey(projectID, name, version)
-
-	c.mu.RLock()
-	if entry, ok := c.versionCache[key]; ok {
-		c.mu.RUnlock()
-		return entry.PromptVersion, nil
-	}
-	c.mu.RUnlock()
-
-	// Cache miss — fetch from store.
-	pv, err := c.Store.GetPromptVersion(ctx, projectID, name, version)
-	if err != nil {
-		return nil, err
-	}
-
-	c.mu.Lock()
-	// Double-check after acquiring write lock.
-	if entry, ok := c.versionCache[key]; ok {
-		c.mu.Unlock()
-		return entry.PromptVersion, nil
-	}
-	c.versionCache[key] = &cacheEntry{PromptVersion: pv}
-	c.mu.Unlock()
-
-	return pv, nil
-}
-
-// GetLabel retrieves a prompt version resolved by label from the cache or the store.
-// The label cache expires after 30 seconds.
-func (c *PromptCache) GetLabel(ctx context.Context, projectID, name, label string) (*domain.PromptVersion, error) {
-	key := labelCacheKey(projectID, name, label)
-
-	c.mu.RLock()
-	if entry, ok := c.labelCache[key]; ok {
-		if time.Now().Before(entry.ExpiresAt) {
-			pv := entry.PromptVersion
-			c.mu.RUnlock()
-			return pv, nil
-		}
-		// Expired — fall through to store.
-	}
-	c.mu.RUnlock()
-
-	// Cache miss or expired — fetch from store.
-	pv, err := c.Store.GetPromptByLabel(ctx, projectID, name, label)
-	if err != nil {
-		return nil, err
-	}
-
-	c.mu.Lock()
-	// Double-check after acquiring write lock.
-	if entry, ok := c.labelCache[key]; ok && time.Now().Before(entry.ExpiresAt) {
-		pv = entry.PromptVersion
-	} else {
-		c.labelCache[key] = &cacheEntry{
-			PromptVersion: pv,
-			ExpiresAt:     time.Now().Add(30 * time.Second),
-		}
-	}
-	c.mu.Unlock()
-
-	return pv, nil
-}
-
-// InvalidateLabel removes a label cache entry so the next lookup hits the store.
-// Called after label reassignment.
-func (c *PromptCache) InvalidateLabel(projectID, name, label string) {
-	key := labelCacheKey(projectID, name, label)
-	c.mu.Lock()
-	delete(c.labelCache, key)
-	c.mu.Unlock()
-}
-
 // HandleListPromptVersions handles GET /api/v1/prompts/:name/versions
 // and returns all versions for a prompt name (uses metadata store).
 // Infers project_id from session context; falls back to query param.
@@ -525,12 +413,13 @@ func (h *PromptHandler) HandleListPromptVersions(w http.ResponseWriter, r *http.
 		return
 	}
 
-	projectID, _ := extractProjectID(h.SessionStore, r)
-	if projectID == "" {
-		projectID = r.URL.Query().Get("project_id")
+	// Extract project_id from the canonical resolver.
+	resolver := h.ResolveProjectID
+	if resolver == nil {
+		resolver = defaultResolveProjectID
 	}
-	if projectID == "" {
-		http.Error(w, "project_id is required", http.StatusBadRequest)
+	projectID, ok := resolver(h.SessionStore, w, r, "")
+	if !ok {
 		return
 	}
 
