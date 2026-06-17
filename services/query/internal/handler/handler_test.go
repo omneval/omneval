@@ -20,6 +20,7 @@ import (
 	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/lake/lakeservertest"
 	"github.com/omneval/omneval/services/query/internal/auth"
+	"github.com/omneval/omneval/services/query/internal/cursor"
 	"github.com/omneval/omneval/services/query/internal/query"
 )
 
@@ -2475,25 +2476,18 @@ func TestLakeSQL_Integration(t *testing.T) {
 	defer rows.Close()
 
 	type traceRow struct {
-		traceID       string
-		spanCount     int64
-		totalInput    int64
-		totalOutput   int64
-		costUSD       float64
-		hasError      bool
-		startTime     time.Time
+		traceID   string
+		spanCount int64
 	}
 	var results []traceRow
 	for rows.Next() {
-		var spanID, traceID, parentID, conversationID, projectID, serviceName, name, kind, startTime, endTime, model, input, output, promptName, promptVersion, statusCode, statusMessage string
-		var inputTokens, outputTokens int64
-		var costUSD float64
-		var spanCount int64
-		var kindCounts string
-		err = rows.Scan(&spanID, &traceID, &parentID, &conversationID, &projectID, &serviceName, &name, &kind, &startTime, &endTime, &model, &input, &output, &inputTokens, &outputTokens, &costUSD, &promptName, &promptVersion, &statusCode, &statusMessage, &spanCount, &kindCounts)
+		var row [22]any
+		err = rows.Scan(&row[0], &row[1], &row[2], &row[3], &row[4], &row[5], &row[6], &row[7], &row[8], &row[9], &row[10], &row[11], &row[12], &row[13], &row[14], &row[15], &row[16], &row[17], &row[18], &row[19], &row[20], &row[21])
 		if err != nil {
 			t.Fatalf("scan row: %v", err)
 		}
+		traceID := row[1].(string)
+		spanCount := row[20].(int64)
 		results = append(results, traceRow{
 			traceID:   traceID,
 			spanCount: spanCount,
@@ -2553,16 +2547,15 @@ func TestLakeSQL_Integration(t *testing.T) {
 	defer rows2.Close()
 
 	var firstTraceID string
-	var firstSpanID, firstStartTime string
 	for rows2.Next() {
-		var raws [22]sql.RawBytes
-		err = rows2.Scan(&raws[0], &raws[1], &raws[2], &raws[3], &raws[4], &raws[5], &raws[6], &raws[7], &raws[8], &raws[9], &raws[10], &raws[11], &raws[12], &raws[13], &raws[14], &raws[15], &raws[16], &raws[17], &raws[18], &raws[19], &raws[20], &raws[21])
+		var row [22]any
+		err = rows2.Scan(&row[0], &row[1], &row[2], &row[3], &row[4], &row[5], &row[6], &row[7], &row[8], &row[9], &row[10], &row[11], &row[12], &row[13], &row[14], &row[15], &row[16], &row[17], &row[18], &row[19], &row[20], &row[21])
 		if err != nil {
 			t.Fatalf("scan keyset row: %v", err)
 		}
-		firstSpanID = string(raws[0])
-		firstTraceID = string(raws[1])
-		firstStartTime = string(raws[8])
+		if firstTraceID == "" {
+			firstTraceID = row[1].(string)
+		}
 	}
 	if err := rows2.Err(); err != nil {
 		t.Fatalf("rows iteration (keyset): %v", err)
@@ -2579,7 +2572,7 @@ func TestLakeSQL_Integration(t *testing.T) {
 		From:    baseTime.Add(-time.Hour),
 		To:      baseTime.Add(time.Hour),
 		Limit:   1,
-		Cursor:  query.Cursor{StartTime: baseTime.Add(10 * time.Second), SpanID: "c-1"},
+		Cursor:  cursor.Encode(cursor.Cursor{StartTime: baseTime.Add(10 * time.Second), SpanID: "c-1"}),
 	})
 	if err != nil {
 		t.Fatalf("NewSpanQuery with cursor: %v", err)
@@ -2598,12 +2591,14 @@ func TestLakeSQL_Integration(t *testing.T) {
 
 	var cursorTraceID string
 	for rows3.Next() {
-		var raws [22]sql.RawBytes
-		err = rows3.Scan(&raws[0], &raws[1], &raws[2], &raws[3], &raws[4], &raws[5], &raws[6], &raws[7], &raws[8], &raws[9], &raws[10], &raws[11], &raws[12], &raws[13], &raws[14], &raws[15], &raws[16], &raws[17], &raws[18], &raws[19], &raws[20], &raws[21])
+		var row [22]any
+		err = rows3.Scan(&row[0], &row[1], &row[2], &row[3], &row[4], &row[5], &row[6], &row[7], &row[8], &row[9], &row[10], &row[11], &row[12], &row[13], &row[14], &row[15], &row[16], &row[17], &row[18], &row[19], &row[20], &row[21])
 		if err != nil {
 			t.Fatalf("scan cursor row: %v", err)
 		}
-		cursorTraceID = string(raws[1])
+		if cursorTraceID == "" {
+			cursorTraceID = row[1].(string)
+		}
 	}
 	if err := rows3.Err(); err != nil {
 		t.Fatalf("rows iteration (cursor): %v", err)
