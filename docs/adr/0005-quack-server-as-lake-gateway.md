@@ -1,6 +1,6 @@
 # Quack Server is the sole gateway to the Lake
 
-Status: accepted (amends ADR-0004)
+Status: accepted (amends ADR-0004; catalog-driver framing superseded by ADR-0006 — see there for current Catalog-backend guidance)
 
 ADR-0004 gave every Writer and Query API pod a direct DuckLake Catalog (Postgres) attachment, planning to bridge to a horizontally-scalable Writer fleet later via Quack (#89) and cut over in a final phase (#90). Investigating #105 surfaced DuckDB's Quack remote protocol (beta as of DuckDB 1.5.3, requiring a driver bump from the currently-pinned `duckdb-go/v2 v2.5.0`/DuckDB 1.4.1 to `v2.10503.1`/DuckDB 1.5.3) as a client-server RPC layer purpose-built for this. We decided to make it the foundation from day one rather than a later migration step: a new standalone **Quack Server** service (`services/quack/`) becomes the *only* process holding a direct DuckLake Catalog/data-path connection. Every other service — Writer, Query API, the backfill tool, and eventually Eval if it needs Lake reads — attaches via `ATTACH 'quack://...'` as a thin Quack client. `internal/lake`'s direct Postgres-Catalog and local-file-Catalog attach modes are removed entirely, including for the demo profile, in favor of a single `quack://` code path everywhere.
 

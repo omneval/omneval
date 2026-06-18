@@ -1,6 +1,6 @@
 # DuckLake replaces the hot/snapshot/cold storage tiers
 
-Status: accepted (supersedes ADR-0001)
+Status: accepted (supersedes ADR-0001; §Catalog superseded by ADR-0006 — see there for current Catalog-backend guidance)
 
 The three-tier storage design (hot DuckDB on a PVC, full-file S3 snapshot every 30s, Hive-partitioned Parquet archive) hit two walls on the path to Langfuse-scale ingestion: the Writer is a single replica because DuckDB allows one RW process, and the snapshot sync re-ships the entire database file every 30 seconds — already slow enough in production to need a startupProbe workaround. We decided to replace all three tiers with a single DuckLake table set (spans, scores) stored as Parquet on S3, with the DuckLake catalog in Postgres (the same instance as the metadata store). DuckLake gives ACID commits over Parquet through catalog transactions, which makes the Writer a horizontally scalable stateless Deployment and lets Query API pods read committed data directly — no snapshot download, no hot/cold UNION, no archival sweep.
 

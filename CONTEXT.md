@@ -29,7 +29,7 @@ The single authoritative span/score store: DuckLake tables (`spans`, `scores`) s
 _Avoid_: hot store, cold store, snapshot, archive
 
 ### Catalog
-The Postgres database holding DuckLake table metadata and transaction state — the serialization point that makes multiple concurrent writers safe. Shares the Postgres instance with the Metadata Store. The demo profile may use a local single-writer catalog instead. Only the Quack Server holds a direct Catalog connection (see ADR-0005); every other service reaches the Lake through it.
+The database holding DuckLake table metadata and transaction state. Defaults to a local DuckDB file on the Quack Server's PVC in every profile (see ADR-0006) — concurrent-writer safety comes from the Quack Server being the sole process with a direct Catalog connection (ADR-0005), not from the Catalog backend itself. A Postgres-backed Catalog (sharing the Metadata Store's Postgres instance) remains supported as an explicit opt-out via `quack.server.catalogDriver: postgres`, but is no longer the default for any profile. Only the Quack Server holds a direct Catalog connection; every other service reaches the Lake through it.
 
 ### Quack Server
 The standalone service (`services/quack/`) that is the sole holder of a direct DuckLake Catalog and data-path connection, running `quack_serve()`. Every other service — Writer, Query API, the backfill tool — attaches to the Lake as a Quack client via `ATTACH 'quack://...'`, never directly. Also owns Table Maintenance. See ADR-0005.
@@ -52,7 +52,7 @@ A Trace whose root span (the Span with no `ParentID`) has not yet been committed
 _Avoid_: active trace, live trace (use "in-progress trace")
 
 ### Table Maintenance
-The scheduled compaction duty of the Quack Server (ADR-0005): flush inlined data (`ducklake_flush_inlined_data`), merge adjacent small Parquet files, expire old DuckLake snapshots, and clean orphaned/rewritten files. Required because frequent small commits fragment the Lake and DuckLake 1.5 inlines small writes/deletes into Catalog metadata until flushed. Replaces the former leader-elected-Writer duty — there is no leader election after ADR-0005 (`internal/leader` retired).
+The scheduled compaction duty of the Quack Server (ADR-0005): flush inlined data (`ducklake_flush_inlined_data`), merge adjacent small Parquet files, expire old DuckLake snapshots, and clean orphaned/rewritten files. Required because frequent small commits fragment the Lake and DuckLake 1.5 inlines small writes/deletes into Catalog metadata until flushed. Replaces the former leader-elected-Writer duty — there is no leader election after ADR-0005 (`internal/leader` retired). Since ADR-0006, Table Maintenance also owns Catalog backup: `CHECKPOINT` then copy the Catalog file to S3 on a configurable interval, pruning old backups beyond a configurable retention count.
 _Avoid_: leader-elected writer, leader writer
 
 ### Phase 1 UI Routes
@@ -165,7 +165,7 @@ Implementation proceeds as vertical TDD slices — each slice has a failing test
 Slices 8–12 are independent of each other once slices 1–4 are done.
 
 ### Disaster Recovery
-The Lake lives entirely on S3, so span/score durability is S3 durability. The Catalog (Postgres) is the only stateful component needing backup — standard Postgres backup tooling applies. Unprocessed batches survive in the Ingest Buffer and are replayable.
+The Lake's span/score data lives entirely on S3, so its durability is S3 durability. The Catalog (a local DuckDB file by default, see ADR-0006) is the only stateful component needing backup: Table Maintenance periodically runs `CHECKPOINT` then copies the Catalog file to S3, pruning older backups beyond a retention count — interval and retention are configurable Helm values, not hardcoded. There is no Catalog replication or standby; recovery from a lost Catalog file means restoring the latest S3 backup or, failing that, rebuilding the Catalog from the Lake's Parquet files (discarding snapshot/time-travel history). Unprocessed batches survive in the Ingest Buffer and are replayable.
 
 ### CORS
 CORS is enabled on the Ingest API only — the Query API (same-origin with the UI) and Writer Service (internal-only) do not need it. Configurable via `ingest.cors_allowed_origins` in `omneval.yaml`; defaults to `*` (the API key is the auth mechanism). Allowed methods: `POST, OPTIONS`. Allowed headers: `Content-Type, Authorization`. Preflight `OPTIONS` requests return `204`.
