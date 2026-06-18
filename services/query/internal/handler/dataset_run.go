@@ -567,3 +567,14 @@ func extractRunID(path string) string {
 	}
 	return ""
 }
+
+// Routes returns the dataset-run-related API routes as AuthRoute entries with
+// AuthPolicySession so the Router can use them for policy-based auth dispatch.
+func (h *DatasetRunHandler) Routes() []AuthRoute {
+	return []AuthRoute{
+		{Method: http.MethodPost, Path: "/api/v1/datasets/{id}/runs", Handler: http.HandlerFunc(h.HandleRun), Policy: AuthPolicySession},
+		{Method: http.MethodGet, Path: "/api/v1/datasets/{id}/runs", Handler: http.HandlerFunc(h.HandleListRuns), Policy: AuthPolicySession},
+		{Method: http.MethodGet, Path: "/api/v1/datasets/{id}/runs/{runId}", Handler: http.HandlerFunc(h.HandleGetRun), Policy: AuthPolicySession},
+		{Method: http.MethodGet, Path: "/api/v1/datasets/{id}/runs/{runId}/status", Handler: http.HandlerFunc(h.HandleGetRunStatus), Policy: AuthPolicySession},
+	}
+}

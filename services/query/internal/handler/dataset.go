@@ -471,4 +471,18 @@ func extractDatasetID(path string) string {
 	return ""
 }
 
+// Routes returns the dataset-related API routes as AuthRoute entries with
+// AuthPolicySession so the Router can use them for policy-based auth dispatch.
+func (h *DatasetHandler) Routes() []AuthRoute {
+	return []AuthRoute{
+		{Method: http.MethodPost, Path: "/api/v1/datasets", Handler: http.HandlerFunc(h.HandleCreate), Policy: AuthPolicySession},
+		{Method: http.MethodGet, Path: "/api/v1/datasets", Handler: http.HandlerFunc(h.HandleList), Policy: AuthPolicySession},
+		{Method: http.MethodGet, Path: "/api/v1/datasets/{datasetId}", Handler: http.HandlerFunc(h.HandleGet), Policy: AuthPolicySession},
+		{Method: http.MethodPost, Path: "/api/v1/datasets/{datasetId}/items", Handler: http.HandlerFunc(h.HandleAddItems), Policy: AuthPolicySession},
+		{Method: http.MethodPost, Path: "/api/v1/datasets/{datasetId}/items/batch", Handler: http.HandlerFunc(h.HandleAddItemsBatch), Policy: AuthPolicySession},
+		{Method: http.MethodGet, Path: "/api/v1/datasets/{datasetId}/items", Handler: http.HandlerFunc(h.HandleListItems), Policy: AuthPolicySession},
+		{Method: http.MethodDelete, Path: "/api/v1/datasets/{datasetId}", Handler: http.HandlerFunc(h.HandleDelete), Policy: AuthPolicySession},
+	}
+}
+
 

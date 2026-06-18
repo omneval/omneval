@@ -410,3 +410,15 @@ func hasFilterConditions(f domain.EvalFilter) bool {
 	}
 	return false
 }
+
+// Routes returns the eval-rule-related API routes as AuthRoute entries with
+// AuthPolicyAPIKeyOrSession so the Router can use them for policy-based auth
+// dispatch.
+func (h *EvalRuleHandler) Routes() []AuthRoute {
+	return []AuthRoute{
+		{Method: http.MethodPost, Path: "/api/v1/eval-rules", Handler: http.HandlerFunc(h.HandleCreate), Policy: AuthPolicyAPIKeyOrSession},
+		{Method: http.MethodGet, Path: "/api/v1/eval-rules", Handler: http.HandlerFunc(h.HandleList), Policy: AuthPolicyAPIKeyOrSession},
+		{Method: http.MethodDelete, Path: "/api/v1/eval-rules/{ruleId}", Handler: http.HandlerFunc(h.HandleDelete), Policy: AuthPolicyAPIKeyOrSession},
+		{Method: http.MethodPost, Path: "/api/v1/eval-rules/preview", Handler: http.HandlerFunc(h.HandlePreview), Policy: AuthPolicyAPIKeyOrSession},
+	}
+}

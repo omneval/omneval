@@ -233,6 +233,18 @@ func (h *AdminHandler) HandleAdminProjectsDelete(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// AdminRoutes returns the admin endpoints as AuthRoute entries with
+// AuthPolicyAdmin so the Router can use them for policy-based auth dispatch.
+func (h *AdminHandler) AdminRoutes() []AuthRoute {
+	return []AuthRoute{
+		{Method: http.MethodGet, Path: "/api/v1/admin/api-keys", Handler: http.HandlerFunc(h.HandleAdminAPIKeysList), Policy: AuthPolicyAdmin},
+		{Method: http.MethodDelete, Path: "/api/v1/admin/api-keys/", Handler: http.HandlerFunc(h.HandleAdminAPIKeyDelete), Policy: AuthPolicyAdmin},
+		{Method: http.MethodGet, Path: "/api/v1/admin/traces/", Handler: http.HandlerFunc(h.HandleAdminTracesCount), Policy: AuthPolicyAdmin},
+		{Method: http.MethodDelete, Path: "/api/v1/admin/traces/", Handler: http.HandlerFunc(h.HandleAdminTracesDelete), Policy: AuthPolicyAdmin},
+		{Method: http.MethodDelete, Path: "/api/v1/admin/projects/", Handler: http.HandlerFunc(h.HandleAdminProjectsDelete), Policy: AuthPolicyAdmin},
+	}
+}
+
 // RegisterAdminRoutes registers the admin endpoints on the given mux.
 // These routes should be protected by session auth + admin check.
 func (h *AdminHandler) RegisterAdminRoutes(mux *http.ServeMux) {

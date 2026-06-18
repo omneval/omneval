@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -61,29 +60,11 @@ func serveUI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// publicAPIPaths is the set of API and service paths that bypass session
-// authentication. The router treats anything in this set as public.
-var publicAPIPaths = map[string]struct{}{
-	"/login":         {},
-	"/logout":        {},
-	"/healthz":       {},
-	"/readyz":        {},
-	"/metrics":       {},
-	"/api/v1/scores": {},
-}
-
 // IsPublicAPIPath reports whether the given path is a public API route
-// that does not require authentication.
+// that does not require authentication. Delegates to the canonical
+// handler.IsPublicPath so there is a single source of truth.
 func IsPublicAPIPath(path string) bool {
-	// Direct match for known public endpoints.
-	if _, ok := publicAPIPaths[path]; ok {
-		return true
-	}
-	// Prefix match for health check variants like /healthz/readyz.
-	if strings.HasPrefix(path, "/healthz") || strings.HasPrefix(path, "/readyz") {
-		return true
-	}
-	return false
+	return handler.IsPublicPath(path)
 }
 
 // Run starts the Query API: opens the DuckDB snapshot from S3 and the

@@ -460,3 +460,16 @@ func extractPromptLabelPath(path string) []string {
 	}
 	return nil
 }
+
+// Routes returns the prompt-related API routes as AuthRoute entries with
+// AuthPolicyAPIKeyOrSession so the Router can use them for policy-based auth
+// dispatch.
+func (h *PromptHandler) Routes() []AuthRoute {
+	return []AuthRoute{
+		{Method: http.MethodGet, Path: "/api/v1/prompts", Handler: http.HandlerFunc(h.HandleListPrompts), Policy: AuthPolicyAPIKeyOrSession},
+		{Method: http.MethodPost, Path: "/api/v1/prompts", Handler: http.HandlerFunc(h.HandleCreatePrompt), Policy: AuthPolicyAPIKeyOrSession},
+		{Method: http.MethodGet, Path: "/api/v1/prompts/{promptId}", Handler: http.HandlerFunc(h.HandleGetPrompt), Policy: AuthPolicyAPIKeyOrSession},
+		{Method: http.MethodGet, Path: "/api/v1/prompts/{promptId}/versions", Handler: http.HandlerFunc(h.HandleListPromptVersions), Policy: AuthPolicyAPIKeyOrSession},
+		{Method: http.MethodPut, Path: "/api/v1/prompts/{promptId}/labels/{label}", Handler: http.HandlerFunc(h.HandleSetLabel), Policy: AuthPolicyAPIKeyOrSession},
+	}
+}
