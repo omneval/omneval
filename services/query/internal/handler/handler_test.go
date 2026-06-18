@@ -1243,6 +1243,74 @@ func TestHandleTraceDetail_ProjectIsolation(t *testing.T) {
 	}
 }
 
+// TestHandleTraceDetail_ExplicitProjectID tests that HandleTraceDetail
+// honours an explicit ?project_id= query parameter that differs from the
+// session's default project — the fix for issue #188 (bug 2).
+func TestHandleTraceDetail_ExplicitProjectID(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omneval-trace-explicit-pid")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	// Insert spans: only proj-b has a span for "trace-b-other".
+	// proj-a's default session has NO span with this trace_id.
+	// Use a recent timestamp so the span falls within LakeTraceSpansSQL's
+	// default 90-day window.
+	now := time.Now().UTC()
+	_, err = db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"span-b1", "trace-b-other", "", "proj-b", "span-b", now, now.Add(5*time.Second))
+	if err != nil {
+		t.Fatalf("insert span-b: %v", err)
+	}
+
+	// The user has both proj-a and proj-b (e.g. multi-project org).
+	// proj-a is the session default, but the UI explicitly requests proj-b.
+	h := &SpanHandler{
+		Lake: db,
+		SessionStore: &FakeSessionStore{
+			projectID: "proj-a",
+			userProjects: []*domain.Project{
+				{ProjectID: "proj-a", Name: "Default Project"},
+				{ProjectID: "proj-b", Name: "Other Project"},
+			},
+		},
+	}
+
+	w := serveTraceDetail(h, http.MethodGet, "/api/v1/traces/trace-b-other?project_id=proj-b", nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var trace struct {
+		ProjectID string     `json:"project_id"`
+		Spans     []treeSpan `json:"spans"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&trace); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if trace.ProjectID != "proj-b" {
+		t.Errorf("project_id: got %q, want %q", trace.ProjectID, "proj-b")
+	}
+	if len(trace.Spans) != 1 {
+		t.Errorf("spans count: got %d, want 1", len(trace.Spans))
+	}
+}
+
 func TestBuildTraceTree_EmptySpans(t *testing.T) {
 	trace := buildTraceTree([]*domain.Span{}, nil, "", "", "scores")
 	if trace.TraceID != "" {
