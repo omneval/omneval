@@ -252,3 +252,12 @@ func (h *ConversationHandler) HandleConversationDetail(w http.ResponseWriter, r 
 func (h *ConversationHandler) selectDB() DBHandle {
 	return h.Lake
 }
+
+// Routes returns the conversation-related API routes as AuthRoute entries with
+// AuthPolicySession so the Router can use them for policy-based auth dispatch.
+func (h *ConversationHandler) Routes() []AuthRoute {
+	return []AuthRoute{
+		{Method: http.MethodGet, Path: "/api/v1/conversations", Handler: http.HandlerFunc(h.HandleListConversations), Policy: AuthPolicySession},
+		{Method: http.MethodGet, Path: "/api/v1/conversations/{conversationId}", Handler: http.HandlerFunc(h.HandleConversationDetail), Policy: AuthPolicySession},
+	}
+}

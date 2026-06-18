@@ -17,6 +17,38 @@ import (
 	"github.com/omneval/omneval/services/query/internal/auth"
 )
 
+func TestAdminRoutes(t *testing.T) {
+	t.Parallel()
+
+	h := &AdminHandler{}
+	routes := h.AdminRoutes()
+
+	// Verify all expected admin routes are present with AuthPolicyAdmin.
+	expectedPaths := map[string]AuthPolicy{
+		"GET /api/v1/admin/api-keys":       AuthPolicyAdmin,
+		"DELETE /api/v1/admin/api-keys/":    AuthPolicyAdmin,
+		"GET /api/v1/admin/traces/":         AuthPolicyAdmin,
+		"DELETE /api/v1/admin/traces/":      AuthPolicyAdmin,
+		"DELETE /api/v1/admin/projects/":    AuthPolicyAdmin,
+	}
+
+	for _, r := range routes {
+		key := r.Method + " " + r.Path
+		want, ok := expectedPaths[key]
+		if !ok {
+			t.Errorf("unexpected route: %s", key)
+			continue
+		}
+		if r.Policy != want {
+			t.Errorf("route %s policy = %v, want %v", key, r.Policy, want)
+		}
+	}
+
+	if len(routes) != len(expectedPaths) {
+		t.Errorf("got %d routes, want %d", len(routes), len(expectedPaths))
+	}
+}
+
 func TestAdminHandler_TracesCount(t *testing.T) {
 	db := setupTestDB(t)
 	handler := &AdminHandler{DB: db, APIKeyStore: newFakeAdminStore(), ProjectStore: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}

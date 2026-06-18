@@ -13,6 +13,44 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// AuthPolicy defines the authentication requirement for a route.
+type AuthPolicy int
+
+const (
+	// AuthPolicyPublic routes bypass authentication entirely.
+	AuthPolicyPublic AuthPolicy = iota
+	// AuthPolicySession routes require a valid session cookie.
+	AuthPolicySession
+	// AuthPolicyAPIKeyOrSession routes accept a valid session cookie or X-API-Key header.
+	AuthPolicyAPIKeyOrSession
+	// AuthPolicyAdmin routes require a valid session cookie AND an admin user.
+	AuthPolicyAdmin
+)
+
+// String returns the canonical string representation of the auth policy.
+func (a AuthPolicy) String() string {
+	switch a {
+	case AuthPolicyPublic:
+		return "public"
+	case AuthPolicySession:
+		return "session"
+	case AuthPolicyAPIKeyOrSession:
+		return "session_or_api_key"
+	case AuthPolicyAdmin:
+		return "admin"
+	default:
+		return "unknown"
+	}
+}
+
+// AuthRoute pairs an HTTP method/path pattern with its handler and auth policy.
+type AuthRoute struct {
+	Method  string
+	Path    string
+	Handler func(http.ResponseWriter, *http.Request)
+	Policy  AuthPolicy
+}
+
 // playgroundHandler is the interface for the playground endpoint.
 // Defined here to avoid importing the playground package (which imports handler).
 type playgroundHandler interface {
@@ -38,6 +76,25 @@ type RouterDeps struct {
 	AdminLake       *lake.Lake
 	SessionTTL      time.Duration
 	APIKeyValidator internalauth.Validator
+}
+
+// authPolicyLookup maps a (method, exact_path) pair to the auth policy
+// that must be enforced. Built from allRoutes at router construction time so
+// that buildMiddleware is a simple table lookup rather than a cascade of
+// string-prefix heuristics.
+type authPolicyLookup struct {
+	policy map[string]map[string]AuthPolicy // path -> method -> policy
+}
+
+// lookup returns the auth policy for the given method and path.
+// The lookup is case-sensitive and exact (no wildcard expansion).
+func (l *authPolicyLookup) lookup(method, path string) AuthPolicy {
+	if methods, ok := l.policy[path]; ok {
+		if p, ok := methods[method]; ok {
+			return p
+		}
+	}
+	return AuthPolicyPublic // default to public for unmatched routes
 }
 
 // Router is the deep interface for the query service HTTP layer. It owns all
@@ -66,6 +123,7 @@ type Router struct {
 	adminLake    *lake.Lake
 	sessionTTL   time.Duration
 	apiValidator internalauth.Validator
+	routes       []AuthRoute // all registered routes with their policies
 }
 
 // NewRouter creates a Router from the provided dependencies. All handlers use
@@ -96,89 +154,107 @@ func NewRouter(deps *RouterDeps) *Router {
 // eval-rules accept session or API-key auth, and all other API routes require
 // session auth.
 func (rt *Router) RegisterRoutes(mux *http.ServeMux) http.Handler {
-	// Register auth routes (login, logout, invite, change password).
-	rt.auth.Register(mux)
+	// Collect all route entries from handlers that implement the Routes() method.
+	// Auth routes are defined inline because the auth handler lives in a
+	// separate package (internal/auth) that cannot import this handler package.
+	routes := make([]AuthRoute, 0, 80)
 
-	// Admin routes (require admin session).
-	rt.admin.RegisterAdminRoutes(mux)
+	// --- Auth routes (defined inline — auth.Handler is in a separate package) ---
+	routes = append(routes, []AuthRoute{
+		{Method: http.MethodGet, Path: "/api/v1/me", Handler: http.HandlerFunc(rt.auth.HandleMe), Policy: AuthPolicySession},
+		{Method: http.MethodPost, Path: "/login", Handler: http.HandlerFunc(rt.auth.Login), Policy: AuthPolicyPublic},
+		{Method: http.MethodPost, Path: "/logout", Handler: http.HandlerFunc(rt.auth.Logout), Policy: AuthPolicyPublic},
+		{Method: http.MethodPost, Path: "/api/v1/users/invite", Handler: http.HandlerFunc(rt.auth.Invite), Policy: AuthPolicySession},
+		{Method: http.MethodPost, Path: "/api/v1/users/reset-password", Handler: http.HandlerFunc(rt.auth.ResetPassword), Policy: AuthPolicySession},
+		{Method: http.MethodPut, Path: "/api/v1/users/me/password", Handler: http.HandlerFunc(rt.auth.ChangePassword), Policy: AuthPolicySession},
+		{Method: http.MethodPost, Path: "/api/v1/projects", Handler: http.HandlerFunc(rt.auth.HandleCreateProject), Policy: AuthPolicySession},
+		{Method: http.MethodPost, Path: "/api/v1/projects/{id}/api-keys", Handler: http.HandlerFunc(rt.auth.HandleGenerateAPIKey), Policy: AuthPolicySession},
+		{Method: http.MethodGet, Path: "/api/v1/projects/{id}/api-keys", Handler: http.HandlerFunc(rt.auth.HandleListAPIKeys), Policy: AuthPolicySession},
+		{Method: http.MethodDelete, Path: "/api/v1/projects/{id}/api-keys/{keyId}", Handler: http.HandlerFunc(rt.auth.HandleRevokeAPIKey), Policy: AuthPolicySession},
+	}...)
 
-	// Projects list for the UI project switcher.
-	mux.HandleFunc("GET /api/v1/projects", rt.span.HandleProjects)
+	// --- Admin routes (require admin session) ---
+	routes = append(routes, rt.admin.AdminRoutes()...)
 
-	// Span list with keyset pagination.
-	mux.HandleFunc("POST /api/v1/spans/query", rt.span.HandleSpansQuery)
+	// --- Span / project routes ---
+	routes = append(routes, rt.span.Routes()...)
 
-	// Analytics: parameterized SQL compilation from structured DSL queries.
-	mux.HandleFunc("POST /api/v1/analytics/spans", rt.span.HandleAnalyticsSpans)
+	// --- Bookmark routes ---
+	routes = append(routes, rt.bookmark.Routes()...)
 
-	// Trace detail waterfall.
-	mux.HandleFunc("GET /api/v1/traces/{traceId}", rt.span.HandleTraceDetail)
+	// --- Conversation routes ---
+	routes = append(routes, rt.conversation.Routes()...)
 
-	// Trace bookmark toggle.
-	mux.HandleFunc("POST /api/v1/traces/{traceId}/bookmark", rt.bookmark.HandleBookmark)
+	// --- Prompt routes ---
+	routes = append(routes, rt.prompt.Routes()...)
 
-	// Conversation list and detail endpoints.
-	mux.HandleFunc("GET /api/v1/conversations", rt.conversation.HandleListConversations)
-	mux.HandleFunc("GET /api/v1/conversations/{conversationId}", rt.conversation.HandleConversationDetail)
+	// --- Eval rule routes ---
+	routes = append(routes, rt.evalRule.Routes()...)
 
-	// Prompt Registry endpoints.
-	mux.HandleFunc("GET /api/v1/prompts", rt.prompt.HandleListPrompts)
-	mux.HandleFunc("POST /api/v1/prompts", rt.prompt.HandleCreatePrompt)
-	mux.HandleFunc("GET /api/v1/prompts/{name}", rt.prompt.HandleGetPrompt)
-	mux.HandleFunc("GET /api/v1/prompts/{name}/versions", rt.prompt.HandleListPromptVersions)
-	mux.HandleFunc("PUT /api/v1/prompts/{name}/labels/{label}", rt.prompt.HandleSetLabel)
+	// --- Dataset routes ---
+	routes = append(routes, rt.dataset.Routes()...)
 
-	// Eval rules endpoints.
-	mux.HandleFunc("POST /api/v1/eval-rules", rt.evalRule.HandleCreate)
-	mux.HandleFunc("GET /api/v1/eval-rules", rt.evalRule.HandleList)
-	mux.HandleFunc("POST /api/v1/eval-rules/preview", rt.evalRule.HandlePreview)
-	mux.HandleFunc("DELETE /api/v1/eval-rules/{id}", rt.evalRule.HandleDelete)
-
-	// Dataset endpoints.
-	mux.HandleFunc("POST /api/v1/datasets", rt.dataset.HandleCreate)
-	mux.HandleFunc("GET /api/v1/datasets", rt.dataset.HandleList)
-	mux.HandleFunc("GET /api/v1/datasets/{id}", rt.dataset.HandleGet)
-	mux.HandleFunc("POST /api/v1/datasets/{id}/items", rt.dataset.HandleAddItems)
-	mux.HandleFunc("POST /api/v1/datasets/{id}/items/batch", rt.dataset.HandleAddItemsBatch)
-	mux.HandleFunc("GET /api/v1/datasets/{id}/items", rt.dataset.HandleListItems)
-	mux.HandleFunc("DELETE /api/v1/datasets/{id}", rt.dataset.HandleDelete)
-
-	// Dataset run endpoints — read endpoints (list, get, status) are always
-	// available. POST (create run) requires judge LLM config.
-	if rt.datasetRun.JudgeClient != nil {
-		mux.HandleFunc("POST /api/v1/datasets/{id}/runs", rt.datasetRun.HandleRun)
+	// --- Dataset run routes (POST requires judge LLM config) ---
+	for _, r := range rt.datasetRun.Routes() {
+		if r.Path != "/api/v1/datasets/{id}/runs" || rt.datasetRun.JudgeClient != nil {
+			routes = append(routes, r)
+		}
 	}
-	mux.HandleFunc("GET /api/v1/datasets/{id}/runs", rt.datasetRun.HandleListRuns)
-	mux.HandleFunc("GET /api/v1/datasets/{id}/runs/{runId}", rt.datasetRun.HandleGetRun)
-	mux.HandleFunc("GET /api/v1/datasets/{id}/runs/{runId}/status", rt.datasetRun.HandleGetRunStatus)
 
-	// Playground endpoint (route always registered; the handler returns 503
-	// when the LLM is not configured).
-	mux.HandleFunc("POST /api/v1/playground/run", rt.playground.HandleRun)
+	// --- Playground route ---
+	routes = append(routes, AuthRoute{
+		Method: http.MethodPost, Path: "/api/v1/playground/run",
+		Handler: http.HandlerFunc(rt.playground.HandleRun),
+		Policy:  AuthPolicySession,
+	})
 
-	// Score write endpoint (for eval worker score write-back, no auth required).
-	// Scores are committed directly to the Lake via the AdminLake attachment
-	// (ADR-0004/#91); SpanDB resolves span_start_time for partitioning.
-	var spanDB DBHandle = rt.adminLake
-	mux.HandleFunc("POST /api/v1/scores", NewScoreHandler(rt.adminLake, spanDB).ServeHTTP)
+	// --- Score route (public — used by eval worker) ---
+	scoreHandler := NewScoreHandler(rt.adminLake, rt.adminLake)
+	routes = append(routes, AuthRoute{
+		Method:  http.MethodPost,
+		Path:    "/api/v1/scores",
+		Handler: func(w http.ResponseWriter, req *http.Request) { scoreHandler.ServeHTTP(w, req) },
+		Policy:  AuthPolicyPublic,
+	})
 
-	// Prometheus metrics.
-	mux.HandleFunc("GET /metrics", promhttp.Handler().ServeHTTP)
+	// --- Prometheus metrics (public) ---
+	metricsHandler := promhttp.Handler()
+	routes = append(routes, AuthRoute{
+		Method:  http.MethodGet,
+		Path:    "/metrics",
+		Handler: metricsHandler.ServeHTTP,
+		Policy:  AuthPolicyPublic,
+	})
 
-	// Serve embedded UI for all other routes (SPA fallback to index.html).
-	// The UI server function is injected at package init time by the server
-	// package via InitServeUI so that the Router does not need to embed the UI.
+	// Store routes on the router so buildMiddleware can look them up.
+	rt.routes = routes
+
+	// Register every route on the mux.
+	for _, r := range routes {
+		mux.HandleFunc(r.Method+" "+r.Path, r.Handler)
+	}
+
+	// SPA fallback.
 	mux.HandleFunc("/", serveUI)
 
 	return rt.buildMiddleware(mux)
 }
 
 // buildMiddleware returns the middleware-wrapped handler that routes requests
-// through the correct auth layer.
+// through the correct auth layer based on the auth policy lookup table.
 func (rt *Router) buildMiddleware(mux *http.ServeMux) http.Handler {
 	sessionMw := auth.RequireAuth(rt.store, rt.cfg.Auth.SecureCookie, rt.sessionTTL)
 	adminMw := auth.RequireAdmin(rt.store, rt.cfg.Auth.SecureCookie, rt.sessionTTL, rt.cfg.Auth.AdminEmail)
 	promptGetMw := auth.RequireSessionOrAPIKey(rt.store, rt.apiValidator, rt.cfg.Auth.SecureCookie, rt.sessionTTL, internalauth.APIKeyProjectIDContextKey)
+
+	// Build lookup table from rt.routes.
+	lk := &authPolicyLookup{policy: make(map[string]map[string]AuthPolicy)}
+	for _, r := range rt.routes {
+		if lk.policy[r.Path] == nil {
+			lk.policy[r.Path] = make(map[string]AuthPolicy)
+		}
+		lk.policy[r.Path][r.Method] = r.Policy
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		path := req.URL.Path
@@ -189,40 +265,38 @@ func (rt *Router) buildMiddleware(mux *http.ServeMux) http.Handler {
 			return
 		}
 
-		// Admin routes require admin-level auth (email must match config).
-		if strings.HasPrefix(path, "/api/v1/admin") {
+		// Lookup the auth policy for this (method, path) pair.
+		policy := lk.lookup(req.Method, path)
+
+		// Apply the appropriate middleware based on the resolved policy.
+		switch policy {
+		case AuthPolicyPublic:
+			mux.ServeHTTP(w, req)
+		case AuthPolicyAdmin:
 			adminMw(mux).ServeHTTP(w, req)
-			return
-		}
-
-		// Prompt and eval-rule endpoints accept X-API-Key (for SDKs) or session cookie.
-		if strings.HasPrefix(path, "/api/v1/prompts") || strings.HasPrefix(path, "/api/v1/eval-rules") {
+		case AuthPolicyAPIKeyOrSession:
 			promptGetMw(mux).ServeHTTP(w, req)
-			return
-		}
-
-		// All other protected API routes require a valid session cookie.
-		if strings.HasPrefix(path, "/api/v1/") {
+		case AuthPolicySession:
 			sessionMw(mux).ServeHTTP(w, req)
-			return
 		}
-
-		// SPA fallback and anything else.
-		mux.ServeHTTP(w, req)
 	})
 }
 
-// isPublicPath reports whether the given path is a public API route
-// that does not require authentication. Mirrors the logic in server.go.
-func isPublicPath(path string) bool {
-	publicPaths := map[string]struct{}{
-		"/login":         {},
-		"/logout":        {},
-		"/healthz":       {},
-		"/readyz":        {},
-		"/metrics":       {},
-		"/api/v1/scores": {},
-	}
+// publicPaths is the single canonical source of truth for public (unauthenticated)
+// API paths. It is referenced by both the router middleware dispatcher and the
+// server package's health-check probe logic.
+var publicPaths = map[string]struct{}{
+	"/login":         {},
+	"/logout":        {},
+	"/healthz":       {},
+	"/readyz":        {},
+	"/metrics":       {},
+	"/api/v1/scores": {},
+}
+
+// IsPublicPath reports whether the given path is a public API route
+// that does not require authentication.
+func IsPublicPath(path string) bool {
 	if _, ok := publicPaths[path]; ok {
 		return true
 	}
@@ -230,6 +304,12 @@ func isPublicPath(path string) bool {
 		return true
 	}
 	return false
+}
+
+// isPublicPath reports whether the given path is a public API route
+// that does not require authentication. Mirrors the logic in server.go.
+func isPublicPath(path string) bool {
+	return IsPublicPath(path)
 }
 
 

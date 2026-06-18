@@ -592,6 +592,14 @@ func (h *ScoreHandler) HandleScores(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"score_id": scoreID})
 }
 
+// Routes returns the score-related API routes as AuthRoute entries with
+// AuthPolicyPublic so the Router can use them for policy-based auth dispatch.
+func (h *ScoreHandler) Routes() []AuthRoute {
+	return []AuthRoute{
+		{Method: http.MethodPost, Path: "/api/v1/scores", Handler: h.HandleScores, Policy: AuthPolicyPublic},
+	}
+}
+
 // resolveProjectID returns a ProjectResolver that chains h.ProjectResolver
 // (if non-nil) with a fallback to h.SessionStore.ProjectID.  When both are
 // nil it returns nil so callers still get the 401.
@@ -600,4 +608,15 @@ func (h *SpanHandler) resolveProjectID() auth.ProjectResolver {
 		return auth.NewSessionStoreResolver(h.SessionStore)
 	}
 	return h.ProjectResolver
+}
+
+// Routes returns the span-related API routes as AuthRoute entries with
+// AuthPolicySession so the Router can use them for policy-based auth dispatch.
+func (h *SpanHandler) Routes() []AuthRoute {
+	return []AuthRoute{
+		{Method: http.MethodGet, Path: "/api/v1/projects", Handler: http.HandlerFunc(h.HandleProjects), Policy: AuthPolicySession},
+		{Method: http.MethodPost, Path: "/api/v1/spans/query", Handler: http.HandlerFunc(h.HandleSpansQuery), Policy: AuthPolicySession},
+		{Method: http.MethodPost, Path: "/api/v1/analytics/spans", Handler: http.HandlerFunc(h.HandleAnalyticsSpans), Policy: AuthPolicySession},
+		{Method: http.MethodGet, Path: "/api/v1/traces/{traceId}", Handler: http.HandlerFunc(h.HandleTraceDetail), Policy: AuthPolicySession},
+	}
 }

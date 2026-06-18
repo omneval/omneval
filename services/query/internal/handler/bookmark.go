@@ -97,3 +97,11 @@ func (h *BookmarkHandler) HandleBookmark(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"bookmarked": wantBookmarked})
 }
+
+// Routes returns the bookmark-related API routes as AuthRoute entries with
+// AuthPolicySession so the Router can use them for policy-based auth dispatch.
+func (h *BookmarkHandler) Routes() []AuthRoute {
+	return []AuthRoute{
+		{Method: http.MethodPost, Path: "/api/v1/traces/{traceId}/bookmark", Handler: http.HandlerFunc(h.HandleBookmark), Policy: AuthPolicySession},
+	}
+}
