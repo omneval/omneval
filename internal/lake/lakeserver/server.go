@@ -149,7 +149,20 @@ func Serve(ctx context.Context, cfg Config) (*Server, error) {
 		cfg.ListenAddr = ":9494"
 	}
 
-	db, err := sql.Open("duckdb", "")
+	// For the local-file catalog driver, open the DuckDB session directly
+	// against the catalog file so DuckLake's quack catalog driver writes
+	// ducklake_* metadata into the file (not into the in-memory primary DB).
+	// Quack_spike2 verified that this approach persists across server restarts.
+	// The Postgres driver must still open in-memory and ATTACH Postgres,
+	// because the duckdb-go driver cannot open a Postgres DSN directly.
+	dbPath := ""
+	if cfg.CatalogDriver == CatalogDriverLocal {
+		if err := ensureLocalCatalogDir(cfg.CatalogDSN); err != nil {
+			return nil, fmt.Errorf("lakeserver: create catalog dir: %w", err)
+		}
+		dbPath = cfg.CatalogDSN
+	}
+	db, err := sql.Open("duckdb", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("lakeserver: open duckdb: %w", err)
 	}
@@ -271,10 +284,16 @@ func (s *Server) Close() error {
 	return err
 }
 
-// attachCatalog makes the configured Catalog (Postgres DSN or local file)
-// the server session's default database, so DuckLake's "quack:" catalog
-// driver (used by every Quack client) creates its ducklake_* metadata
-// tables there.
+// attachCatalog makes the configured Catalog the server session's default
+// database, so DuckLake's "quack:" catalog driver creates its ducklake_*
+// metadata tables there.
+//
+// For CatalogDriverLocal the session was already opened directly against the
+// catalog file (sql.Open("duckdb", path)), so no ATTACH is needed — the file
+// IS the default database and DuckLake writes persist to it automatically.
+//
+// For CatalogDriverPostgres the session is in-memory and we ATTACH Postgres
+// as the default, because duckdb-go cannot open a Postgres DSN directly.
 func attachCatalog(ctx context.Context, db *sql.DB, cfg Config) error {
 	switch cfg.CatalogDriver {
 	case CatalogDriverPostgres:
@@ -290,19 +309,8 @@ func attachCatalog(ctx context.Context, db *sql.DB, cfg Config) error {
 		}
 		return nil
 	default:
-		if err := ensureLocalCatalogDir(cfg.CatalogDSN); err != nil {
-			return fmt.Errorf("lakeserver: create catalog dir: %w", err)
-		}
-		steps := []string{
-			fmt.Sprintf("ATTACH %s AS catalog_db", sqlQuote(cfg.CatalogDSN)),
-			"USE catalog_db",
-		}
-		for _, stmt := range steps {
-			if _, err := db.ExecContext(ctx, stmt); err != nil {
-				return fmt.Errorf("lakeserver: %s: %w", firstWords(stmt, 3), err)
-			}
-		}
-		return nil
+		// Session is already open against the file; just ensure its directory exists.
+		return ensureLocalCatalogDir(cfg.CatalogDSN)
 	}
 }
 
