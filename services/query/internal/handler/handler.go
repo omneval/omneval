@@ -195,6 +195,9 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 
 	// Resolve project_id: honor an explicit ?project_id= (the UI project
 	// switcher) after an org-membership check, else the session default.
+	if pid := r.URL.Query().Get("project_id"); pid != "" {
+		r = auth.WithExplicitProjectID(r, pid)
+	}
 	resolver := h.resolveProjectID()
 	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
