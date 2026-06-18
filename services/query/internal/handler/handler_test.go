@@ -2118,7 +2118,7 @@ func (f *FakeSessionStore) ProjectID(r *http.Request) (string, bool) {
 }
 
 // AuthorizeProject is a minimal ProjectAuthorizer implementation for tests.
-func (f *FakeSessionStore) AuthorizeProject(projectID string) bool {
+func (f *FakeSessionStore) AuthorizeProject(_ *http.Request, projectID string) bool {
 	if f.projectID == projectID {
 		return true
 	}

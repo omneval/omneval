@@ -55,9 +55,9 @@ func (f ProjectResolverFunc) ProjectID(r *http.Request) (string, bool) {
 // with 403.
 type ProjectAuthorizer interface {
 	ProjectResolver
-	// AuthorizeProject reports whether the current request is allowed to
-	// access the given projectID.
-	AuthorizeProject(projectID string) bool
+	// AuthorizeProject reports whether the request is allowed to access
+	// the given projectID.  r is the current HTTP request and must not be nil.
+	AuthorizeProject(r *http.Request, projectID string) bool
 }
 
 // SessionStoreResolver wraps a ProjectIDProvider (any type with a ProjectID
@@ -83,14 +83,17 @@ func NewSessionStoreResolver(p ProjectIDProvider) *SessionStoreResolver {
 }
 
 // AuthorizeProject delegates to the underlying provider if it implements
-// ProjectAuthorizer; otherwise, it only allows the provider's own ProjectID.
-func (r *SessionStoreResolver) AuthorizeProject(projectID string) bool {
+// ProjectAuthorizer; otherwise, it checks whether the provider's default
+// project ID for this request matches projectID.
+func (r *SessionStoreResolver) AuthorizeProject(req *http.Request, projectID string) bool {
 	if auth, ok := r.ProjectIDProvider.(ProjectAuthorizer); ok {
-		return auth.AuthorizeProject(projectID)
+		return auth.AuthorizeProject(req, projectID)
 	}
 	// Without an explicit authorizer, allow only the resolver's own default.
-	if pid, ok := r.ProjectIDProvider.ProjectID(nil); ok {
-		return pid == projectID
+	if req != nil {
+		if pid, ok := r.ProjectIDProvider.ProjectID(req); ok {
+			return pid == projectID
+		}
 	}
 	return false
 }
@@ -171,7 +174,7 @@ func ResolveProjectID(r *http.Request, resolver ProjectResolver, explicitID stri
 			if explicitEID != "" && pid != explicitEID {
 				// Resolver's default differs from explicit ID — try to
 				// authorize the explicit one before rejecting it.
-				if authorizer, ok := resolver.(ProjectAuthorizer); ok && authorizer.AuthorizeProject(explicitEID) {
+				if authorizer, ok := resolver.(ProjectAuthorizer); ok && authorizer.AuthorizeProject(r, explicitEID) {
 					return explicitEID, true
 				}
 				return "", false // resolution fails; error handler sees ExplicitProjectIDKey → 403
@@ -181,7 +184,7 @@ func ResolveProjectID(r *http.Request, resolver ProjectResolver, explicitID stri
 		// Resolver returned no default but the caller set an explicit ID —
 		// try to authorize it.
 		if explicitEID != "" {
-			if authorizer, ok := resolver.(ProjectAuthorizer); ok && authorizer.AuthorizeProject(explicitEID) {
+			if authorizer, ok := resolver.(ProjectAuthorizer); ok && authorizer.AuthorizeProject(r, explicitEID) {
 				return explicitEID, true
 			}
 		}

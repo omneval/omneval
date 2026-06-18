@@ -781,3 +781,27 @@ func (h *Handler) ProjectID(r *http.Request) (string, bool) {
 
 	return "", false
 }
+
+// AuthorizeProject reports whether the authenticated user's org owns projectID.
+// It satisfies auth.ProjectAuthorizer so that project-switcher requests in the
+// UI can access any project that belongs to the same org, not just projects[0].
+func (h *Handler) AuthorizeProject(r *http.Request, projectID string) bool {
+	user := CurrentUserFromContext(r)
+	if user == nil {
+		return false
+	}
+	u, err := h.store.GetUserByID(r.Context(), user.UserID)
+	if err != nil {
+		return false
+	}
+	projects, err := h.store.ListProjects(r.Context(), u.OrgID)
+	if err != nil {
+		return false
+	}
+	for _, p := range projects {
+		if p.ProjectID == projectID {
+			return true
+		}
+	}
+	return false
+}
