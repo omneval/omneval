@@ -115,8 +115,8 @@ spec:
             - name: OMNEVAL_QUACK_CLIENT_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ $name }}-secret
-                  key: quack-token
+                  name: {{ include "omneval.quackSecret" . }}
+                  key: {{ include "omneval.quackSecretKey" . }}
           volumeMounts:
             - name: config
               mountPath: /etc/omneval

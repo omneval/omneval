@@ -62,7 +62,7 @@ tests:
         isNotEmpty:
           path: spec.template.spec.containers[0].resources
 
-  - it: should read the quack token from the shared secret
+  - it: should read the quack token from the shared secret by default
     asserts:
       - documentIndex: 0
         contains:
@@ -73,6 +73,35 @@ tests:
               secretKeyRef:
                 name: RELEASE-NAME-secret
                 key: quack-token
+
+  - it: should read the quack token from existingSecret when set
+    set:
+      quack.server.existingSecret: "my-quack-token-secret"
+      quack.server.existingSecretKey: "quack-token-value"
+    asserts:
+      - documentIndex: 0
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNEVAL_QUACK_SERVER_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: my-quack-token-secret
+                key: quack-token-value
+
+  - it: should use default existingSecretKey when only existingSecret is set
+    set:
+      quack.server.existingSecret: "my-quack-token-secret"
+    asserts:
+      - documentIndex: 0
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNEVAL_QUACK_SERVER_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: my-quack-token-secret
+                key: token
 
   - it: should have a serviceName for the StatefulSet
     asserts:

@@ -31,7 +31,7 @@ tests:
     asserts:
       - hasDocuments:
           count: 2
-  - it: should read the quack client token from the shared secret
+  - it: should read the quack client token from the shared secret by default
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
@@ -41,3 +41,17 @@ tests:
               secretKeyRef:
                 name: RELEASE-NAME-secret
                 key: quack-token
+
+  - it: should read the quack client token from existingSecret when set
+    set:
+      quack.server.existingSecret: "my-quack-token-secret"
+      quack.server.existingSecretKey: "quack-token-value"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNEVAL_QUACK_CLIENT_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: my-quack-token-secret
+                key: quack-token-value

@@ -90,8 +90,8 @@ spec:
             - name: OMNEVAL_QUACK_SERVER_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ $name }}-secret
-                  key: quack-token
+                  name: {{ include "omneval.quackSecret" . }}
+                  key: {{ include "omneval.quackSecretKey" . }}
             {{- with .Values.storage.endpoint }}
             - name: OMNEVAL_STORAGE_ENDPOINT
               value: {{ . | quote }}

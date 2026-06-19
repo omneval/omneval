@@ -107,8 +107,8 @@ spec:
             - name: OMNEVAL_QUACK_CLIENT_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ $name }}-secret
-                  key: quack-token
+                  name: {{ include "omneval.quackSecret" . }}
+                  key: {{ include "omneval.quackSecretKey" . }}
             {{- if .Values.eval.llmBaseURL }}
             - name: OMNEVAL_EVAL_LLM_BASE_URL
               value: {{ .Values.eval.llmBaseURL | quote }}
