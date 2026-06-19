@@ -216,7 +216,7 @@ func (l *Lake) attachWithRetry(ctx context.Context, cfg Config) error {
 		}
 		return nil
 	}
-	return fmt.Errorf("lake: attach after 4 attempts (last: %v)", lastErr)
+	return fmt.Errorf("lake: attach after 4 attempts (last: %w)", lastErr)
 }
 
 // isStaleConn reports whether err is a Quack-connectivity error that indicates
@@ -436,7 +436,7 @@ func (l *Lake) ensureTablesWithRetry(ctx context.Context) error {
 		}
 		return nil
 	}
-	return fmt.Errorf("lake: ensureTables after 9 attempts (last: %v)", lastErr)
+	return fmt.Errorf("lake: ensureTables after 9 attempts (last: %w)", lastErr)
 }
 
 // DB exposes the underlying DuckDB handle with the Lake attached as
@@ -537,11 +537,13 @@ func (l *Lake) InsertSpans(ctx context.Context, spans []*domain.Span) error {
 }
 
 func (l *Lake) insertSpansLocked(ctx context.Context, spans []*domain.Span) error {
+	var lastErr error
 	for attempt := 0; attempt <= 3; attempt++ {
 		if err := l.doInsertSpans(ctx, spans); err != nil {
 			if !isTxConflict(err) {
 				return err
 			}
+			lastErr = err
 			if attempt < 3 {
 				select {
 				case <-ctx.Done():
@@ -553,7 +555,7 @@ func (l *Lake) insertSpansLocked(ctx context.Context, spans []*domain.Span) erro
 		}
 		return nil
 	}
-	return nil
+	return fmt.Errorf("lake: insertSpans after 4 attempts (last: %w)", lastErr)
 }
 
 func (l *Lake) doInsertSpans(ctx context.Context, spans []*domain.Span) error {
@@ -654,11 +656,13 @@ func (l *Lake) InsertScores(ctx context.Context, scores []*domain.Score) error {
 }
 
 func (l *Lake) insertScoresLocked(ctx context.Context, scores []*domain.Score) error {
+	var lastErr error
 	for attempt := 0; attempt <= 3; attempt++ {
 		if err := l.doInsertScores(ctx, scores); err != nil {
 			if !isTxConflict(err) {
 				return err
 			}
+			lastErr = err
 			if attempt < 3 {
 				select {
 				case <-ctx.Done():
@@ -670,7 +674,7 @@ func (l *Lake) insertScoresLocked(ctx context.Context, scores []*domain.Score) e
 		}
 		return nil
 	}
-	return nil
+	return fmt.Errorf("lake: insertScores after 4 attempts (last: %w)", lastErr)
 }
 
 func (l *Lake) doInsertScores(ctx context.Context, scores []*domain.Score) error {
@@ -855,4 +859,3 @@ func firstWords(s string, n int) string {
 	}
 	return strings.Join(fields, " ")
 }
-
