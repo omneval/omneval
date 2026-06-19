@@ -28,13 +28,13 @@ In both cases the Catalog's DuckLake snapshot and time-travel history is discard
 | Setting | Helm value | Environment variable | Description |
 |---------|-----------|---------------------|-------------|
 | Catalog driver | `quack.server.catalogDriver` | `OMNEVAL_QUACK_SERVER_CATALOG_DRIVER` | `"postgres"` (old) → `"duckdb"` (new) |
-| Catalog DSN | `quack.server.catalogDSN` | `OMNEVAL_QUACK_SERVER_CATALOG_DSN` | Postgres DSN (postgres) or local path `lake/catalog.duckdb` (duckdb) |
+| Catalog DSN | `quack.server.catalogDSN` | `OMNEVAL_QUACK_SERVER_CATALOG_DSN` | Postgres DSN (postgres) or local path `lake/catalog.ducklake` (duckdb) |
 | Quack backup enabled | `quack.server.backup.enabled` | `OMNEVAL_QUACK_SERVER_BACKUP_ENABLED` | Controls Catalog backup scheduler (default `true`) |
 | Quack backup interval | `quack.server.backup.interval` | `OMNEVAL_QUACK_SERVER_BACKUP_INTERVAL` | Backup frequency (default `"1h"`) |
 | Quack backup keep count | `quack.server.backup.keepCount` | `OMNEVAL_QUACK_SERVER_BACKUP_KEEP_COUNT` | Max backups to retain (default `24`) |
 | Lake data path | `quack.server.dataPath` / `quack.client.dataPath` | `OMNEVAL_QUACK_SERVER_DATA_PATH` / `OMNEVAL_QUACK_CLIENT_DATA_PATH` | `s3://<bucket>/lake` for production |
 
-The Quack Server statefulset mounts the PVC at `/data`; the default catalog file path when `catalogDSN` is empty and `catalogDriver` is `duckdb` is `lake/catalog.duckdb` relative to the data path (i.e. `/data/lake/catalog.duckdb` on the PVC).
+The Quack Server statefulset mounts the PVC at `/data`; the default catalog file path when `catalogDSN` is empty and `catalogDriver` is `duckdb` is `lake/catalog.ducklake` relative to the data path (i.e. `/data/lake/catalog.ducklake` on the PVC).
 
 ## Phase 0 — Pre-flight checks
 
@@ -124,7 +124,7 @@ Add or update the following in your Helm values override:
 quack:
   server:
     catalogDriver: "duckdb"
-    # catalogDSN is empty — defaults to lake/catalog.duckdb on the PVC
+    # catalogDSN is empty — defaults to lake/catalog.ducklake on the PVC
     catalogDSN: ""
     dataPath: ""  # empty — derived from storage.bucket → s3://<bucket>/lake
     # Backup is meaningful only when catalogDriver is duckdb:
@@ -157,93 +157,81 @@ kubectl exec -it <release>-quack-server-0 -n <namespace> -- \
 
 ```bash
 kubectl exec -it <release>-quack-server-0 -n <namespace> -- \
-  ls -la /data/lake/catalog.duckdb
+  ls -la /data/lake/catalog.ducklake
 # Expected: file exists if it was created by the prior Quack Server; otherwise
 # it will be created on first attach by a Quack client.
 ```
 
 ## Phase 5 — Re-register existing Parquet files as a DuckLake table set
 
-A freshly deployed `CatalogDriverLocal` does not yet know about the existing `spans` and `scores` tables in the Lake's Parquet files. You must register them so the Catalog's metadata describes the Parquet data.
+A freshly deployed `CatalogDriverLocal` does not yet know about the existing `spans` and `scores` data in the Lake's Parquet files. You must re-import that data into the new Catalog.
 
-Run the registration from a temporary DuckDB client session (or from the Query API pod during validation) that attaches the new local-file Catalog and writes the table definitions.
+**Do not hand-write `CREATE TABLE` DDL for this.** Every Quack client attach already runs `internal/lake.Lake.Open`'s schema-creation step (`ensureTablesWithRetry` in `internal/lake/lake.go`), which idempotently creates `lake.spans` and `lake.scores` with the exact current schema and partitioning the rest of the platform expects (`CREATE TABLE IF NOT EXISTS ... ALTER TABLE ... SET PARTITIONED BY (...)`). The moment any service — the Quack Server's own Table Maintenance loopback client, or any Writer/Query/Eval pod — attaches to the freshly deployed Catalog, both tables already exist with the correct columns. Re-deriving that schema by hand in this runbook risks drifting from `internal/lake/lake.go` every time it changes; the steps below just confirm the auto-created schema is present, then bulk-import the historical Parquet data into it.
 
-### Register the `spans` table
+### Confirm the tables were auto-created
 
-```bash
-# Register spans table metadata in the new Catalog
-kubectl exec -it <release>-quack-server-0 -n <namespace> -- \
-  duckdb -c "
-    -- Attach the new local-file Catalog
-    ATTACH 'lake/catalog.duckdb' AS catalog;
-    USE catalog;
-
-    -- Install and load the quack extension
-    INSTALL quack;
-    LOAD quack;
-
-    -- Register the spans table: point DuckLake at the existing Parquet files
-    -- The exact table creation syntax depends on DuckLake 1.5 API.
-    -- This is illustrative — verify the actual DDL against your DuckLake version:
-    CREATE TABLE lake.spans (
-      span_id VARCHAR,
-      trace_id VARCHAR,
-      parent_id VARCHAR,
-      conversation_id VARCHAR,
-      project_id VARCHAR,
-      kind VARCHAR,
-      model VARCHAR,
-      input VARCHAR,
-      output VARCHAR,
-      input_tokens INTEGER,
-      output_tokens INTEGER,
-      cost_usd DOUBLE,
-      start_time TIMESTAMP,
-      end_time TIMESTAMP,
-      attributes VARCHAR,
-      status VARCHAR
-    );
-
-    -- Set the data path for Lake data files
-    CALL ducklake_set_data_path('s3://<bucket>/lake');
-  "
-```
-
-### Register the `scores` table
+The Quack Server creates its own loopback Quack-client attachment on startup (see `services/quack/internal/server/server.go`), so by the time its pod is `Ready`, `lake.spans` and `lake.scores` already exist:
 
 ```bash
 kubectl exec -it <release>-quack-server-0 -n <namespace> -- \
   duckdb -c "
-    ATTACH 'lake/catalog.duckdb' AS catalog;
-    USE catalog;
-    INSTALL quack;
-    LOAD quack;
-
-    CREATE TABLE lake.scores (
-      span_id VARCHAR,
-      project_id VARCHAR,
-      value DOUBLE,
-      reasoning VARCHAR,
-      judge_model VARCHAR,
-      judge_prompt_version VARCHAR,
-      span_start_time TIMESTAMP
-    );
-
-    CALL ducklake_set_data_path('s3://<bucket>/lake');
-  "
-```
-
-### Verify table registration
-
-```bash
-kubectl exec -it <release>-quack-server-0 -n <namespace> -- \
-  duckdb -c "
-    ATTACH 'lake/catalog.duckdb' AS catalog;
+    INSTALL quack; LOAD quack;
+    ATTACH 'lake/catalog.ducklake' AS catalog;
     USE catalog;
     SHOW TABLES;
-    -- Expected: lake.spans, lake.scores
+    -- Expected: spans, scores (both already present, with full columns/partitioning)
   "
 ```
+
+If this step doesn't show both tables yet, start (or restart) one Writer/Query/Eval pod against the new Quack Server first — any of them attaching via `internal/lake` triggers the same schema creation — then re-run the check above.
+
+### Bulk-import historical Parquet data
+
+Import day-by-day to bound memory: a single bulk `INSERT ... SELECT * FROM read_parquet('**/*.parquet')` across the whole history can OOM the importing pod once the Lake has hundreds of small Parquet files per day (this happened during this project's own live cutover — see the daily-batched approach the import job ultimately used). Use an explicit column list matching `internal/lake/lake.go`'s `ensureTables` schema, not `SELECT *`, so a column-order mismatch between the Parquet files and the table can't silently misalign data.
+
+```bash
+kubectl exec -it <release>-quack-server-0 -n <namespace> -- \
+  duckdb -c "
+    INSTALL quack; LOAD quack; INSTALL httpfs; LOAD httpfs;
+    ATTACH 'lake/catalog.ducklake' AS catalog;
+    USE catalog;
+
+    -- Repeat once per historical day you need to recover, oldest first.
+    -- Daily batching keeps peak memory bounded on days with many small files.
+    INSERT INTO spans
+      (span_id, trace_id, parent_id, conversation_id, project_id, service_name,
+       name, kind, start_time, end_time, model, input, output, input_tokens,
+       output_tokens, cost_usd, prompt_name, prompt_version, status_code,
+       status_message, attributes)
+    SELECT span_id, trace_id, parent_id, conversation_id, project_id, service_name,
+           name, kind, start_time, end_time, model, input, output, input_tokens,
+           output_tokens, cost_usd, prompt_name, prompt_version, status_code,
+           status_message, attributes
+    FROM read_parquet(
+      's3://<bucket>/lake/main/spans/*/year=<YYYY>/month=<M>/day=<D>/**/*.parquet'
+    );
+  "
+```
+
+Repeat the equivalent `INSERT INTO scores (...) SELECT ... FROM read_parquet('s3://<bucket>/lake/main/scores/*/year=<YYYY>/month=<M>/day=<D>/**/*.parquet')` for the `scores` table, using the column list from `internal/lake/lake.go`'s `lake.scores` schema (`score_id, span_id, trace_id, project_id, eval_name, value, reasoning, judge_model, prompt_name, prompt_version, created_at, span_start_time`).
+
+If a given day has no Parquet files yet (e.g. the cutover happens before any data was ever written for that day), `read_parquet` raises a "No files found" error — skip that day rather than treating it as a failure.
+
+### Verify the import
+
+```bash
+kubectl exec -it <release>-quack-server-0 -n <namespace> -- \
+  duckdb -c "
+    INSTALL quack; LOAD quack;
+    ATTACH 'lake/catalog.ducklake' AS catalog;
+    USE catalog;
+    SELECT COUNT(*) AS span_count FROM spans;
+    SELECT COUNT(*) AS score_count FROM scores;
+    SELECT COUNT(DISTINCT trace_id) AS trace_count FROM spans;
+  "
+```
+
+Compare `span_count`/`score_count` against the figures recorded in Phase 2.
 
 ## Phase 6 — Validation checklist
 
@@ -288,7 +276,7 @@ kubectl exec -it <release>-query-0 -n <namespace> -- \
 # Verify: total == <pre-cutover span count> + 1
 ```
 
-**If this check fails:** the Catalog's table registration in Phase 5 is incomplete or the ATTACH statement is misconfigured. Review the `catalogDSN`, `dataPath`, and the CREATE TABLE statements.
+**If this check fails:** the Phase 5 Parquet re-import is incomplete or the ATTACH statement is misconfigured. Review the `catalogDSN`, `dataPath`, and the `read_parquet` source paths used in Phase 5.
 
 ### Check 2 — Eval score write-back (write a score to an existing span)
 

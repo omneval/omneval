@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
+	"path"
 	"sort"
 	"time"
 
@@ -33,8 +33,11 @@ type BackupResult struct {
 	Skipped bool
 }
 
-// DefaultBackupPrefix is the S3 prefix for catalog backup objects.
-const DefaultBackupPrefix = "catalog-backups"
+// DefaultBackupPrefix is the S3 prefix for catalog backup objects. It lives
+// under "lake/" alongside every other Lake artifact (span/score Parquet,
+// the Catalog file itself at "lake/catalog.ducklake") so bucket-level
+// policies and lifecycle rules scoped to "lake/*" also cover backups.
+const DefaultBackupPrefix = "lake/catalog-backups"
 
 // RunBackup checkpoints the DuckDB catalog file via the CHECKPOINT SQL
 // command, uploads the resulting snapshot to an S3 timestamped key under
@@ -77,8 +80,10 @@ func RunBackup(ctx context.Context, db *sql.DB, catalogDriver string, store stor
 	}
 
 	// Step 4: Build the S3 key with an RFC3339 timestamp for unique sorting.
+	// path.Join (not filepath.Join) because this is an S3 object key, which
+	// always uses "/" regardless of the host OS's path separator.
 	ts := time.Now().UTC().Format(time.RFC3339Nano)
-	uploadKey := filepath.Join(DefaultBackupPrefix, catalogName, ts+".duckdb")
+	uploadKey := path.Join(DefaultBackupPrefix, catalogName, ts+".duckdb")
 
 	// Step 5: Upload the catalog file content to S3.
 	payload := bytes.NewReader(fileData)
@@ -186,7 +191,7 @@ func RunBackupLoop(ctx context.Context, db *sql.DB, catalogDriver string, store 
 // timestamp (embedded in the key), and deletes the oldest ones beyond
 // keepCount. It returns the number of objects deleted.
 func pruneBackups(ctx context.Context, store storage.ObjectStore, prefix, catalogName string, keepCount int) (int, error) {
-	allPrefix := filepath.Join(prefix, catalogName)
+	allPrefix := path.Join(prefix, catalogName)
 	keys, err := store.ListPrefix(ctx, allPrefix)
 	if err != nil {
 		return 0, fmt.Errorf("lakeserver: backup: list: %w", err)

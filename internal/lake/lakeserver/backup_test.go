@@ -159,8 +159,8 @@ func TestRunBackup_DuckDB(t *testing.T) {
 	if len(keys) != 1 {
 		t.Fatalf("expected 1 uploaded object, got %d", len(keys))
 	}
-	// Key format: catalog-backups/<catalog-name>/<timestamp>.duckdb
-	if !strings.HasPrefix(keys[0], "catalog-backups/") {
+	// Key format: lake/catalog-backups/<catalog-name>/<timestamp>.duckdb
+	if !strings.HasPrefix(keys[0], "lake/catalog-backups/") {
 		t.Errorf("unexpected key format: %q", keys[0])
 	}
 
@@ -204,7 +204,7 @@ func TestRunBackup_PruneOldest(t *testing.T) {
 	baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 4; i++ {
 		ts := baseTime.Add(time.Duration(i) * time.Hour)
-		key := "catalog-backups/test-catalog/" + ts.Format(time.RFC3339) + ".duckdb"
+		key := "lake/catalog-backups/test-catalog/" + ts.Format(time.RFC3339) + ".duckdb"
 		store.objects[key] = []byte("old-backup")
 	}
 
@@ -241,7 +241,7 @@ func TestRunBackup_PruneNeverExceedKeepCount(t *testing.T) {
 	baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < int(keepCount); i++ {
 		ts := baseTime.Add(time.Duration(i) * time.Hour)
-		key := "catalog-backups/test-catalog/" + ts.Format(time.RFC3339) + ".duckdb"
+		key := "lake/catalog-backups/test-catalog/" + ts.Format(time.RFC3339) + ".duckdb"
 		store.objects[key] = []byte("backup")
 	}
 
@@ -276,7 +276,7 @@ func TestRunBackup_PruneNoDeleteWhenUnderKeepCount(t *testing.T) {
 	baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 2; i++ {
 		ts := baseTime.Add(time.Duration(i) * time.Hour)
-		key := "catalog-backups/test-catalog/" + ts.Format(time.RFC3339) + ".duckdb"
+		key := "lake/catalog-backups/test-catalog/" + ts.Format(time.RFC3339) + ".duckdb"
 		store.objects[key] = []byte("old")
 	}
 
@@ -311,7 +311,7 @@ func TestRunBackup_PruneAlwaysDeletesOldest(t *testing.T) {
 	oldestKeys := make([]string, 3)
 	for i := 0; i < 3; i++ {
 		ts := baseTime.Add(time.Duration(i) * time.Hour)
-		key := "catalog-backups/test-catalog/" + ts.Format(time.RFC3339) + ".duckdb"
+		key := "lake/catalog-backups/test-catalog/" + ts.Format(time.RFC3339) + ".duckdb"
 		oldestKeys[i] = key
 		store.objects[key] = []byte("old")
 	}

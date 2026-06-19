@@ -167,18 +167,19 @@ tests:
           path: spec.template.spec.containers[0].env
           content:
             name: OMNEVAL_QUACK_SERVER_BACKUP_KEEP_COUNT
-            value: 12
+            value: "12"
 
-  - it: should not render backup env vars when backup.enabled is false
+  - it: should render OMNEVAL_QUACK_SERVER_BACKUP_ENABLED as explicit "false" when backup.enabled is false
     set:
       quack.server.backup:
         enabled: false
     asserts:
       - documentIndex: 0
-        notContains:
+        contains:
           path: spec.template.spec.containers[0].env
           content:
             name: OMNEVAL_QUACK_SERVER_BACKUP_ENABLED
+            value: "false"
 
 ---
 suite: quack server catalog and PVC
