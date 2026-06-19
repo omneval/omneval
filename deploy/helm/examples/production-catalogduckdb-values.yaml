@@ -1,0 +1,98 @@
+# Production values override for Catalog cutover: CatalogDriverPostgres → CatalogDriverLocal (DuckDB)
+#
+# Usage:
+#   helm upgrade omneval ./deploy/helm --values production-catalogduckdb-values.yaml
+#
+# Prerequisites:
+#   1. Read the full runbook: deploy/helm/examples/README.md (links to docs/runbooks/catalog-cutover.md)
+#   2. Follow the phased procedure: stop Writers, rebuild Catalog, validate, resume Writers
+#   3. Ensure S3 storage is configured (storage.endpoint + storage.bucket + credentials)
+#   4. Ensure Quack Server existingSecret is set for the auth token (GitOps-safe)
+#
+# WARNING: This is a HITL (human-in-the-loop) operation.
+# See the runbook for the full phased procedure with downtime window management.
+
+# ============================================================================
+# Quack Server — DuckDB file Catalog (primary change from Postgres Catalog)
+# ============================================================================
+quack:
+  server:
+    # Catalog driver: duckdb (local DuckDB file on PVC, single-writer)
+    catalogDriver: "duckdb"
+
+    # Catalog DSN: empty — defaults to lake/catalog.duckdb on the PVC
+    # Only set this if you need a custom path (not recommended for production)
+    catalogDSN: ""
+
+    # Lake data path: empty — derived from storage.bucket → s3://<bucket>/lake
+    # Only set this if the Lake Parquet files are at a non-standard S3 prefix
+    dataPath: ""
+
+    # Table Maintenance interval
+    maintenanceInterval: "5m"
+
+    # Lake-native retention (optional — disabled by default)
+    retention:
+      enabled: false
+      maxAgeDays: 0
+
+    # Catalog Backup — enabled by default for DuckDB file Catalog
+    # CHECKPOINT the DuckDB file, upload to S3, prune old backups
+    backup:
+      enabled: true
+      interval: "1h"
+      keepCount: 24
+
+  # PVC for the Catalog file and Lake data path
+  pvc:
+    size: 10Gi
+    storageClass: ""  # set to your cluster's default storage class (e.g. "gp3")
+    accessMode: ReadWriteOnce
+
+  # Client configuration (shared by Writer, Query API, and Eval)
+  client:
+    # Quack Server URL: empty — derives from release name
+    # Only set this if using an external Quack Server (not the typical case)
+    url: ""
+    # Lake data path for clients: empty — derives from quack.server.dataPath
+    dataPath: ""
+
+# ============================================================================
+# Storage — S3-compatible object store (required for Lake Parquet files)
+# ============================================================================
+storage:
+  endpoint: ""       # e.g. "https://s3.amazonaws.com" or "https://s3.us-west-2.amazonaws.com"
+  bucket: ""         # e.g. "omneval-lake"
+  region: "us-east-1"
+  accessKey: ""      # set via omneval-secret (or use IAM roles)
+  secretKey: ""      # set via omneval-secret (or use IAM roles)
+
+# ============================================================================
+# MinIO — disabled in production (use external S3)
+# ============================================================================
+minio:
+  enabled: false
+
+# ============================================================================
+# Metadata database — PostgreSQL (retained for metadata store)
+# ============================================================================
+database:
+  driver: "postgres"
+  dsn: ""  # empty — derived from postgresql section below
+
+postgresql:
+  enabled: true  # internal Postgres for metadata, or set enabled: false + external.* for external Postgres
+  auth:
+    username: omneval
+    password: omneval  # change in production; prefer existingSecret for GitOps
+    database: omneval
+
+# ============================================================================
+# Quack Server — existingSecret for auth token (GitOps-safe)
+# ============================================================================
+# Uncomment and set when using a pre-existing Secret for the Quack token:
+#
+# quack:
+#   server:
+#     existingSecret: "my-quack-token-secret"
+#     existingSecretKey: "token"
