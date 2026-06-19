@@ -142,3 +142,23 @@ tests:
       - documentIndex: 2
         isKind:
           of: ServiceAccount
+
+---
+suite: quack server catalog and PVC
+templates:
+  - configmap.yaml
+tests:
+  - it: should render catalog_driver duckdb in the configmap by default
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'catalog_driver: "duckdb"'
+---
+suite: quack server PVC
+templates:
+  - quack-server-statefulset.yaml
+tests:
+  - it: should provision PVC by default when catalog_driver is duckdb
+    asserts:
+      - isNotEmpty:
+          path: spec.volumeClaimTemplates
