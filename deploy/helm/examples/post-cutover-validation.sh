@@ -34,6 +34,7 @@ NAMESPACE="${2:-omneval}"
 PASSED=0
 FAILED=0
 MANUAL=0
+MANUAL_HINT=""
 
 pass() { echo "  ✅ $1"; PASSED=$((PASSED + 1)); }
 fail() { echo "  ❌ $1"; FAILED=$((FAILED + 1)); }
@@ -86,23 +87,29 @@ fi
 # Check 5: Catalog file path exists in Quack Server pod
 echo ""
 echo "5. Checking catalog file path..."
-CATALOG_PATH=$(kubectl get configmap "${RELEASE}-config" -n "${NAMESPACE}" -o jsonpath='{.data.omneval\.yaml}' 2>/dev/null | grep catalog_dsn | awk '{print $2}' || true)
+CATALOG_PATH=$(kubectl get configmap "${RELEASE}-config" -n "${NAMESPACE}" -o jsonpath='{.data.omneval\.yaml}' 2>/dev/null | grep catalog_dsn | awk '{print $2}' | tr -d '"' || true)
 if [[ -z "${CATALOG_PATH}" ]]; then
   CATALOG_PATH="lake/catalog.duckdb"
 fi
 
 # Verify catalog file exists inside the Quack Server pod
-CATALOG_FILE_EXISTS=$(kubectl exec "${RELEASE}-quack-server-0" -n "${NAMESPACE}" -- ls "/data/${CATALOG_PATH}" 2>/dev/null || true)
-if [[ -n "${CATALOG_FILE_EXISTS}" ]]; then
-  pass "Catalog file exists at /data/${CATALOG_PATH}"
+# If CATALOG_PATH is absolute (starts with /), use it directly; otherwise prepend /data/
+if [[ "${CATALOG_PATH}" == /* ]]; then
+  CATALOG_CHECK_PATH="${CATALOG_PATH}"
 else
-  fail "Catalog file not found at /data/${CATALOG_PATH}"
+  CATALOG_CHECK_PATH="/data/${CATALOG_PATH}"
+fi
+CATALOG_FILE_EXISTS=$(kubectl exec "${RELEASE}-quack-server-0" -n "${NAMESPACE}" -- ls "${CATALOG_CHECK_PATH}" 2>/dev/null || true)
+if [[ -n "${CATALOG_FILE_EXISTS}" ]]; then
+  pass "Catalog file exists at ${CATALOG_CHECK_PATH}"
+else
+  fail "Catalog file not found at ${CATALOG_CHECK_PATH}"
 fi
 
 # Check 6: Old Postgres Catalog config removed
 echo ""
 echo "6. Checking old Postgres Catalog config removed..."
-POSTGRES_CONFIG=$(kubectl get configmap "${RELEASE}-config" -n "${NAMESPACE}" -o jsonpath='{.data.omneval\.yaml}' 2>/dev/null | grep -E 'postgres|Postgres' | head -5 || true)
+POSTGRES_CONFIG=$(kubectl get configmap "${RELEASE}-config" -n "${NAMESPACE}" -o jsonpath='{.data.omneval\.yaml}' 2>/dev/null | grep -E 'catalog.*postgres|catalog.*Postgres' | head -5 || true)
 if [[ -z "${POSTGRES_CONFIG}" ]]; then
   pass "No old Postgres Catalog config found in configmap"
 else
@@ -127,7 +134,7 @@ echo "8. Checking all Omneval services..."
 ALL_PODS=$(kubectl get pods -n "${NAMESPACE}" -o name 2>/dev/null | grep -E '(omneval-)?(ingest|writer|query|eval|quack)' || true)
 if [[ -n "${ALL_PODS}" ]]; then
   pass "Omneval pods found"
-  MANUAL="Check all pods are Running/Ready: $(echo "${ALL_PODS}" | tr '\n' ' ')"
+  MANUAL_HINT="Check all pods are Running/Ready: $(echo "${ALL_PODS}" | tr '\n' ' ')"
 else
   fail "No Omneval service pods found"
 fi
@@ -137,6 +144,9 @@ echo ""
 echo "================================================================"
 echo "Automated checks: ${PASSED} passed, ${FAILED} failed"
 echo "Manual checks remaining: ${MANUAL}"
+if [[ -n "${MANUAL_HINT}" ]]; then
+  echo "  Hint: ${MANUAL_HINT}"
+fi
 echo "================================================================"
 
 if [[ ${FAILED} -gt 0 ]]; then
