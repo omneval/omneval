@@ -34,6 +34,81 @@
 - Integration tests that require a real database spin up instances in Docker via `testcontainers-go`.
 - Every public function that handles external input must have at least one test.
 
+When mocking your own code in tests, **always mock interfaces derived from the real code — never hand-write standalone fakes without a compile-time check.**
+
+If a test needs to replace an internal component, function, or client, define an interface that matches the real target and use a mock generation tool (like `uber-go/mock` or `moq`) that implements that interface. Do not author a bespoke `struct` or function variable without binding it to the explicit interface contract.
+
+### Why
+
+A hand-written fake struct or function variable encodes whatever signature or sync/async behavior (such as channels or context propagation) you assumed at the time you wrote the test. When the real implementation's signature changes later (e.g., adding a new required argument, modifying a return type, or introducing a `context.Context`), a loosely-typed hand-written mock might still compile if it's not strictly bound to the contract, causing tests to pass while production breaks.
+
+By using tool-generated mocks or explicitly casting your fakes to the target interface at compile time, the compiler will immediately reject your test code if the real production contract changes.
+
+### How to Apply
+
+Instead of arbitrary function overrides, define an interface for the dependency and use generated mocks.
+
+```go
+// production_code.go
+package service
+
+import "context"
+
+// DataFetcher defines the contract. 
+type DataFetcher interface {
+    FetchData(ctx context.Context, id string) (string, error)
+}
+
+type RealFetcher struct{}
+func (rf *RealFetcher) FetchData(ctx context.Context, id string) (string, error) {
+    // Real implementation
+    return "real data", nil
+}
+
+```
+
+```go
+// service_test.go
+package service_test
+
+import (
+	"context"
+	"testing"
+	"yourproject/service"
+)
+
+// 1. If using a mock generation tool (e.g., uber-go/mock):
+func TestServiceWithGenMock(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// The generated mock is guaranteed to match the interface contract
+	mockFetcher := mock_service.NewMockDataFetcher(ctrl)
+	mockFetcher.EXPECT().FetchData(gomock.Any(), "123").Return("fake data", nil)
+
+	// Inject into your production struct...
+}
+
+// 2. If hand-writing a fake, FORCE a compile-time check:
+type fakeFetcher struct{}
+func (f *fakeFetcher) FetchData(ctx context.Context, id string) (string, error) {
+	return "fake data", nil
+}
+
+// CRITICAL: This line forces the compiler to guarantee fakeFetcher implements DataFetcher.
+// If DataFetcher's signature changes, this test file will fail to compile.
+var _ service.DataFetcher = (*fakeFetcher)(nil)
+
+func TestServiceWithHandWrittenFake(t *testing.T) {
+    fake := &fakeFetcher{}
+    // Inject into your production struct...
+}
+
+```
+
+---
+
+
 ## Architecture
 
 - Each service has its own `go.mod` inside a Go workspace (`go.work` at repo root).
