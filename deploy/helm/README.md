@@ -118,6 +118,24 @@ query:
 | `postgresql-statefulset.yaml` | StatefulSet | PostgreSQL metadata store |
 | `minio-deployment.yaml` | Deployment | MinIO object store |
 
+## Catalog cutover (DuckDB file catalog)
+
+Migrating from `CatalogDriverPostgres` (Postgres-backed DuckLake Catalog) to
+`CatalogDriverLocal` (local DuckDB file catalog on the Quack Server PVC) is
+documented in the [Catalog cutover runbook](../../docs/runbooks/catalog-cutover.md).
+
+Key artifacts:
+
+| Artifact | Path |
+|---|---|
+| Runbook | [docs/runbooks/catalog-cutover.md](../../docs/runbooks/catalog-cutover.md) |
+| Production values override | [examples/production-catalogduckdb-values.yaml](examples/production-catalogduckdb-values.yaml) |
+| Post-cutover validation script | [examples/post-cutover-validation.sh](examples/post-cutover-validation.sh) |
+
+> **⚠️ Warning:** This is a HITL (human-in-the-loop) operation that requires a
+> maintenance window. Follow the phased procedure in the runbook before applying
+> the Helm upgrade.
+
 ## Helm unittest
 
 Unit tests live in [tests/](tests/) using [helm-unittest](https://github.com/helm-unittest/helm-unittest):
