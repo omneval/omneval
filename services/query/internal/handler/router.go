@@ -78,21 +78,27 @@ type RouterDeps struct {
 	APIKeyValidator internalauth.Validator
 }
 
-// authPolicyLookup maps a (method, exact_path) pair to the auth policy
-// that must be enforced. Built from allRoutes at router construction time so
-// that buildMiddleware is a simple table lookup rather than a cascade of
-// string-prefix heuristics.
+// authPolicyLookup maps a registered mux pattern ("METHOD /path/{param}", the
+// exact string passed to mux.HandleFunc) to the auth policy that must be
+// enforced. Built from allRoutes at router construction time.
+//
+// Lookups must be keyed by the *registered pattern*, not the concrete
+// request path: a route like "/api/v1/traces/{traceId}" never equals a real
+// request path like "/api/v1/traces/abc123", so looking this table up with
+// req.URL.Path directly always misses for every route with a path
+// parameter and silently falls back to AuthPolicyPublic — bypassing
+// session/admin auth entirely for that route. Callers must resolve the
+// concrete request to its registered pattern first via mux.Handler(req)
+// (see buildMiddleware), which performs the same path-parameter matching
+// http.ServeMux itself uses to dispatch the request.
 type authPolicyLookup struct {
-	policy map[string]map[string]AuthPolicy // path -> method -> policy
+	policy map[string]AuthPolicy // "METHOD /registered/pattern" -> policy
 }
 
-// lookup returns the auth policy for the given method and path.
-// The lookup is case-sensitive and exact (no wildcard expansion).
-func (l *authPolicyLookup) lookup(method, path string) AuthPolicy {
-	if methods, ok := l.policy[path]; ok {
-		if p, ok := methods[method]; ok {
-			return p
-		}
+// lookup returns the auth policy for the given registered mux pattern.
+func (l *authPolicyLookup) lookup(pattern string) AuthPolicy {
+	if p, ok := l.policy[pattern]; ok {
+		return p
 	}
 	return AuthPolicyPublic // default to public for unmatched routes
 }
@@ -247,13 +253,12 @@ func (rt *Router) buildMiddleware(mux *http.ServeMux) http.Handler {
 	adminMw := auth.RequireAdmin(rt.store, rt.cfg.Auth.SecureCookie, rt.sessionTTL, rt.cfg.Auth.AdminEmail)
 	promptGetMw := auth.RequireSessionOrAPIKey(rt.store, rt.apiValidator, rt.cfg.Auth.SecureCookie, rt.sessionTTL, internalauth.APIKeyProjectIDContextKey)
 
-	// Build lookup table from rt.routes.
-	lk := &authPolicyLookup{policy: make(map[string]map[string]AuthPolicy)}
+	// Build lookup table from rt.routes, keyed by the exact pattern string
+	// each route was registered on the mux with (see RegisterRoutes:
+	// mux.HandleFunc(r.Method+" "+r.Path, r.Handler)).
+	lk := &authPolicyLookup{policy: make(map[string]AuthPolicy)}
 	for _, r := range rt.routes {
-		if lk.policy[r.Path] == nil {
-			lk.policy[r.Path] = make(map[string]AuthPolicy)
-		}
-		lk.policy[r.Path][r.Method] = r.Policy
+		lk.policy[r.Method+" "+r.Path] = r.Policy
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -265,8 +270,14 @@ func (rt *Router) buildMiddleware(mux *http.ServeMux) http.Handler {
 			return
 		}
 
-		// Lookup the auth policy for this (method, path) pair.
-		policy := lk.lookup(req.Method, path)
+		// Resolve the concrete request to the registered mux pattern it
+		// matches (e.g. "/api/v1/traces/abc123" -> "GET /api/v1/traces/{traceId}")
+		// using the same path-parameter matching http.ServeMux uses to
+		// dispatch the request, then look up the policy for that pattern.
+		// Matching on req.URL.Path directly would never hit any route with
+		// a path parameter and silently default every such route to public.
+		_, pattern := mux.Handler(req)
+		policy := lk.lookup(pattern)
 
 		// Apply the appropriate middleware based on the resolved policy.
 		switch policy {
