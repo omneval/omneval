@@ -97,7 +97,7 @@ type Config struct {
 
 // ConfigFromApp derives the Quack Server's catalog settings from the
 // application config: explicit quack.server.* settings win; otherwise the
-// Catalog driver follows the metadata-store database.
+// Catalog defaults to a local DuckDB file (ADR-0006).
 func ConfigFromApp(cfg *config.Config) Config {
 	sc := Config{
 		ListenAddr:    cfg.Quack.Server.ListenAddr,
@@ -109,11 +109,7 @@ func ConfigFromApp(cfg *config.Config) Config {
 		sc.ListenAddr = ":9494"
 	}
 	if sc.CatalogDriver == "" {
-		if cfg.Database.Driver == "postgres" {
-			sc.CatalogDriver = CatalogDriverPostgres
-		} else {
-			sc.CatalogDriver = CatalogDriverLocal
-		}
+		sc.CatalogDriver = CatalogDriverLocal
 	}
 	if sc.CatalogDSN == "" {
 		if sc.CatalogDriver == CatalogDriverPostgres {

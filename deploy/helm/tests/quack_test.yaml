@@ -110,6 +110,11 @@ tests:
           path: spec.serviceName
           pattern: 'RELEASE-NAME-quack-server'
 
+  - it: should provision PVC for default duckdb catalogDriver
+    asserts:
+      - isNotEmpty:
+          path: spec.volumeClaimTemplates
+
   - it: should provision a PVC for the local catalog driver
     set:
       quack.server.catalogDriver: duckdb
