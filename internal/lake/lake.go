@@ -189,9 +189,21 @@ func isStaleConn(err error) bool {
 	return false
 }
 
+// reconnectTimeout bounds the fresh context reconnect uses for ATTACH and
+// table setup. Deliberately not derived from the caller's ctx: callers
+// detect a stale connection via a context that may already be at or past
+// its deadline (e.g. the readiness probe's 3s budget), and reusing that
+// context here would make the reconnect attempt fail immediately with the
+// same "context canceled"/"context deadline exceeded" error that triggered
+// it in the first place.
+const reconnectTimeout = 10 * time.Second
+
 // reconnect closes the current DuckDB in-memory instance, opens a fresh one,
 // and re-establishes the Quack Server attachment. Callers must hold l.mu.
 func (l *Lake) reconnect(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reconnectTimeout)
+	defer cancel()
+
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
 		return fmt.Errorf("lake: reconnect open: %w", err)

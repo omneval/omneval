@@ -133,6 +133,7 @@ spec:
               port: http
             initialDelaySeconds: 10
             periodSeconds: 5
+            timeoutSeconds: 3
           resources:
             {{- toYaml .Values.writer.resources | nindent 12 }}
       volumes:
