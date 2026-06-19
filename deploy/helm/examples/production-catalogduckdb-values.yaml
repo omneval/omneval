@@ -84,7 +84,7 @@ postgresql:
   enabled: true  # internal Postgres for metadata, or set enabled: false + external.* for external Postgres
   auth:
     username: omneval
-    password: omneval  # change in production; prefer existingSecret for GitOps
+    # NOTE: set password explicitly or prefer existingSecret for GitOps safety
     database: omneval
 
 # ============================================================================
