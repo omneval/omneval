@@ -254,7 +254,7 @@ quack:
     existingSecretKey: "token"
     # Catalog driver: "postgres" (prod, shares the metadata Postgres) or
     # "duckdb" (local single-writer catalog file, demo profile).
-    catalogDriver: "postgres"
+    catalogDriver: "duckdb"
     # Catalog DSN override. When empty and catalogDriver is "postgres", the
     # chart derives this from the postgresql section (same as database.dsn).
     # When catalogDriver is "duckdb", this is the local catalog file path on

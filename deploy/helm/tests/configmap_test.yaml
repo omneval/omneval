@@ -65,3 +65,17 @@ tests:
       - matchRegex:
           path: data["omneval.yaml"]
           pattern: 's3://omneval/lake'
+
+  - it: should default catalog_driver to duckdb when not explicitly set
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'catalog_driver: "duckdb"'
+
+  - it: should respect explicit catalog_driver postgres
+    set:
+      quack.server.catalogDriver: postgres
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'catalog_driver: "postgres"'
