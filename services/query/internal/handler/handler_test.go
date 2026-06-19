@@ -1177,6 +1177,15 @@ func TestHandleTraceDetail_ScoresAttached(t *testing.T) {
 		if trace.RootSpan.Scores[0].Value != 0.9 {
 			t.Errorf("score value: got %f, want 0.9", trace.RootSpan.Scores[0].Value)
 		}
+		if trace.RootSpan.Scores[0].ScoreID != "score-001" {
+			t.Errorf("score score_id: got %q, want %q", trace.RootSpan.Scores[0].ScoreID, "score-001")
+		}
+		if trace.RootSpan.Scores[0].TraceID != "trace-scores" {
+			t.Errorf("score trace_id: got %q, want %q", trace.RootSpan.Scores[0].TraceID, "trace-scores")
+		}
+		if trace.RootSpan.Scores[0].ProjectID != "test-proj" {
+			t.Errorf("score project_id: got %q, want %q", trace.RootSpan.Scores[0].ProjectID, "test-proj")
+		}
 	}
 }
 
@@ -1426,6 +1435,9 @@ type treeSpan struct {
 }
 
 type spanScore struct {
+	ScoreID   string  `json:"score_id"`
+	TraceID   string  `json:"trace_id"`
+	ProjectID string  `json:"project_id"`
 	EvalName  string  `json:"eval_name"`
 	Value     float64 `json:"value"`
 	Reasoning string  `json:"reasoning"`

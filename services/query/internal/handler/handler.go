@@ -453,7 +453,7 @@ func buildTraceTree(spans []*domain.Span, db DBHandle, traceID, projectID, score
 // scoresTable should be "scores" for snapshot DB or "lake.scores" for Lake.
 func withScores(db DBHandle, spans []*domain.Span, traceID, projectID, scoresTable string) []*domain.Span {
 	rows, err := db.QueryContext(context.Background(),
-		"SELECT span_id, eval_name, value, reasoning, judge_model, "+
+		"SELECT score_id, span_id, trace_id, project_id, eval_name, value, reasoning, judge_model, "+
 			"prompt_name, prompt_version, created_at FROM "+scoresTable+
 			" WHERE trace_id = ? AND project_id = ?",
 		traceID, projectID,
@@ -471,7 +471,7 @@ func withScores(db DBHandle, spans []*domain.Span, traceID, projectID, scoresTab
 		var judgeModelStr *string
 		var promptNameStr *string
 		var promptVer *int64
-		if err := rows.Scan(&s.SpanID, &s.EvalName, &s.Value, &s.Reasoning, &judgeModelStr, &promptNameStr, &promptVer, &createdAtStr); err != nil {
+		if err := rows.Scan(&s.ScoreID, &s.SpanID, &s.TraceID, &s.ProjectID, &s.EvalName, &s.Value, &s.Reasoning, &judgeModelStr, &promptNameStr, &promptVer, &createdAtStr); err != nil {
 			continue
 		}
 		if judgeModelStr != nil {
