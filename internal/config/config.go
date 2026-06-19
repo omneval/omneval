@@ -77,6 +77,8 @@ type QuackServerConfig struct {
 	// file-deletion retention worker (Writer.Retention), which is wrong under
 	// DuckLake.
 	Retention QuackRetentionConfig `mapstructure:"retention"`
+	// Backup controls Catalog file checkpoint and S3 upload.
+	Backup QuackBackupConfig `mapstructure:"backup"`
 }
 
 // QuackRetentionConfig controls the Lake-native retention step in Table
@@ -90,6 +92,21 @@ type QuackRetentionConfig struct {
 	// MaxAgeDays is how old a span (by start_time) or score (by
 	// span_start_time) must be to be deleted. Zero means no age limit.
 	MaxAgeDays int `mapstructure:"max_age_days"`
+}
+
+// QuackBackupConfig controls the Catalog Backup scheduler: CHECKPOINT the
+// DuckDB file, upload to an S3 timestamped key, and prune old backups.
+// Only meaningful when CatalogDriver is "duckdb" (local single-writer
+// catalog). When CatalogDriver is "postgres" the backup is a no-op because
+// the Catalog lives in Postgres and does not need checkpointing.
+type QuackBackupConfig struct {
+	// Enabled turns on the backup scheduler. Default true.
+	Enabled bool `mapstructure:"enabled"`
+	// Interval is how often to run a backup pass. Default "1h".
+	Interval string `mapstructure:"interval"`
+	// KeepCount is the maximum number of backup objects to retain per
+	// upload pass. Oldest objects beyond KeepCount are deleted.
+	KeepCount int `mapstructure:"keep_count"`
 }
 
 // QuackClientConfig configures a Quack client attachment (Writer, Query
@@ -338,6 +355,11 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("quack.server.catalog_dsn", "")
 	v.SetDefault("quack.server.data_path", "")
 	v.SetDefault("quack.server.maintenance_interval", "5m")
+	v.SetDefault("quack.server.retention.enabled", false)
+	v.SetDefault("quack.server.retention.max_age_days", 0)
+	v.SetDefault("quack.server.backup.enabled", true)
+	v.SetDefault("quack.server.backup.interval", "1h")
+	v.SetDefault("quack.server.backup.keep_count", 24)
 	// quack client (Writer, Query API, backfill tool, demo profile)
 	v.SetDefault("quack.client.url", "localhost:9494")
 	v.SetDefault("quack.client.token", "")
@@ -405,6 +427,9 @@ func Load(path string) (*Config, error) {
 	envString(&cfg.Quack.Server.CatalogDSN, "OMNEVAL_QUACK_SERVER_CATALOG_DSN")
 	envString(&cfg.Quack.Server.DataPath, "OMNEVAL_QUACK_SERVER_DATA_PATH")
 	envString(&cfg.Quack.Server.MaintenanceInterval, "OMNEVAL_QUACK_SERVER_MAINTENANCE_INTERVAL")
+	envBool(&cfg.Quack.Server.Backup.Enabled, "OMNEVAL_QUACK_SERVER_BACKUP_ENABLED")
+	envString(&cfg.Quack.Server.Backup.Interval, "OMNEVAL_QUACK_SERVER_BACKUP_INTERVAL")
+	envInt(&cfg.Quack.Server.Backup.KeepCount, "OMNEVAL_QUACK_SERVER_BACKUP_KEEP_COUNT")
 	envString(&cfg.Quack.Client.URL, "OMNEVAL_QUACK_CLIENT_URL")
 	envString(&cfg.Quack.Client.Token, "OMNEVAL_QUACK_CLIENT_TOKEN")
 	envString(&cfg.Quack.Client.DataPath, "OMNEVAL_QUACK_CLIENT_DATA_PATH")

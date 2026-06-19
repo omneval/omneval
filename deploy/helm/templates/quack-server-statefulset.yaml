@@ -118,6 +118,14 @@ spec:
                   key: storage-secret-key
                   optional: true
             {{- end }}
+            {{- if .Values.quack.server.backup.enabled }}
+            - name: OMNEVAL_QUACK_SERVER_BACKUP_ENABLED
+              value: "true"
+            - name: OMNEVAL_QUACK_SERVER_BACKUP_INTERVAL
+              value: {{ .Values.quack.server.backup.interval | quote }}
+            - name: OMNEVAL_QUACK_SERVER_BACKUP_KEEP_COUNT
+              value: {{ .Values.quack.server.backup.keepCount }}
+            {{- end }}
             {{- if and (eq .Values.database.driver "postgres") (not $useLocalCatalog) }}
             - name: OMNEVAL_DATABASE_DSN
               valueFrom:
