@@ -1,0 +1,206 @@
+---
+# Post-cutover validation: catalogDriver=duckdb, backup enabled, no old Postgres
+# catalog config, PVC provisioned.
+suite: cutover — configmap duckdb
+templates:
+  - configmap.yaml
+tests:
+  - it: should render catalog_driver duckdb in post-cutover config
+    set:
+      quack.server.catalogDriver: duckdb
+      quack.server.backup.enabled: true
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'catalog_driver: "duckdb"'
+
+  - it: should render catalog_dsn for DuckDB (local file path)
+    set:
+      quack.server.catalogDriver: duckdb
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'catalog_dsn:.*duckdb'
+
+  - it: should render the full backup section in configmap
+    set:
+      quack.server.backup.enabled: true
+      quack.server.backup.interval: "30m"
+      quack.server.backup.keepCount: 48
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'backup:'
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'enabled: true'
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'interval: "30m"'
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'keep_count: 48'
+
+  - it: should NOT have postgres catalog DSN in catalog_dsn when duckdb
+    set:
+      quack.server.catalogDriver: duckdb
+    asserts:
+      - notMatchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'catalog_dsn.*postgres://'
+
+  - it: should keep database postgres config (metadata store) when postgresql is enabled
+    set:
+      postgresql.enabled: true
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'database:'
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'driver: postgres'
+
+  - it: should produce valid full post-cutover config with S3 storage
+    set:
+      quack.server.catalogDriver: duckdb
+      quack.server.catalogDSN: ""
+      quack.server.backup.enabled: true
+      storage.endpoint: "https://s3.us-west-2.amazonaws.com"
+      storage.bucket: "omneval-lake"
+      storage.region: "us-west-2"
+      postgresql.enabled: true
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'catalog_driver: "duckdb"'
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'storage:'
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'bucket: "omneval-lake"'
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'endpoint:'
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'data_path:.*s3://omneval-lake/lake'
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'enabled: true'
+
+  - it: should NOT have old postgres catalog when using duckdb default
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'catalog_driver: "duckdb"'
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'catalog_dsn:.*duckdb'
+
+---
+# Post-cutover validation: StatefulSet PVC and env vars
+suite: cutover — statefulset duckdb
+templates:
+  - quack-server-statefulset.yaml
+tests:
+  - it: should provision PVC for DuckDB catalog (volumeClaimTemplates)
+    set:
+      quack.server.catalogDriver: duckdb
+    asserts:
+      - documentIndex: 0
+        isNotEmpty:
+          path: spec.volumeClaimTemplates
+
+  - it: should NOT include Postgres catalog DSN env var when catalogDriver is duckdb
+    set:
+      quack.server.catalogDriver: duckdb
+      quack.server.backup.enabled: true
+    asserts:
+      - documentIndex: 0
+        notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNEVAL_DATABASE_DSN
+
+  - it: should include backup env vars when backup is enabled
+    set:
+      quack.server.backup.enabled: true
+      quack.server.backup.interval: "1h"
+      quack.server.backup.keepCount: 24
+    asserts:
+      - documentIndex: 0
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNEVAL_QUACK_SERVER_BACKUP_ENABLED
+            value: "true"
+
+  - it: should mount PVC at /data when catalogDriver is duckdb
+    set:
+      quack.server.catalogDriver: duckdb
+    asserts:
+      - documentIndex: 0
+        contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: data
+            mountPath: /data
+
+  - it: default statefulset should have PVC provisioned
+    asserts:
+      - documentIndex: 0
+        isNotEmpty:
+          path: spec.volumeClaimTemplates
+
+---
+# Post-cutover validation: Secret config
+suite: cutover — secret
+templates:
+  - secret.yaml
+tests:
+  - it: should include postgres-dsn for metadata store when postgresql enabled
+    set:
+      postgresql.enabled: true
+    asserts:
+      - isNotEmpty:
+          path: stringData.postgres-dsn
+
+  - it: should not contain catalog postgres DSN in secret
+    set:
+      postgresql.enabled: true
+    asserts:
+      - notExists:
+          path: stringData.catalog-postgres-dsn
+
+---
+# Verify backward compatibility: postgres catalog still works
+suite: cutover — backward compat postgres catalog
+templates:
+  - configmap.yaml
+  - quack-server-statefulset.yaml
+tests:
+  - it: should support explicit postgres catalogDriver (rollback path)
+    set:
+      quack.server.catalogDriver: postgres
+      quack.server.catalogDSN: "postgres://old:dsn@host:5432/omneval"
+    templates:
+      - configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'catalog_driver: "postgres"'
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'catalog_dsn: "postgres://old:dsn@host:5432/omneval"'
+
+  - it: should not provision PVC when using postgres catalog
+    set:
+      quack.server.catalogDriver: postgres
+      storage.bucket: "omneval"
+      storage.endpoint: "http://minio:9000"
+    templates:
+      - quack-server-statefulset.yaml
+    asserts:
+      - notExists:
+          path: spec.volumeClaimTemplates
