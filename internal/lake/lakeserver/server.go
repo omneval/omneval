@@ -163,6 +163,13 @@ func Serve(ctx context.Context, cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("lakeserver: open duckdb: %w", err)
 	}
 
+	// CatalogDriverLocal requires a single-writer DuckDB file. Serialize all
+	// access through one connection so DuckLake's catalog metadata stays
+	// consistent across concurrent Quack-client attachments.
+	if cfg.CatalogDriver == CatalogDriverLocal {
+		db.SetMaxOpenConns(1)
+	}
+
 	if err := attachCatalog(ctx, db, cfg); err != nil {
 		db.Close()
 		return nil, err

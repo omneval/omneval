@@ -72,6 +72,11 @@ func ConfigFromApp(cfg *config.Config) Config {
 	return lc
 }
 
+// ensureTablesMu serializes DDL across all Lake instances so that
+// concurrent Open() calls do not race on ALTER TABLE (which DuckLake
+// rejects as a transaction conflict when two sessions modify table metadata).
+var ensureTablesMu sync.Mutex
+
 // Lake is an attached DuckLake catalog ready for reads and writes.
 // The underlying *sql.DB is an in-memory DuckDB instance with the Lake
 // attached as catalog "lake"; the attachment is shared by every pooled
@@ -109,12 +114,19 @@ func Open(ctx context.Context, cfg Config) (*Lake, error) {
 	db.SetMaxOpenConns(1)
 
 	l := &Lake{db: db, readOnly: cfg.ReadOnly, cfg: cfg}
-	if err := l.attach(ctx, cfg); err != nil {
+
+	// Retry attach with backoff. When a Quack Server backs its DuckLake
+	// catalog by a local DuckDB file, concurrent Quack-client attachments
+	// can race on the catalog's initialization protocol (e.g. "table already
+	// exists" or "no snapshot found"). Retrying with a short backoff lets the
+	// first writers finish their catalog setup so subsequent clients can
+	// attach against the now-consistent catalog.
+	if err := l.attachWithRetry(ctx, cfg); err != nil {
 		db.Close()
 		return nil, err
 	}
 	if !cfg.ReadOnly {
-		if err := l.ensureTables(ctx); err != nil {
+		if err := l.ensureTablesWithRetry(ctx); err != nil {
 			db.Close()
 			return nil, err
 		}
@@ -151,6 +163,60 @@ func (l *Lake) attach(ctx context.Context, cfg Config) error {
 		}
 	}
 	return nil
+}
+
+// isAttachRace reports whether err indicates a transient DuckLake catalog
+// initialization race: two clients simultaneously running the ATTACH
+// protocol against a file-backed catalog. These errors are recoverable —
+// retrying after a short backoff usually succeeds because the first writer
+// finishes its catalog setup and the second client attaches against a
+// consistent catalog.
+func isAttachRace(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "already exists") ||
+		strings.Contains(msg, "No snapshot found in DuckLake") ||
+		strings.Contains(msg, "write-write conflict") ||
+		strings.Contains(msg, "GetDBPath not implemented yet") ||
+		strings.Contains(msg, "Transaction conflict")
+}
+
+// isTxConflict reports whether err indicates a transient DuckLake transaction
+// conflict: two concurrent transactions attempted to modify the same table or
+// row. DuckLake's inlined-insert/inlined-delete semantics use optimistic
+// concurrency control, so conflicting commits fail and must be retried.
+func isTxConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Transaction conflict")
+}
+
+// attachWithRetry calls attach, retrying on transient catalog-race errors
+// with exponential backoff (up to 3 retries).
+func (l *Lake) attachWithRetry(ctx context.Context, cfg Config) error {
+	var lastErr error
+	for attempt := 0; attempt <= 3; attempt++ {
+		if err := l.attach(ctx, cfg); err != nil {
+			if !isAttachRace(err) {
+				return err
+			}
+			lastErr = err
+			if attempt < 3 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(time.Duration(attempt+1) * 50 * time.Millisecond):
+				}
+			}
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("lake: attach after 4 attempts (last: %w)", lastErr)
 }
 
 // isStaleConn reports whether err is a Quack-connectivity error that indicates
@@ -343,6 +409,36 @@ func (l *Lake) ensureTables(ctx context.Context) error {
 	return nil
 }
 
+// ensureTablesWithRetry calls ensureTables, retrying on transient catalog-race
+// errors (e.g. "No snapshot found in DuckLake", "Transaction conflict" for
+// ALTER TABLE DDL) that happen when a client reaches ensureTables before the
+// catalog has finished initializing from a concurrent ATTACH. The call is
+// serialized across all Lake instances via ensureTablesMu so that concurrent
+// Open() callers never race on ALTER TABLE at the DuckLake layer.
+func (l *Lake) ensureTablesWithRetry(ctx context.Context) error {
+	ensureTablesMu.Lock()
+	defer ensureTablesMu.Unlock()
+	var lastErr error
+	for attempt := 0; attempt <= 8; attempt++ {
+		if err := l.ensureTables(ctx); err != nil {
+			if !isAttachRace(err) {
+				return err
+			}
+			lastErr = err
+			if attempt < 8 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(time.Duration(attempt+1) * 100 * time.Millisecond):
+				}
+			}
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("lake: ensureTables after 9 attempts (last: %w)", lastErr)
+}
+
 // DB exposes the underlying DuckDB handle with the Lake attached as
 // catalog "lake".
 func (l *Lake) DB() *sql.DB { return l.db }
@@ -441,6 +537,28 @@ func (l *Lake) InsertSpans(ctx context.Context, spans []*domain.Span) error {
 }
 
 func (l *Lake) insertSpansLocked(ctx context.Context, spans []*domain.Span) error {
+	var lastErr error
+	for attempt := 0; attempt <= 3; attempt++ {
+		if err := l.doInsertSpans(ctx, spans); err != nil {
+			if !isTxConflict(err) {
+				return err
+			}
+			lastErr = err
+			if attempt < 3 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(time.Duration(attempt+1) * 50 * time.Millisecond):
+				}
+			}
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("lake: insertSpans after 4 attempts (last: %w)", lastErr)
+}
+
+func (l *Lake) doInsertSpans(ctx context.Context, spans []*domain.Span) error {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("lake: begin tx: %w", err)
@@ -538,6 +656,28 @@ func (l *Lake) InsertScores(ctx context.Context, scores []*domain.Score) error {
 }
 
 func (l *Lake) insertScoresLocked(ctx context.Context, scores []*domain.Score) error {
+	var lastErr error
+	for attempt := 0; attempt <= 3; attempt++ {
+		if err := l.doInsertScores(ctx, scores); err != nil {
+			if !isTxConflict(err) {
+				return err
+			}
+			lastErr = err
+			if attempt < 3 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(time.Duration(attempt+1) * 50 * time.Millisecond):
+				}
+			}
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("lake: insertScores after 4 attempts (last: %w)", lastErr)
+}
+
+func (l *Lake) doInsertScores(ctx context.Context, scores []*domain.Score) error {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("lake: begin tx: %w", err)
@@ -719,4 +859,3 @@ func firstWords(s string, n int) string {
 	}
 	return strings.Join(fields, " ")
 }
-
