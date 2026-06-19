@@ -143,6 +143,43 @@ tests:
         isKind:
           of: ServiceAccount
 
+  - it: should render backup env vars when backup.enabled is true
+    set:
+      quack.server.backup:
+        enabled: true
+        interval: "2h"
+        keepCount: 12
+    asserts:
+      - documentIndex: 0
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNEVAL_QUACK_SERVER_BACKUP_ENABLED
+            value: "true"
+      - documentIndex: 0
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNEVAL_QUACK_SERVER_BACKUP_INTERVAL
+            value: "2h"
+      - documentIndex: 0
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNEVAL_QUACK_SERVER_BACKUP_KEEP_COUNT
+            value: 12
+
+  - it: should not render backup env vars when backup.enabled is false
+    set:
+      quack.server.backup:
+        enabled: false
+    asserts:
+      - documentIndex: 0
+        notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNEVAL_QUACK_SERVER_BACKUP_ENABLED
+
 ---
 suite: quack server catalog and PVC
 templates:
@@ -153,6 +190,22 @@ tests:
       - matchRegex:
           path: data["omneval.yaml"]
           pattern: 'catalog_driver: "duckdb"'
+
+  - it: should render the backup section in the configmap by default
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'backup:'
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'enabled: true'
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'interval: "1h"'
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'keep_count: 24'
+
 ---
 suite: quack server PVC
 templates:

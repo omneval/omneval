@@ -21,6 +21,7 @@ import (
 	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/lake/lakeserver"
 	"github.com/omneval/omneval/internal/probe"
+	"github.com/omneval/omneval/internal/storage/s3"
 )
 
 func levelFromString(s string) slog.Level {
@@ -123,6 +124,31 @@ func Run() error {
 			}
 		})
 	}()
+
+	// Catalog Backup scheduler: CHECKPOINT + S3 upload + prune.
+	backupStore := s3.New(&cfg.Storage)
+	backupInterval, err := time.ParseDuration(cfg.Quack.Server.Backup.Interval)
+	if err != nil || backupInterval <= 0 {
+		backupInterval = lakeserver.DefaultBackupInterval
+	}
+	backupCfg := lakeserver.BackupConfig{
+		KeepCount: cfg.Quack.Server.Backup.KeepCount,
+	}
+
+	if cfg.Quack.Server.Backup.Enabled {
+		backupDone := make(chan error, 1)
+		go func() {
+			backupDone <- lakeserver.RunBackupLoop(ctx, maintLake.DB(), scfg.CatalogDriver, backupStore, "quack-catalog", backupCfg, backupInterval, nil)
+		}()
+
+		defer func() {
+			if err := <-backupDone; err != nil && err != context.Canceled {
+				slog.Warn("quack: backup loop error", "err", err)
+			}
+		}()
+	} else {
+		slog.Info("quack: catalog backup disabled")
+	}
 
 	// Health/readiness HTTP server.
 	p := probe.New()
