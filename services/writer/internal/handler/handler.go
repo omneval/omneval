@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/idgen"
 	"github.com/omneval/omneval/services/writer/internal/metrics"
 )
 
@@ -71,8 +72,16 @@ func (h *ScoreMux) HandleScores(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The real caller (the Eval Worker) never sets score_id - generate one
+	// server-side, same as the Query service's public /api/v1/scores
+	// endpoint, rather than silently storing an empty score_id.
+	scoreID := req.ScoreID
+	if scoreID == "" {
+		scoreID = idgen.Generate()
+	}
+
 	score := &domain.Score{
-		ScoreID:       req.ScoreID,
+		ScoreID:       scoreID,
 		SpanID:        req.SpanID,
 		TraceID:       req.TraceID,
 		ProjectID:     req.ProjectID,

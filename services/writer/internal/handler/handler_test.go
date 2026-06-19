@@ -75,6 +75,57 @@ func TestScoreWriteToLake(t *testing.T) {
 	}
 }
 
+// TestScoreWithoutScoreID_GeneratesOne is a regression test: the real Eval
+// Worker (services/eval/internal/worker/worker.go's writeScore) never sends
+// a score_id in its payload — only job_id, rule_id, span_id, trace_id,
+// project_id, score, reasoning. Before this fix, HandleScores passed that
+// empty req.ScoreID straight through to domain.Score, so every score
+// written by the actual Eval pipeline had an empty score_id stored in the
+// Lake. Confirmed live against the production instance during the v0.0.27
+// cutover validation.
+func TestScoreWithoutScoreID_GeneratesOne(t *testing.T) {
+	ctx := context.Background()
+
+	cfg, _ := lakeservertest.NewLocal(t)
+	lk, err := lake.Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open lake: %v", err)
+	}
+	defer lk.Close()
+
+	if err := lk.InsertSpans(ctx, []*domain.Span{{
+		SpanID: "s2", TraceID: "t2", ProjectID: "p1", StartTime: time.Now(),
+	}}); err != nil {
+		t.Fatalf("seed span: %v", err)
+	}
+
+	body := `{
+		"span_id": "s2",
+		"trace_id": "t2",
+		"project_id": "p1",
+		"eval_name": "helpfulness",
+		"value": 0.5,
+		"reasoning": "ok"
+	}`
+	req := httptest.NewRequest("POST", "/internal/v1/scores", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	New(lk).ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want 201 (%s)", rec.Code, rec.Body.String())
+	}
+
+	var gotScoreID string
+	err = lk.DB().QueryRowContext(ctx,
+		"SELECT score_id FROM lake.scores WHERE trace_id = 't2' AND span_id = 's2'",
+	).Scan(&gotScoreID)
+	if err != nil {
+		t.Fatalf("read lake score: %v", err)
+	}
+	if gotScoreID == "" {
+		t.Error("score_id: got empty string, want a generated ID")
+	}
+}
+
 type failingScoreLake struct{}
 
 func (failingScoreLake) InsertScores(context.Context, []*domain.Score) error {
