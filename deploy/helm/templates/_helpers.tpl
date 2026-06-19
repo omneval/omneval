@@ -200,11 +200,48 @@ Usage: {{ include "omneval.quackDataPath" . }}
 {{- end -}}
 
 {{- /*
+omneval.quackSecret returns the name of the Secret that holds the Quack auth
+token. Returns the user-provided existingSecret when set, otherwise the
+chart-managed release Secret.
+
+Usage: {{ include "omneval.quackSecret" . }}
+*/ -}}
+{{- define "omneval.quackSecret" -}}
+{{- if .Values.quack.server.existingSecret -}}
+{{- .Values.quack.server.existingSecret -}}
+{{- else -}}
+{{- printf "%s-secret" .Release.Name -}}
+{{- end }}
+{{- end -}}
+
+{{- /*
+omneval.quackSecretKey returns the key inside the Quack token Secret. Returns
+existingSecretKey when existingSecret is set, otherwise "quack-token" (the key
+used in the chart-managed omneval-secret).
+
+Usage: {{ include "omneval.quackSecretKey" . }}
+*/ -}}
+{{- define "omneval.quackSecretKey" -}}
+{{- if .Values.quack.server.existingSecret -}}
+{{- .Values.quack.server.existingSecretKey -}}
+{{- else -}}
+quack-token
+{{- end }}
+{{- end -}}
+
+{{- /*
 omneval.quackToken returns the Quack auth token shared between the
-quack-server pod and its clients (Writer/Query/Eval). Uses
-quack.server.token if set, otherwise generates a stable random token stored
-in the release Secret (regenerated on every `helm template`/`install` unless
-pinned via values — set quack.server.token to pin across upgrades).
+quack-server pod and its clients (Writer/Query/Eval).
+
+Precedence:
+1. existingSecret — when set, the token is sourced from the referenced Secret.
+   The chart does NOT write quack-token into omneval-secret in this case.
+2. token — when set to a non-empty string, used directly and written to
+   omneval-secret. Stable across upgrades.
+3. Auto-generated — when neither is set, the chart looks up the existing
+   omneval-secret's quack-token value (stable across `helm upgrade`). On first
+   install the secret does not exist yet, so a random token is generated and
+   stored in the secret for subsequent upgrades.
 
 Usage: {{ include "omneval.quackToken" . }}
 */ -}}
@@ -212,7 +249,23 @@ Usage: {{ include "omneval.quackToken" . }}
 {{- if .Values.quack.server.token -}}
 {{- .Values.quack.server.token -}}
 {{- else -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace (printf "%s-secret" .Release.Name) -}}
+{{- if and $secret (index $secret.data "quack-token") -}}
+{{- index $secret.data "quack-token" | b64dec -}}
+{{- else -}}
 {{- randAlphaNum 32 -}}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{- /*
+omneval.quackHasExistingSecret returns true when existingSecret is set.
+
+Usage: {{ include "omneval.quackHasExistingSecret" . }}
+*/ -}}
+{{- define "omneval.quackHasExistingSecret" -}}
+{{- if .Values.quack.server.existingSecret -}}
+true
 {{- end }}
 {{- end -}}
 
