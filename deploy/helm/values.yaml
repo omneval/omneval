@@ -272,13 +272,6 @@ quack:
     retention:
       enabled: false
       maxAgeDays: 0
-    # Catalog Backup scheduler: CHECKPOINT the DuckDB file, upload to an S3
-    # timestamped key, and prune old backups. Only meaningful when
-    # catalogDriver is "duckdb"; a no-op when "postgres".
-    backup:
-      enabled: true
-      interval: "1h"
-      keepCount: 24
     resources:
       limits:
         cpu: "1"

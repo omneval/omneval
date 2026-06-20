@@ -36,13 +36,6 @@ quack:
       enabled: false
       maxAgeDays: 0
 
-    # Catalog Backup — enabled by default for DuckDB file Catalog
-    # CHECKPOINT the DuckDB file, upload to S3, prune old backups
-    backup:
-      enabled: true
-      interval: "1h"
-      keepCount: 24
-
   # PVC for the Catalog file and Lake data path
   pvc:
     size: 10Gi

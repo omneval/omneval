@@ -117,6 +117,22 @@ query:
   passwordKey: "admin-password"
 ```
 
+## Upgrade notes
+
+### Removing the S3 Catalog Backup mechanism (issue-201)
+
+The `quack.server.backup.*` values (`backup.enabled`, `backup.interval`,
+`backup.keepCount`) have been removed. The Quack Server no longer writes
+catalog snapshots to S3 — this was an in-process backup that duplicated
+operator-owned PVC backup tooling (e.g. a Kubernetes `VolumeSnapshot` policy)
+that every production deployment already has in place.
+
+**What to do:** Configure your own PVC backup policy for the Quack Server's
+PVC (the `/data` mount) using your cluster's snapshot solution
+(e.g. [CSI VolumeSnapshot](https://kubernetes.io/docs/concepts/storage/volume-snapshots/)).
+No Helm migration is required — simply remove any `quack.server.backup`
+entries from your `values.yaml` and apply the upgrade.
+
 ## Chart templates
 
 | Template | Kind | Description |
