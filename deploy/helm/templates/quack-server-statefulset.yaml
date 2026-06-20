@@ -52,10 +52,11 @@ spec:
         {{- with .Values.quack.server.labels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with .Values.quack.server.annotations }}
       annotations:
+        checksum/config: {{ toYaml .Values | sha256sum }}
+        {{- with .Values.quack.server.annotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
     spec:
       {{- if .Values.quack.server.serviceAccount.create }}
       serviceAccountName: {{ $name }}-quack-server

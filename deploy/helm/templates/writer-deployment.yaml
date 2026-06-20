@@ -44,10 +44,11 @@ spec:
         {{- with .Values.writer.labels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with .Values.writer.annotations }}
       annotations:
+        checksum/config: {{ toYaml .Values | sha256sum }}
+        {{- with .Values.writer.annotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
     spec:
       {{- if .Values.writer.serviceAccount.create }}
       serviceAccountName: {{ $name }}-writer

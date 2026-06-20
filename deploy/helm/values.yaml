@@ -552,3 +552,16 @@ metrics:
   addr: ":9090"
   # Disable per-project label cardinality on all metrics
   disableProjectLabels: false
+  # Prometheus Operator ServiceMonitor scraping every omneval Service's
+  # `metrics` port (ingest, writer, query, eval, quack-server). Requires the
+  # Prometheus Operator CRDs (monitoring.coreos.com/v1) to already be
+  # installed — leave disabled if your cluster doesn't run Prometheus
+  # Operator / kube-prometheus-stack.
+  serviceMonitor:
+    enabled: false
+    interval: "30s"
+    # Extra labels merged onto the ServiceMonitor. Some kube-prometheus-stack
+    # installs scope ServiceMonitor discovery to a specific label (commonly
+    # `release: <prometheus-release-name>`) instead of matching everything —
+    # set that here if your Prometheus instance requires it.
+    additionalLabels: {}
