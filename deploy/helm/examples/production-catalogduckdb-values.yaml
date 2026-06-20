@@ -1,19 +1,19 @@
-# Production values override for Catalog cutover: CatalogDriverPostgres → CatalogDriverLocal (DuckDB)
+# Production values override for CatalogDriverLocal (DuckDB file catalog)
 #
 # Usage:
 #   helm upgrade omneval ./deploy/helm --values production-catalogduckdb-values.yaml
 #
 # Prerequisites:
-#   1. Read the full runbook: deploy/helm/examples/README.md (links to docs/runbooks/catalog-cutover.md)
-#   2. Follow the phased procedure: stop Writers, rebuild Catalog, validate, resume Writers
-#   3. Ensure S3 storage is configured (storage.endpoint + storage.bucket + credentials)
-#   4. Ensure Quack Server existingSecret is set for the auth token (GitOps-safe)
+#   1. Ensure S3 storage is configured (storage.endpoint + storage.bucket + credentials)
+#   2. Ensure Quack Server existingSecret is set for the auth token (GitOps-safe)
+#   3. If the Catalog file is lost and no PVC backup exists, see:
+#      docs/runbooks/catalog-rebuild-from-parquet.md (last-resort rebuild from Parquet)
 #
-# WARNING: This is a HITL (human-in-the-loop) operation.
-# See the runbook for the full phased procedure with downtime window management.
+# WARNING: If the Catalog is lost and must be rebuilt, this is a human-in-the-loop
+# (HITL) operation requiring a maintenance window.
 
 # ============================================================================
-# Quack Server — DuckDB file Catalog (primary change from Postgres Catalog)
+# Quack Server — DuckDB file Catalog (CatalogDriverLocal)
 # ============================================================================
 quack:
   server:
