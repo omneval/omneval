@@ -311,6 +311,20 @@ quack:
     # Lake Parquet data path, read directly by clients for DATA_PATH in the
     # ATTACH statement. Empty derives the same default as quack.server.dataPath.
     dataPath: ""
+    # Connection pool size per Lake client. 0 falls back to a small built-in
+    # default. A pool of 1 means every call on a pod's Lake instance —
+    # including the readiness/liveness Ping — serializes behind whatever
+    # query is currently running, so one slow UI query can freeze health
+    # checks for the entire pod even while the Quack Server itself is
+    # healthy. Keep modest: each connection is a full embedded DuckDB
+    # session sharing this pod's memory budget (see memoryLimit below).
+    maxOpenConns: 0
+    # Bounds this client's own embedded DuckDB buffer manager (e.g.
+    # "1536MiB"). Empty means no pragma is set (DuckDB sizes against the
+    # host's total RAM rather than the container's cgroup limit). Mirrors
+    # quack.server.memoryLimit: a larger maxOpenConns means more concurrent
+    # client-side Parquet scans can run in this pod at once.
+    memoryLimit: ""
 
 # ============================================================================
 # Storage (S3-compatible object store)

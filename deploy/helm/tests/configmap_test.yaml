@@ -93,3 +93,31 @@ tests:
       - matchRegex:
           path: data["omneval.yaml"]
           pattern: 'memory_limit: "3GB"'
+
+  - it: should default client max_open_conns to 0 (falls back to the client's built-in default)
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'max_open_conns: 0'
+
+  - it: should respect an explicit client maxOpenConns override
+    set:
+      quack.client.maxOpenConns: 4
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'max_open_conns: 4'
+
+  - it: should default client memory_limit to empty (no pragma)
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'client:[\s\S]*?memory_limit: ""'
+
+  - it: should respect an explicit client memoryLimit override
+    set:
+      quack.client.memoryLimit: "768MiB"
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'memory_limit: "768MiB"'
