@@ -31,6 +31,13 @@ quack:
     # Table Maintenance interval
     maintenanceInterval: "15m"
 
+    # Bounds DuckDB's buffer manager (`SET memory_limit`) so it backs off
+    # under memory pressure instead of being OOM-killed by the kernel. Set
+    # to ~75% of whatever memory limit you configure below (or the chart
+    # default of 2Gi if you don't override resources here) — adjust if you
+    # raise resources.limits.memory.
+    memoryLimit: "1536MiB"
+
     # Lake-native retention (optional — disabled by default)
     retention:
       enabled: false

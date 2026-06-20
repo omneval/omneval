@@ -270,6 +270,14 @@ quack:
     # rewrite/merge writes a new merge-lineage Parquet generation, so a
     # shorter interval creates more of these than light workloads need.
     maintenanceInterval: "15m"
+    # Bounds DuckDB's buffer manager (`SET memory_limit`). Without this,
+    # DuckDB sizes its buffer pool against the host's total RAM rather than
+    # this container's memory limit below, so it never backs off under
+    # memory pressure — the kernel OOM-kills the process instead of DuckDB
+    # gracefully spilling to disk. Set to ~75% of resources.limits.memory,
+    # leaving headroom for the Go runtime and Quack RPC overhead. Update
+    # this together with resources.limits.memory if you change either.
+    memoryLimit: "1536MiB"
     # Lake-native retention (#92): DELETEs aged spans/scores via the Catalog.
     retention:
       enabled: false

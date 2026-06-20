@@ -1,10 +1,15 @@
 package lakeserver_test
 
 import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/lake/lakeserver"
+	"github.com/omneval/omneval/internal/lake/lakeservertest"
 )
 
 func TestConfigFromApp_CatalogDriver(t *testing.T) {
@@ -76,5 +81,82 @@ func TestConfigFromApp_CatalogDriver(t *testing.T) {
 				t.Errorf("CatalogDSN: got %q, want %q", cfg.CatalogDSN, tc.wantCatalogDSN)
 			}
 		})
+	}
+}
+
+// TestConfigFromApp_MemoryLimit proves ConfigFromApp passes through
+// quack.server.memory_limit unchanged (no derivation/defaulting — the right
+// value depends entirely on the deployment's container memory limit, which
+// this package cannot know).
+func TestConfigFromApp_MemoryLimit(t *testing.T) {
+	app := &config.Config{
+		Quack: config.QuackConfig{
+			Server: config.QuackServerConfig{
+				MemoryLimit: "3GB",
+			},
+		},
+	}
+	cfg := lakeserver.ConfigFromApp(app)
+	if cfg.MemoryLimit != "3GB" {
+		t.Errorf("MemoryLimit: got %q, want %q", cfg.MemoryLimit, "3GB")
+	}
+}
+
+// TestServe_AppliesMemoryLimit proves that a configured MemoryLimit is
+// actually applied to the Quack Server's DuckDB session via `SET
+// memory_limit`, so DuckDB's buffer manager backs off under memory pressure
+// instead of growing until the kernel OOM-kills the process (the root cause
+// of a production incident: quack-server has no memory_limit configured by
+// default, so it sizes its buffer pool against the host's total RAM rather
+// than the container's cgroup limit).
+func TestServe_AppliesMemoryLimit(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	port := lakeservertest.FreePort(t)
+
+	srv, err := lakeserver.Serve(ctx, lakeserver.Config{
+		ListenAddr:    fmt.Sprintf(":%d", port),
+		CatalogDriver: lakeserver.CatalogDriverLocal,
+		CatalogDSN:    filepath.Join(dir, "catalog", "lake.ducklake"),
+		MemoryLimit:   "512MiB",
+	})
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	defer srv.Close()
+
+	var limit string
+	if err := srv.DB().QueryRowContext(ctx, "SELECT current_setting('memory_limit')").Scan(&limit); err != nil {
+		t.Fatalf("query current_setting: %v", err)
+	}
+	if !strings.Contains(limit, "512") {
+		t.Errorf("memory_limit: got %q, want it to reflect the configured 512MiB", limit)
+	}
+}
+
+// TestServe_NoMemoryLimitConfigured proves that an empty MemoryLimit leaves
+// DuckDB's default behavior untouched (no SET statement issued) — this is a
+// regression guard for deployments that haven't set quack.server.memoryLimit.
+func TestServe_NoMemoryLimitConfigured(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	port := lakeservertest.FreePort(t)
+
+	srv, err := lakeserver.Serve(ctx, lakeserver.Config{
+		ListenAddr:    fmt.Sprintf(":%d", port),
+		CatalogDriver: lakeserver.CatalogDriverLocal,
+		CatalogDSN:    filepath.Join(dir, "catalog", "lake.ducklake"),
+	})
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	defer srv.Close()
+
+	var limit string
+	if err := srv.DB().QueryRowContext(ctx, "SELECT current_setting('memory_limit')").Scan(&limit); err != nil {
+		t.Fatalf("query current_setting: %v", err)
+	}
+	if strings.Contains(limit, "512") {
+		t.Errorf("memory_limit: got %q, expected DuckDB's untouched default, not the 512MB value from another test", limit)
 	}
 }

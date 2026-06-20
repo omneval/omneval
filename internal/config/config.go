@@ -71,6 +71,13 @@ type QuackServerConfig struct {
 	// (ducklake_flush_inlined_data, ducklake_merge_adjacent_files,
 	// ducklake_expire_snapshots, orphan/old-file cleanup). Default "5m".
 	MaintenanceInterval string `mapstructure:"maintenance_interval"`
+	// MemoryLimit bounds DuckDB's buffer manager (e.g. "3GB"), applied via
+	// `SET memory_limit`. Without this, DuckDB sizes its buffer pool against
+	// the host's total RAM rather than the container's cgroup limit, so it
+	// never backs off under memory pressure — the kernel OOM-kills the
+	// process instead of DuckDB gracefully spilling to disk. Empty means no
+	// pragma is set (DuckDB's auto-detected default).
+	MemoryLimit string `mapstructure:"memory_limit"`
 	// Retention controls Lake-native retention (#92): DELETEs aged spans and
 	// scores through the DuckLake Catalog and reclaims physical Parquet files
 	// in the same maintenance pass. This replaces the legacy S3-prefix-based
@@ -407,6 +414,7 @@ func Load(path string) (*Config, error) {
 	envString(&cfg.Quack.Server.CatalogDSN, "OMNEVAL_QUACK_SERVER_CATALOG_DSN")
 	envString(&cfg.Quack.Server.DataPath, "OMNEVAL_QUACK_SERVER_DATA_PATH")
 	envString(&cfg.Quack.Server.MaintenanceInterval, "OMNEVAL_QUACK_SERVER_MAINTENANCE_INTERVAL")
+	envString(&cfg.Quack.Server.MemoryLimit, "OMNEVAL_QUACK_SERVER_MEMORY_LIMIT")
 	envString(&cfg.Quack.Client.URL, "OMNEVAL_QUACK_CLIENT_URL")
 	envString(&cfg.Quack.Client.Token, "OMNEVAL_QUACK_CLIENT_TOKEN")
 	envString(&cfg.Quack.Client.DataPath, "OMNEVAL_QUACK_CLIENT_DATA_PATH")
