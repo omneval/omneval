@@ -802,6 +802,16 @@ func (l *Lake) SpanStartTime(ctx context.Context, traceID, spanID string) (time.
 	return startTime, nil
 }
 
+// pingRetryTimeout bounds the post-reconnect retry query in Ping. Deliberately
+// not derived from the caller's ctx, for the same reason reconnectTimeout
+// isn't (see its doc comment): reconnect() runs under its own decoupled
+// budget and can take up to reconnectTimeout to succeed, by which point a
+// short-lived caller context (e.g. the readiness probe's 3s budget) has
+// almost certainly already expired. Reusing that expired ctx for the retry
+// would guarantee failure on every reconnect — even though the connection it
+// just repaired is healthy — defeating Ping's self-heal entirely.
+const pingRetryTimeout = 3 * time.Second
+
 // Ping verifies the Lake's Catalog connection is reachable by executing
 // a metadata-only scan against lake.spans. This forces a round-trip
 // through the Quack Server catalog — pinging the in-memory DuckDB via
@@ -817,7 +827,9 @@ func (l *Lake) Ping(ctx context.Context) error {
 		if rerr := l.reconnect(ctx); rerr != nil {
 			return fmt.Errorf("lake: reconnect: %w", rerr)
 		}
-		err = l.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM lake.spans WHERE 1 = 0").Scan(&n)
+		retryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pingRetryTimeout)
+		defer cancel()
+		err = l.db.QueryRowContext(retryCtx, "SELECT COUNT(*) FROM lake.spans WHERE 1 = 0").Scan(&n)
 	}
 	return err
 }

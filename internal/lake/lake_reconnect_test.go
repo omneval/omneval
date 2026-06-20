@@ -439,6 +439,46 @@ func TestReconnect_ExecContext_AfterReconnect(t *testing.T) {
 // on the reconnected DB. In production, a concurrent Ping reconnect makes the
 // new connection visible to a subsequent QueryRowContext call via mutex
 // serialisation.
+// TestPing_SucceedsAfterReconnect_EvenIfCallerContextAlreadyExpired proves
+// that Ping's documented self-heal retry ("Ping reconnects and retries once
+// so the readiness probe self-heals") actually succeeds once the underlying
+// connection is healthy again — even when the caller's context (e.g. the
+// readiness probe's 3-second budget, internal/probe/probe.go) has already
+// expired by the time reconnect() finishes.
+//
+// This is exactly the failure mode observed in production: reconnect() runs
+// under its own decoupled reconnectTimeout budget (up to 10s, deliberately
+// independent of the caller's ctx — see reconnect's doc comment) and can
+// succeed well after the probe's ctx has already expired. The retry query
+// must not reuse that expired ctx, or every reconnect-triggering Ping is
+// guaranteed to report failure even though the connection it just repaired
+// is perfectly healthy — defeating the self-heal and forcing every
+// subsequent probe to pay for another full reconnect, indefinitely.
+func TestPing_SucceedsAfterReconnect_EvenIfCallerContextAlreadyExpired(t *testing.T) {
+	ctx := context.Background()
+	cfg, _ := startTestServer(t)
+
+	l, err := Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open lake: %v", err)
+	}
+	defer l.Close()
+
+	// An already-canceled context simulates the readiness probe's budget
+	// having elapsed by the time Ping's reconnect-and-retry logic runs.
+	// database/sql returns ctx.Err() ("context canceled") for a query
+	// issued against an already-done context without even reaching the
+	// driver, which is exactly the error isStaleConn recognizes and that
+	// triggers the reconnect path in production — even though the
+	// underlying connection here is perfectly healthy.
+	expiredCtx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	if err := l.Ping(expiredCtx); err != nil {
+		t.Fatalf("Ping: expected self-heal to succeed despite an already-expired caller context, got: %v", err)
+	}
+}
+
 func TestReconnect_QueryRowContext_AfterReconnect(t *testing.T) {
 	ctx := context.Background()
 	cfg, _ := startTestServer(t)
