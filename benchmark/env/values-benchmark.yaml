@@ -1,0 +1,247 @@
+# Omneval — Benchmark Environment Values
+#
+# This values file provisions a reproducible, single-node benchmark
+# environment: 1 replica each of Ingest API, Writer, Query API, and
+# Quack Server with DuckDB catalog (ADR-0006 default), backed by real
+# S3 for the Lake's Parquet data.
+#
+# Use with:
+#   helm upgrade --install omneval-benchmark ./deploy/helm \
+#     --values ./deploy/helm/values.yaml \
+#     --values ./benchmark/env/values-benchmark.yaml \
+#     --namespace omneval-benchmark --create-namespace \
+#     --set-string image.tag=<tag> \
+#     --set-string storage.bucket=<your-bucket> \
+#     --set-string storage.endpoint=<your-s3-endpoint> \
+#     --set-string storage.accessKey=<access-key> \
+#     --set-string storage.secretKey=<secret-key>
+#
+# See README.md for full documentation.
+
+# ============================================================================
+# Image
+# ============================================================================
+image:
+  repository: omneval/app
+  tag: ""  # override via --set-string image.tag=<tag>
+  pullPolicy: IfNotPresent
+
+# ============================================================================
+# Ingest API — 1 replica
+# ============================================================================
+ingest:
+  replicas: 1
+  corsAllowedOrigins:
+    - "*"
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  autoscaling:
+    enabled: false
+  serviceAccount:
+    create: false
+
+# ============================================================================
+# Writer Service — 1 replica
+# ============================================================================
+writer:
+  replicas: 1
+  resources:
+    limits:
+      cpu: 1
+      memory: 512Mi
+    requests:
+      cpu: 200m
+      memory: 256Mi
+  autoscaling:
+    enabled: false
+  serviceAccount:
+    create: false
+
+# ============================================================================
+# Query API — 1 replica
+# ============================================================================
+query:
+  replicas: 1
+  sessionTTL: "168h"
+  secureCookie: true
+  # Admin bootstrap — override via --set-string query.adminEmail=... --set-string query.adminPassword=...
+  adminEmail: ""
+  adminPassword: ""
+  existingSecret: ""
+  emailKey: "admin-email"
+  passwordKey: "admin-password"
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  autoscaling:
+    enabled: false
+  serviceAccount:
+    create: false
+
+# ============================================================================
+# Eval Workers — 0 replicas (benchmark env has no eval load)
+# ============================================================================
+eval:
+  replicas: 0
+  concurrency: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  autoscaling:
+    enabled: false
+  serviceAccount:
+    create: false
+
+# ============================================================================
+# Quack Server — 1 replica, DuckDB catalog (ADR-0006 default)
+# ============================================================================
+quack:
+  server:
+    replicas: 1
+    catalogDriver: duckdb
+    catalogDSN: ""  # defaults to .duckdb path on PVC
+    existingSecret: ""
+    existingSecretKey: "token"
+    resources:
+      limits:
+        cpu: 1
+        memory: 1Gi
+      requests:
+        cpu: 200m
+        memory: 256Mi
+    nodeSelector: {}
+    affinity: {}
+    tolerations: []
+    annotations: {}
+    labels: {}
+    serviceAccount:
+      create: false
+  pvc:
+    size: 10Gi
+    storageClass: ""  # use default storage class
+    accessMode: ReadWriteOnce
+  client:
+    url: ""  # defaults to "<release>-quack-server:9494"
+    dataPath: ""  # defaults to s3://<bucket>/lake
+
+# ============================================================================
+# Storage — real S3 (MinIO disabled)
+#
+# Provide real S3 credentials/endpoint via CLI --set flags:
+#   storage.bucket: e.g. "my-omneval-bucket"
+#   storage.endpoint: e.g. "https://s3.us-east-1.amazonaws.com"
+#     (or Cloudflare R2: "https://<account-id>.r2.cloudflarestorage.com")
+#   storage.accessKey: your S3/R2 access key
+#   storage.secretKey: your S3/R2 secret key
+# ============================================================================
+storage:
+  endpoint: ""  # override via --set-string storage.endpoint=...
+  bucket: ""    # override via --set-string storage.bucket=...
+  region: "us-east-1"
+  accessKey: ""  # override via --set-string storage.accessKey=...
+  secretKey: ""  # override via --set-string storage.secretKey=...
+  existingSecret: ""
+  existingSecretAccessKeyKey: "access-key"
+  existingSecretSecretKeyKey: "secret-key"
+
+# ============================================================================
+# MinIO — disabled (using real S3)
+# ============================================================================
+minio:
+  enabled: false
+
+# ============================================================================
+# Metadata Store — internal PostgreSQL (single-node demo)
+#
+# For production self-host, consider external PostgreSQL and point:
+#   database.driver: postgres
+#   postgresql.enabled: false
+#   postgresql.external.host: <your-host>
+#   postgresql.external.database: <your-db>
+#   postgresql.external.user: <your-user>
+#   postgresql.external.password: <your-password>
+# ============================================================================
+database:
+  driver: postgres
+
+postgresql:
+  enabled: true
+  auth:
+    username: omneval
+    password: omneval
+    database: omneval
+    existingSecret: ""
+  primary:
+    persistence:
+      size: 10Gi
+      storageClass: ""
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    service:
+      port: 5432
+  readReplicas:
+    replicaCount: 0
+
+# ============================================================================
+# Redis — internal (single-node demo)
+#
+# For production self-host, consider external Redis and point:
+#   redis.enabled: false
+#   redis.external.addr: <your-host>:6379
+#   redis.external.password: <your-password>
+# ============================================================================
+redis:
+  enabled: true
+  auth:
+    enabled: false
+    password: ""
+  master:
+    replicas: 0
+    persistence:
+      enabled: false
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    service:
+      port: 6379
+
+# ============================================================================
+# Ingress — disabled (use port-forward or LoadBalancer service for now)
+# ============================================================================
+ingress:
+  enabled: false
+
+# ============================================================================
+# HTTPRoute — disabled
+# ============================================================================
+httpRoute:
+  enabled: false
+
+# ============================================================================
+# Metrics
+# ============================================================================
+metrics:
+  addr: ":9090"
+  disableProjectLabels: false
