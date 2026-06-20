@@ -43,10 +43,11 @@ spec:
         {{- with .Values.eval.labels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with .Values.eval.annotations }}
       annotations:
+        checksum/config: {{ toYaml .Values | sha256sum }}
+        {{- with .Values.eval.annotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
     spec:
       {{- if .Values.eval.serviceAccount.create }}
       serviceAccountName: {{ $name }}-eval
