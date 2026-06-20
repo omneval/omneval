@@ -340,22 +340,29 @@ Run the same end-to-end validation checks that verify the rebuilt Catalog is ful
 
 ### Check 1 — Span write (write a test span)
 
-Write a test span through the Writer's internal endpoint to verify the Catalog can accept writes:
+Write a test span through the Writer's OTLP ingest endpoint to verify the Catalog can accept writes:
 
 ```bash
-# 1. Write a test span via the internal span endpoint
-curl -X POST http://<release>-writer.<namespace>.svc.cluster.local:8001/internal/v1/spans \
+# 1. Write a test span via the OTLP traces endpoint
+curl -X POST http://<release>-writer.<namespace>.svc.cluster.local:8001/v1/traces \
   -H 'Content-Type: application/json' \
   -d '{
-    "spans": [{
-      "span_id": "cutover-validation-span",
-      "trace_id": "cutover-validation-trace",
-      "project_id": "<project-id>",
-      "name": "catalog-rebuild-validation",
-      "kind": "SPAN_KIND_INTERNAL",
-      "start_time": "'"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"'",
-      "end_time": "'"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"'",
-      "status_code": "STATUS_CODE_OK"
+    "resourceSpans": [{
+      "resource": {
+        "attributes": [
+          {"key": "service.name", "value": {"stringValue": "catalog-rebuild-validation"}}
+        ]
+      },
+      "scopeSpans": [{
+        "spans": [{
+          "spanId": "cutover-validation-span",
+          "traceId": "cutover-validation-trace",
+          "name": "catalog-rebuild-validation",
+          "kind": 3,
+          "startTimeUnixNano": "'"$(date -u +%s)000000000"'",
+          "endTimeUnixNano": "'"$(date -u +%s)000000000"'"
+        }]
+      }]
     }]
   }'
 
