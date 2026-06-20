@@ -20,21 +20,26 @@ type Check interface {
 
 // Prober aggregates checks and serves HTTP handlers for /healthz and /readyz.
 type Prober struct {
-	mu     sync.RWMutex
-	checks map[string]Check
-	names  []string // sorted for deterministic ordering
+	mu       sync.RWMutex
+	checks   map[string]Check
+	names    []string            // sorted for deterministic ordering
+	critical map[string]struct{} // names that also gate the liveness handler
 }
 
 // New creates a Prober with a default liveness handler (always 200) and
 // empty readiness checks.
 func New() *Prober {
 	p := &Prober{
-		checks: make(map[string]Check),
+		checks:   make(map[string]Check),
+		critical: make(map[string]struct{}),
 	}
 	return p
 }
 
-// AddCheck registers a readiness gate identified by name.
+// AddCheck registers a readiness-only gate identified by name. Use this for
+// checks reflecting an external dependency being temporarily unavailable
+// (e.g. Redis) — restarting this process can't fix that, so a persistent
+// failure should only take the pod out of Service routing, not restart it.
 func (p *Prober) AddCheck(name string, ch Check) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -43,26 +48,63 @@ func (p *Prober) AddCheck(name string, ch Check) {
 	p.names = p.sortedNames()
 }
 
-// HealthHandler returns the HTTP handler for the liveness probe.
-// It always returns 200 OK with body "ok".
+// AddCriticalCheck registers a check that gates both readiness and
+// liveness. Use this only when the check's failure means THIS PROCESS is
+// broken in a way only a restart can fix — e.g. the Lake's single
+// underlying database connection getting permanently wedged by a blocked
+// call that never returns. Readiness alone only removes the pod from
+// Service routing; without a liveness signal Kubernetes never restarts a
+// wedged pod, leaving it stuck until a human notices and intervenes
+// manually (a real production incident this guards against).
+func (p *Prober) AddCriticalCheck(name string, ch Check) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.checks[name] = ch
+	p.names = p.sortedNames()
+	p.critical[name] = struct{}{}
+}
+
+// HealthHandler returns the HTTP handler for the liveness probe. With no
+// critical checks registered (AddCriticalCheck), it always returns 200 OK
+// — unchanged from before critical checks existed. Otherwise it runs the
+// critical subset and returns 503 if any fail, so Kubernetes' liveness
+// probe can eventually restart a genuinely wedged process. Pair with a much
+// more lenient failureThreshold than readiness at the Kubernetes level, so
+// normal transient reconnect cycles never trigger a restart — only a
+// sustained, multi-minute failure should.
 func (p *Prober) HealthHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
-	})
+	return p.runChecks(true, "not healthy")
 }
 
 // ReadyHandler returns the HTTP handler for the readiness probe.
 // It runs all registered checks in order. If any check fails, it returns
 // HTTP 503 with body "not ready".
 func (p *Prober) ReadyHandler() http.Handler {
+	return p.runChecks(false, "not ready")
+}
+
+// runChecks builds a handler that runs registered checks in sorted order
+// under a shared 3s budget. When criticalOnly is true, only checks
+// registered via AddCriticalCheck run (HealthHandler); otherwise every
+// registered check runs (ReadyHandler). failureBody is the response body
+// written on the first failing check.
+func (p *Prober) runChecks(criticalOnly bool, failureBody string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		defer cancel()
 
 		p.mu.RLock()
-		names := make([]string, len(p.names))
-		copy(names, p.names)
+		var names []string
+		for _, name := range p.names {
+			if !criticalOnly {
+				names = append(names, name)
+				continue
+			}
+			if _, ok := p.critical[name]; ok {
+				names = append(names, name)
+			}
+		}
 		p.mu.RUnlock()
 
 		for _, name := range names {
@@ -71,9 +113,9 @@ func (p *Prober) ReadyHandler() http.Handler {
 			p.mu.RUnlock()
 
 			if err := ch.Check(ctx); err != nil {
-				slog.Warn("readiness check failed", "name", name, "err", err)
+				slog.Warn("probe check failed", "name", name, "err", err, "body", failureBody)
 				w.WriteHeader(http.StatusServiceUnavailable)
-				w.Write([]byte("not ready"))
+				w.Write([]byte(failureBody))
 				return
 			}
 		}

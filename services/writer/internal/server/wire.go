@@ -163,7 +163,12 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		return rc.Ping(ctx).Err()
 	}})
 	if deps.Lake != nil {
-		p.AddCheck("catalog", &probe.CatalogReachable{
+		// Critical: the Lake holds a single underlying connection
+		// (SetMaxOpenConns(1)); if a call against it ever gets permanently
+		// wedged, readiness alone would only pull this pod out of Service
+		// routing forever — it needs to also gate liveness so Kubernetes
+		// eventually restarts it instead of requiring manual intervention.
+		p.AddCriticalCheck("catalog", &probe.CatalogReachable{
 			Ping: deps.Lake.Ping,
 		})
 	}

@@ -151,6 +151,15 @@ spec:
               path: /healthz
               port: http
             periodSeconds: 10
+            timeoutSeconds: 3
+            # /healthz now also gates the Lake catalog check (critical
+            # check, see internal/probe). failureThreshold 18 * periodSeconds
+            # 10s = 3 minutes of sustained failure before Kubernetes
+            # restarts the pod — generously longer than any normal
+            # reconnect/self-heal cycle, so this only fires for a
+            # genuinely wedged process (e.g. the single underlying Lake
+            # connection permanently blocked), not a transient blip.
+            failureThreshold: 18
           readinessProbe:
             httpGet:
               path: /readyz
