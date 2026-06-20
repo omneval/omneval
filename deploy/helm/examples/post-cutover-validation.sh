@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# post-cutover-validation.sh — Post-Cutover Validation Checklist
+# post-cutover-validation.sh — Catalog Recovery Validation Checklist
 #
 # Usage:
 #   ./post-cutover-validation.sh <release> <namespace>
 #
-# This script automates the validation checks from the Catalog cutover runbook
-# (docs/runbooks/catalog-cutover.md, Phase 6). It verifies:
+# This script automates the validation checks from the Catalog Rebuild runbook
+# (docs/runbooks/catalog-rebuild-from-parquet.md, Phase 5). It verifies:
 #   1. Quack Server catalog_driver = duckdb
 #   2. Quack Server PVC exists and catalog file path is accessible
 #   3. Old Postgres Catalog config removed from deployment config
@@ -141,7 +141,7 @@ echo "================================================================"
 if [[ ${FAILED} -gt 0 ]]; then
   echo ""
   echo "❌ Automated validation FAILED. Review the failures above."
-  echo "   See docs/runbooks/catalog-cutover.md for the full runbook."
+  echo "   See docs/runbooks/catalog-rebuild-from-parquet.md for the full runbook."
   exit 1
 fi
 
@@ -170,5 +170,5 @@ echo "    1. Monitor Writer logs for 30 min (no tx conflict/attach race errors)"
 echo "    2. Verify Eval scores flowing in"
 echo "    3. Set up your own PVC backup policy (e.g. VolumeSnapshot) for the Quack Server's /data mount"
 echo ""
-echo "  See docs/runbooks/catalog-cutover.md for all details."
+echo "  See docs/runbooks/catalog-rebuild-from-parquet.md for all details."
 exit 0
