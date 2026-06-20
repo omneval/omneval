@@ -251,8 +251,17 @@ func (s *Store) CopyObject(_ context.Context, dstBucket, dstKey, srcKey, storage
 	return nil
 }
 
-// DeleteObjectsBatch removes multiple objects from the given bucket in a
-// single API call. Returns nil when the key list is empty.
+// DeleteObjectsBatch removes multiple objects from the given bucket.
+// Returns nil when the key list is empty.
+//
+// Deliberately issues one single-object DeleteObject call per key instead of
+// using minio's batch RemoveObjects (S3 DeleteObjects API): Cloudflare R2's
+// implementation of DeleteObjects has a long-standing, documented bug where
+// it returns HTTP 200 with the requested keys listed as deleted, but never
+// actually removes the objects (reported on Cloudflare's community forum
+// since 2023). Single-object DeleteObject calls are confirmed reliable
+// against R2, so this trades one API call for N to work correctly on every
+// S3-compatible backend, not just AWS.
 func (s *Store) DeleteObjectsBatch(_ context.Context, bucket string, keys []string) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("s3: no client configured")
@@ -261,16 +270,10 @@ func (s *Store) DeleteObjectsBatch(_ context.Context, bucket string, keys []stri
 		return nil
 	}
 
-	objCh := make(chan minio.ObjectInfo, len(keys))
-	for _, key := range keys {
-		objCh <- minio.ObjectInfo{Key: key}
-	}
-	close(objCh)
-
 	var errs []error
-	for err := range s.client.RemoveObjects(context.Background(), bucket, objCh, minio.RemoveObjectsOptions{}) {
-		if err.Err != nil {
-			errs = append(errs, fmt.Errorf("s3: delete %s: %w", err.ObjectName, err.Err))
+	for _, key := range keys {
+		if err := s.client.RemoveObject(context.Background(), bucket, key, minio.RemoveObjectOptions{}); err != nil {
+			errs = append(errs, fmt.Errorf("s3: delete %s: %w", key, err))
 		}
 	}
 	if len(errs) > 0 {
