@@ -74,8 +74,6 @@ Usage: {{ include "omneval.storageEndpoint" . }}
 {{- printf "http://%s-minio:9000" .Release.Name -}}
 {{- else if .Values.storage.endpoint -}}
 {{- .Values.storage.endpoint -}}
-{{- else if .Values.minio.external.endpoint -}}
-{{- .Values.minio.external.endpoint -}}
 {{- end }}
 {{- end -}}
 
@@ -89,8 +87,6 @@ Usage: {{ include "omneval.storageAccessKey" . }}
 {{- .Values.storage.accessKey -}}
 {{- else if .Values.minio.enabled -}}
 {{- .Values.minio.rootUser -}}
-{{- else if .Values.minio.external.accessKey -}}
-{{- .Values.minio.external.accessKey -}}
 {{- end }}
 {{- end -}}
 
@@ -104,8 +100,6 @@ Usage: {{ include "omneval.storageSecretKey" . }}
 {{- .Values.storage.secretKey -}}
 {{- else if .Values.minio.enabled -}}
 {{- .Values.minio.rootPassword -}}
-{{- else if .Values.minio.external.secretKey -}}
-{{- .Values.minio.external.secretKey -}}
 {{- end }}
 {{- end -}}
 
@@ -114,8 +108,7 @@ omneval.storageBucket returns the S3 bucket name.
 
 When MinIO is enabled internally, the bundled bucket-creation Job provisions a
 bucket named "omneval", so that is used as the default unless storage.bucket is
-explicitly set. For external storage, storage.bucket or minio.external.bucket
-applies.
+explicitly set.
 
 Usage: {{ include "omneval.storageBucket" . }}
 */ -}}
@@ -124,8 +117,65 @@ Usage: {{ include "omneval.storageBucket" . }}
 {{- .Values.storage.bucket -}}
 {{- else if .Values.minio.enabled -}}
 omneval
-{{- else if .Values.minio.external.bucket -}}
-{{- .Values.minio.external.bucket -}}
+{{- end }}
+{{- end -}}
+
+{{- /*
+omneval.storageSecret returns the name of the Secret that holds the S3
+access key and secret key. Returns the user-provided storage.existingSecret
+when set, otherwise the chart-managed release Secret.
+
+Usage: {{ include "omneval.storageSecret" . }}
+*/ -}}
+{{- define "omneval.storageSecret" -}}
+{{- if .Values.storage.existingSecret -}}
+{{- .Values.storage.existingSecret -}}
+{{- else -}}
+{{- printf "%s-secret" .Release.Name -}}
+{{- end }}
+{{- end -}}
+
+{{- /*
+omneval.storageAccessKeySecretKey returns the key inside the storage Secret
+that holds the S3 access key. Returns storage.existingSecretAccessKeyKey when
+storage.existingSecret is set, otherwise "storage-access-key" (the key used
+in the chart-managed omneval-secret).
+
+Usage: {{ include "omneval.storageAccessKeySecretKey" . }}
+*/ -}}
+{{- define "omneval.storageAccessKeySecretKey" -}}
+{{- if .Values.storage.existingSecret -}}
+{{- .Values.storage.existingSecretAccessKeyKey -}}
+{{- else -}}
+storage-access-key
+{{- end }}
+{{- end -}}
+
+{{- /*
+omneval.storageSecretKeySecretKey returns the key inside the storage Secret
+that holds the S3 secret key. Returns storage.existingSecretSecretKeyKey when
+storage.existingSecret is set, otherwise "storage-secret-key" (the key used
+in the chart-managed omneval-secret).
+
+Usage: {{ include "omneval.storageSecretKeySecretKey" . }}
+*/ -}}
+{{- define "omneval.storageSecretKeySecretKey" -}}
+{{- if .Values.storage.existingSecret -}}
+{{- .Values.storage.existingSecretSecretKeyKey -}}
+{{- else -}}
+storage-secret-key
+{{- end }}
+{{- end -}}
+
+{{- /*
+omneval.storageHasExistingSecret returns true when storage.existingSecret is
+set.
+
+Usage: {{ include "omneval.storageHasExistingSecret" . }}
+*/ -}}
+{{- define "omneval.storageHasExistingSecret" -}}
+{{- if .Values.storage.existingSecret -}}
+true
 {{- end }}
 {{- end -}}
 

@@ -80,12 +80,26 @@ postgresql:
 
 minio:
   enabled: false
-  external:
-    endpoint: "https://s3.amazonaws.com"
-    bucket: "omneval-lake"
-    region: "us-east-1"
-    accessKey: "AKIA..."
-    secretKey: "..."
+
+storage:
+  endpoint: "https://s3.amazonaws.com"
+  bucket: "omneval-lake"
+  region: "us-east-1"
+  accessKey: "AKIA..."   # not recommended for production — see below
+  secretKey: "..."
+```
+
+For production/GitOps deployments, source the access key and secret key from
+a pre-existing Secret instead of plaintext values:
+
+```yaml
+storage:
+  endpoint: "https://s3.amazonaws.com"
+  bucket: "omneval-lake"
+  region: "us-east-1"
+  existingSecret: "my-s3-credentials"
+  existingSecretAccessKeyKey: "access-key"   # default
+  existingSecretSecretKeyKey: "secret-key"   # default
 ```
 
 ### Bootstrap admin credentials (Query API)

@@ -109,18 +109,18 @@ spec:
             - name: OMNEVAL_STORAGE_REGION
               value: {{ . | quote }}
             {{- end }}
-            {{- if include "omneval.storageAccessKey" . }}
+            {{- if or (include "omneval.storageAccessKey" .) .Values.storage.existingSecret }}
             - name: OMNEVAL_STORAGE_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ $name }}-secret
-                  key: storage-access-key
+                  name: {{ include "omneval.storageSecret" . }}
+                  key: {{ include "omneval.storageAccessKeySecretKey" . }}
                   optional: true
             - name: OMNEVAL_STORAGE_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ $name }}-secret
-                  key: storage-secret-key
+                  name: {{ include "omneval.storageSecret" . }}
+                  key: {{ include "omneval.storageSecretKeySecretKey" . }}
                   optional: true
             {{- end }}
           volumeMounts:

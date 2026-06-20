@@ -15,9 +15,11 @@
 #   storage.endpoint: ""
 #
 # External infrastructure:
-#   Each component (redis, postgresql, minio) supports an "external" mode.
-#   Set <component>.enabled: false and <component>.external.<key>: <value>
-#   to use your own infrastructure. This allows mixing and matching —
+#   redis and postgresql support an "external" mode: set <component>.enabled:
+#   false and <component>.external.<key>: <value> to use your own
+#   infrastructure. For S3-compatible storage, set minio.enabled: false and
+#   configure storage.* instead (see storage.existingSecret for sourcing
+#   credentials from a pre-existing Secret). This allows mixing and matching —
 #   you can run Redis internally while pointing to an external PostgreSQL.
 #
 # Example: use external Redis + internal PostgreSQL + external S3
@@ -317,10 +319,30 @@ storage:
   bucket: ""
   # S3 region
   region: "us-east-1"
-  # Access key ID (set via the omneval-secret Secret)
+  # Access key ID. Plaintext in values/valuesFrom — not recommended for
+  # production/GitOps. Prefer existingSecret below. Ignored when
+  # existingSecret is set.
   accessKey: ""
-  # Secret access key (set via the omneval-secret Secret)
+  # Secret access key. Same caveat as accessKey above.
   secretKey: ""
+  # Name of a pre-existing Secret holding the S3 access key + secret key.
+  # When set, accessKey/secretKey above are ignored and the chart does NOT
+  # write storage-access-key/storage-secret-key into omneval-secret — pods
+  # source the credentials from this Secret instead via secretKeyRef. This
+  # is the recommended approach for GitOps workflows (Flux, ArgoCD) and for
+  # external S3-compatible providers (e.g. Cloudflare R2) where credentials
+  # come from a vault-synced Secret rather than plaintext values.
+  #
+  # Example:
+  #   storage:
+  #     existingSecret: my-r2-credentials
+  #     existingSecretAccessKeyKey: access-key
+  #     existingSecretSecretKeyKey: secret-key
+  existingSecret: ""
+  # Key inside existingSecret that holds the access key ID.
+  existingSecretAccessKeyKey: "access-key"
+  # Key inside existingSecret that holds the secret access key.
+  existingSecretSecretKeyKey: "secret-key"
 
 # ============================================================================
 # MinIO (S3-compatible object store)
@@ -330,13 +352,6 @@ storage:
 # ============================================================================
 minio:
   enabled: false
-  # When external, specify the connection details
-  external:
-    endpoint: ""
-    bucket: ""
-    region: "us-east-1"
-    accessKey: ""
-    secretKey: ""
   # Internal MinIO settings (when enabled: true)
   image:
     repository: minio/minio
