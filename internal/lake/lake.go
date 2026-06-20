@@ -380,6 +380,14 @@ func s3SecretSQL(sc *config.StorageConfig) string {
 				"KEY_ID " + sqlQuote(sc.AccessKey),
 				"SECRET " + sqlQuote(sc.SecretKey),
 				"ACCOUNT_ID " + sqlQuote(m[1]),
+				// An unscoped TYPE r2 secret defaults to matching only
+				// "r2://" URIs (verified against duckdb_secrets()), but the
+				// Lake's DATA_PATH and every file DuckLake touches use
+				// "s3://" URIs. Without this, the secret silently never
+				// matches and DuckDB falls back to the default AWS
+				// credential chain against the literal
+				// "*.s3.amazonaws.com" endpoint.
+				"SCOPE " + sqlQuote("s3://"+sc.Bucket),
 			}
 			return fmt.Sprintf("CREATE OR REPLACE SECRET lake_s3 (%s)", strings.Join(fields, ", "))
 		}
