@@ -86,3 +86,5 @@ data:
       client:
         url: {{ $quackAddr | quote }}
         data_path: {{ (.Values.quack.client.dataPath | default $quackDataPath) | quote }}
+        max_open_conns: {{ .Values.quack.client.maxOpenConns }}
+        memory_limit: {{ .Values.quack.client.memoryLimit | quote }}

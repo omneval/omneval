@@ -114,6 +114,19 @@ type QuackClientConfig struct {
 	// URL or a local directory. Read directly by the client for DATA_PATH in
 	// the ATTACH statement (Quack carries catalog metadata only).
 	DataPath string `mapstructure:"data_path"`
+	// MaxOpenConns bounds this client's connection pool. Zero defaults to
+	// lake.defaultMaxOpenConns. A pool of 1 means every call on this
+	// client's Lake instance — including the readiness/liveness Ping —
+	// serializes behind whatever query is currently running, so a single
+	// slow UI query can wedge an entire pod's health checks even while the
+	// Quack Server itself stays healthy.
+	MaxOpenConns int `mapstructure:"max_open_conns"`
+	// MemoryLimit bounds this client's own embedded DuckDB buffer manager
+	// (e.g. "1536MiB"), applied via `SET memory_limit` after attach. Empty
+	// means no pragma is set. Mirrors quack.server.memory_limit: a larger
+	// MaxOpenConns lets more concurrent client-side Parquet scans run in
+	// this process at once, so the same OOM risk applies here too.
+	MemoryLimit string `mapstructure:"memory_limit"`
 }
 
 // WriterLakeConfig controls the Writer's Lake participation.
@@ -351,6 +364,8 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("quack.client.url", "localhost:9494")
 	v.SetDefault("quack.client.token", "")
 	v.SetDefault("quack.client.data_path", "")
+	v.SetDefault("quack.client.max_open_conns", 0)
+	v.SetDefault("quack.client.memory_limit", "")
 	v.SetDefault("writer.lake.enabled", true)
 
 	if path != "" {
@@ -418,6 +433,8 @@ func Load(path string) (*Config, error) {
 	envString(&cfg.Quack.Client.URL, "OMNEVAL_QUACK_CLIENT_URL")
 	envString(&cfg.Quack.Client.Token, "OMNEVAL_QUACK_CLIENT_TOKEN")
 	envString(&cfg.Quack.Client.DataPath, "OMNEVAL_QUACK_CLIENT_DATA_PATH")
+	envInt(&cfg.Quack.Client.MaxOpenConns, "OMNEVAL_QUACK_CLIENT_MAX_OPEN_CONNS")
+	envString(&cfg.Quack.Client.MemoryLimit, "OMNEVAL_QUACK_CLIENT_MEMORY_LIMIT")
 	envBool(&cfg.Writer.Lake.Enabled, "OMNEVAL_WRITER_LAKE_ENABLED")
 
 	return &cfg, nil

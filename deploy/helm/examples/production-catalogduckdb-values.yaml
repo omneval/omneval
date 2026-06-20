@@ -56,6 +56,21 @@ quack:
     url: ""
     # Lake data path for clients: empty — derives from quack.server.dataPath
     dataPath: ""
+    # Connection pool size per Lake client (query/writer/eval pods). A pool
+    # of 1 means every call on a pod's Lake instance — including the
+    # readiness/liveness Ping — serializes behind whatever query is
+    # currently running, so one slow UI query can freeze health checks for
+    # the entire pod even while the Quack Server itself is healthy. Keep
+    # this modest against CatalogDriverLocal (single-writer file Catalog):
+    # each connection is a full embedded DuckDB session, and many
+    # concurrent connections across pods can contend more heavily than a
+    # Postgres-backed Catalog would.
+    maxOpenConns: 2
+    # Bounds this client's own embedded DuckDB buffer manager. Set to ~75%
+    # of query.resources.limits.memory / writer.resources.limits.memory
+    # (whatever you configure those to), same reasoning as
+    # quack.server.memoryLimit above.
+    memoryLimit: ""
 
 # ============================================================================
 # Storage — S3-compatible object store (required for Lake Parquet files)
