@@ -21,6 +21,11 @@ tests:
           path: spec.template.spec.containers.livenessProbe
       - isNotEmpty:
           path: spec.template.spec.containers.readinessProbe
+  - it: should give liveness a lenient failureThreshold (catalog check is critical now)
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.failureThreshold
+          value: 18
   - it: should have resource limits
     asserts:
       - isNotEmpty:

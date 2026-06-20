@@ -126,6 +126,108 @@ func TestReadyHandler_BodyNotReady(t *testing.T) {
 	}
 }
 
+// TestHealthHandler_NonCriticalCheckFailureDoesNotAffectLiveness proves that
+// a check registered via the plain AddCheck (readiness-only) does NOT gate
+// the liveness handler, even while failing. This matters because liveness
+// failures eventually restart the container — appropriate for a check whose
+// failure means THIS PROCESS is broken (e.g. a permanently wedged
+// single-connection database client), but wrong for a check that merely
+// reflects an external dependency being temporarily unavailable (e.g.
+// Redis): restarting this process can't fix Redis, and would just add
+// restart churn on top of an already-degraded dependency.
+func TestHealthHandler_NonCriticalCheckFailureDoesNotAffectLiveness(t *testing.T) {
+	p := probe.New()
+	p.AddCheck("redis", &probe.RedisPing{
+		Pinger: func(ctx context.Context) error { return os.ErrNotExist },
+	})
+
+	ts := httptest.NewServer(p.HealthHandler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want %d (non-critical check failures must not affect liveness)", resp.StatusCode, http.StatusOK)
+	}
+}
+
+// TestHealthHandler_CriticalCheckFailureReturns503 proves that a check
+// registered via AddCriticalCheck DOES gate liveness: a permanently failing
+// critical check (e.g. the Lake catalog being unreachable because the
+// single underlying connection is wedged) must eventually fail liveness too,
+// so Kubernetes restarts the container — readiness alone only removes the
+// pod from Service routing, which left a wedged query/writer pod stuck
+// forever in a real production incident with no automatic recovery.
+func TestHealthHandler_CriticalCheckFailureReturns503(t *testing.T) {
+	p := probe.New()
+	p.AddCriticalCheck("catalog", &probe.CatalogReachable{
+		Ping: func(ctx context.Context) error { return os.ErrNotExist },
+	})
+
+	ts := httptest.NewServer(p.HealthHandler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+// TestHealthHandler_CriticalCheckPassesReturns200 proves a passing critical
+// check doesn't break the common case.
+func TestHealthHandler_CriticalCheckPassesReturns200(t *testing.T) {
+	p := probe.New()
+	p.AddCriticalCheck("catalog", &probe.CatalogReachable{
+		Ping: func(ctx context.Context) error { return nil },
+	})
+
+	ts := httptest.NewServer(p.HealthHandler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+}
+
+// TestReadyHandler_CriticalCheckStillGatesReadiness proves AddCriticalCheck
+// doesn't bypass readiness — a critical check must still behave exactly
+// like a normal readiness check (fail fast, take the pod out of Service
+// routing) in addition to eventually gating liveness.
+func TestReadyHandler_CriticalCheckStillGatesReadiness(t *testing.T) {
+	p := probe.New()
+	p.AddCriticalCheck("catalog", &probe.CatalogReachable{
+		Ping: func(ctx context.Context) error { return os.ErrNotExist },
+	})
+
+	ts := httptest.NewServer(p.ReadyHandler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
 func TestFileExists_CheckPasses(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "exists.db")
