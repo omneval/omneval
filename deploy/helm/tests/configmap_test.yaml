@@ -79,3 +79,17 @@ tests:
       - matchRegex:
           path: data["omneval.yaml"]
           pattern: 'catalog_driver: "postgres"'
+
+  - it: should default memory_limit to 1536MiB (75% of the default 2Gi limit)
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'memory_limit: "1536MiB"'
+
+  - it: should respect an explicit memoryLimit override
+    set:
+      quack.server.memoryLimit: "3GB"
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'memory_limit: "3GB"'

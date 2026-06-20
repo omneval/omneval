@@ -93,6 +93,11 @@ type Config struct {
 	// CatalogDSN is the Postgres DSN for the Catalog, or the local catalog
 	// file path when CatalogDriver is "duckdb".
 	CatalogDSN string
+	// MemoryLimit bounds DuckDB's buffer manager (e.g. "3GB"), applied via
+	// `SET memory_limit` immediately after opening the session. Empty means
+	// no pragma is set (DuckDB's auto-detected default, which sizes against
+	// the host's total RAM rather than any container memory limit).
+	MemoryLimit string
 }
 
 // ConfigFromApp derives the Quack Server's catalog settings from the
@@ -104,6 +109,7 @@ func ConfigFromApp(cfg *config.Config) Config {
 		Token:         cfg.Quack.Server.Token,
 		CatalogDriver: cfg.Quack.Server.CatalogDriver,
 		CatalogDSN:    cfg.Quack.Server.CatalogDSN,
+		MemoryLimit:   cfg.Quack.Server.MemoryLimit,
 	}
 	if sc.ListenAddr == "" {
 		sc.ListenAddr = ":9494"
@@ -161,6 +167,13 @@ func Serve(ctx context.Context, cfg Config) (*Server, error) {
 	db, err := sql.Open("duckdb", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("lakeserver: open duckdb: %w", err)
+	}
+
+	if cfg.MemoryLimit != "" {
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("SET memory_limit = %s", sqlQuote(cfg.MemoryLimit))); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("lakeserver: set memory_limit: %w", err)
+		}
 	}
 
 	// CatalogDriverLocal requires a single-writer DuckDB file. Serialize all

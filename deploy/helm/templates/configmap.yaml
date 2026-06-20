@@ -79,6 +79,7 @@ data:
         catalog_dsn: {{ $quackCatalogDSN | quote }}
         data_path: {{ $quackDataPath | quote }}
         maintenance_interval: {{ .Values.quack.server.maintenanceInterval | quote }}
+        memory_limit: {{ .Values.quack.server.memoryLimit | quote }}
         retention:
           enabled: {{ .Values.quack.server.retention.enabled }}
           max_age_days: {{ .Values.quack.server.retention.maxAgeDays }}
