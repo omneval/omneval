@@ -20,7 +20,7 @@
 #   Ingest API:  localhost:8000
 #   Query API:   localhost:8002
 #
-# See README.md for how to set up port-f forwards.
+# See README.md for how to set up port-forwards.
 # ============================================================================
 
 set -euo pipefail
@@ -178,7 +178,7 @@ if [[ $FAIL -gt 0 ]]; then
   exit 1
 elif [[ $WARN -gt 0 ]]; then
   echo "STATUS: WARNINGS — $WARN check(s) had issues"
-  echo "  Check the warnings above; many are expected if port-fors"
+  echo "  Check the warnings above; many are expected if port-forwards are not active"
   exit 0
 else
   echo "STATUS: ALL CHECKS PASSED"

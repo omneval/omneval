@@ -19,8 +19,9 @@
 #   ./teardown_benchmark.sh
 #
 # Environment variables:
-#   OMNEVAL_NAMESPACE — Kubernetes namespace (default: omneval-benchmark)
-#   OMNEVAL_RELEASE   — Helm release name  (default: omneval-benchmark)
+#   OMNEVAL_NAMESPACE   — Kubernetes namespace (default: omneval-benchmark)
+#   OMNEVAL_RELEASE     — Helm release name  (default: omneval-benchmark)
+#   OMNEVAL_S3_BUCKET   — S3 bucket name (for cost warnings; optional)
 #
 # See README.md for cost considerations and S3 bucket cleanup steps.
 # ============================================================================
@@ -29,6 +30,7 @@ set -euo pipefail
 
 NAMESPACE="${OMNEVAL_NAMESPACE:-omneval-benchmark}"
 RELEASE="${OMNEVAL_RELEASE:-omneval-benchmark}"
+S3_BUCKET="${OMNEVAL_S3_BUCKET:-}"
 
 echo "=== Omneval Benchmark Environment — Teardown ==="
 echo ""
@@ -38,8 +40,13 @@ echo ""
 echo "WARNING: This will remove the Helm release, all pods, PVCs, and"
 echo "associated Kubernetes resources in namespace '$NAMESPACE'."
 echo ""
-echo "The S3 bucket '$OMNEVAL_S3_BUCKET' will NOT be deleted automatically."
-echo "You must manually delete it to avoid ongoing storage costs."
+if [[ -n "$S3_BUCKET" ]]; then
+  echo "The S3 bucket '$S3_BUCKET' will NOT be deleted automatically."
+  echo "You must manually delete it to avoid ongoing storage costs."
+else
+  echo "The S3 bucket used during deployment will NOT be deleted automatically."
+  echo "You must manually delete it to avoid ongoing storage costs."
+fi
 echo ""
 
 # Confirm teardown if not in CI/non-interactive mode
@@ -73,11 +80,19 @@ echo "=== Teardown complete ==="
 echo ""
 echo "IMPORTANT: Manually delete your S3 bucket to avoid ongoing costs:"
 echo ""
-echo "  AWS CLI:"
-echo "    aws s3 rb s3://$(echo "$OMNEVAL_S3_BUCKET" || echo '<your-bucket>') --force"
-echo ""
-echo "  Cloudflare R2 (via rclone or the R2 console):"
-echo "    rclone rmdir remote:$(echo "$OMNEVAL_S3_BUCKET" || echo '<your-bucket>')"
+if [[ -n "$S3_BUCKET" ]]; then
+  echo "  AWS CLI:"
+  echo "    aws s3 rb s3://${S3_BUCKET} --force"
+  echo ""
+  echo "  Cloudflare R2 (via rclone or the R2 console):"
+  echo "    rclone rmdir remote:${S3_BUCKET}"
+else
+  echo "  AWS CLI:"
+  echo "    aws s3 rb s3://<your-bucket> --force"
+  echo ""
+  echo "  Cloudflare R2 (via rclone or the R2 console):"
+  echo "    rclone rmdir remote:<your-bucket>"
+fi
 echo ""
 echo "  Or via the cloud provider's web console."
 echo ""
