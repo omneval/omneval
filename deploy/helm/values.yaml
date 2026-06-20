@@ -266,8 +266,10 @@ quack:
     # (s3://<bucket>/lake) or a local path on the PVC for the demo profile.
     dataPath: ""
     # Table Maintenance scheduler interval (compaction, snapshot expiry,
-    # retention GC).
-    maintenanceInterval: "5m"
+    # retention GC). 15m rather than a shorter cadence: each pass's
+    # rewrite/merge writes a new merge-lineage Parquet generation, so a
+    # shorter interval creates more of these than light workloads need.
+    maintenanceInterval: "15m"
     # Lake-native retention (#92): DELETEs aged spans/scores via the Catalog.
     retention:
       enabled: false
