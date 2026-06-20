@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -130,8 +131,32 @@ func Open(ctx context.Context, cfg Config) (*Lake, error) {
 			db.Close()
 			return nil, err
 		}
+		// DuckLake persists this as catalog metadata, so it only needs to be
+		// set once ever for the catalog's lifetime — unlike ensureTables'
+		// CREATE/ALTER statements, it must NOT be repeated on every
+		// reconnect() (see reconnect's ensureTables call): reconnect runs
+		// under a tight reconnectTimeout budget, and this catalog-wide
+		// config write doesn't need to compete for that budget on every
+		// stale-connection recovery.
+		if err := l.configureCompression(ctx); err != nil {
+			db.Close()
+			return nil, err
+		}
 	}
 	return l, nil
+}
+
+// configureCompression sets the Lake's Parquet write compression to zstd
+// (DuckLake defaults to snappy). The heaviest columns (spans' input/output)
+// hold LLM prompt/completion text, which zstd compresses meaningfully
+// better than snappy — cost is pre-computed at write time and never
+// recomputed at query time, so there's no repeated-decode penalty to worry
+// about.
+func (l *Lake) configureCompression(ctx context.Context) error {
+	if _, err := l.db.ExecContext(ctx, "CALL ducklake_set_option('lake', 'parquet_compression', 'zstd')"); err != nil {
+		return fmt.Errorf("lake: configure compression: %w", err)
+	}
+	return nil
 }
 
 // attach loads the required extensions, registers the Quack auth secret
@@ -327,9 +352,39 @@ func attachSQL(cfg Config) string {
 		sqlQuote(target), strings.Join(options, ", "))
 }
 
+// r2EndpointPattern matches a Cloudflare R2 S3-compatible endpoint host,
+// e.g. "dee226c52e8c33561dacbbc793a9d207.r2.cloudflarestorage.com", capturing
+// the account ID.
+var r2EndpointPattern = regexp.MustCompile(`^([0-9a-f]{32})\.r2\.cloudflarestorage\.com$`)
+
 // s3SecretSQL builds the CREATE SECRET statement granting DuckDB access to
 // the S3-compatible store holding the Lake's data path.
+//
+// Cloudflare R2 endpoints get DuckDB's purpose-built "TYPE r2" secret
+// (ACCOUNT_ID only, no ENDPOINT/URL_STYLE) instead of the generic "TYPE s3"
+// + ENDPOINT/URL_STYLE combination used for MinIO/AWS. This sidesteps a
+// documented DuckLake bug (duckdb/ducklake#562, see
+// lakeserver/maintenance.go) where some of DuckLake's internal S3 calls
+// ignore a generic secret's URL_STYLE/ENDPOINT and fall back to AWS
+// virtual-hosted-style requests, which fail against non-AWS endpoints —
+// among other symptoms, this silently prevents ducklake_cleanup_old_files
+// from physically deleting superseded Parquet files, so compaction output
+// piles up unbounded in the bucket.
 func s3SecretSQL(sc *config.StorageConfig) string {
+	if sc.Endpoint != "" {
+		endpoint := strings.TrimPrefix(sc.Endpoint, "http://")
+		endpoint = strings.TrimPrefix(endpoint, "https://")
+		if m := r2EndpointPattern.FindStringSubmatch(endpoint); m != nil {
+			fields := []string{
+				"TYPE r2",
+				"KEY_ID " + sqlQuote(sc.AccessKey),
+				"SECRET " + sqlQuote(sc.SecretKey),
+				"ACCOUNT_ID " + sqlQuote(m[1]),
+			}
+			return fmt.Sprintf("CREATE OR REPLACE SECRET lake_s3 (%s)", strings.Join(fields, ", "))
+		}
+	}
+
 	region := sc.Region
 	if region == "" {
 		region = "us-east-1"

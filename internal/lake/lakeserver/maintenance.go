@@ -9,8 +9,14 @@ import (
 )
 
 // DefaultMaintenanceInterval is how often RunMaintenanceLoop runs a pass
-// when the configured interval is zero or unparsable.
-const DefaultMaintenanceInterval = 5 * time.Minute
+// when the configured interval is zero or unparsable. 15m rather than the
+// original 5m: a shorter cadence creates more merge-lineage generations
+// (each compaction pass's rewrite/merge output) than light workloads need,
+// independent of whether cleanup successfully reclaims the superseded
+// ones — skip-when-idle (see RunMaintenanceLoop) avoids wasted passes when
+// nothing changed, but a longer baseline interval also means fewer
+// intermediate file generations are ever created in the first place.
+const DefaultMaintenanceInterval = 15 * time.Minute
 
 // MaintenanceTables lists the DuckLake tables Table Maintenance operates
 // on: spans and scores (internal/lake's ensureTables).
@@ -49,6 +55,11 @@ type MaintenanceResult struct {
 	// Retention reports the retention step's outcome. Zero value when
 	// retention was disabled (no DELETEs ran).
 	Retention RetentionResult
+	// Skipped is true when RunMaintenanceLoop skipped this tick's
+	// compaction statements because no new snapshot was committed since
+	// the previous completed pass (nothing to rewrite/merge/clean up).
+	// Retention is always its zero value when Skipped is true.
+	Skipped bool
 }
 
 // RunMaintenance runs one Table Maintenance pass against db, which must
@@ -150,11 +161,32 @@ func RunMaintenance(ctx context.Context, db *sql.DB, tables []string, retention 
 	return result, nil
 }
 
+// latestSnapshotID returns the highest DuckLake snapshot ID committed
+// against the "lake" catalog so far.
+func latestSnapshotID(ctx context.Context, db *sql.DB) (int64, error) {
+	var id int64
+	if err := db.QueryRowContext(ctx, "SELECT max(snapshot_id) FROM ducklake_snapshots('lake')").Scan(&id); err != nil {
+		return 0, fmt.Errorf("lakeserver: maintenance: latest snapshot id: %w", err)
+	}
+	return id, nil
+}
+
 // RunMaintenanceLoop runs RunMaintenance on db on the given interval until
 // ctx is canceled. Errors are logged and the loop continues — a failed
 // pass does not stop future scheduled passes. onResult, if non-nil, is
-// called with the result of each successful pass (used by services/quack to
-// record retention metrics).
+// called with the result of each tick (used by services/quack to record
+// retention metrics), including skipped ticks.
+//
+// Each tick after the first is skipped — RunMaintenance's
+// rewrite/merge/expire/cleanup statements are not run — when no new
+// DuckLake snapshot has been committed since the previous completed pass
+// and retention is disabled. With two idle agents and a short interval,
+// most ticks otherwise have nothing to compact; running the full pass
+// anyway writes a fresh (often near-empty) merged Parquet file every
+// interval for no benefit. Retention is never skipped this way because the
+// retention cutoff is time-based, not snapshot-based: rows can become
+// newly eligible for deletion purely because time passed, even with zero
+// new writes.
 func RunMaintenanceLoop(ctx context.Context, db *sql.DB, tables []string, interval time.Duration, retention RetentionConfig, onResult func(MaintenanceResult)) error {
 	if interval <= 0 {
 		interval = DefaultMaintenanceInterval
@@ -165,17 +197,35 @@ func RunMaintenanceLoop(ctx context.Context, db *sql.DB, tables []string, interv
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	var lastSnapshotID int64
+	haveBaseline := false
+
 	for {
 		select {
 		case <-ctx.Done():
 			slog.Info("lakeserver: table maintenance scheduler stopped")
 			return ctx.Err()
 		case <-ticker.C:
+			if !retention.Enabled && haveBaseline {
+				current, err := latestSnapshotID(ctx, db)
+				if err == nil && current == lastSnapshotID {
+					slog.Info("lakeserver: table maintenance pass skipped (no new snapshot)", "snapshot_id", current)
+					if onResult != nil {
+						onResult(MaintenanceResult{Skipped: true})
+					}
+					continue
+				}
+			}
+
 			start := time.Now()
 			result, err := RunMaintenance(ctx, db, tables, retention)
 			if err != nil {
 				slog.Error("lakeserver: table maintenance pass failed", "err", err, "duration", time.Since(start))
 				continue
+			}
+			if id, err := latestSnapshotID(ctx, db); err == nil {
+				lastSnapshotID = id
+				haveBaseline = true
 			}
 			if retention.Enabled {
 				slog.Info("lakeserver: table maintenance pass complete",

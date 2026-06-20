@@ -29,7 +29,7 @@ quack:
     dataPath: ""
 
     # Table Maintenance interval
-    maintenanceInterval: "5m"
+    maintenanceInterval: "15m"
 
     # Lake-native retention (optional — disabled by default)
     retention:

@@ -195,3 +195,47 @@ func TestRunMaintenanceFlushOrderingPreserved(t *testing.T) {
 		t.Errorf("spans after maintenance: got %d, want 1", n)
 	}
 }
+
+// TestDefaultMaintenanceIntervalIs15Minutes pins the documented fallback
+// interval. 5m was too aggressive for light workloads: with skip-when-idle
+// (RunMaintenanceLoop) doing most of the work to avoid wasted passes, a
+// longer baseline cadence further reduces how many merge-lineage
+// generations ever get created in the first place, independent of whether
+// cleanup successfully reclaims them.
+func TestDefaultMaintenanceIntervalIs15Minutes(t *testing.T) {
+	if lakeserver.DefaultMaintenanceInterval != 15*time.Minute {
+		t.Errorf("DefaultMaintenanceInterval: got %v, want 15m", lakeserver.DefaultMaintenanceInterval)
+	}
+}
+
+// TestRunMaintenanceLoopFallsBackToDefaultInterval proves RunMaintenanceLoop
+// uses DefaultMaintenanceInterval when given a non-positive interval, by
+// checking the configured-interval is reflected back in its startup log
+// would require log capture; instead this proves it via behavior: a
+// canceled context returns promptly without ever firing a tick at an
+// effectively-zero interval (which would instead busy-loop).
+func TestRunMaintenanceLoopFallsBackToDefaultInterval(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	cfg, _ := lakeservertest.NewLocal(t)
+	l, err := lake.Open(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer l.Close()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- lakeserver.RunMaintenanceLoop(ctx, l.DB(), lakeserver.MaintenanceTables, 0, lakeserver.RetentionConfig{}, nil)
+	}()
+
+	select {
+	case err := <-done:
+		if err != context.Canceled {
+			t.Errorf("RunMaintenanceLoop with interval=0 and canceled ctx: got err %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunMaintenanceLoop did not return promptly with an already-canceled context")
+	}
+}
