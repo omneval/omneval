@@ -82,10 +82,6 @@ data:
         retention:
           enabled: {{ .Values.quack.server.retention.enabled }}
           max_age_days: {{ .Values.quack.server.retention.maxAgeDays }}
-        backup:
-          enabled: {{ .Values.quack.server.backup.enabled }}
-          interval: {{ .Values.quack.server.backup.interval | quote }}
-          keep_count: {{ .Values.quack.server.backup.keepCount }}
       client:
         url: {{ $quackAddr | quote }}
         data_path: {{ (.Values.quack.client.dataPath | default $quackDataPath) | quote }}

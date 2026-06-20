@@ -19,7 +19,7 @@ In both cases the Catalog's DuckLake snapshot and time-travel history is discard
 
 - `kubectl` access to the target cluster with permissions to manage Deployments and StatefulSets in the Omneval release namespace.
 - Helm 3 installed (used for re-deploying the Quack Server).
-- Access to the S3 bucket where the Lake's Parquet files and Catalog backups are stored.
+- Access to the S3 bucket where the Lake's Parquet files are stored.
 - The release name (the Helm release prefix for all resources, typically `omneval` or `omneval-<environment>`).
 - The Helm values file or values overrides used for the production deployment.
 
@@ -29,10 +29,8 @@ In both cases the Catalog's DuckLake snapshot and time-travel history is discard
 |---------|-----------|---------------------|-------------|
 | Catalog driver | `quack.server.catalogDriver` | `OMNEVAL_QUACK_SERVER_CATALOG_DRIVER` | `"postgres"` (old) → `"duckdb"` (new) |
 | Catalog DSN | `quack.server.catalogDSN` | `OMNEVAL_QUACK_SERVER_CATALOG_DSN` | Postgres DSN (postgres) or local path `lake/catalog.ducklake` (duckdb) |
-| Quack backup enabled | `quack.server.backup.enabled` | `OMNEVAL_QUACK_SERVER_BACKUP_ENABLED` | Controls Catalog backup scheduler (default `true`) |
-| Quack backup interval | `quack.server.backup.interval` | `OMNEVAL_QUACK_SERVER_BACKUP_INTERVAL` | Backup frequency (default `"1h"`) |
-| Quack backup keep count | `quack.server.backup.keepCount` | `OMNEVAL_QUACK_SERVER_BACKUP_KEEP_COUNT` | Max backups to retain (default `24`) |
 | Lake data path | `quack.server.dataPath` / `quack.client.dataPath` | `OMNEVAL_QUACK_SERVER_DATA_PATH` / `OMNEVAL_QUACK_CLIENT_DATA_PATH` | `s3://<bucket>/lake` for production |
+| Table Maintenance interval | `quack.server.maintenanceInterval` | `OMNEVAL_QUACK_SERVER_MAINTENANCE_INTERVAL` | Table Maintenance cadence (default `"5m"`) |
 
 The Quack Server statefulset mounts the PVC at `/data`; the default catalog file path when `catalogDSN` is empty and `catalogDriver` is `duckdb` is `lake/catalog.ducklake` relative to the data path (i.e. `/data/lake/catalog.ducklake` on the PVC).
 
@@ -127,11 +125,6 @@ quack:
     # catalogDSN is empty — defaults to lake/catalog.ducklake on the PVC
     catalogDSN: ""
     dataPath: ""  # empty — derived from storage.bucket → s3://<bucket>/lake
-    # Backup is meaningful only when catalogDriver is duckdb:
-    backup:
-      enabled: true
-      interval: "1h"
-      keepCount: 24
 ```
 
 ### Deploy
@@ -363,15 +356,19 @@ kubectl logs -f -l app.kubernetes.io/component=writer -n <namespace> --tail=20
 kubectl get pods -n <namespace> -l app.kubernetes.io/name=omneval -o wide
 # Expected: all pods Running, Ready 1/1
 
-# 2. Check Quack Server backups are starting (if backup.enabled=true)
-kubectl logs <release>-quack-server-0 -n <namespace> --tail=30 | grep -i backup
-# Expected: CHECKPOINT succeeded, backup uploaded to s3://...
+# 2. Verify Table Maintenance is running (if configured)
+kubectl logs <release>-quack-server-0 -n <namespace> --tail=30 | grep -i "table maintenance\|checkpoint"
+# Expected: periodic checkpoint/maintenance messages
 
-# 3. Verify the Helm release state
+# 3. Configure your own PVC backup policy (e.g. Kubernetes VolumeSnapshot)
+#    for the Quack Server's /data mount — the Helm chart no longer provides
+#    S3 catalog backups. See the README's upgrade notes for details.
+
+# 5. Verify the Helm release state
 helm status <release> -n <namespace>
 # Expected: STATUS: deployed, REVISION incremented from pre-cutover
 
-# 4. Check the new catalog driver
+# 6. Check the new catalog driver
 kubectl exec -it <release>-quack-server-0 -n <namespace> -- \
   grep catalog_driver /etc/omneval/omneval.yaml
 # Expected: catalog_driver: duckdb
@@ -386,7 +383,7 @@ kubectl exec -it <release>-quack-server-0 -n <namespace> -- \
 
 2. **Verify Eval scores** are flowing in for the next 10 minutes by checking the Query API's trace-detail endpoint for new scores.
 
-3. **Confirm backup scheduler** is running: the Quack Server logs should show periodic `CHECKPOINT` and `backup uploaded` messages (at the configured interval, default 1 hour).
+3. **Configure PVC backup:** set up your own PVC backup policy (e.g. Kubernetes VolumeSnapshot) for the Quack Server's `/data` mount — the Helm chart no longer provides S3 catalog backups. See the README's upgrade notes for details.
 
 4. **Archival:** Keep the old Postgres catalog accessible (or at least record the Postgres DSN) for the first 24 hours as a rollback reference. No tool exists to replay Postgres `ducklake_*` tables back into a new Catalog file if something goes wrong.
 
@@ -422,4 +419,4 @@ kubectl scale deployment <release>-writer -n <namespace> --replicas=<production-
 - **Snapshot/time-travel history is lost.** DuckLake 1.5 stores snapshot and time-travel metadata in the Catalog file itself. When the Catalog is rebuilt from scratch, this history is discarded. This is acceptable because the product does not currently surface snapshot or time-travel functionality to users.
 - **Downtime is bounded by the cutover duration.** From Phase 1 (stop Writers) to Phase 7 (resume Writers), no new spans or scores can be committed. Plan the cutover during a low-traffic window.
 - **Ingest Buffer replay.** Batches that were ingested but not yet committed to the Lake by the Writers at the time of cutover survive in the Ingest Buffer (S3). The Writers' reconciliation sweep will replay them once Writers resume.
-- **This document is the permanent DR procedure for "Catalog file lost, no S3 backup available."** In a disaster-recovery scenario where the Catalog file is corrupted or the PVC is lost, skip Phases 0–4 (pre-flight, stop Writers, record state, remove old catalog) and proceed directly from the Writers-stop step through the rebuild steps. The Prerequisites and Phase 1 remain identical.
+- **This document is the permanent DR procedure for "Catalog file lost."** In a disaster-recovery scenario where the Catalog file is corrupted or the PVC is lost, skip Phases 0–4 (pre-flight, stop Writers, record state, remove old catalog) and proceed directly from the Writers-stop step through the rebuild steps. The Prerequisites and Phase 1 remain identical.

@@ -7,11 +7,10 @@
 # This script automates the validation checks from the Catalog cutover runbook
 # (docs/runbooks/catalog-cutover.md, Phase 6). It verifies:
 #   1. Quack Server catalog_driver = duckdb
-#   2. Quack Server backup.enabled = true
-#   3. Quack Server PVC exists and catalog file path is accessible
-#   4. Old Postgres Catalog config removed from deployment config
-#   5. Quack Server is healthy and running
-#   6. Writer pods are running (after resume)
+#   2. Quack Server PVC exists and catalog file path is accessible
+#   3. Old Postgres Catalog config removed from deployment config
+#   4. Quack Server is healthy and running
+#   5. Writer pods are running (after resume)
 #
 # After this script, manually execute the three validation checks from the
 # runbook:
@@ -54,19 +53,9 @@ else
   fail "catalog_driver = ${CATALOG_DRIVER:-<unset>} (expected: duckdb)"
 fi
 
-# Check 2: Quack Server backup.enabled = true
+# Check 2: Quack Server PVC exists
 echo ""
-echo "2. Checking backup.enabled..."
-BACKUP_ENABLED=$(kubectl get configmap "${RELEASE}-config" -n "${NAMESPACE}" -o jsonpath='{.data.omneval\.yaml}' 2>/dev/null | grep -A2 backup | grep enabled | awk '{print $2}' || true)
-if [[ "${BACKUP_ENABLED}" == "true" ]]; then
-  pass "backup.enabled = true"
-else
-  fail "backup.enabled = ${BACKUP_ENABLED:-<unset>} (expected: true)"
-fi
-
-# Check 3: Quack Server PVC exists
-echo ""
-echo "3. Checking Quack Server PVC..."
+echo "2. Checking Quack Server PVC..."
 PVC_EXISTS=$(kubectl get pvc -l app.kubernetes.io/component=quack-server -n "${NAMESPACE}" -o name 2>/dev/null || true)
 if [[ -n "${PVC_EXISTS}" ]]; then
   pass "PVC exists: ${PVC_EXISTS}"
@@ -74,9 +63,9 @@ else
   fail "No PVC found for quack-server"
 fi
 
-# Check 4: Quack Server pod is running
+# Check 3: Quack Server pod is running
 echo ""
-echo "4. Checking Quack Server health..."
+echo "3. Checking Quack Server health..."
 QUACK_READY=$(kubectl get statefulset "${RELEASE}-quack-server" -n "${NAMESPACE}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)
 if [[ "${QUACK_READY}" == "1" ]]; then
   pass "Quack Server is ready (1/1 replicas)"
@@ -84,9 +73,9 @@ else
   fail "Quack Server ready replicas: ${QUACK_READY:-0}/1"
 fi
 
-# Check 5: Catalog file path exists in Quack Server pod
+# Check 4: Catalog file path exists in Quack Server pod
 echo ""
-echo "5. Checking catalog file path..."
+echo "4. Checking catalog file path..."
 CATALOG_PATH=$(kubectl get configmap "${RELEASE}-config" -n "${NAMESPACE}" -o jsonpath='{.data.omneval\.yaml}' 2>/dev/null | grep catalog_dsn | awk '{print $2}' | tr -d '"' || true)
 if [[ -z "${CATALOG_PATH}" ]]; then
   CATALOG_PATH="lake/catalog.duckdb"
@@ -106,9 +95,9 @@ else
   fail "Catalog file not found at ${CATALOG_CHECK_PATH}"
 fi
 
-# Check 6: Old Postgres Catalog config removed
+# Check 5: Old Postgres Catalog config removed
 echo ""
-echo "6. Checking old Postgres Catalog config removed..."
+echo "5. Checking old Postgres Catalog config removed..."
 POSTGRES_CONFIG=$(kubectl get configmap "${RELEASE}-config" -n "${NAMESPACE}" -o jsonpath='{.data.omneval\.yaml}' 2>/dev/null | grep -E 'catalog.*postgres|catalog.*Postgres' | head -5 || true)
 if [[ -z "${POSTGRES_CONFIG}" ]]; then
   pass "No old Postgres Catalog config found in configmap"
@@ -117,9 +106,9 @@ else
   echo "    ${POSTGRES_CONFIG}"
 fi
 
-# Check 7: Writer pods are running (after resume)
+# Check 6: Writer pods are running (after resume)
 echo ""
-echo "7. Checking Writer pods..."
+echo "6. Checking Writer pods..."
 WRITER_PODS=$(kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/component=writer -o name 2>/dev/null || true)
 WRITER_COUNT=$(kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/component=writer -o name 2>/dev/null | wc -l || echo "0")
 if [[ "${WRITER_COUNT}" -gt 0 ]]; then
@@ -128,9 +117,9 @@ else
   fail "No Writer pods running (cutover may not be complete)"
 fi
 
-# Check 8: All services healthy
+# Check 7: All services healthy
 echo ""
-echo "8. Checking all Omneval services..."
+echo "7. Checking all Omneval services..."
 ALL_PODS=$(kubectl get pods -n "${NAMESPACE}" -o name 2>/dev/null | grep -E '(omneval-)?(ingest|writer|query|eval|quack)' || true)
 if [[ -n "${ALL_PODS}" ]]; then
   pass "Omneval pods found"
@@ -179,7 +168,7 @@ echo ""
 echo "  Final checks:"
 echo "    1. Monitor Writer logs for 30 min (no tx conflict/attach race errors)"
 echo "    2. Verify Eval scores flowing in"
-echo "    3. Confirm backup scheduler is running (CHECKPOINT/backup uploaded in logs)"
+echo "    3. Set up your own PVC backup policy (e.g. VolumeSnapshot) for the Quack Server's /data mount"
 echo ""
 echo "  See docs/runbooks/catalog-cutover.md for all details."
 exit 0
