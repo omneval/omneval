@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"time"
 )
 
@@ -157,6 +158,90 @@ func RunMaintenance(ctx context.Context, db *sql.DB, tables []string, retention 
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return result, fmt.Errorf("lakeserver: maintenance: %s: %w", firstWords(stmt, 3), err)
 		}
+	}
+	return result, nil
+}
+
+// inlinedTableNamePattern matches DuckLake's machine-generated naming for
+// catalog-resident inlined-data tables: ducklake_inlined_data_<table_id>_<schema_version>.
+// PruneEmptyInlinedTables only ever operates on rows whose table_name
+// matches this pattern, as defense-in-depth before DROP TABLE.
+var inlinedTableNamePattern = regexp.MustCompile(`^ducklake_inlined_data_[0-9]+_[0-9]+$`)
+
+// PruneResult reports what PruneEmptyInlinedTables did.
+type PruneResult struct {
+	// TablesDropped is the number of empty inlined tables that were
+	// dropped and deregistered.
+	TablesDropped int
+}
+
+// PruneEmptyInlinedTables drops every catalog-resident inlined-data table
+// (ducklake_inlined_data_<table_id>_<schema_version>) that is currently
+// empty, and removes its row from the ducklake_inlined_data_tables
+// registry. ducklake_flush_inlined_data empties an inlined table into
+// Parquet but never drops the now-dead table or its registry row —
+// DuckLake's query planner unions across every entry in that registry when
+// scanning a table, so thousands of long-dead empty entries make even a
+// trivial query take minutes, independent of real data volume (confirmed:
+// 1 entry -> 2.1s, 4000 entries -> 28m for an identical COUNT(*) query).
+//
+// db must be the Quack Server's own raw catalog connection (Server.DB()),
+// never a "ducklake:quack:" client attach — the registry table isn't
+// visible at all through that layer. For CatalogDriverLocal this
+// connection is the sole writer (Serve sets db.SetMaxOpenConns(1)), so
+// every other catalog operation (including remote Quack-client requests)
+// is already serialized against this same connection, making the
+// count-then-drop sequence below race-free without an explicit transaction.
+func PruneEmptyInlinedTables(ctx context.Context, db *sql.DB) (PruneResult, error) {
+	var result PruneResult
+
+	rows, err := db.QueryContext(ctx, "SELECT table_id, table_name, schema_version FROM ducklake_inlined_data_tables")
+	if err != nil {
+		return result, fmt.Errorf("lakeserver: prune inlined tables: list: %w", err)
+	}
+	type entry struct {
+		tableID       int64
+		tableName     string
+		schemaVersion int64
+	}
+	var entries []entry
+	for rows.Next() {
+		var e entry
+		if err := rows.Scan(&e.tableID, &e.tableName, &e.schemaVersion); err != nil {
+			rows.Close()
+			return result, fmt.Errorf("lakeserver: prune inlined tables: scan: %w", err)
+		}
+		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return result, fmt.Errorf("lakeserver: prune inlined tables: rows: %w", err)
+	}
+	rows.Close()
+
+	for _, e := range entries {
+		if !inlinedTableNamePattern.MatchString(e.tableName) {
+			return result, fmt.Errorf("lakeserver: prune inlined tables: registry table_name %q does not match expected pattern, refusing to touch it", e.tableName)
+		}
+
+		var n int
+		if err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT count(*) FROM "%s"`, e.tableName)).Scan(&n); err != nil {
+			return result, fmt.Errorf("lakeserver: prune inlined tables: count %s: %w", e.tableName, err)
+		}
+		if n != 0 {
+			continue
+		}
+
+		if _, err := db.ExecContext(ctx, fmt.Sprintf(`DROP TABLE "%s"`, e.tableName)); err != nil {
+			return result, fmt.Errorf("lakeserver: prune inlined tables: drop %s: %w", e.tableName, err)
+		}
+		if _, err := db.ExecContext(ctx,
+			"DELETE FROM ducklake_inlined_data_tables WHERE table_id = ? AND table_name = ? AND schema_version = ?",
+			e.tableID, e.tableName, e.schemaVersion,
+		); err != nil {
+			return result, fmt.Errorf("lakeserver: prune inlined tables: deregister %s: %w", e.tableName, err)
+		}
+		result.TablesDropped++
 	}
 	return result, nil
 }

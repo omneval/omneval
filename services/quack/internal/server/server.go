@@ -86,6 +86,21 @@ func Run() error {
 		"catalog_driver", scfg.CatalogDriver,
 	)
 
+	// One-time cleanup of empty catalog-resident inlined-data tables left
+	// behind by DuckLake's data inlining (never pruned by DuckLake itself —
+	// see PruneEmptyInlinedTables). Must run against the server's own raw
+	// catalog connection (srv.DB()), not a Quack-client attach: the registry
+	// table isn't visible through that layer. Only CatalogDriverLocal is
+	// confirmed to expose the registry this way.
+	if scfg.CatalogDriver == lakeserver.CatalogDriverLocal {
+		pruneResult, err := lakeserver.PruneEmptyInlinedTables(ctx, srv.DB())
+		if err != nil {
+			slog.Error("quack: prune empty inlined tables failed", "err", err)
+		} else {
+			slog.Info("quack: pruned empty inlined tables", "tables_dropped", pruneResult.TablesDropped)
+		}
+	}
+
 	// Attach a loopback Quack client to our own catalog for Table
 	// Maintenance: the Quack Server is itself a valid Quack client of the
 	// catalog it serves (same pattern as Writer/Query API), so it reuses

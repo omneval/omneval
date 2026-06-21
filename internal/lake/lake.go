@@ -435,6 +435,18 @@ func attachSQL(cfg Config) string {
 		options = append(options, fmt.Sprintf("META_TOKEN %s", sqlQuote(cfg.QuackToken)))
 	}
 	options = append(options, "META_DISABLE_SSL true")
+	// Disables DuckLake data inlining (small writes held as catalog-resident
+	// mini-tables instead of Parquet files). DuckLake never prunes an inlined
+	// table from ducklake_inlined_data_tables even once ducklake_flush_inlined_data
+	// has emptied it, and its planner unions across every entry in that
+	// registry when scanning a table — thousands of long-dead empty entries
+	// made a trivial query take minutes in production. This must be set as
+	// an ATTACH option on the quack: client connection itself: neither the
+	// GLOBAL DuckDB setting ducklake_default_data_inlining_row_limit nor the
+	// catalog-level ducklake_set_option('lake', 'data_inlining_row_limit', ...)
+	// metadata key has any effect on writes routed through a remote Quack
+	// Server attachment.
+	options = append(options, "DATA_INLINING_ROW_LIMIT 0")
 	if cfg.ReadOnly {
 		options = append(options, "READ_ONLY")
 	}

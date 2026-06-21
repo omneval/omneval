@@ -2,6 +2,7 @@ package lake
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io/fs"
 	"net"
@@ -88,6 +89,43 @@ func testSpan(projectID, spanID string, start time.Time) *domain.Span {
 		CostUSD:      0.001,
 		StatusCode:   "OK",
 		Attributes:   map[string]any{"k": "v"},
+	}
+}
+
+// TestDisabledInliningPreventsNewInlinedTables proves that with inlining
+// disabled, repeated small InsertSpans calls never grow the catalog's
+// ducklake_inlined_data_tables registry (the table-count growth that made
+// production queries take minutes is fully prevented, not just slowed).
+func TestDisabledInliningPreventsNewInlinedTables(t *testing.T) {
+	cfg, dir := startTestServer(t)
+	ctx := context.Background()
+
+	l, err := Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer l.Close()
+
+	for i := 0; i < 20; i++ {
+		start := time.Now()
+		span := testSpan("proj1", fmt.Sprintf("span-%d", i), start)
+		if err := l.InsertSpans(ctx, []*domain.Span{span}); err != nil {
+			t.Fatalf("insert %d: %v", i, err)
+		}
+	}
+
+	rawDB, err := sql.Open("duckdb", filepath.Join(dir, "catalog", "lake.ducklake"))
+	if err != nil {
+		t.Fatalf("open raw catalog: %v", err)
+	}
+	defer rawDB.Close()
+
+	var n int
+	if err := rawDB.QueryRowContext(ctx, "SELECT count(*) FROM ducklake_inlined_data_tables").Scan(&n); err != nil {
+		t.Fatalf("count inlined tables: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("ducklake_inlined_data_tables has %d rows after 20 small inserts, want 0 (inlining should be fully disabled)", n)
 	}
 }
 
