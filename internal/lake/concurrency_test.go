@@ -54,6 +54,34 @@ func TestOpenConfiguresConnectionPoolLargerThanOne(t *testing.T) {
 	}
 }
 
+// TestOpenAppliesThreads proves Open applies a configured Threads via `SET
+// threads`, capping DuckDB's intra-query parallelism at the container's CPU
+// limit instead of letting DuckDB auto-detect the host's full core count —
+// the root cause of a production incident where the query pod's /healthz
+// and /readyz timed out under normal Traces-list load even after the
+// container's own CPU limit was raised, because a single query's threads
+// still fanned out across every host core and blew through the cgroup's
+// CFS quota in one burst.
+func TestOpenAppliesThreads(t *testing.T) {
+	ctx := context.Background()
+	cfg, _ := startTestServer(t)
+	cfg.Threads = 2
+
+	l, err := Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer l.Close()
+
+	var threads string
+	if err := l.QueryRow("SELECT current_setting('threads')").Scan(&threads); err != nil {
+		t.Fatalf("query current_setting: %v", err)
+	}
+	if threads != "2" {
+		t.Errorf("threads: got %q, want %q", threads, "2")
+	}
+}
+
 // TestOpenDefaultsMaxOpenConnsWhenUnset proves a zero-value MaxOpenConns
 // (e.g. a Config built without ConfigFromApp, or an older config file
 // missing the new field) still gets a usable pool instead of silently

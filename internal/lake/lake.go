@@ -63,6 +63,18 @@ type Config struct {
 	// client-side Parquet scans can run in this process at once, so the
 	// same OOM risk that motivated the server-side pragma applies here too.
 	MemoryLimit string
+	// Threads caps this client's embedded DuckDB intra-query parallelism,
+	// applied via `SET threads` after attach. Zero means no pragma is set,
+	// so DuckDB auto-detects against the host's total CPU count rather than
+	// the container's cgroup CPU limit: under Kubernetes this lets a single
+	// query fan out across far more threads than the container's CPU quota
+	// allows, exhausting an entire CFS period's budget in one burst and
+	// throttling the whole cgroup — including the Go runtime's health check
+	// goroutine — for the rest of that period (production incident: query
+	// pod's /healthz and /readyz timed out under normal Traces-list load
+	// even after the container's CPU limit was raised, because DuckDB kept
+	// detecting and using the host's full core count regardless).
+	Threads int
 }
 
 // defaultMaxOpenConns is used when Config.MaxOpenConns is unset (zero).
@@ -103,6 +115,7 @@ func ConfigFromApp(cfg *config.Config) Config {
 	}
 	lc.MaxOpenConns = cfg.Quack.Client.MaxOpenConns
 	lc.MemoryLimit = cfg.Quack.Client.MemoryLimit
+	lc.Threads = cfg.Quack.Client.Threads
 	return lc
 }
 
@@ -170,6 +183,12 @@ func Open(ctx context.Context, cfg Config) (*Lake, error) {
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("SET memory_limit = %s", sqlQuote(cfg.MemoryLimit))); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("lake: set memory_limit: %w", err)
+		}
+	}
+	if cfg.Threads > 0 {
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("SET threads = %d", cfg.Threads)); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("lake: set threads: %w", err)
 		}
 	}
 	if !cfg.ReadOnly {
@@ -357,6 +376,12 @@ func (l *Lake) reconnect(ctx context.Context) error {
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("SET memory_limit = %s", sqlQuote(l.cfg.MemoryLimit))); err != nil {
 			db.Close()
 			return fmt.Errorf("lake: set memory_limit: %w", err)
+		}
+	}
+	if l.cfg.Threads > 0 {
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("SET threads = %d", l.cfg.Threads)); err != nil {
+			db.Close()
+			return fmt.Errorf("lake: set threads: %w", err)
 		}
 	}
 	if !l.readOnly {

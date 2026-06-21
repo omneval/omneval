@@ -80,6 +80,7 @@ data:
         data_path: {{ $quackDataPath | quote }}
         maintenance_interval: {{ .Values.quack.server.maintenanceInterval | quote }}
         memory_limit: {{ .Values.quack.server.memoryLimit | quote }}
+        threads: {{ .Values.quack.server.threads }}
         retention:
           enabled: {{ .Values.quack.server.retention.enabled }}
           max_age_days: {{ .Values.quack.server.retention.maxAgeDays }}
@@ -88,3 +89,4 @@ data:
         data_path: {{ (.Values.quack.client.dataPath | default $quackDataPath) | quote }}
         max_open_conns: {{ .Values.quack.client.maxOpenConns }}
         memory_limit: {{ .Values.quack.client.memoryLimit | quote }}
+        threads: {{ .Values.quack.client.threads }}
