@@ -102,6 +102,22 @@ func TestConfigFromApp_MemoryLimit(t *testing.T) {
 	}
 }
 
+// TestConfigFromApp_Threads proves ConfigFromApp passes through
+// quack.server.threads unchanged.
+func TestConfigFromApp_Threads(t *testing.T) {
+	app := &config.Config{
+		Quack: config.QuackConfig{
+			Server: config.QuackServerConfig{
+				Threads: 2,
+			},
+		},
+	}
+	cfg := lakeserver.ConfigFromApp(app)
+	if cfg.Threads != 2 {
+		t.Errorf("Threads: got %d, want %d", cfg.Threads, 2)
+	}
+}
+
 // TestServe_AppliesMemoryLimit proves that a configured MemoryLimit is
 // actually applied to the Quack Server's DuckDB session via `SET
 // memory_limit`, so DuckDB's buffer manager backs off under memory pressure
@@ -158,5 +174,65 @@ func TestServe_NoMemoryLimitConfigured(t *testing.T) {
 	}
 	if strings.Contains(limit, "512") {
 		t.Errorf("memory_limit: got %q, expected DuckDB's untouched default, not the 512MB value from another test", limit)
+	}
+}
+
+// TestServe_AppliesThreads proves that a configured Threads is actually
+// applied to the Quack Server's DuckDB session via `SET threads`, so DuckDB
+// caps its intra-query parallelism at the container's CPU limit instead of
+// fanning out across the host's full core count and blowing through a CFS
+// period's quota in one burst (the root cause of a production incident:
+// query pod's /healthz and /readyz timed out under normal load even after
+// the container's CPU limit was raised, because DuckDB kept detecting and
+// using the host's full core count regardless of the cgroup limit).
+func TestServe_AppliesThreads(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	port := lakeservertest.FreePort(t)
+
+	srv, err := lakeserver.Serve(ctx, lakeserver.Config{
+		ListenAddr:    fmt.Sprintf(":%d", port),
+		CatalogDriver: lakeserver.CatalogDriverLocal,
+		CatalogDSN:    filepath.Join(dir, "catalog", "lake.ducklake"),
+		Threads:       2,
+	})
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	defer srv.Close()
+
+	var threads string
+	if err := srv.DB().QueryRowContext(ctx, "SELECT current_setting('threads')").Scan(&threads); err != nil {
+		t.Fatalf("query current_setting: %v", err)
+	}
+	if threads != "2" {
+		t.Errorf("threads: got %q, want %q", threads, "2")
+	}
+}
+
+// TestServe_NoThreadsConfigured proves that a zero Threads leaves DuckDB's
+// default thread-count behavior untouched (no SET statement issued) — a
+// regression guard for deployments that haven't set quack.server.threads.
+func TestServe_NoThreadsConfigured(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	port := lakeservertest.FreePort(t)
+
+	srv, err := lakeserver.Serve(ctx, lakeserver.Config{
+		ListenAddr:    fmt.Sprintf(":%d", port),
+		CatalogDriver: lakeserver.CatalogDriverLocal,
+		CatalogDSN:    filepath.Join(dir, "catalog", "lake.ducklake"),
+	})
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	defer srv.Close()
+
+	var threads string
+	if err := srv.DB().QueryRowContext(ctx, "SELECT current_setting('threads')").Scan(&threads); err != nil {
+		t.Fatalf("query current_setting: %v", err)
+	}
+	if threads == "2" {
+		t.Errorf("threads: got %q, expected DuckDB's untouched default, not the 2 value from another test", threads)
 	}
 }

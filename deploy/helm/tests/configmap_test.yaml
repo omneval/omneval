@@ -121,3 +121,31 @@ tests:
       - matchRegex:
           path: data["omneval.yaml"]
           pattern: 'memory_limit: "768MiB"'
+
+  - it: should default server threads to 0 (no pragma)
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'server:[\s\S]*?threads: 0'
+
+  - it: should respect an explicit server threads override
+    set:
+      quack.server.threads: 2
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'threads: 2'
+
+  - it: should default client threads to 0 (no pragma)
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'client:[\s\S]*?threads: 0'
+
+  - it: should respect an explicit client threads override
+    set:
+      quack.client.threads: 2
+    asserts:
+      - matchRegex:
+          path: data["omneval.yaml"]
+          pattern: 'threads: 2'

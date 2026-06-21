@@ -534,6 +534,25 @@ func TestConfigFromApp(t *testing.T) {
 			t.Errorf("data path: %q", lc.DataPath)
 		}
 	})
+
+	t.Run("threads and memory limit pass through unchanged", func(t *testing.T) {
+		app := &config.Config{
+			Quack: config.QuackConfig{
+				Client: config.QuackClientConfig{
+					URL:         "localhost:9494",
+					MemoryLimit: "1536MiB",
+					Threads:     2,
+				},
+			},
+		}
+		lc := ConfigFromApp(app)
+		if lc.MemoryLimit != "1536MiB" {
+			t.Errorf("memory limit: got %q, want %q", lc.MemoryLimit, "1536MiB")
+		}
+		if lc.Threads != 2 {
+			t.Errorf("threads: got %d, want %d", lc.Threads, 2)
+		}
+	})
 }
 
 // TestInsertSpansSQL_PlaceholderCount verifies the INSERT statement has

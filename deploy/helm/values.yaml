@@ -278,6 +278,15 @@ quack:
     # leaving headroom for the Go runtime and Quack RPC overhead. Update
     # this together with resources.limits.memory if you change either.
     memoryLimit: "1536MiB"
+    # Caps DuckDB's intra-query parallelism (`SET threads`). Without this,
+    # DuckDB auto-detects the *host's* total CPU count rather than this
+    # container's cgroup CPU limit, so a single query's threads can fan out
+    # across far more cores than resources.limits.cpu below allows — blowing
+    # through a CFS scheduling period's quota in one burst and throttling
+    # the whole cgroup (including the Go runtime's health-check goroutine)
+    # for the rest of that period. 0 means no pragma is set. Set to match
+    # resources.limits.cpu below.
+    threads: 0
     # Lake-native retention (#92): DELETEs aged spans/scores via the Catalog.
     retention:
       enabled: false
@@ -325,6 +334,18 @@ quack:
     # quack.server.memoryLimit: a larger maxOpenConns means more concurrent
     # client-side Parquet scans can run in this pod at once.
     memoryLimit: ""
+    # Caps DuckDB's intra-query parallelism (`SET threads`). Without this,
+    # DuckDB auto-detects the *host's* total CPU count rather than this
+    # pod's cgroup CPU limit — so a single Traces-list-style query's threads
+    # can fan out across far more cores than the pod's CPU limit allows,
+    # exhausting a CFS period's quota in one burst and throttling the whole
+    # cgroup (including the Go runtime's health-check goroutine) for the
+    # rest of that period. This is the actual fix for that failure mode;
+    # raising the CPU limit alone does not help if DuckDB keeps requesting
+    # more threads than the limit provides. 0 means no pragma is set. Set
+    # to match the consuming service's resources.limits.cpu (query/writer/
+    # eval), since this setting is shared by every Quack client.
+    threads: 0
 
 # ============================================================================
 # Storage (S3-compatible object store)
