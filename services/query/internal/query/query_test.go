@@ -669,8 +669,16 @@ func TestLakeSQL_FirstPage(t *testing.T) {
 		t.Errorf("Lake reads must not UNION hot+cold, got:\n%s", sql)
 	}
 	// Issue #154: query uses inline subqueries (no CTEs).
-	if got := strings.Count(sql, "WHERE"); got != 10 {
-		t.Errorf("expected ten WHERE clauses (3 base + 3 phase1 × 2 + 3 WHERE rn=1 + 1 outer), got %d:\n%s", got, sql)
+	// The ranked subquery is now also scoped to phase1's trace_ids (like
+	// rollup/kind_rollup already were), so its read of the wide input/output
+	// columns is limited to the page's candidate traces rather than the full
+	// time window — confirmed via EXPLAIN ANALYZE this unscoped scan was the
+	// dominant query cost. That changes ranked's WHERE contribution from a
+	// single bare WHERE to the same 3-WHERE shape (own WHERE + phase1's own
+	// WHERE + phase1's "WHERE rn = 1") already used by rollup/kind_rollup/
+	// main, for a net total of 12 (was 10).
+	if got := strings.Count(sql, "WHERE"); got != 12 {
+		t.Errorf("expected twelve WHERE clauses, got %d:\n%s", got, sql)
 	}
 	if !strings.Contains(sql, "GROUP BY trace_id") {
 		t.Errorf("expected trace-level rollup aggregation, got:\n%s", sql)
@@ -696,11 +704,12 @@ func TestLakeSQL_FirstPage(t *testing.T) {
 	if !strings.Contains(sql, "WHERE r.rn = 1") {
 		t.Errorf("expected root-span selection WHERE r.rn = 1, got:\n%s", sql)
 	}
-	// 6 base WHERE clauses × 3 args each = 18, + 3 phase1 LIMIT args × 1 = 3,
-	// + 1 outer LIMIT = 1 → 22 total. (3 WHERE rn=1 inside phase1 SQLs
-	// are literal, not placeholders.)
-	if len(args) != 22 {
-		t.Fatalf("expected 22 args (6 WHEREs × 3 + 3 phase1 LIMITs + 1 outer LIMIT), got %d: %v", len(args), args)
+	// Ranked is now phase1-scoped too: 3 sites (ranked, rollup, kind_rollup)
+	// each contribute whereArgs(3) + phase1Args(3) + limit(1) = 7 args, the
+	// main WHERE's own phase1 IN clause contributes phase1Args(3) + limit(1)
+	// = 4, plus the outer LIMIT = 1 → 3×7 + 4 + 1 = 26.
+	if len(args) != 26 {
+		t.Fatalf("expected 26 args, got %d: %v", len(args), args)
 	}
 	if args[len(args)-1] != 11 {
 		t.Errorf("last arg should be limit+1 (11), got %v", args[len(args)-1])
@@ -726,19 +735,21 @@ func TestLakeSQL_CursorPage(t *testing.T) {
 	}
 
 	// The cursor predicate is ANDed onto the root-span selection WHERE
-	// (r.rn = 1). SQL contains: 3 base filtered subqueries + 3 phase1 filtered
-	// subqueries + 3 WHERE rn=1 inside phase1 SQLs + 1 outer WHERE rn=1 = 10.
-	if got := strings.Count(sql, "WHERE"); got != 10 {
-		t.Errorf("expected ten WHERE clauses, got %d:\n%s", got, sql)
+	// (r.rn = 1). Ranked is now phase1-scoped too (see TestLakeSQL_FirstPage),
+	// for the same net +2 WHERE clauses as there: was 10, now 12.
+	if got := strings.Count(sql, "WHERE"); got != 12 {
+		t.Errorf("expected twelve WHERE clauses, got %d:\n%s", got, sql)
 	}
 	if !strings.Contains(sql, "AND (r.start_time < ? OR (r.start_time = ? AND r.span_id < ?))") {
 		t.Errorf("expected keyset cursor predicate ANDed into root-span WHERE, got:\n%s", sql)
 	}
-	// 6 WHERE clauses × 3 args each = 18, + 3 phase1 cursor args × 3 = 9,
-	// + 3 phase1 LIMIT args × 1 = 3, + 1 outer cursor × 3 = 3,
-	// + 1 outer LIMIT = 1 → 34 total.
-	if len(args) != 34 {
-		t.Fatalf("expected 34 args, got %d: %v", len(args), args)
+	// Same 3 sites as TestLakeSQL_FirstPage, but each now also carries a
+	// 3-value cursor predicate: whereArgs(3) + phase1Args(3) + cursorArgs(3)
+	// + limit(1) = 10 per site × 3 = 30, + main WHERE's phase1Args(3) +
+	// cursorArgs(3) + limit(1) = 7, + outer cursor(3) + outer LIMIT(1) = 4
+	// → 30 + 7 + 4 = 41.
+	if len(args) != 41 {
+		t.Fatalf("expected 41 args, got %d: %v", len(args), args)
 	}
 }
 

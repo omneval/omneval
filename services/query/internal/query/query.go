@@ -752,12 +752,23 @@ func (q *SpanQuery) phase1Args() []any {
 // limited page of trace_ids.  When a cursor is set, it adds a cursor predicate
 // so that only trace_ids whose root span appears before the cursor are
 // included — this is essential for correct pagination.
+//
+// The inner scan lists its columns explicitly (trace_id, span_id, parent_id,
+// start_time, project_id) instead of `SELECT *`: DuckDB's projection pushdown
+// does not reach through a `SELECT *` wrapped in a window function, so an
+// unqualified `SELECT *` here was forcing every span's full row — including
+// the input/output LLM payload columns, which dominate row size — to be read
+// for every span in the time window purely to compute a rank that only needs
+// these five narrow columns (confirmed via EXPLAIN ANALYZE: the wide scan
+// showed up under the WINDOW operator reading all 16 span columns). Phase 1
+// is inlined three times per query (rollup join, kind-rollup join, main
+// WHERE), so this scan's cost is paid three times over.
 func (q *SpanQuery) buildPhase1SQL(cursorArgs []any) string {
 	sql := fmt.Sprintf(`
     SELECT trace_id FROM (
       SELECT trace_id, span_id, start_time, %s
       FROM (
-        SELECT * FROM lake.spans%s
+        SELECT trace_id, span_id, parent_id, start_time, project_id FROM lake.spans%s
       )
     ) WHERE rn = 1`, rankClause, q.phase1Where())
 	if len(cursorArgs) == 3 {
@@ -803,12 +814,20 @@ func (q *SpanQuery) LakeSQL() (sql string, args []any, err error) {
 	sb.WriteString("  r.status_message,\n")
 	sb.WriteString("  ru.span_count,\n")
 	sb.WriteString("  kr.kind_counts\n")
-	// ranked: inline subquery with ROW_NUMBER for root-span selection.
+	// ranked: inline subquery with ROW_NUMBER for root-span selection, scoped
+	// to the phase 1 trace_ids (like the rollup joins below) so this is the
+	// only place that reads the wide input/output columns, and only for the
+	// page's candidate traces — not every span in the full time window
+	// (confirmed via EXPLAIN ANALYZE: without this scoping, this scan alone
+	// dominated query cost, since rollup/kind_rollup were already scoped but
+	// this one read every span's full row just to compute a per-trace rank).
 	sb.WriteString("FROM (\n  SELECT *,\n    ")
 	sb.WriteString(rankClause)
 	sb.WriteString("\n  FROM (\n    SELECT * FROM lake.spans")
 	sb.WriteString(where)
-	sb.WriteString("\n  )\n) r\n")
+	sb.WriteString("\n    AND trace_id IN (\n      ")
+	sb.WriteString(phase1SQL)
+	sb.WriteString("\n    )\n  )\n) r\n")
 	// rollups: inline subquery computing per-trace aggregates, scoped to the
 	// phase 1 trace_ids so memory does not scale with the full time range.
 	sb.WriteString("JOIN (\n  SELECT\n    trace_id,\n    CAST(COUNT(*) AS BIGINT) AS span_count,\n    CAST(COALESCE(SUM(input_tokens), 0) AS BIGINT) AS total_input_tokens,\n    CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT) AS total_output_tokens,\n    COALESCE(SUM(cost_usd), 0) AS total_cost_usd,\n    MAX(end_time) AS trace_end_time,\n    MAX(CASE WHEN status_code = 'error' THEN 1 ELSE 0 END) AS has_error\n  FROM lake.spans")
@@ -826,10 +845,13 @@ func (q *SpanQuery) LakeSQL() (sql string, args []any, err error) {
 	sb.WriteString(phase1SQL)
 	sb.WriteString("\n  )")
 
-	// Collect args: 6 WHERE clauses (3 from `where` + 3 from inlined phase1),
-	// 3 phase1 LIMITs (one per inlined phase1), 1 outer LIMIT.
-	// 6 WHEREs × 3 + 3 phase1 LIMITs + 1 outer LIMIT = 22 (no cursor)
+	// Collect args: 7 WHERE clauses (4 from `where` + 4 from inlined phase1,
+	// now that ranked is also phase1-scoped), 4 phase1 LIMITs (one per
+	// inlined phase1), 1 outer LIMIT.
 	args = append(args, whereArgs...)         // ranked subquery WHERE (project, from, to)
+	args = append(args, q.phase1Args()...)   // ranked phase1 (where)
+	args = append(args, cursorArgs...)        // ranked cursor
+	args = append(args, q.limit+1)            // ranked phase1 LIMIT
 	args = append(args, whereArgs...)         // rollup WHERE (project, from, to)
 	args = append(args, q.phase1Args()...)   // rollup phase1 (where)
 	args = append(args, cursorArgs...)        // rollup cursor
