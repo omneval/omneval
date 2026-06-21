@@ -388,3 +388,55 @@ func TestPruneEmptyInlinedTablesRejectsUnexpectedTableName(t *testing.T) {
 		t.Fatalf("decoy table no longer queryable, want untouched: %v", err)
 	}
 }
+
+// TestPruneEmptyInlinedTablesRemovesOrphanedRegistryRows proves
+// PruneEmptyInlinedTables deregisters a registry row whose table doesn't
+// physically exist at all, rather than erroring out and aborting the whole
+// pass. Confirmed in production: DuckLake itself can leave a registry row
+// behind referencing a table that was already dropped/never materialized
+// (table_id 3, an old schema_version, while a newer schema_version for the
+// same table_id existed and was fine) — with ~4362 real entries, the
+// previous behavior (return an error on the first such row) meant the
+// entire cleanup sweep silently did nothing.
+func TestPruneEmptyInlinedTablesRemovesOrphanedRegistryRows(t *testing.T) {
+	srv := startRawTestServer(t)
+	ctx := context.Background()
+	db := srv.DB()
+	ensureInlinedDataTablesRegistry(t, ctx, db)
+
+	if _, err := db.ExecContext(ctx,
+		"INSERT INTO ducklake_inlined_data_tables (table_id, table_name, schema_version) VALUES (3, 'ducklake_inlined_data_3_2086', 2086)",
+	); err != nil {
+		t.Fatalf("register orphaned row: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx, "CREATE TABLE ducklake_inlined_data_4_1 (x INT)"); err != nil {
+		t.Fatalf("create empty inlined table: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		"INSERT INTO ducklake_inlined_data_tables (table_id, table_name, schema_version) VALUES (4, 'ducklake_inlined_data_4_1', 1)",
+	); err != nil {
+		t.Fatalf("register empty inlined table: %v", err)
+	}
+
+	result, err := lakeserver.PruneEmptyInlinedTables(ctx, db)
+	if err != nil {
+		t.Fatalf("PruneEmptyInlinedTables: %v", err)
+	}
+	if result.OrphanedRowsRemoved != 1 {
+		t.Errorf("OrphanedRowsRemoved: got %d, want 1", result.OrphanedRowsRemoved)
+	}
+	if result.TablesDropped != 1 {
+		t.Errorf("TablesDropped: got %d, want 1", result.TablesDropped)
+	}
+
+	var n int
+	if err := db.QueryRowContext(ctx,
+		"SELECT count(*) FROM ducklake_inlined_data_tables WHERE table_name = 'ducklake_inlined_data_3_2086'",
+	).Scan(&n); err != nil {
+		t.Fatalf("check orphaned row: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("orphaned registry row still present, want removed")
+	}
+}

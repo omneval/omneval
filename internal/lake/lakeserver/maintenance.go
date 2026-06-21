@@ -173,6 +173,11 @@ type PruneResult struct {
 	// TablesDropped is the number of empty inlined tables that were
 	// dropped and deregistered.
 	TablesDropped int
+	// OrphanedRowsRemoved is the number of registry rows that referenced a
+	// table that no longer physically exists at all (DuckLake itself can
+	// leave these behind; confirmed in production), deregistered without a
+	// DROP TABLE since there was nothing to drop.
+	OrphanedRowsRemoved int
 }
 
 // PruneEmptyInlinedTables drops every catalog-resident inlined-data table
@@ -224,6 +229,29 @@ func PruneEmptyInlinedTables(ctx context.Context, db *sql.DB) (PruneResult, erro
 			return result, fmt.Errorf("lakeserver: prune inlined tables: registry table_name %q does not match expected pattern, refusing to touch it", e.tableName)
 		}
 
+		deregister := func() error {
+			_, err := db.ExecContext(ctx,
+				"DELETE FROM ducklake_inlined_data_tables WHERE table_id = ? AND table_name = ? AND schema_version = ?",
+				e.tableID, e.tableName, e.schemaVersion,
+			)
+			return err
+		}
+
+		var exists int
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM duckdb_tables() WHERE table_name = ?", e.tableName).Scan(&exists); err != nil {
+			return result, fmt.Errorf("lakeserver: prune inlined tables: check exists %s: %w", e.tableName, err)
+		}
+		if exists == 0 {
+			// Confirmed in production: DuckLake can leave a registry row
+			// behind whose table was already dropped/never materialized.
+			// Nothing to lose by deregistering it.
+			if err := deregister(); err != nil {
+				return result, fmt.Errorf("lakeserver: prune inlined tables: deregister orphaned %s: %w", e.tableName, err)
+			}
+			result.OrphanedRowsRemoved++
+			continue
+		}
+
 		var n int
 		if err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT count(*) FROM "%s"`, e.tableName)).Scan(&n); err != nil {
 			return result, fmt.Errorf("lakeserver: prune inlined tables: count %s: %w", e.tableName, err)
@@ -235,10 +263,7 @@ func PruneEmptyInlinedTables(ctx context.Context, db *sql.DB) (PruneResult, erro
 		if _, err := db.ExecContext(ctx, fmt.Sprintf(`DROP TABLE "%s"`, e.tableName)); err != nil {
 			return result, fmt.Errorf("lakeserver: prune inlined tables: drop %s: %w", e.tableName, err)
 		}
-		if _, err := db.ExecContext(ctx,
-			"DELETE FROM ducklake_inlined_data_tables WHERE table_id = ? AND table_name = ? AND schema_version = ?",
-			e.tableID, e.tableName, e.schemaVersion,
-		); err != nil {
+		if err := deregister(); err != nil {
 			return result, fmt.Errorf("lakeserver: prune inlined tables: deregister %s: %w", e.tableName, err)
 		}
 		result.TablesDropped++

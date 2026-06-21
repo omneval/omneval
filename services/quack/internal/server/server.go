@@ -97,7 +97,7 @@ func Run() error {
 		if err != nil {
 			slog.Error("quack: prune empty inlined tables failed", "err", err)
 		} else {
-			slog.Info("quack: pruned empty inlined tables", "tables_dropped", pruneResult.TablesDropped)
+			slog.Info("quack: pruned empty inlined tables", "tables_dropped", pruneResult.TablesDropped, "orphaned_rows_removed", pruneResult.OrphanedRowsRemoved)
 		}
 	}
 
