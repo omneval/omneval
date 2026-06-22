@@ -590,18 +590,6 @@ func writeResultsDoc(path string, cfg benchmark.BenchmarkConfig) error {
 	return os.WriteFile(path, []byte(sb.String()), 0o644)
 }
 
-// percentile returns the value at the given percentile from a sorted float64 slice.
-func percentile(sorted []float64, p float64) float64 {
-	if len(sorted) == 0 {
-		return 0
-	}
-	idx := int(p * float64(len(sorted)-1))
-	if idx >= len(sorted) {
-		idx = len(sorted) - 1
-	}
-	return sorted[idx]
-}
-
 func writeScalingResultsDoc(path string, cfg benchmark.WriteScalingConfig) error {
 	var sb strings.Builder
 
@@ -672,7 +660,7 @@ func writeScalingResultsDoc(path string, cfg benchmark.WriteScalingConfig) error
 				sorted := make([]float64, len(stats.AcceptedSpansPerSec))
 				copy(sorted, stats.AcceptedSpansPerSec)
 				sort.Float64s(sorted)
-				baselineRate = percentile(sorted, 0.50)
+				baselineRate = benchmark.Percentile(sorted, 0.50)
 			}
 			break
 		}
@@ -698,7 +686,7 @@ func writeScalingResultsDoc(path string, cfg benchmark.WriteScalingConfig) error
 			sorted := make([]float64, len(stats.AcceptedSpansPerSec))
 			copy(sorted, stats.AcceptedSpansPerSec)
 			sort.Float64s(sorted)
-			rateP50 := percentile(sorted, 0.50)
+			rateP50 := benchmark.Percentile(sorted, 0.50)
 			ratio := rateP50 / baselineRate
 
 			sb.WriteString(fmt.Sprintf("- **N=%d**: %.2fx scaling (throughput=%.1f/s, baseline=%.1f/s)\n",

@@ -106,6 +106,26 @@ func TestGenerateTraces_ProjectID(t *testing.T) {
 	}
 }
 
+// spanToNativeSpan converts a benchmark Span into the domain.Span type
+// that the omneval SDK and ingest API expect. Defined here in the test file
+// to keep the production workload package free of domain imports.
+func spanToNativeSpan(s *Span) *domain.Span {
+	return &domain.Span{
+		SpanID:        s.SpanID,
+		TraceID:       s.TraceID,
+		ProjectID:     s.ProjectID,
+		ParentID:      s.ParentID,
+		Kind:          domain.SpanKind(s.SpanKind),
+		Name:          s.Name,
+		Input:         s.Input,
+		Output:        s.Output,
+		StartTime:     s.StartTime,
+		EndTime:       s.EndTime,
+		InputTokens:   256,
+		OutputTokens:  256,
+	}
+}
+
 func TestTraceToNativeSpan(t *testing.T) {
 	span := &Span{
 		SpanID:    "aa00000000000001",
@@ -119,7 +139,7 @@ func TestTraceToNativeSpan(t *testing.T) {
 		EndTime:    time.Date(2026, 1, 1, 0, 0, 1, 0, time.UTC),
 	}
 
-	native := TraceToNativeSpan(span)
+	native := spanToNativeSpan(span)
 
 	if native.SpanID != "aa00000000000001" {
 		t.Errorf("span_id = %q, want %q", native.SpanID, "aa00000000000001")

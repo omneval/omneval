@@ -45,18 +45,18 @@ func TestPercentile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := percentile(tt.sorted, tt.p)
+			got := benchmark.Percentile(tt.sorted, tt.p)
 			if got != tt.want {
-				t.Errorf("percentile(%v, %.2f) = %v, want %v", tt.sorted, tt.p, got, tt.want)
+				t.Errorf("Percentile(%v, %.2f) = %v, want %v", tt.sorted, tt.p, got, tt.want)
 			}
 		})
 	}
 }
 
 func TestPercentileEmpty(t *testing.T) {
-	got := percentile([]float64{}, 0.50)
+	got := benchmark.Percentile([]float64{}, 0.50)
 	if got != 0 {
-		t.Errorf("percentile([]float64{}, 0.50) = %v, want 0", got)
+		t.Errorf("Percentile([]float64{}, 0.50) = %v, want 0", got)
 	}
 }
 

@@ -33,3 +33,15 @@ type WriteScalingConfig struct {
 	GenerateTime      time.Time
 	KubectlDeployment string
 }
+
+// Percentile returns the value at the given percentile from a sorted float64 slice.
+func Percentile(sorted []float64, p float64) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	idx := int(p * float64(len(sorted)-1))
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+	return sorted[idx]
+}
