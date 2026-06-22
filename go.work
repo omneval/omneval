@@ -1,6 +1,7 @@
 go 1.25.0
 
 use (
+	./benchmark
 	./internal
 	./sdk/go
 	./services/eval
@@ -8,5 +9,4 @@ use (
 	./services/quack
 	./services/query
 	./services/writer
-	./benchmark
 )
