@@ -37,6 +37,8 @@ go/go/
 /ingest
 /query
 /writer
+# Benchmark binary
+/benchmark/benchmark
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
