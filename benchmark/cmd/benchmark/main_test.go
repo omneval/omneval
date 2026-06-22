@@ -114,6 +114,131 @@ func TestWriteScalingResultsDocGeneratesMarkdown(t *testing.T) {
 	}
 }
 
+func TestWriteQueryLatencyResultsDocGeneratesMarkdown(t *testing.T) {
+	stats := benchmark.NewQueryLatencyStats()
+	stats.Set(benchmark.LatencyTypeTraceList, &benchmark.LatencyTypeResult{
+		Latencies: []time.Duration{
+			100 * time.Millisecond,
+			200 * time.Millisecond,
+			300 * time.Millisecond,
+			400 * time.Millisecond,
+			500 * time.Millisecond,
+		},
+	})
+	stats.Set(benchmark.LatencyTypeTraceDetail, &benchmark.LatencyTypeResult{
+		Latencies: []time.Duration{
+			50 * time.Millisecond,
+			100 * time.Millisecond,
+			150 * time.Millisecond,
+			200 * time.Millisecond,
+			250 * time.Millisecond,
+		},
+	})
+	stats.Set(benchmark.LatencyTypeAnalytics, &benchmark.LatencyTypeResult{
+		Latencies: []time.Duration{
+			300 * time.Millisecond,
+			400 * time.Millisecond,
+			500 * time.Millisecond,
+			600 * time.Millisecond,
+			700 * time.Millisecond,
+		},
+	})
+
+	cfg := benchmark.WriteQueryLatencyConfig{
+		Endpoint:             "http://localhost:8000/api/v1/spans",
+		QueryEndpoint:        "http://localhost:8000/api/v1/spans/query",
+		TracesEndpoint:       "http://localhost:8000/api/v1/traces",
+		AnalyticsEndpoint:    "http://localhost:8000/api/v1/analytics/spans",
+		ProjectID:            "test-project",
+		CommitCadence:        10 * time.Second,
+		RunCount:             5,
+		WarmupRuns:           2,
+		PreLoadDescription:   "30 days of traces, ~25 million spans",
+		TotalSpansIngested:   25000000,
+		TotalTracesIngested:  5000000,
+		TraceListQueryShape:  "project_id=eq(test-project) kind=in(agent,tool,llm)",
+		TraceDetailQueryShape: "GET /api/v1/traces/{trace_id}",
+		AnalyticsQueryShape:  "COUNT(*)+AVG(duration_ms)+SUM(input_tokens)+SUM(output_tokens)",
+		QueryLatencyStats:    stats,
+		GenerateTime:         time.Date(2026, 6, 22, 0, 0, 0, 0, time.UTC),
+	}
+
+	content, err := writeQueryLatencyResultsDocContent(cfg)
+	if err != nil {
+		t.Fatalf("writeQueryLatencyResultsDocContent failed: %v", err)
+	}
+
+	// Check key sections are present.
+	if !strings.Contains(content, "# Query Performance Benchmark") {
+		t.Error("expected query performance benchmark title")
+	}
+	if !strings.Contains(content, "## Methodology") {
+		t.Error("expected methodology section")
+	}
+	if !strings.Contains(content, "## Results") {
+		t.Error("expected results section")
+	}
+	if !strings.Contains(content, "## Reproducing This Benchmark") {
+		t.Error("expected reproducing section")
+	}
+
+	// Check data volume is documented.
+	if !strings.Contains(content, "30 days of traces") {
+		t.Error("expected pre-load data volume description")
+	}
+	if !strings.Contains(content, "25000000") {
+		t.Error("expected total spans ingested")
+	}
+
+	// Check query shapes are documented.
+	if !strings.Contains(content, "project_id=eq(test-project)") {
+		t.Error("expected trace-list query shape")
+	}
+	if !strings.Contains(content, "GET /api/v1/traces") {
+		t.Error("expected trace-detail query shape")
+	}
+	if !strings.Contains(content, "COUNT(*)") {
+		t.Error("expected analytics query shape")
+	}
+
+	// Check latency results are present.
+	if !strings.Contains(content, "Trace List") && !strings.Contains(content, "trace-list") {
+		t.Error("expected trace-list latency results")
+	}
+	if !strings.Contains(content, "Trace Detail") && !strings.Contains(content, "trace-detail") {
+		t.Error("expected trace-detail latency results")
+	}
+	if !strings.Contains(content, "Analytics DSL") && !strings.Contains(content, "analytics") {
+		t.Error("expected analytics latency results")
+	}
+}
+
+func TestWriteQueryLatencyResultsDocEmptyStats(t *testing.T) {
+	cfg := benchmark.WriteQueryLatencyConfig{
+		Endpoint:             "http://localhost:8000/api/v1/spans",
+		QueryEndpoint:        "http://localhost:8000/api/v1/spans/query",
+		TracesEndpoint:       "http://localhost:8000/api/v1/traces",
+		AnalyticsEndpoint:    "http://localhost:8000/api/v1/analytics/spans",
+		ProjectID:            "test-project",
+		CommitCadence:        10 * time.Second,
+		RunCount:             5,
+		WarmupRuns:           2,
+		PreLoadDescription:   "30 days of traces, ~25 million spans",
+		QueryLatencyStats:    benchmark.NewQueryLatencyStats(),
+		GenerateTime:         time.Date(2026, 6, 22, 0, 0, 0, 0, time.UTC),
+	}
+
+	content, err := writeQueryLatencyResultsDocContent(cfg)
+	if err != nil {
+		t.Fatalf("writeQueryLatencyResultsDocContent failed: %v", err)
+	}
+
+	// Should contain "No data collected" for each query type.
+	if !strings.Contains(content, "No data collected") {
+		t.Error("expected 'No data collected' for empty stats")
+	}
+}
+
 func TestWriteScalingResultsDocEmptyScalingResult(t *testing.T) {
 	result := &benchmark.ScalingResult{
 		Replicas: nil,

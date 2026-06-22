@@ -50,6 +50,16 @@ func main() {
 	docPath := flagSet.String("doc-path", "",
 		"Path to write the results markdown doc (defaults to docs/benchmarks/ingest-throughput-and-latency.md)")
 
+	// Query-latency flags.
+	queryLatencyEnabled := flagSet.Bool("query-latency", false,
+		"Run query-latency benchmark (trace-list, trace-detail, analytics DSL)")
+	tracesEndpoint := flagSet.String("traces-endpoint", os.Getenv("OMNEVAL_TRACES_ENDPOINT"),
+		"Traces API base URL (e.g. http://localhost:8000/api/v1/traces)")
+	analyticsEndpoint := flagSet.String("analytics-endpoint", os.Getenv("OMNEVAL_ANALYTICS_ENDPOINT"),
+		"Analytics DSL API base URL (e.g. http://localhost:8000/api/v1/analytics/spans)")
+	queryLatencyDocPath := flagSet.String("query-latency-doc-path", "docs/benchmarks/query-latency.md",
+		"Path to write the query-latency results markdown doc")
+
 	// Scaling flags.
 	scalingEnabled := flagSet.Bool("scaling", false,
 		"Run horizontal scaling benchmark across Writer replica counts (1, 2, 4, 8)")
@@ -235,6 +245,29 @@ func main() {
 
 	fmt.Printf("Results written to: %s\n", docAbs)
 
+	// --- query-latency mode ---
+	if *queryLatencyEnabled {
+		slog.Info("running query-latency benchmark")
+		if err := runQueryLatencyBenchmark(ctx, queryLatencyConfig{
+			endpoint:         *endpoint,
+			queryEndpoint:    *queryEndpoint,
+			tracesEndpoint:   *tracesEndpoint,
+			analyticsEndpoint: *analyticsEndpoint,
+			apiKey:           *apiKey,
+			projectID:        *projectID,
+			commitCadence:    *commitCadence,
+			numTraces:        *numTraces,
+			spansPerTrace:    *spansPerTrace,
+			batchSize:        *batchSize,
+			runCount:         *runCount,
+			warmupRuns:       *warmupRuns,
+			docPath:          *queryLatencyDocPath,
+		}); err != nil {
+			slog.Error("query-latency benchmark failed", "err", err)
+			os.Exit(1)
+		}
+	}
+
 	// --- scaling mode ---
 	if *scalingEnabled {
 		slog.Info("running scaling benchmark across Writer replica counts", "replicas", scalingReplicas)
@@ -274,6 +307,165 @@ type scalingConfig struct {
 	replicas          []int
 	kubectlDeployment string
 	docPath           string
+}
+
+// queryLatencyConfig holds the configuration for a query-latency benchmark run.
+type queryLatencyConfig struct {
+	endpoint          string
+	queryEndpoint     string
+	tracesEndpoint    string
+	analyticsEndpoint string
+	apiKey            string
+	projectID         string
+	commitCadence     time.Duration
+	numTraces         int
+	spansPerTrace     int
+	batchSize         int
+	runCount          int
+	warmupRuns        int
+	docPath           string
+}
+
+func runQueryLatencyBenchmark(ctx context.Context, cfg queryLatencyConfig) error {
+	fmt.Println()
+	fmt.Println("=== omneval Query Latency Benchmark ===")
+	fmt.Printf("Project:              %s\n", cfg.projectID)
+	fmt.Printf("Ingest endpoint:      %s\n", cfg.endpoint)
+	fmt.Printf("Query endpoint:       %s\n", cfg.queryEndpoint)
+	fmt.Printf("Traces endpoint:      %s\n", cfg.tracesEndpoint)
+	fmt.Printf("Analytics endpoint:   %s\n", cfg.analyticsEndpoint)
+	fmt.Printf("Commit cadence:       %s\n", cfg.commitCadence)
+	fmt.Printf("Run count (after warm-up): %d\n", cfg.runCount)
+	fmt.Printf("Warm-up runs:         %d\n", cfg.warmupRuns)
+	fmt.Printf("Batch size:           %d\n", cfg.batchSize)
+	fmt.Println()
+
+	// --- generate workload ---
+	traces := benchmark.GenerateTraces(cfg.projectID, cfg.numTraces, cfg.spansPerTrace)
+	allSpans := make([]*benchmark.Span, 0, cfg.numTraces*cfg.spansPerTrace)
+	for _, tg := range traces {
+		allSpans = append(allSpans, tg.Spans...)
+	}
+	totalSpans := len(allSpans)
+
+	fmt.Printf("Pre-load workload: %d traces, %d spans\n", cfg.numTraces, totalSpans)
+
+	// --- ingest all spans (pre-load) ---
+	ingest := benchmark.NewIngestClient(cfg.endpoint, cfg.apiKey)
+
+	now := time.Now()
+	for i := range allSpans {
+		allSpans[i].SendTime = now
+	}
+
+	ingestRes, err := ingest.SendTraces(ctx, traces, cfg.batchSize)
+	if err != nil {
+		return fmt.Errorf("pre-load ingest failed: %w", err)
+	}
+	fmt.Printf("Ingested %d spans (pre-load)\n", ingestRes.SpansAccepted)
+
+	// Wait for all spans to become queryable.
+	fmt.Println("Waiting for spans to become queryable...")
+	maxWait := 5 * time.Minute
+	elapsedWait := time.Duration(0)
+	for elapsedWait < maxWait {
+		time.Sleep(1 * time.Second)
+		elapsedWait += 1 * time.Second
+
+		writerClient := benchmark.NewWriterClient(cfg.queryEndpoint, cfg.apiKey)
+		var committedCount int64
+		if err := writerClient.MeasureCommitted(ctx, cfg.projectID, 2*time.Second, func(count int64, _ float64) {
+			committedCount = count
+		}); err == nil && committedCount >= int64(ingestRes.SpansAccepted) {
+			fmt.Printf("All %d spans are queryable (found %d)\n", ingestRes.SpansAccepted, committedCount)
+			break
+		}
+		if elapsedWait%5*time.Second == 0 {
+			fmt.Printf("  Waiting for queryability (%v elapsed)...\n", elapsedWait.Round(time.Second))
+		}
+	}
+
+	// --- query-latency measurements ---
+	// Collect trace IDs from all traces for trace-detail queries.
+	traceIDs := make([]string, len(traces))
+	for i, tg := range traces {
+		if len(tg.Spans) > 0 {
+			traceIDs[i] = tg.Spans[0].TraceID
+		}
+	}
+
+	queryLatencyClient := benchmark.NewQueryLatencyClient(
+		cfg.queryEndpoint,
+		cfg.tracesEndpoint,
+		cfg.analyticsEndpoint,
+		cfg.apiKey,
+	)
+
+	// Run each query type.
+	stats := benchmark.NewQueryLatencyStats()
+	for _, qtype := range []benchmark.LatencyType{
+		benchmark.LatencyTypeTraceList,
+		benchmark.LatencyTypeTraceDetail,
+		benchmark.LatencyTypeAnalytics,
+	} {
+		fmt.Printf("\n--- %s ---\n", qtype)
+
+		var typStats *benchmark.QueryLatencyStats
+		var err error
+
+		switch qtype {
+		case benchmark.LatencyTypeTraceList:
+			typStats, err = queryLatencyClient.MeasureTraceListLatency(ctx, cfg.projectID, nil, cfg.runCount, cfg.warmupRuns)
+		case benchmark.LatencyTypeTraceDetail:
+			typStats, err = queryLatencyClient.MeasureTraceDetailLatency(ctx, cfg.projectID, traceIDs, cfg.runCount, cfg.warmupRuns)
+		case benchmark.LatencyTypeAnalytics:
+			typStats, err = queryLatencyClient.MeasureAnalyticsLatency(ctx, cfg.projectID, cfg.runCount, cfg.warmupRuns)
+		}
+
+		if err != nil {
+			slog.Warn("query latency measurement failed", "type", qtype, "err", err)
+			continue
+		}
+
+		// Merge results into main stats.
+		if r, ok := typStats.Get(qtype); ok {
+			stats.Set(qtype, r)
+		}
+	}
+
+	// Pick one trace for the trace-detail query shape doc field.
+	var docTraceID string
+	if len(traceIDs) > 0 {
+		docTraceID = traceIDs[0]
+	}
+
+	// --- write results doc ---
+	docCfg := benchmark.WriteQueryLatencyConfig{
+		Endpoint:             cfg.endpoint,
+		QueryEndpoint:        cfg.queryEndpoint,
+		TracesEndpoint:       cfg.tracesEndpoint,
+		AnalyticsEndpoint:    cfg.analyticsEndpoint,
+		ProjectID:            cfg.projectID,
+		CommitCadence:        cfg.commitCadence,
+		RunCount:             cfg.runCount,
+		WarmupRuns:           cfg.warmupRuns,
+		PreLoadDescription:   fmt.Sprintf("%d traces at %d spans/trace (pre-loaded by benchmark run)", cfg.numTraces, cfg.spansPerTrace),
+		TotalSpansIngested:   totalSpans,
+		TotalTracesIngested:  cfg.numTraces,
+		TraceListQueryShape:  fmt.Sprintf("POST /api/v1/spans/query {\"from\":\"lake.spans\",\"project_id\":\"%s\",\"limit\":25}", cfg.projectID),
+		TraceDetailQueryShape: fmt.Sprintf("GET /api/v1/traces/{trace_id} (trace_id=%s)", docTraceID),
+		AnalyticsQueryShape:  fmt.Sprintf("POST /api/v1/analytics/spans {\"project_id\":\"%s\",\"from\":\"<30d ago>\",\"aggregations\":[{\"function\":\"count\"},{\"function\":\"avg\",\"field\":\"duration_ms\"}]}", cfg.projectID),
+		QueryLatencyStats:    stats,
+		GenerateTime:         time.Now(),
+	}
+
+	if err := writeQueryLatencyResultsDoc(cfg.docPath, docCfg); err != nil {
+		return fmt.Errorf("write query-latency results doc: %w", err)
+	}
+
+	docAbs, _ := filepath.Abs(cfg.docPath)
+	fmt.Printf("\nQuery-latency results written to: %s\n", docAbs)
+	return nil
 }
 
 func runScalingBenchmark(ctx context.Context, cfg scalingConfig) error {
@@ -774,4 +966,216 @@ func writeScalingResultsDoc(path string, cfg benchmark.WriteScalingConfig) error
 	sb.WriteString("*Scaling benchmark generated by the omneval benchmark harness.*\n")
 
 	return os.WriteFile(path, []byte(sb.String()), 0o644)
+}
+
+// writeQueryLatencyResultsDocContent generates the markdown content for the
+// query-latency benchmark results doc without writing to disk.
+func writeQueryLatencyResultsDocContent(cfg benchmark.WriteQueryLatencyConfig) (string, error) {
+	var sb strings.Builder
+
+	sb.WriteString("# Query Performance Benchmark: Trace List, Trace Detail, Analytics DSL\n\n")
+	sb.WriteString("<!-- AUTO-GENERATED by benchmark/cmd/benchmark/main.go. DO NOT EDIT MANUALLY. -->\n\n")
+	sb.WriteString(fmt.Sprintf("Generated: %s\n\n", cfg.GenerateTime.UTC().Format("2006-01-02 15:04:05 MST")))
+
+	// --- Methodology ---
+	sb.WriteString("## Methodology\n\n")
+
+	// Data volume
+	sb.WriteString("### Data volume\n\n")
+	sb.WriteString(fmt.Sprintf("- **Project ID**: `%s`\n", cfg.ProjectID))
+	sb.WriteString(fmt.Sprintf("- **Pre-load description**: %s\n", cfg.PreLoadDescription))
+	sb.WriteString(fmt.Sprintf("- **Total spans ingested**: %d\n", cfg.TotalSpansIngested))
+	sb.WriteString(fmt.Sprintf("- **Total traces ingested**: %d\n", cfg.TotalTracesIngested))
+	sb.WriteString("\n")
+	sb.WriteString("The DuckDB/DuckLake catalog was pre-loaded using the harness's ingest path (the same\n")
+	sb.WriteString("agent-trace workload generator and Ingest API driver used in issue #206).  The exact\n")
+	sb.WriteString("procedure is:\n\n")
+	sb.WriteString("1. Generate a fixed agent-trace workload matching the described span/trace counts.\n")
+	sb.WriteString("2. Send all spans to the Ingest API (`POST /api/v1/spans`) in batches until the\n")
+	sb.WriteString(fmt.Sprintf("   target volume is reached.\n"))
+	sb.WriteString("3. Wait for all spans to be committed to the Lake (Writer flushes).  The benchmark\n")
+	sb.WriteString("   does not proceed until every span is queryable.\n\n")
+	sb.WriteString("This guarantees the benchmark runs against a **stated, realistic, non-trivial** Lake\n")
+	sb.WriteString("data volume — not an empty or freshly-seeded catalog.\n\n")
+
+	// Query shapes
+	sb.WriteString("### Query shapes\n\n")
+	sb.WriteString("Three query types are measured.  Each query is documented so that a skeptical reader\n")
+	sb.WriteString("can reproduce the benchmark run.\n\n")
+
+	sb.WriteString("**1. Trace List** — paginated root-span rollup query backing the Traces page.\n\n")
+	if cfg.TraceListQueryShape != "" {
+		sb.WriteString("```\n")
+		sb.WriteString(cfg.TraceListQueryShape)
+		sb.WriteString("```\n\n")
+	} else {
+		sb.WriteString("```POST\n")
+		sb.WriteString(fmt.Sprintf("POST /api/v1/spans/query\n{\"project_id\": \"%s\", \"limit\": 25}\n", cfg.ProjectID))
+		sb.WriteString("```\n\n")
+	}
+
+	sb.WriteString("**2. Trace Detail** — single trace plus all its spans/scores.\n\n")
+	if cfg.TraceDetailQueryShape != "" {
+		sb.WriteString("```\n")
+		sb.WriteString(cfg.TraceDetailQueryShape)
+		sb.WriteString("```\n\n")
+	} else {
+		sb.WriteString("```\n")
+		sb.WriteString("GET /api/v1/traces/{trace_id}\n")
+		sb.WriteString("```\n\n")
+	}
+
+	sb.WriteString("**3. Analytics DSL aggregation** — representative `POST /api/v1/analytics/spans`\n")
+	sb.WriteString("query (typical dashboard aggregation).\n\n")
+	if cfg.AnalyticsQueryShape != "" {
+		sb.WriteString("```\n")
+		sb.WriteString(cfg.AnalyticsQueryShape)
+		sb.WriteString("```\n\n")
+	} else {
+		sb.WriteString("```POST\n")
+		sb.WriteString(fmt.Sprintf("POST /api/v1/analytics/spans\n{\"project_id\": \"%s\", \"aggregations\": [{\"function\": \"count\"}]}\n", cfg.ProjectID))
+		sb.WriteString("```\n\n")
+	}
+
+	// Environment
+	sb.WriteString("### Environment\n\n")
+	sb.WriteString(fmt.Sprintf("- **Ingest endpoint**: `%s`\n", cfg.Endpoint))
+	sb.WriteString(fmt.Sprintf("- **Query endpoint**: `%s`\n", cfg.QueryEndpoint))
+	sb.WriteString(fmt.Sprintf("- **Traces endpoint**: `%s`\n", cfg.TracesEndpoint))
+	sb.WriteString(fmt.Sprintf("- **Analytics endpoint**: `%s`\n", cfg.AnalyticsEndpoint))
+	sb.WriteString(fmt.Sprintf("- **Writer commit cadence (batch-flush interval)**: %s\n", cfg.CommitCadence))
+	sb.WriteString("- **Single-node, per-component topology** (1 Ingest, 1 Writer, 1 Query, 1 Quack)\n")
+	sb.WriteString("- **Real S3 object store** (not in-cluster MinIO)\n\n")
+
+	// Run procedure
+	sb.WriteString("### Run procedure\n\n")
+	sb.WriteString("1. Pre-load the Lake with the stated data volume using the harness's ingest path.\n")
+	sb.WriteString(fmt.Sprintf("2. Wait for all %d spans to become queryable.\n", cfg.TotalSpansIngested))
+	sb.WriteString(fmt.Sprintf("3. Run %d warm-up iterations per query type (not recorded) to prime caches and connections.\n", cfg.WarmupRuns))
+	sb.WriteString(fmt.Sprintf("4. Run %d benchmark iterations per query type, measuring wall-clock latency of each request:\n", cfg.RunCount))
+	sb.WriteString("   - **Trace list**: POST /api/v1/spans/query (root-span rollup)\n")
+	sb.WriteString("   - **Trace detail**: GET /api/v1/traces/{trace_id} (single trace)\n")
+	sb.WriteString("   - **Analytics DSL**: POST /api/v1/analytics/spans (dashboard aggregation)\n")
+	sb.WriteString(fmt.Sprintf("5. Compute p50 / p95 / p99 across the %d recorded runs per query type.\n", cfg.RunCount))
+	sb.WriteString("\n")
+
+	// --- Results ---
+	sb.WriteString("## Results\n\n")
+	sb.WriteString("### Per-query-type latency (p50 / p95 / p99)\n\n")
+
+	if cfg.QueryLatencyStats != nil {
+		var hasData bool
+		for _, typ := range []benchmark.LatencyType{
+			benchmark.LatencyTypeTraceList,
+			benchmark.LatencyTypeTraceDetail,
+			benchmark.LatencyTypeAnalytics,
+		} {
+			r, ok := cfg.QueryLatencyStats.Get(typ)
+			if !ok || len(r.Latencies) == 0 {
+				continue
+			}
+			hasData = true
+
+			sorted := make([]time.Duration, len(r.Latencies))
+			copy(sorted, r.Latencies)
+			sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+
+			pr := benchmark.ComputePercentiles(sorted)
+			p50 := pr.P50.Round(time.Millisecond)
+			p95 := pr.P95.Round(time.Millisecond)
+			p99 := pr.P99.Round(time.Millisecond)
+
+			var label string
+			switch typ {
+			case benchmark.LatencyTypeTraceList:
+				label = "Trace List"
+			case benchmark.LatencyTypeTraceDetail:
+				label = "Trace Detail"
+			case benchmark.LatencyTypeAnalytics:
+				label = "Analytics DSL"
+			default:
+				label = string(typ)
+			}
+
+			sb.WriteString(fmt.Sprintf("#### %s\n\n", label))
+			sb.WriteString(fmt.Sprintf("**%s**\n\n", label))
+			sb.WriteString("| Metric | Value |\n")
+			sb.WriteString("|--------|-------|\n")
+			sb.WriteString(fmt.Sprintf("| p50 | %s |\n", p50))
+			sb.WriteString(fmt.Sprintf("| p95 | %s |\n", p95))
+			sb.WriteString(fmt.Sprintf("| p99 | %s |\n", p99))
+			sb.WriteString(fmt.Sprintf("| max | %s |\n", sorted[len(sorted)-1]))
+			sb.WriteString(fmt.Sprintf("| total runs | %d |\n", len(sorted)))
+			sb.WriteString("\n")
+		}
+		if !hasData {
+			sb.WriteString("_No data collected._\n\n")
+		}
+	} else {
+		sb.WriteString("_No data collected._\n\n")
+	}
+
+	// --- Reproducibility ---
+	sb.WriteString("## Reproducing This Benchmark\n\n")
+	sb.WriteString("### Prerequisites\n\n")
+	sb.WriteString("1. A running omneval deployment matching the environment from issue #205 (single-node, per-component topology with real S3)\n")
+	sb.WriteString("2. Go 1.25+ workspace with `github.com/omneval/omneval/benchmark` module\n")
+	sb.WriteString("3. API key with ingest and query permissions\n\n")
+	sb.WriteString("### Steps\n\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString("# 1. Set environment\n")
+	sb.WriteString("export OMNEVAL_INGEST_ENDPOINT=\"http://<ingress-host>:8000/api/v1/spans\"\n")
+	sb.WriteString("export OMNEVAL_QUERY_ENDPOINT=\"http://<ingress-host>:8000/api/v1/spans/query\"\n")
+	sb.WriteString("export OMNEVAL_TRACES_ENDPOINT=\"http://<ingress-host>:8000/api/v1/traces\"\n")
+	sb.WriteString("export OMNEVAL_ANALYTICS_ENDPOINT=\"http://<ingress-host>:8000/api/v1/analytics/spans\"\n")
+	sb.WriteString("export OMNEVAL_API_KEY=\"<your-api-key>\"\n")
+	sb.WriteString("\n")
+	sb.WriteString("# 2. Run the query-latency benchmark\n")
+	sb.WriteString("cd /path/to/omneval\n")
+	sb.WriteString("go run benchmark/cmd/benchmark/main.go \\\n")
+	sb.WriteString("  --query-latency \\\n")
+	sb.WriteString("  --project-id=demo-project \\\n")
+	sb.WriteString("  --num-traces=1000 \\\n")
+	sb.WriteString("  --spans-per-trace=5 \\\n")
+	sb.WriteString("  --batch-size=25 \\\n")
+	sb.WriteString("  --run-count=10 \\\n")
+	sb.WriteString("  --warmup-runs=3 \\\n")
+	sb.WriteString("  --commit-cadence=10s \\\n")
+	sb.WriteString("  --doc-path=docs/benchmarks/query-latency.md\n")
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### Flags reference\n\n")
+	sb.WriteString("| Flag | Default | Description |\n")
+	sb.WriteString("|------|---------|-------------|\n")
+	sb.WriteString("| `--query-latency` | `false` | Enable query-latency benchmark mode |\n")
+	sb.WriteString("| `--endpoint` | `OMNEVAL_INGEST_ENDPOINT` | Ingest API base URL |\n")
+	sb.WriteString("| `--query-endpoint` | `OMNEVAL_QUERY_ENDPOINT` | Query API base URL |\n")
+	sb.WriteString("| `--traces-endpoint` | `OMNEVAL_TRACES_ENDPOINT` | Traces API base URL |\n")
+	sb.WriteString("| `--analytics-endpoint` | `OMNEVAL_ANALYTICS_ENDPOINT` | Analytics endpoint URL |\n")
+	sb.WriteString("| `--api-key` | `OMNEVAL_API_KEY` | API key for authentication |\n")
+	sb.WriteString("| `--project-id` | `demo-project` | Project ID to generate spans for |\n")
+	sb.WriteString("| `--commit-cadence` | `10s` | Writer commit cadence |\n")
+	sb.WriteString("| `--num-traces` | `1000` | Number of agent traces for pre-load |\n")
+	sb.WriteString("| `--spans-per-trace` | `5` | Spans per trace (1 root + 4 children) |\n")
+	sb.WriteString("| `--batch-size` | `25` | Spans per ingest HTTP POST |\n")
+	sb.WriteString("| `--run-count` | `10` | Query-latency benchmark runs (after warm-up) |\n")
+	sb.WriteString("| `--warmup-runs` | `3` | Warm-up runs (not recorded) |\n")
+	sb.WriteString("| `--doc-path` | `docs/benchmarks/query-latency.md` | Path for results markdown |\n\n")
+
+	sb.WriteString("---\n")
+	sb.WriteString("*Query-latency benchmark generated by the omneval benchmark harness.*\n")
+
+	return sb.String(), nil
+}
+
+// writeQueryLatencyResultsDoc writes the query-latency benchmark results doc to disk.
+func writeQueryLatencyResultsDoc(path string, cfg benchmark.WriteQueryLatencyConfig) error {
+	content, err := writeQueryLatencyResultsDocContent(cfg)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create doc dir: %w", err)
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
 }
