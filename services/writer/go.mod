@@ -3,7 +3,6 @@ module github.com/omneval/omneval/services/writer
 go 1.25.0
 
 require (
-	github.com/duckdb/duckdb-go/v2 v2.10503.1
 	github.com/minio/minio-go/v7 v7.1.0
 	github.com/omneval/omneval/internal v0.0.0
 	github.com/prometheus/client_golang v1.23.2
@@ -14,6 +13,8 @@ require (
 	go.opentelemetry.io/proto/otlp v1.10.0
 	google.golang.org/protobuf v1.36.11
 )
+
+require github.com/duckdb/duckdb-go/v2 v2.10503.1 // indirect
 
 replace github.com/omneval/omneval/internal => ../../internal
 
