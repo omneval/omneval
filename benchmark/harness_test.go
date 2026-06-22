@@ -173,3 +173,49 @@ func TestRunScalingBenchEmptyReplicas(t *testing.T) {
 		t.Errorf("expected 0 replicas, got %d", len(result.Replicas))
 	}
 }
+
+func TestScalingResultChartIncludesP99(t *testing.T) {
+	// The scaling chart must report p50, p95, and p99 for both accepted
+	// and committed throughput at every replica count.
+	result := &ScalingResult{
+		Replicas: []int{1, 2, 4, 8},
+		Stats: map[int]*ThroughputStats{
+			1: {
+				AcceptedSpansPerSec:  []float64{100, 105, 110},
+				CommittedSpansPerSec: []float64{90, 95, 100},
+			},
+			2: {
+				AcceptedSpansPerSec:  []float64{200, 210, 220},
+				CommittedSpansPerSec: []float64{180, 190, 200},
+			},
+			4: {
+				AcceptedSpansPerSec:  []float64{360, 380, 400},
+				CommittedSpansPerSec: []float64{340, 360, 380},
+			},
+			8: {
+				AcceptedSpansPerSec:  []float64{650, 700, 750},
+				CommittedSpansPerSec: []float64{600, 650, 700},
+			},
+		},
+	}
+
+	md := result.WriteMarkdown()
+
+	// Must include p99 columns.
+	if !strings.Contains(md, "Accepted spans/s (p99)") {
+		t.Errorf("expected 'Accepted spans/s (p99)' header, got:\n%s", md)
+	}
+	if !strings.Contains(md, "Committed spans/s (p99)") {
+		t.Errorf("expected 'Committed spans/s (p99)' header, got:\n%s", md)
+	}
+
+	// Verify p99 values appear in the table body.
+	// p99 of [100, 105, 110] = 110 (highest value).
+	if !strings.Contains(md, "110.0") {
+		t.Errorf("expected p99 value 110.0 for accepted throughput at N=1, got:\n%s", md)
+	}
+	// p99 of [90, 95, 100] = 100.
+	if !strings.Contains(md, "100.0") {
+		t.Errorf("expected p99 value 100.0 for committed throughput at N=1, got:\n%s", md)
+	}
+}

@@ -29,9 +29,9 @@ func (r *ScalingResult) WriteMarkdown() string {
 	}
 	sort.Ints(replicas)
 
-	sb.WriteString("| Replicas | Accepted spans/s (p50) | Accepted spans/s (p95) | " +
-		"Committed spans/s (p50) | Committed spans/s (p95) | Scaling factor |\n")
-	sb.WriteString("|----------|----------------------|----------------------|----------------------|----------------------|---------------|")
+	sb.WriteString("| Replicas | Accepted spans/s (p50) | Accepted spans/s (p95) | Accepted spans/s (p99) | " +
+		"Committed spans/s (p50) | Committed spans/s (p95) | Committed spans/s (p99) | Scaling factor |\n")
+	sb.WriteString("|----------|----------------------|----------------------|----------------------|----------------------|----------------------|----------------------|---------------|")
 
 	// Find the baseline (lowest replica count, typically 1).
 	var baselineRate float64
@@ -54,16 +54,18 @@ func (r *ScalingResult) WriteMarkdown() string {
 		stats := r.Stats[rc]
 		acceptedP50 := statsP50(stats, true)
 		acceptedP95 := statsP95(stats, true)
+		acceptedP99 := statsP99(stats, true)
 		committedP50 := statsP50(stats, false)
 		committedP95 := statsP95(stats, false)
+		committedP99 := statsP99(stats, false)
 
 		scalingFactor := float64(1.0)
 		if baselineRate > 0 && rc > 0 {
 			scalingFactor = acceptedP50 / baselineRate
 		}
 
-		sb.WriteString(fmt.Sprintf("\n| %d | %.1f | %.1f | %.1f | %.1f | %.2fx |",
-			rc, acceptedP50, acceptedP95, committedP50, committedP95, scalingFactor))
+		sb.WriteString(fmt.Sprintf("\n| %d | %.1f | %.1f | %.1f | %.1f | %.1f | %.1f | %.2fx |",
+			rc, acceptedP50, acceptedP95, acceptedP99, committedP50, committedP95, committedP99, scalingFactor))
 	}
 
 	return sb.String()
@@ -102,6 +104,23 @@ func statsP95(s *ThroughputStats, accepted bool) float64 {
 	copy(sorted, s.CommittedSpansPerSec)
 	sort.Float64s(sorted)
 	return float64Value(sorted, 0.95)
+}
+
+// statsP99 returns the p99 of the stats slice.
+func statsP99(s *ThroughputStats, accepted bool) float64 {
+	if s == nil {
+		return 0
+	}
+	if accepted {
+		sorted := make([]float64, len(s.AcceptedSpansPerSec))
+		copy(sorted, s.AcceptedSpansPerSec)
+		sort.Float64s(sorted)
+		return float64Value(sorted, 0.99)
+	}
+	sorted := make([]float64, len(s.CommittedSpansPerSec))
+	copy(sorted, s.CommittedSpansPerSec)
+	sort.Float64s(sorted)
+	return float64Value(sorted, 0.99)
 }
 
 // ScalingBenchConfig holds the configuration for a scaling benchmark run.
