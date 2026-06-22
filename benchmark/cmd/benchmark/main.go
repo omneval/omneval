@@ -214,7 +214,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := writeResultsDoc(*docPath, BenchmarkConfig{
+	if err := writeResultsDoc(*docPath, benchmark.BenchmarkConfig{
 		Endpoint:        *endpoint,
 		QueryEndpoint:   *queryEndpoint,
 		ProjectID:       *projectID,
@@ -378,7 +378,7 @@ func runScalingBenchmark(ctx context.Context, cfg scalingConfig) error {
 		return err
 	}
 
-	if err := writeScalingResultsDoc(docPath, writeScalingConfig{
+	if err := writeScalingResultsDoc(docPath, benchmark.WriteScalingConfig{
 		Endpoint:         cfg.endpoint,
 		QueryEndpoint:    cfg.queryEndpoint,
 		ProjectID:        cfg.projectID,
@@ -445,25 +445,7 @@ func waitForDeploymentReady(ctx context.Context, name string, replicas int) erro
 	}
 }
 
-// BenchmarkConfig holds the full configuration used to run the benchmark, for
-// documentation in the results markdown.
-type BenchmarkConfig struct {
-	Endpoint        string
-	QueryEndpoint   string
-	ProjectID       string
-	CommitCadence   time.Duration
-	NumTraces       int
-	SpansPerTrace   int
-	BatchSize       int
-	RunCount        int
-	WarmupRuns      int
-	Throughput      benchmark.ThroughputStats
-	Latency         benchmark.LatencyStats
-	GenerateTime    time.Time
-	TotalSpans      int
-}
-
-func writeResultsDoc(path string, cfg BenchmarkConfig) error {
+func writeResultsDoc(path string, cfg benchmark.BenchmarkConfig) error {
 	var sb strings.Builder
 
 	sb.WriteString("# Ingest Throughput & End-to-End Latency Benchmark\n\n")
@@ -608,20 +590,6 @@ func writeResultsDoc(path string, cfg BenchmarkConfig) error {
 	return os.WriteFile(path, []byte(sb.String()), 0o644)
 }
 
-// writeScalingConfig holds the configuration for writing a scaling results doc.
-type writeScalingConfig struct {
-	Endpoint          string
-	QueryEndpoint     string
-	ProjectID         string
-	CommitCadence     time.Duration
-	Replicas          []int
-	RunCount          int
-	WarmupRuns        int
-	ScalingResult     *benchmark.ScalingResult
-	GenerateTime      time.Time
-	KubectlDeployment string
-}
-
 // percentile returns the value at the given percentile from a sorted float64 slice.
 func percentile(sorted []float64, p float64) float64 {
 	if len(sorted) == 0 {
@@ -634,7 +602,7 @@ func percentile(sorted []float64, p float64) float64 {
 	return sorted[idx]
 }
 
-func writeScalingResultsDoc(path string, cfg writeScalingConfig) error {
+func writeScalingResultsDoc(path string, cfg benchmark.WriteScalingConfig) error {
 	var sb strings.Builder
 
 	sb.WriteString("# Horizontal Scaling Chart: Writer Ingest Throughput (N=1,2,4,8 Replicas)\n\n")

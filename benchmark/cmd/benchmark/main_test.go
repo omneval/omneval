@@ -75,7 +75,7 @@ func TestWriteScalingResultsDocGeneratesMarkdown(t *testing.T) {
 		},
 	}
 
-	cfg := writeScalingConfig{
+	cfg := benchmark.WriteScalingConfig{
 		Endpoint:        "http://localhost:8000/api/v1/spans",
 		QueryEndpoint:   "http://localhost:8000/api/v1/spans/query",
 		ProjectID:       "test-project",
@@ -120,7 +120,7 @@ func TestWriteScalingResultsDocEmptyScalingResult(t *testing.T) {
 		Stats:    nil,
 	}
 
-	cfg := writeScalingConfig{
+	cfg := benchmark.WriteScalingConfig{
 		Endpoint:        "http://localhost:8000/api/v1/spans",
 		QueryEndpoint:   "http://localhost:8000/api/v1/spans/query",
 		ProjectID:       "test-project",
@@ -161,7 +161,7 @@ func TestWriteScalingResultsDocContainsScalingBehavior(t *testing.T) {
 		},
 	}
 
-	cfg := writeScalingConfig{
+	cfg := benchmark.WriteScalingConfig{
 		Endpoint:        "http://localhost:8000/api/v1/spans",
 		QueryEndpoint:   "http://localhost:8000/api/v1/spans/query",
 		ProjectID:       "test-project",
@@ -193,7 +193,7 @@ func TestWriteScalingResultsDocContainsScalingBehavior(t *testing.T) {
 
 // Helper: writeScalingResultsDocContent generates the markdown content
 // without writing to disk (for testing).
-func writeScalingResultsDocContent(cfg writeScalingConfig) (string, error) {
+func writeScalingResultsDocContent(cfg benchmark.WriteScalingConfig) (string, error) {
 	// Write to a temporary file, read it back, and return content.
 	tmpFile := "/tmp/omneval-scaling-test.md"
 	if err := writeScalingResultsDoc(tmpFile, cfg); err != nil {

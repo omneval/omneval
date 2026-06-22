@@ -204,20 +204,3 @@ func TestWriterClientTwoSamplesYieldRate(t *testing.T) {
 		t.Errorf("sample[1].rate = %.1f, expected ~5000", samples[1].rate)
 	}
 }
-
-func itoa(v int64) string {
-	if v == 0 {
-		return "0"
-	}
-	neg := v < 0
-	v = -v
-	var b []byte
-	for v > 0 {
-		b = append([]byte{'0' + byte(v%10)}, b...)
-		v /= 10
-	}
-	if neg {
-		b = append([]byte{'-'}, b...)
-	}
-	return string(b)
-}
