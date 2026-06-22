@@ -51,6 +51,7 @@ RUN go mod download -C ./internal && \
 COPY internal/ ./internal/
 COPY services/ ./services/
 COPY sdk/go/ ./sdk/go/
+COPY benchmark/ ./benchmark/
 
 # Build each service binary
 RUN go build -o /build/ingest ./services/ingest/cmd/ingest/

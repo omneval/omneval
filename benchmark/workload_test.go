@@ -4,28 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/omneval/omneval/internal/domain"
 )
-
-// TraceToNativeSpan converts a benchmark Span into the domain.Span type
-// that the omneval SDK and ingest API expect.
-func TraceToNativeSpan(s *Span) *domain.Span {
-	return &domain.Span{
-		SpanID:        s.SpanID,
-		TraceID:       s.TraceID,
-		ProjectID:     s.ProjectID,
-		ParentID:      s.ParentID,
-		Kind:          domain.SpanKind(s.SpanKind),
-		Name:          s.Name,
-		Input:         s.Input,
-		Output:        s.Output,
-		StartTime:     s.StartTime,
-		EndTime:       s.EndTime,
-		InputTokens:   256,
-		OutputTokens:  256,
-	}
-}
 
 func TestGenerateTraces_MultiSpanFanOut(t *testing.T) {
 	projID := "benchmark-project"
@@ -106,40 +85,20 @@ func TestGenerateTraces_ProjectID(t *testing.T) {
 	}
 }
 
-// spanToNativeSpan converts a benchmark Span into the domain.Span type
-// that the omneval SDK and ingest API expect. Defined here in the test file
-// to keep the production workload package free of domain imports.
-func spanToNativeSpan(s *Span) *domain.Span {
-	return &domain.Span{
-		SpanID:        s.SpanID,
-		TraceID:       s.TraceID,
-		ProjectID:     s.ProjectID,
-		ParentID:      s.ParentID,
-		Kind:          domain.SpanKind(s.SpanKind),
-		Name:          s.Name,
-		Input:         s.Input,
-		Output:        s.Output,
-		StartTime:     s.StartTime,
-		EndTime:       s.EndTime,
-		InputTokens:   256,
-		OutputTokens:  256,
-	}
-}
-
 func TestTraceToNativeSpan(t *testing.T) {
 	span := &Span{
 		SpanID:    "aa00000000000001",
-		TraceID:    "bb000000000000000000000000000001",
-		ProjectID:  "proj-1",
-		SpanKind:   "tool",
-		Name:       "search",
-		Input:      strings.Repeat("x", 1500),
-		Output:     strings.Repeat("y", 1500),
-		StartTime:  time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		EndTime:    time.Date(2026, 1, 1, 0, 0, 1, 0, time.UTC),
+		TraceID:   "bb000000000000000000000000000001",
+		ProjectID: "proj-1",
+		SpanKind:  "tool",
+		Name:      "search",
+		Input:     strings.Repeat("x", 1500),
+		Output:    strings.Repeat("y", 1500),
+		StartTime: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		EndTime:   time.Date(2026, 1, 1, 0, 0, 1, 0, time.UTC),
 	}
 
-	native := spanToNativeSpan(span)
+	native := TraceToNativeSpan(span)
 
 	if native.SpanID != "aa00000000000001" {
 		t.Errorf("span_id = %q, want %q", native.SpanID, "aa00000000000001")
