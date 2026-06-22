@@ -177,10 +177,22 @@ func TestPingDoesNotBlockOnConcurrentSlowOperation(t *testing.T) {
 // below the true cost, so the minimum is a much more reliable estimate of
 // each case's real duration than any one sample. This test flaked in CI
 // (1.61x vs a 1.6x threshold from single-sample noise) before this change.
+//
+// Threads is pinned to 1 so each query's own intra-query parallelism can't
+// fan out across every host core. Without this, a solo run of the
+// deliberately CPU-heavy slowQuery below already saturates all cores on a
+// CPU-constrained CI runner, so two such queries "running concurrently"
+// genuinely contend for the same cores and take ~2x as long regardless of
+// whether the connection pool/mutex serializes them — that real CPU
+// contention, not pool serialization, is what made this flake again at
+// ~2.0x on a narrow runner. Capping each query to one thread leaves
+// headroom for the two queries to actually overlap on >=2 cores, isolating
+// the property this test exists to check.
 func TestConcurrentQueriesRunInParallelNotSerialized(t *testing.T) {
 	ctx := context.Background()
 	cfg, _ := startTestServer(t)
 	cfg.MaxOpenConns = 4
+	cfg.Threads = 1
 
 	l, err := Open(ctx, cfg)
 	if err != nil {

@@ -28,6 +28,7 @@ COPY services/query/go.* ./services/query/
 COPY services/eval/go.* ./services/eval/
 COPY services/quack/go.* ./services/quack/
 COPY sdk/go/go.* ./sdk/go/
+COPY benchmark/go.* ./benchmark/
 
 # Copy pricing data (needed by the embedded pricing package for build cache)
 COPY internal/pricing/ ./internal/pricing/
@@ -49,6 +50,7 @@ RUN go mod download -C ./internal && \
 COPY internal/ ./internal/
 COPY services/ ./services/
 COPY sdk/go/ ./sdk/go/
+COPY benchmark/ ./benchmark/
 
 # Build each service binary
 RUN go build -o /build/ingest ./services/ingest/cmd/ingest/
