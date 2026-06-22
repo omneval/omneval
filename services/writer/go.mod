@@ -14,6 +14,8 @@ require (
 	google.golang.org/protobuf v1.36.11
 )
 
+require github.com/duckdb/duckdb-go/v2 v2.10503.1 // indirect
+
 replace github.com/omneval/omneval/internal => ../../internal
 
 require (

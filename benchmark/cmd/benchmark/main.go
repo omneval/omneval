@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -47,7 +50,40 @@ func main() {
 	docPath := flagSet.String("doc-path", "",
 		"Path to write the results markdown doc (defaults to docs/benchmarks/ingest-throughput-and-latency.md)")
 
+	// Scaling flags.
+	scalingEnabled := flagSet.Bool("scaling", false,
+		"Run horizontal scaling benchmark across Writer replica counts (1, 2, 4, 8)")
+	scalingReplicasStr := flagSet.String("scaling-replicas", "1,2,4,8",
+		"Comma-separated list of Writer replica counts to test (used when --scaling=true)")
+	kubectlDeployment := flagSet.String("kubectl-deployment", "omneval-writer",
+		"Helm release name prefix for the Writer deployment (used to scale via kubectl)")
+	scalingDocPath := flagSet.String("scaling-doc-path", "",
+		"Path to write the scaling results markdown doc (defaults to docs/benchmarks/ingest-scaling.md)")
+
 	flagSet.Parse(os.Args[1:])
+
+	// Parse scaling replicas.
+	scalingReplicas := []int{1, 2, 4, 8}
+	if *scalingReplicasStr != "" {
+		parts := strings.Split(*scalingReplicasStr, ",")
+		scalingReplicas = make([]int, len(parts))
+		for i, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			val, err := strconv.Atoi(p)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: invalid replica count %q in --scaling-replicas: %v\n", p, err)
+				os.Exit(1)
+			}
+			scalingReplicas[i] = val
+		}
+		if len(scalingReplicas) == 0 {
+			fmt.Fprintln(os.Stderr, "error: --scaling-replicas must contain at least one value")
+			os.Exit(1)
+		}
+	}
 
 	// --- validate ---
 	if *endpoint == "" || *queryEndpoint == "" || *apiKey == "" {
@@ -178,7 +214,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := writeResultsDoc(*docPath, BenchmarkConfig{
+	if err := writeResultsDoc(*docPath, benchmark.BenchmarkConfig{
 		Endpoint:        *endpoint,
 		QueryEndpoint:   *queryEndpoint,
 		ProjectID:       *projectID,
@@ -198,27 +234,218 @@ func main() {
 	}
 
 	fmt.Printf("Results written to: %s\n", docAbs)
+
+	// --- scaling mode ---
+	if *scalingEnabled {
+		slog.Info("running scaling benchmark across Writer replica counts", "replicas", scalingReplicas)
+		if err := runScalingBenchmark(ctx, scalingConfig{
+			endpoint:          *endpoint,
+			queryEndpoint:     *queryEndpoint,
+			apiKey:            *apiKey,
+			projectID:         *projectID,
+			commitCadence:     *commitCadence,
+			numTraces:         *numTraces,
+			spansPerTrace:     *spansPerTrace,
+			batchSize:         *batchSize,
+			runCount:          *runCount,
+			warmupRuns:        *warmupRuns,
+			replicas:          scalingReplicas,
+			kubectlDeployment: *kubectlDeployment,
+			docPath:           *scalingDocPath,
+		}); err != nil {
+			slog.Error("scaling benchmark failed", "err", err)
+			os.Exit(1)
+		}
+	}
 }
 
-// BenchmarkConfig holds the full configuration used to run the benchmark, for
-// documentation in the results markdown.
-type BenchmarkConfig struct {
-	Endpoint        string
-	QueryEndpoint   string
-	ProjectID       string
-	CommitCadence   time.Duration
-	NumTraces       int
-	SpansPerTrace   int
-	BatchSize       int
-	RunCount        int
-	WarmupRuns      int
-	Throughput      benchmark.ThroughputStats
-	Latency         benchmark.LatencyStats
-	GenerateTime    time.Time
-	TotalSpans      int
+// scalingConfig holds the configuration for a scaling benchmark run.
+type scalingConfig struct {
+	endpoint          string
+	queryEndpoint     string
+	apiKey            string
+	projectID         string
+	commitCadence     time.Duration
+	numTraces         int
+	spansPerTrace     int
+	batchSize         int
+	runCount          int
+	warmupRuns        int
+	replicas          []int
+	kubectlDeployment string
+	docPath           string
 }
 
-func writeResultsDoc(path string, cfg BenchmarkConfig) error {
+func runScalingBenchmark(ctx context.Context, cfg scalingConfig) error {
+	fmt.Println()
+	fmt.Println("=== omneval Writer Scaling Benchmark ===")
+	fmt.Printf("Replica counts to test: %v\n", cfg.replicas)
+	fmt.Printf("Kubernetes deployment:  %s\n", cfg.kubectlDeployment)
+	fmt.Println()
+
+	// Generate the workload once (same for all replica counts).
+	traces := benchmark.GenerateTraces(cfg.projectID, cfg.numTraces, cfg.spansPerTrace)
+	allSpans := make([]*benchmark.Span, 0, cfg.numTraces*cfg.spansPerTrace)
+	for _, tg := range traces {
+		allSpans = append(allSpans, tg.Spans...)
+	}
+
+	// Create clients (ingest/query are replica-count independent).
+	ingest := benchmark.NewIngestClient(cfg.endpoint, cfg.apiKey)
+	writerClient := benchmark.NewWriterClient(cfg.queryEndpoint, cfg.apiKey)
+
+	// Collect stats for each replica count.
+	harnessStats := make(map[int]*benchmark.ThroughputStats)
+	for _, replica := range cfg.replicas {
+		fmt.Printf("--- Scaling to %d Writer replica(s) ---\n", replica)
+		if err := scaleWriter(ctx, cfg.kubectlDeployment, replica); err != nil {
+			slog.Error("failed to scale writer", "replicas", replica, "err", err)
+			// Continue to try other replica counts.
+			continue
+		}
+
+		// Run the benchmark at this replica count.
+		stats := &benchmark.ThroughputStats{}
+		for runIdx := 0; runIdx < cfg.runCount+cfg.warmupRuns; runIdx++ {
+			isWarmup := runIdx < cfg.warmupRuns
+
+			// Re-set send timestamps for each run.
+			now := time.Now()
+			for i := range allSpans {
+				allSpans[i].SendTime = now
+			}
+
+			// Ingest run.
+			ingestRes, err := ingest.SendTraces(ctx, traces, cfg.batchSize)
+			if err != nil {
+				slog.Error("scaling ingest run failed", "replicas", replica, "err", err)
+				continue
+			}
+
+			ingestRate := float64(ingestRes.SpansAccepted) / ingestRes.Wall.Seconds()
+
+			if !isWarmup {
+				stats.AcceptedSpansPerSec = append(stats.AcceptedSpansPerSec, ingestRate)
+
+				// Committed spans/sec measurement.
+				var committedCount int64
+				if err := writerClient.MeasureCommitted(ctx, cfg.projectID, 5*time.Second, func(count int64, rate float64) {
+					committedCount = count
+				}); err == nil && committedCount > 0 {
+					committedRate := float64(committedCount) / 5
+					stats.CommittedSpansPerSec = append(stats.CommittedSpansPerSec, committedRate)
+					fmt.Printf("  Run %d/%d (N=%d): %.1f accepted/s, %.1f committed/s\n",
+						runIdx-cfg.warmupRuns+1, cfg.runCount, replica, ingestRate, committedRate)
+				} else {
+					slog.Warn("failed to measure committed spans/sec", "err", err)
+					stats.CommittedSpansPerSec = append(stats.CommittedSpansPerSec, 0)
+				}
+			}
+
+			fmt.Printf("Run %d/%d (N=%d)", runIdx+1, cfg.runCount+cfg.warmupRuns, replica)
+			if isWarmup {
+				fmt.Print(" [warm-up]")
+			}
+			fmt.Printf(": %d accepted in %s (%.1f spans/s)\n",
+				ingestRes.SpansAccepted, ingestRes.Wall.Round(time.Millisecond), ingestRate)
+		}
+		harnessStats[replica] = stats
+	}
+
+	// Build scaling result.
+	scalingResult := &benchmark.ScalingResult{
+		Replicas: cfg.replicas,
+		Stats:    harnessStats,
+	}
+
+	// --- report ---
+	fmt.Println()
+	fmt.Println("======================================")
+	fmt.Println("         SCALING RESULTS")
+	fmt.Println("======================================")
+	fmt.Println()
+	fmt.Println(scalingResult.WriteMarkdown())
+
+	// --- write scaling results doc ---
+	docPath := cfg.docPath
+	if docPath == "" {
+		docPath = filepath.Join("docs/benchmarks", "ingest-scaling.md")
+	}
+
+	docAbs, _ := filepath.Abs(docPath)
+	if err := os.MkdirAll(filepath.Dir(docPath), 0o755); err != nil {
+		slog.Error("failed to create scaling doc dir", "err", err)
+		return err
+	}
+
+	if err := writeScalingResultsDoc(docPath, benchmark.WriteScalingConfig{
+		Endpoint:         cfg.endpoint,
+		QueryEndpoint:    cfg.queryEndpoint,
+		ProjectID:        cfg.projectID,
+		CommitCadence:    cfg.commitCadence,
+		Replicas:         cfg.replicas,
+		RunCount:         cfg.runCount,
+		WarmupRuns:       cfg.warmupRuns,
+		ScalingResult:    scalingResult,
+		GenerateTime:     time.Now(),
+		KubectlDeployment: cfg.kubectlDeployment,
+	}); err != nil {
+		slog.Error("failed to write scaling results doc", "err", err)
+		return err
+	}
+
+	fmt.Printf("Scaling results written to: %s\n", docAbs)
+	return nil
+}
+
+// scaleWriter uses kubectl to scale the Writer deployment to the target replica count.
+// It waits for the deployment to become ready.
+func scaleWriter(ctx context.Context, deploymentName string, replicas int) error {
+	// Run kubectl scale.
+	cmd := exec.CommandContext(ctx, "kubectl", "scale", "deployment", deploymentName,
+		"--replicas="+strconv.Itoa(replicas))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("kubectl scale failed: %w\noutput: %s", err, string(out))
+	}
+	slog.Info("scaled writer", "deployment", deploymentName, "replicas", replicas, "output", string(out))
+
+	// Wait for deployment to be ready.
+	fmt.Printf("Waiting for deployment %s to become ready (%d replicas)...\n", deploymentName, replicas)
+	return waitForDeploymentReady(ctx, deploymentName, replicas)
+}
+
+// waitForDeploymentReady polls kubectl until the deployment has the desired replicas ready.
+func waitForDeploymentReady(ctx context.Context, name string, replicas int) error {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	timeout := time.After(5 * time.Minute)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for deployment %s to become ready", name)
+		case <-ticker.C:
+			cmd := exec.CommandContext(ctx, "kubectl", "get", "deployment", name,
+				"-o=jsonpath='{.status.readyReplicas}'")
+			out, err := cmd.Output()
+			if err != nil {
+				slog.Warn("kubectl get failed (retrying)", "err", err)
+				continue
+			}
+			ready, _ := strconv.Atoi(strings.TrimSpace(strings.Trim(string(out), "'")))
+			if ready >= replicas {
+				fmt.Printf("  Deployment %s ready (%d/%d replicas)\n", name, ready, replicas)
+				return nil
+			}
+			fmt.Printf("  Deployment %s: %d/%d replicas ready\n", name, ready, replicas)
+		}
+	}
+}
+
+func writeResultsDoc(path string, cfg benchmark.BenchmarkConfig) error {
 	var sb strings.Builder
 
 	sb.WriteString("# Ingest Throughput & End-to-End Latency Benchmark\n\n")
@@ -359,6 +586,192 @@ func writeResultsDoc(path string, cfg BenchmarkConfig) error {
 	sb.WriteString("| `--run-count` | `5` | Benchmark runs (after warm-up) |\n")
 	sb.WriteString("| `--warmup-runs` | `2` | Warm-up runs (not recorded) |\n")
 	sb.WriteString("| `--doc-path` | `docs/benchmarks/ingest-throughput-and-latency.md` | Path for results markdown |\n\n")
+
+	return os.WriteFile(path, []byte(sb.String()), 0o644)
+}
+
+func writeScalingResultsDoc(path string, cfg benchmark.WriteScalingConfig) error {
+	var sb strings.Builder
+
+	sb.WriteString("# Horizontal Scaling Chart: Writer Ingest Throughput (N=1,2,4,8 Replicas)\n\n")
+	sb.WriteString("<!-- AUTO-GENERATED by benchmark/cmd/benchmark/main.go. DO NOT EDIT MANUALLY. -->\n\n")
+	sb.WriteString(fmt.Sprintf("Generated: %s\n\n", cfg.GenerateTime.UTC().Format("2006-01-02 15:04:05 MST")))
+
+	// --- Methodology ---
+	sb.WriteString("## Methodology\n\n")
+	sb.WriteString("### Purpose\n\n")
+	sb.WriteString("This benchmark measures how Writer ingest throughput scales when the number of Writer\n")
+	sb.WriteString("replicas is increased from 1 to 8. It tests the competing-consumers pattern on the\n")
+	sb.WriteString("Redis ingest queue, where multiple Writer replicas safely dequeue disjoint batches of\n")
+	sb.WriteString("spans with no double-processing.\n\n")
+	sb.WriteString("The results are compared against the Definite.app Quack benchmark which found that\n")
+	sb.WriteString("8 concurrent Quack-client writers achieved ~222K rows/sec (super-linear scaling) vs\n")
+	sb.WriteString("~192K rows/sec for a single writer against a DuckDB-file DuckLake catalog.\n\n")
+
+	sb.WriteString("### Workload shape\n\n")
+	sb.WriteString(fmt.Sprintf("- **Project ID**: `%s`\n", cfg.ProjectID))
+	sb.WriteString(fmt.Sprintf("- **Commit cadence (Writer batch-flush interval)**: %s\n\n", cfg.CommitCadence))
+
+	sb.WriteString("### Environment\n\n")
+	sb.WriteString(fmt.Sprintf("- **Ingest endpoint**: `%s`\n", cfg.Endpoint))
+	sb.WriteString(fmt.Sprintf("- **Query endpoint**: `%s`\n", cfg.QueryEndpoint))
+	sb.WriteString(fmt.Sprintf("- **Kubernetes deployment**: `%s`\n", cfg.KubectlDeployment))
+	sb.WriteString(fmt.Sprintf("- **Replica counts tested**: %v\n", cfg.Replicas))
+	sb.WriteString("- **Other components**: held fixed (Ingest, Query, Eval, Quack Server, Redis, DuckLake)\n\n")
+
+	sb.WriteString("### Run procedure\n\n")
+	sb.WriteString(fmt.Sprintf("For each replica count in `%v`:\n", cfg.Replicas))
+	sb.WriteString("1. Scale the Writer deployment to the target replica count via `kubectl scale`\n")
+	sb.WriteString("2. Wait for the deployment to become ready (all replicas running and healthy)\n")
+	sb.WriteString(fmt.Sprintf("3. Run %d warm-up iterations (not recorded) to prime caches and connections\n", cfg.WarmupRuns))
+	sb.WriteString(fmt.Sprintf("4. Run %d benchmark iterations, collecting data from each:\n", cfg.RunCount))
+	sb.WriteString("   - Send spans to the Ingest API in batches\n")
+	sb.WriteString("   - Measure accepted spans/sec per run\n")
+	sb.WriteString("   - Measure committed spans/sec per run (Writer → Lake)\n")
+	sb.WriteString(fmt.Sprintf("5. Compute p50 / p95 across the %d recorded runs\n", cfg.RunCount))
+	sb.WriteString("6. Repeat for the next replica count\n\n")
+
+	sb.WriteString("### Note on scaling factors\n\n")
+	sb.WriteString("The **scaling factor** column shows the ratio of throughput at N replicas vs N=1.\n")
+	sb.WriteString("- **1.0x** = no improvement over single replica\n")
+	sb.WriteString("- **>1.0x** = linear or super-linear scaling (more replicas = more throughput)\n")
+	sb.WriteString("- **<1.0x** = degradation (contention, overhead, or resource bottleneck)\n\n")
+
+	// --- Results ---
+	sb.WriteString("## Results\n\n")
+	sb.WriteString("### Throughput Table\n\n")
+	sb.WriteString(cfg.ScalingResult.WriteMarkdown())
+	sb.WriteString("\n\n")
+
+	// --- Interpretation ---
+	sb.WriteString("## Interpretation\n\n")
+
+	// Analyze scaling behavior.
+	replicas := cfg.Replicas
+	if len(replicas) == 0 {
+		replicas = []int{1, 2, 4, 8}
+	}
+
+	// Find baseline (N=1).
+	var baselineRate float64
+	for _, rc := range replicas {
+		if rc == 1 && cfg.ScalingResult.Stats[1] != nil {
+			if stats := cfg.ScalingResult.Stats[1]; len(stats.AcceptedSpansPerSec) > 0 {
+				sorted := make([]float64, len(stats.AcceptedSpansPerSec))
+				copy(sorted, stats.AcceptedSpansPerSec)
+				sort.Float64s(sorted)
+				baselineRate = benchmark.Percentile(sorted, 0.50)
+			}
+			break
+		}
+	}
+
+	sb.WriteString("### Scaling Behavior\n\n")
+
+	if baselineRate <= 0 {
+		sb.WriteString("_Insufficient data to determine scaling behavior (no baseline at N=1)._")
+	} else {
+		var scalingBehavior string
+		var bottleneckHypothesis string
+
+		// Check each replica count.
+		for _, rc := range replicas {
+			if rc <= 1 {
+				continue
+			}
+			stats := cfg.ScalingResult.Stats[rc]
+			if stats == nil || len(stats.AcceptedSpansPerSec) == 0 {
+				continue
+			}
+			sorted := make([]float64, len(stats.AcceptedSpansPerSec))
+			copy(sorted, stats.AcceptedSpansPerSec)
+			sort.Float64s(sorted)
+			rateP50 := benchmark.Percentile(sorted, 0.50)
+			ratio := rateP50 / baselineRate
+
+			sb.WriteString(fmt.Sprintf("- **N=%d**: %.2fx scaling (throughput=%.1f/s, baseline=%.1f/s)\n",
+				rc, ratio, rateP50, baselineRate))
+
+			if ratio > 1.0 {
+				scalingBehavior = "linear or super-linear"
+			} else if ratio < 1.0 {
+				scalingBehavior = "degradation"
+			}
+
+			// Check for diminishing returns.
+			if rc == 2 && ratio < 1.8 {
+				bottleneckHypothesis = fmt.Sprintf(
+					"Redis queue contention or single-threaded write path may be limiting at N=%d", rc)
+			} else if rc == 4 && ratio < 3.5 {
+				bottleneckHypothesis = fmt.Sprintf(
+					"DuckLake catalog's single-process write path or S3 I/O may be the bottleneck at N=%d", rc)
+			} else if rc == 8 && ratio < 7.0 {
+				bottleneckHypothesis = fmt.Sprintf(
+					"DuckLake catalog commit serialisation, S3 throughput, or Quack Server concurrency limits at N=%d", rc)
+			}
+		}
+
+		if scalingBehavior == "" {
+			scalingBehavior = "linear (all replicas show near-proportional scaling)"
+		}
+
+		sb.WriteString(fmt.Sprintf("\n**Observed scaling**: %s\n\n", scalingBehavior))
+
+		if bottleneckHypothesis != "" {
+			sb.WriteString(fmt.Sprintf("**Likely bottleneck**: %s\n\n", bottleneckHypothesis))
+		} else {
+			sb.WriteString("No significant bottleneck detected — throughput scales proportionally with replica count.\n\n")
+		}
+	}
+
+	// --- Reproducibility ---
+	sb.WriteString("## Reproducing This Benchmark\n\n")
+	sb.WriteString("### Prerequisites\n\n")
+	sb.WriteString("1. A running omneval deployment matching the environment from issue #205\n")
+	sb.WriteString("2. Go 1.25+ workspace with `github.com/omneval/omneval/benchmark` module\n")
+	sb.WriteString("3. API key with ingest and query permissions\n")
+	sb.WriteString("4. `kubectl` access to the target Kubernetes cluster\n\n")
+	sb.WriteString("### Steps\n\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString("# 1. Set environment\n")
+	sb.WriteString("export OMNEVAL_INGEST_ENDPOINT=\"http://<ingress-host>:8000/api/v1/spans\"\n")
+	sb.WriteString("export OMNEVAL_QUERY_ENDPOINT=\"http://<ingress-host>:8000/api/v1/spans/query\"\n")
+	sb.WriteString("export OMNEVAL_API_KEY=\"<your-api-key>\"\n")
+	sb.WriteString("\n")
+	sb.WriteString("# 2. Run the scaling benchmark\n")
+	sb.WriteString("cd /path/to/omneval\n")
+	sb.WriteString("go run benchmark/cmd/benchmark/main.go \\\n")
+	sb.WriteString("  --scaling \\\n")
+	sb.WriteString("  --scaling-replicas=\"1,2,4,8\" \\\n")
+	sb.WriteString("  --kubectl-deployment=omneval-writer \\\n")
+	sb.WriteString("  --commit-cadence=10s \\\n")
+	sb.WriteString("  --num-traces=20 \\\n")
+	sb.WriteString("  --spans-per-trace=5 \\\n")
+	sb.WriteString("  --batch-size=25 \\\n")
+	sb.WriteString("  --run-count=5 \\\n")
+	sb.WriteString("  --warmup-runs=2\n")
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### Flags reference\n\n")
+	sb.WriteString("| Flag | Default | Description |\n")
+	sb.WriteString("|------|---------|-------------|\n")
+	sb.WriteString("| `--scaling` | `false` | Enable horizontal scaling benchmark mode |\n")
+	sb.WriteString("| `--scaling-replicas` | `1,2,4,8` | Comma-separated Writer replica counts to test |\n")
+	sb.WriteString("| `--kubectl-deployment` | `omneval-writer` | Kubernetes deployment name for Writer |\n")
+	sb.WriteString("| `--scaling-doc-path` | `docs/benchmarks/ingest-scaling.md` | Path for scaling results markdown |\n")
+	sb.WriteString("| `--endpoint` | `OMNEVAL_INGEST_ENDPOINT` | Ingest API base URL |\n")
+	sb.WriteString("| `--query-endpoint` | `OMNEVAL_QUERY_ENDPOINT` | Query API base URL |\n")
+	sb.WriteString("| `--api-key` | `OMNEVAL_API_KEY` | API key for authentication |\n")
+	sb.WriteString("| `--project-id` | `demo-project` | Project ID to generate spans for |\n")
+	sb.WriteString("| `--commit-cadence` | `10s` | Writer commit cadence |\n")
+	sb.WriteString("| `--num-traces` | `20` | Number of agent-trace groups |\n")
+	sb.WriteString("| `--spans-per-trace` | `5` | Spans per trace (1 root + 4 children) |\n")
+	sb.WriteString("| `--batch-size` | `25` | Spans per ingest HTTP POST |\n")
+	sb.WriteString("| `--run-count` | `5` | Benchmark runs (after warm-up) |\n")
+	sb.WriteString("| `--warmup-runs` | `2` | Warm-up runs (not recorded) |\n\n")
+
+	sb.WriteString("---\n")
+	sb.WriteString("*Scaling benchmark generated by the omneval benchmark harness.*\n")
 
 	return os.WriteFile(path, []byte(sb.String()), 0o644)
 }

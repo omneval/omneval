@@ -99,17 +99,17 @@ func GenerateTraces(projectID string, numTraces, spansPerTrace int) []*TraceGrou
 // that the omneval SDK and ingest API expect.
 func TraceToNativeSpan(s *Span) *domain.Span {
 	return &domain.Span{
-		SpanID:        s.SpanID,
-		TraceID:       s.TraceID,
-		ProjectID:     s.ProjectID,
-		ParentID:      s.ParentID,
-		Kind:          domain.SpanKind(s.SpanKind),
-		Name:          s.Name,
-		Input:         s.Input,
-		Output:        s.Output,
-		StartTime:     s.StartTime,
-		EndTime:       s.EndTime,
-		InputTokens:   256,
-		OutputTokens:  256,
+		SpanID:       s.SpanID,
+		TraceID:      s.TraceID,
+		ProjectID:    s.ProjectID,
+		ParentID:     s.ParentID,
+		Kind:         domain.SpanKind(s.SpanKind),
+		Name:         s.Name,
+		Input:        s.Input,
+		Output:       s.Output,
+		StartTime:    s.StartTime,
+		EndTime:      s.EndTime,
+		InputTokens:  256,
+		OutputTokens: 256,
 	}
 }

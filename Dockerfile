@@ -40,6 +40,7 @@ COPY --from=ui-builder /build/services/query/internal/server/ui/dist ./services/
 # so that subsequent full builds only recompile changed packages.
 RUN go mod download -C ./internal && \
     go mod download -C ./sdk/go && \
+    go mod download -C ./benchmark && \
     go mod download -C ./services/ingest && \
     go mod download -C ./services/writer && \
     go mod download -C ./services/query && \

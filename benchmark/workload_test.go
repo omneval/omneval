@@ -88,14 +88,14 @@ func TestGenerateTraces_ProjectID(t *testing.T) {
 func TestTraceToNativeSpan(t *testing.T) {
 	span := &Span{
 		SpanID:    "aa00000000000001",
-		TraceID:    "bb000000000000000000000000000001",
-		ProjectID:  "proj-1",
-		SpanKind:   "tool",
-		Name:       "search",
-		Input:      strings.Repeat("x", 1500),
-		Output:     strings.Repeat("y", 1500),
-		StartTime:  time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		EndTime:    time.Date(2026, 1, 1, 0, 0, 1, 0, time.UTC),
+		TraceID:   "bb000000000000000000000000000001",
+		ProjectID: "proj-1",
+		SpanKind:  "tool",
+		Name:      "search",
+		Input:     strings.Repeat("x", 1500),
+		Output:    strings.Repeat("y", 1500),
+		StartTime: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		EndTime:   time.Date(2026, 1, 1, 0, 0, 1, 0, time.UTC),
 	}
 
 	native := TraceToNativeSpan(span)
