@@ -28,6 +28,7 @@ COPY services/query/go.* ./services/query/
 COPY services/eval/go.* ./services/eval/
 COPY services/quack/go.* ./services/quack/
 COPY sdk/go/go.* ./sdk/go/
+COPY benchmark/go.* ./benchmark/
 
 # Copy pricing data (needed by the embedded pricing package for build cache)
 COPY internal/pricing/ ./internal/pricing/
@@ -39,6 +40,7 @@ COPY --from=ui-builder /build/services/query/internal/server/ui/dist ./services/
 # so that subsequent full builds only recompile changed packages.
 RUN go mod download -C ./internal && \
     go mod download -C ./sdk/go && \
+    go mod download -C ./benchmark && \
     go mod download -C ./services/ingest && \
     go mod download -C ./services/writer && \
     go mod download -C ./services/query && \
