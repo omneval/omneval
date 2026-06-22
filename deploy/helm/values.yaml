@@ -278,6 +278,15 @@ quack:
     # leaving headroom for the Go runtime and Quack RPC overhead. Update
     # this together with resources.limits.memory if you change either.
     memoryLimit: "1536MiB"
+    # Caps DuckDB's intra-query parallelism (`SET threads`). Without this,
+    # DuckDB auto-detects the *host's* total CPU count rather than this
+    # container's cgroup CPU limit, so a single query's threads can fan out
+    # across far more cores than resources.limits.cpu below allows — blowing
+    # through a CFS scheduling period's quota in one burst and throttling
+    # the whole cgroup (including the Go runtime's health-check goroutine)
+    # for the rest of that period. 0 means no pragma is set. Set to match
+    # resources.limits.cpu below.
+    threads: 0
     # Lake-native retention (#92): DELETEs aged spans/scores via the Catalog.
     retention:
       enabled: false
@@ -311,6 +320,32 @@ quack:
     # Lake Parquet data path, read directly by clients for DATA_PATH in the
     # ATTACH statement. Empty derives the same default as quack.server.dataPath.
     dataPath: ""
+    # Connection pool size per Lake client. 0 falls back to a small built-in
+    # default. A pool of 1 means every call on a pod's Lake instance —
+    # including the readiness/liveness Ping — serializes behind whatever
+    # query is currently running, so one slow UI query can freeze health
+    # checks for the entire pod even while the Quack Server itself is
+    # healthy. Keep modest: each connection is a full embedded DuckDB
+    # session sharing this pod's memory budget (see memoryLimit below).
+    maxOpenConns: 0
+    # Bounds this client's own embedded DuckDB buffer manager (e.g.
+    # "1536MiB"). Empty means no pragma is set (DuckDB sizes against the
+    # host's total RAM rather than the container's cgroup limit). Mirrors
+    # quack.server.memoryLimit: a larger maxOpenConns means more concurrent
+    # client-side Parquet scans can run in this pod at once.
+    memoryLimit: ""
+    # Caps DuckDB's intra-query parallelism (`SET threads`). Without this,
+    # DuckDB auto-detects the *host's* total CPU count rather than this
+    # pod's cgroup CPU limit — so a single Traces-list-style query's threads
+    # can fan out across far more cores than the pod's CPU limit allows,
+    # exhausting a CFS period's quota in one burst and throttling the whole
+    # cgroup (including the Go runtime's health-check goroutine) for the
+    # rest of that period. This is the actual fix for that failure mode;
+    # raising the CPU limit alone does not help if DuckDB keeps requesting
+    # more threads than the limit provides. 0 means no pragma is set. Set
+    # to match the consuming service's resources.limits.cpu (query/writer/
+    # eval), since this setting is shared by every Quack client.
+    threads: 0
 
 # ============================================================================
 # Storage (S3-compatible object store)
@@ -538,3 +573,16 @@ metrics:
   addr: ":9090"
   # Disable per-project label cardinality on all metrics
   disableProjectLabels: false
+  # Prometheus Operator ServiceMonitor scraping every omneval Service's
+  # `metrics` port (ingest, writer, query, eval, quack-server). Requires the
+  # Prometheus Operator CRDs (monitoring.coreos.com/v1) to already be
+  # installed — leave disabled if your cluster doesn't run Prometheus
+  # Operator / kube-prometheus-stack.
+  serviceMonitor:
+    enabled: false
+    interval: "30s"
+    # Extra labels merged onto the ServiceMonitor. Some kube-prometheus-stack
+    # installs scope ServiceMonitor discovery to a specific label (commonly
+    # `release: <prometheus-release-name>`) instead of matching everything —
+    # set that here if your Prometheus instance requires it.
+    additionalLabels: {}

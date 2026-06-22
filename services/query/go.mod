@@ -1,12 +1,15 @@
 module github.com/omneval/omneval/services/query
 
-go 1.22.2
+go 1.25.0
 
 require (
 	github.com/duckdb/duckdb-go/v2 v2.10503.1
 	github.com/minio/minio-go/v7 v7.1.0
+	github.com/omneval/omneval/internal v0.0.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/rs/xid v1.6.0
-	github.com/omneval/omneval/internal v0.0.0
-	golang.org/x/crypto v0.46.0
+	go.uber.org/automaxprocs v1.6.0
+	golang.org/x/crypto v0.51.0
 )
+
+replace github.com/omneval/omneval/internal => ../../internal

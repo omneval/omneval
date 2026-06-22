@@ -2558,87 +2558,43 @@ func TestLakeSQL_Integration(t *testing.T) {
 		t.Fatalf("insert spans: %v", err)
 	}
 
-	// Build the traces-list query via the LakeSQL path.
-	q, err := query.NewSpanQuery("proj-int", query.SpanQueryRequest{
+	// Build the traces-list query via the production querybuild.ExecuteSpan
+	// path — the two-phase PhaseOneSQL/MainSQL query (issue #229) — rather
+	// than a removed single-shot LakeSQL().
+	qb := &querybuild.QueryBuilder{Lake: lk}
+
+	resp, err := qb.ExecuteSpan(ctx, query.SpanQueryRequest{
 		From:  baseTime.Add(-time.Hour),
 		To:    baseTime.Add(time.Hour),
 		Limit: 10,
-	})
+	}, "proj-int")
 	if err != nil {
-		t.Fatalf("NewSpanQuery: %v", err)
+		t.Fatalf("ExecuteSpan: %v", err)
 	}
-
-	sqlStr, args, err := q.LakeSQL()
-	if err != nil {
-		t.Fatalf("LakeSQL: %v", err)
-	}
-
-	rows, err := lk.DB().Query(sqlStr, args...)
-	if err != nil {
-		t.Fatalf("execute lake traces list query: %v (sql=%s)", err, sqlStr)
-	}
-	defer rows.Close()
 
 	// We should get exactly 2 rows — one per trace.
-	var rowCount int
-	for rows.Next() {
-		rowCount++
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows iteration: %v", err)
-	}
-
-	if rowCount != 2 {
-		t.Fatalf("expected 2 trace rows, got %d", rowCount)
-	}
-
-	// Now verify rollup values by reading columns more carefully.
-	rows, err = lk.DB().Query(sqlStr, args...)
-	if err != nil {
-		t.Fatalf("execute lake traces list query (second pass): %v", err)
-	}
-	defer rows.Close()
-
-	type traceRow struct {
-		traceID   string
-		spanCount int64
-	}
-	var results []traceRow
-	for rows.Next() {
-		var row [22]any
-		err = rows.Scan(&row[0], &row[1], &row[2], &row[3], &row[4], &row[5], &row[6], &row[7], &row[8], &row[9], &row[10], &row[11], &row[12], &row[13], &row[14], &row[15], &row[16], &row[17], &row[18], &row[19], &row[20], &row[21])
-		if err != nil {
-			t.Fatalf("scan row: %v", err)
-		}
-		traceID := row[1].(string)
-		spanCount := row[20].(int64)
-		results = append(results, traceRow{
-			traceID:   traceID,
-			spanCount: spanCount,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows iteration: %v", err)
+	if len(resp.Spans) != 2 {
+		t.Fatalf("expected 2 trace rows, got %d", len(resp.Spans))
 	}
 
 	// Build a map keyed by trace_id for easy lookup.
-	traceMap := make(map[string]traceRow)
-	for _, r := range results {
-		traceMap[r.traceID] = r
+	traceMap := make(map[string]int64)
+	for _, s := range resp.Spans {
+		traceMap[s.TraceID] = s.SpanCount
 	}
 
 	// Verify rollup: trace-a has 2 spans.
-	if row, ok := traceMap["trace-a"]; !ok {
+	if spanCount, ok := traceMap["trace-a"]; !ok {
 		t.Fatal("missing trace-a in results")
-	} else if row.spanCount != 2 {
-		t.Errorf("trace-a span_count: got %d, want 2", row.spanCount)
+	} else if spanCount != 2 {
+		t.Errorf("trace-a span_count: got %d, want 2", spanCount)
 	}
 
 	// Verify rollup: trace-b has 3 spans.
-	if row, ok := traceMap["trace-b"]; !ok {
+	if spanCount, ok := traceMap["trace-b"]; !ok {
 		t.Fatal("missing trace-b in results")
-	} else if row.spanCount != 3 {
-		t.Errorf("trace-b span_count: got %d, want 3", row.spanCount)
+	} else if spanCount != 3 {
+		t.Errorf("trace-b span_count: got %d, want 3", spanCount)
 	}
 
 	// Verify keyset pagination: add a third trace with a later start_time
@@ -2650,86 +2606,33 @@ func TestLakeSQL_Integration(t *testing.T) {
 		t.Fatalf("insert extra span: %v", err)
 	}
 
-	q2, err := query.NewSpanQuery("proj-int", query.SpanQueryRequest{
+	resp2, err := qb.ExecuteSpan(ctx, query.SpanQueryRequest{
 		From:  baseTime.Add(-time.Hour),
 		To:    baseTime.Add(time.Hour),
 		Limit: 1,
-	})
+	}, "proj-int")
 	if err != nil {
-		t.Fatalf("NewSpanQuery: %v", err)
-	}
-
-	sql2, args2, err := q2.LakeSQL()
-	if err != nil {
-		t.Fatalf("LakeSQL: %v", err)
-	}
-
-	rows2, err := lk.DB().Query(sql2, args2...)
-	if err != nil {
-		t.Fatalf("execute lake traces list query (keyset): %v", err)
-	}
-	defer rows2.Close()
-
-	var firstTraceID string
-	for rows2.Next() {
-		var row [22]any
-		err = rows2.Scan(&row[0], &row[1], &row[2], &row[3], &row[4], &row[5], &row[6], &row[7], &row[8], &row[9], &row[10], &row[11], &row[12], &row[13], &row[14], &row[15], &row[16], &row[17], &row[18], &row[19], &row[20], &row[21])
-		if err != nil {
-			t.Fatalf("scan keyset row: %v", err)
-		}
-		if firstTraceID == "" {
-			firstTraceID = row[1].(string)
-		}
-	}
-	if err := rows2.Err(); err != nil {
-		t.Fatalf("rows iteration (keyset): %v", err)
+		t.Fatalf("ExecuteSpan (keyset): %v", err)
 	}
 
 	// The most recent trace should be "trace-c" (start_time at +10s).
-	if firstTraceID != "trace-c" {
-		t.Errorf("first trace with limit=1: got %q, want %q", firstTraceID, "trace-c")
+	if len(resp2.Spans) == 0 || resp2.Spans[0].TraceID != "trace-c" {
+		t.Errorf("first trace with limit=1: got %v, want trace-c", resp2.Spans)
 	}
 
 	// Now verify that using keyset pagination from trace-c returns trace-b.
-	// Parse trace-c's start_time to build the cursor predicate.
-	q3, err := query.NewSpanQuery("proj-int", query.SpanQueryRequest{
-		From:    baseTime.Add(-time.Hour),
-		To:      baseTime.Add(time.Hour),
-		Limit:   1,
-		Cursor:  cursor.Encode(cursor.Cursor{StartTime: baseTime.Add(10 * time.Second), SpanID: "c-1"}),
-	})
+	resp3, err := qb.ExecuteSpan(ctx, query.SpanQueryRequest{
+		From:   baseTime.Add(-time.Hour),
+		To:     baseTime.Add(time.Hour),
+		Limit:  1,
+		Cursor: cursor.Encode(cursor.Cursor{StartTime: baseTime.Add(10 * time.Second), SpanID: "c-1"}),
+	}, "proj-int")
 	if err != nil {
-		t.Fatalf("NewSpanQuery with cursor: %v", err)
-	}
-
-	sql3, args3, err := q3.LakeSQL()
-	if err != nil {
-		t.Fatalf("LakeSQL with cursor: %v", err)
-	}
-
-	rows3, err := lk.DB().Query(sql3, args3...)
-	if err != nil {
-		t.Fatalf("execute lake traces list query (cursor): %v", err)
-	}
-	defer rows3.Close()
-
-	var cursorTraceID string
-	for rows3.Next() {
-		var row [22]any
-		err = rows3.Scan(&row[0], &row[1], &row[2], &row[3], &row[4], &row[5], &row[6], &row[7], &row[8], &row[9], &row[10], &row[11], &row[12], &row[13], &row[14], &row[15], &row[16], &row[17], &row[18], &row[19], &row[20], &row[21])
-		if err != nil {
-			t.Fatalf("scan cursor row: %v", err)
-		}
-		if cursorTraceID == "" {
-			cursorTraceID = row[1].(string)
-		}
-	}
-	if err := rows3.Err(); err != nil {
-		t.Fatalf("rows iteration (cursor): %v", err)
+		t.Fatalf("ExecuteSpan with cursor: %v", err)
 	}
 
 	// After trace-c, the next trace should be "trace-b" (start_time at +2s).
-	if cursorTraceID != "trace-b" {
-		t.Errorf("next trace after trace-c: got %q, want %q", cursorTraceID, "trace-b")
+	if len(resp3.Spans) == 0 || resp3.Spans[0].TraceID != "trace-b" {
+		t.Errorf("next trace after trace-c: got %v, want trace-b", resp3.Spans)
 	}
 }

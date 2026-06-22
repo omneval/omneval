@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -21,6 +22,8 @@ import (
 	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/lake/lakeserver"
 	"github.com/omneval/omneval/internal/probe"
+	"github.com/omneval/omneval/services/quack/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func levelFromString(s string) slog.Level {
@@ -51,6 +54,13 @@ func Run() error {
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: levelFromString(cfg.LogLevel)})))
 
+	if err := metrics.Register(); err != nil {
+		var are prometheus.AlreadyRegisteredError
+		if !errors.As(err, &are) {
+			return fmt.Errorf("quack: register metrics: %w", err)
+		}
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
@@ -75,6 +85,21 @@ func Run() error {
 		"reported_addr", srv.Addr(),
 		"catalog_driver", scfg.CatalogDriver,
 	)
+
+	// One-time cleanup of empty catalog-resident inlined-data tables left
+	// behind by DuckLake's data inlining (never pruned by DuckLake itself —
+	// see PruneEmptyInlinedTables). Must run against the server's own raw
+	// catalog connection (srv.DB()), not a Quack-client attach: the registry
+	// table isn't visible through that layer. Only CatalogDriverLocal is
+	// confirmed to expose the registry this way.
+	if scfg.CatalogDriver == lakeserver.CatalogDriverLocal {
+		pruneResult, err := lakeserver.PruneEmptyInlinedTables(ctx, srv.DB())
+		if err != nil {
+			slog.Error("quack: prune empty inlined tables failed", "err", err)
+		} else {
+			slog.Info("quack: pruned empty inlined tables", "tables_dropped", pruneResult.TablesDropped, "orphaned_rows_removed", pruneResult.OrphanedRowsRemoved)
+		}
+	}
 
 	// Attach a loopback Quack client to our own catalog for Table
 	// Maintenance: the Quack Server is itself a valid Quack client of the
@@ -114,6 +139,7 @@ func Run() error {
 	maintDone := make(chan error, 1)
 	go func() {
 		maintDone <- lakeserver.RunMaintenanceLoop(ctx, maintLake.DB(), lakeserver.MaintenanceTables, interval, retention, func(result lakeserver.MaintenanceResult) {
+			metrics.RecordMaintenanceResult(result, retention.Enabled)
 			if retention.Enabled {
 				slog.Info("quack: maintenance retention metrics",
 					"spans_deleted", result.Retention.SpansDeleted,
@@ -124,11 +150,9 @@ func Run() error {
 		})
 	}()
 
-	// Health/readiness HTTP server.
+	// Health/readiness/metrics HTTP server.
 	p := probe.New()
-	mux := http.NewServeMux()
-	mux.Handle("/healthz", p.HealthHandler())
-	mux.Handle("/readyz", p.ReadyHandler())
+	mux := newHTTPMux(p)
 	addr := cfg.Metrics.Addr
 	if addr == "" {
 		addr = ":9090"

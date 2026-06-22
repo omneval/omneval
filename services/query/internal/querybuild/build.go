@@ -75,11 +75,16 @@ type QueryResult struct {
 //
 //	1. Build SpanQuery from request and projectID (handles validation, default time range, cursor decode)
 //	2. Inject bookmarked trace IDs if a "bookmarked" filter is present
-//	3. Compile SQL via LakeSQL()
-//	4. Execute SQL against the Lake
+//	3. Resolve the page's trace_ids via PhaseOneSQL (cheap, narrow-column scan)
+//	4. Compile and execute MainSQL against those resolved trace_ids
 //	5. Scan rows into domain spans
 //	6. Compute next cursor and truncate to effective limit
 //	7. Return SpanResponse
+//
+// Phase 1 is a separate round trip rather than an inlined subquery — see
+// query.SpanQuery.PhaseOneSQL's doc for why (issue #229: inlining let DuckDB
+// read the wide input/output LLM payload columns across the full query time
+// range instead of just the resolved page).
 func (qb *QueryBuilder) ExecuteSpan(ctx context.Context, req query.SpanQueryRequest, projectID string) (*query.SpanResponse, error) {
 	// Build the query — projectID is validated by the caller before calling ExecuteSpan.
 	q, err := query.NewSpanQuery(projectID, req)
@@ -97,13 +102,27 @@ func (qb *QueryBuilder) ExecuteSpan(ctx context.Context, req query.SpanQueryRequ
 		q.SetBookmarkedTraceIDs(ids)
 	}
 
-	// Compile SQL.
-	sqlStr, args, err := q.LakeSQL()
+	// Phase 1: resolve the page's candidate trace_ids first.
+	phase1SQL, phase1Args := q.PhaseOneSQL()
+	phase1Rows, err := qb.Lake.Query(phase1SQL, phase1Args...)
+	if err != nil {
+		return nil, fmt.Errorf("querybuild: execute phase1 query: %w", err)
+	}
+	traceIDs, err := scanTraceIDs(phase1Rows)
+	if err != nil {
+		return nil, fmt.Errorf("querybuild: scan phase1 trace_ids: %w", err)
+	}
+
+	if len(traceIDs) == 0 {
+		return &query.SpanResponse{Limit: q.EffectiveLimit()}, nil
+	}
+
+	// Compile and execute the main query against the resolved trace_ids.
+	sqlStr, args, err := q.MainSQL(traceIDs)
 	if err != nil {
 		return nil, &ValidationError{Message: fmt.Sprintf("querybuild: compile span query: %s", err)}
 	}
 
-	// Execute.
 	rows, err := qb.Lake.Query(sqlStr, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querybuild: execute span query: %w", err)
@@ -137,6 +156,24 @@ func (qb *QueryBuilder) ExecuteSpan(ctx context.Context, req query.SpanQueryRequ
 		Next:  next,
 		Limit: q.EffectiveLimit(),
 	}, nil
+}
+
+// scanTraceIDs scans a single-column (trace_id) result set returned by
+// PhaseOneSQL into a string slice, closing rows when done.
+func scanTraceIDs(rows *sql.Rows) ([]string, error) {
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan: trace_id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("scan: rows iteration: %w", err)
+	}
+	return ids, nil
 }
 
 // ExecuteAnalytics handles the full analytics query pipeline:

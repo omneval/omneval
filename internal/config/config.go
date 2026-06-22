@@ -78,6 +78,11 @@ type QuackServerConfig struct {
 	// process instead of DuckDB gracefully spilling to disk. Empty means no
 	// pragma is set (DuckDB's auto-detected default).
 	MemoryLimit string `mapstructure:"memory_limit"`
+	// Threads caps DuckDB's intra-query parallelism, applied via
+	// `SET threads`. Zero means no pragma is set. Mirrors
+	// quack.client.threads — see that field's doc for why this matters
+	// under a Kubernetes CPU limit.
+	Threads int `mapstructure:"threads"`
 	// Retention controls Lake-native retention (#92): DELETEs aged spans and
 	// scores through the DuckLake Catalog and reclaims physical Parquet files
 	// in the same maintenance pass. This replaces the legacy S3-prefix-based
@@ -114,6 +119,29 @@ type QuackClientConfig struct {
 	// URL or a local directory. Read directly by the client for DATA_PATH in
 	// the ATTACH statement (Quack carries catalog metadata only).
 	DataPath string `mapstructure:"data_path"`
+	// MaxOpenConns bounds this client's connection pool. Zero defaults to
+	// lake.defaultMaxOpenConns. A pool of 1 means every call on this
+	// client's Lake instance — including the readiness/liveness Ping —
+	// serializes behind whatever query is currently running, so a single
+	// slow UI query can wedge an entire pod's health checks even while the
+	// Quack Server itself stays healthy.
+	MaxOpenConns int `mapstructure:"max_open_conns"`
+	// MemoryLimit bounds this client's own embedded DuckDB buffer manager
+	// (e.g. "1536MiB"), applied via `SET memory_limit` after attach. Empty
+	// means no pragma is set. Mirrors quack.server.memory_limit: a larger
+	// MaxOpenConns lets more concurrent client-side Parquet scans run in
+	// this process at once, so the same OOM risk applies here too.
+	MemoryLimit string `mapstructure:"memory_limit"`
+	// Threads caps this client's embedded DuckDB intra-query parallelism,
+	// applied via `SET threads`. Zero means no pragma is set, so DuckDB
+	// auto-detects against the host's total CPU count rather than the
+	// container's cgroup CPU limit — under Kubernetes this means a single
+	// query can fan out across far more threads than the container's CPU
+	// quota allows, exhausting an entire CFS period's budget in one burst
+	// and throttling the whole cgroup (including the Go runtime's health
+	// check goroutine) for the rest of that period. Should generally match
+	// (or be slightly below) the container's CPU limit.
+	Threads int `mapstructure:"threads"`
 }
 
 // WriterLakeConfig controls the Writer's Lake participation.
@@ -351,6 +379,8 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("quack.client.url", "localhost:9494")
 	v.SetDefault("quack.client.token", "")
 	v.SetDefault("quack.client.data_path", "")
+	v.SetDefault("quack.client.max_open_conns", 0)
+	v.SetDefault("quack.client.memory_limit", "")
 	v.SetDefault("writer.lake.enabled", true)
 
 	if path != "" {
@@ -415,9 +445,13 @@ func Load(path string) (*Config, error) {
 	envString(&cfg.Quack.Server.DataPath, "OMNEVAL_QUACK_SERVER_DATA_PATH")
 	envString(&cfg.Quack.Server.MaintenanceInterval, "OMNEVAL_QUACK_SERVER_MAINTENANCE_INTERVAL")
 	envString(&cfg.Quack.Server.MemoryLimit, "OMNEVAL_QUACK_SERVER_MEMORY_LIMIT")
+	envInt(&cfg.Quack.Server.Threads, "OMNEVAL_QUACK_SERVER_THREADS")
 	envString(&cfg.Quack.Client.URL, "OMNEVAL_QUACK_CLIENT_URL")
 	envString(&cfg.Quack.Client.Token, "OMNEVAL_QUACK_CLIENT_TOKEN")
 	envString(&cfg.Quack.Client.DataPath, "OMNEVAL_QUACK_CLIENT_DATA_PATH")
+	envInt(&cfg.Quack.Client.MaxOpenConns, "OMNEVAL_QUACK_CLIENT_MAX_OPEN_CONNS")
+	envString(&cfg.Quack.Client.MemoryLimit, "OMNEVAL_QUACK_CLIENT_MEMORY_LIMIT")
+	envInt(&cfg.Quack.Client.Threads, "OMNEVAL_QUACK_CLIENT_THREADS")
 	envBool(&cfg.Writer.Lake.Enabled, "OMNEVAL_WRITER_LAKE_ENABLED")
 
 	return &cfg, nil

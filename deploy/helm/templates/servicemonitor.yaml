@@ -1,0 +1,39 @@
+{{- /*
+Prometheus Operator ServiceMonitor — scrapes the `metrics` port (9090) on
+every omneval Service that exposes one (ingest, writer, query, eval,
+quack-server). redis and postgresql don't carry a port named `metrics`, so
+the endpoint selector skips them automatically rather than needing an
+explicit exclusion.
+
+Requires the Prometheus Operator CRDs (monitoring.coreos.com/v1) already
+installed in the cluster; gated behind metrics.serviceMonitor.enabled so
+charts installed without the CRD don't fail to apply.
+*/ -}}
+{{- if .Values.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-omneval
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: omneval
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.metrics.serviceMonitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: omneval
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval | default "30s" | quote }}
+{{- end }}

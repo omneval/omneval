@@ -48,6 +48,49 @@ type Config struct {
 	Storage *config.StorageConfig
 	// ReadOnly attaches the Lake read-only (Query API).
 	ReadOnly bool
+	// MaxOpenConns bounds the underlying connection pool. Zero (the field's
+	// default) falls back to defaultMaxOpenConns rather than 1: a
+	// single-connection pool means every Lake call — including the
+	// readiness/liveness Ping — serializes behind whatever query is
+	// currently running, so one slow UI query can freeze health checks for
+	// the entire pod even though the Quack Server itself is healthy.
+	MaxOpenConns int
+	// MemoryLimit bounds this client's own embedded DuckDB buffer manager
+	// (e.g. "1536MiB"), applied via `SET memory_limit` after attach. Empty
+	// means no pragma is set (DuckDB sizes against the host's total RAM
+	// rather than the container's cgroup limit). Mirrors the Quack Server's
+	// memory_limit fix: a larger MaxOpenConns means more concurrent
+	// client-side Parquet scans can run in this process at once, so the
+	// same OOM risk that motivated the server-side pragma applies here too.
+	MemoryLimit string
+	// Threads caps this client's embedded DuckDB intra-query parallelism,
+	// applied via `SET threads` after attach. Zero means no pragma is set,
+	// so DuckDB auto-detects against the host's total CPU count rather than
+	// the container's cgroup CPU limit: under Kubernetes this lets a single
+	// query fan out across far more threads than the container's CPU quota
+	// allows, exhausting an entire CFS period's budget in one burst and
+	// throttling the whole cgroup — including the Go runtime's health check
+	// goroutine — for the rest of that period (production incident: query
+	// pod's /healthz and /readyz timed out under normal Traces-list load
+	// even after the container's CPU limit was raised, because DuckDB kept
+	// detecting and using the host's full core count regardless).
+	Threads int
+}
+
+// defaultMaxOpenConns is used when Config.MaxOpenConns is unset (zero).
+// Chosen to give real headroom for concurrent UI queries and ingest writes
+// within one pod without per-connection memory cost growing unbounded.
+const defaultMaxOpenConns = 2
+
+// maxOpenConnsOrDefault applies defaultMaxOpenConns when n is unset (zero or
+// negative), so a Config built without ConfigFromApp (e.g. an older config
+// file, or a test) still gets a usable pool instead of silently reverting to
+// the single-connection wedge risk.
+func maxOpenConnsOrDefault(n int) int {
+	if n <= 0 {
+		return defaultMaxOpenConns
+	}
+	return n
 }
 
 // ConfigFromApp derives the Quack client connection settings from the
@@ -70,6 +113,9 @@ func ConfigFromApp(cfg *config.Config) Config {
 	if strings.HasPrefix(lc.DataPath, "s3://") {
 		lc.Storage = &cfg.Storage
 	}
+	lc.MaxOpenConns = cfg.Quack.Client.MaxOpenConns
+	lc.MemoryLimit = cfg.Quack.Client.MemoryLimit
+	lc.Threads = cfg.Quack.Client.Threads
 	return lc
 }
 
@@ -83,7 +129,13 @@ var ensureTablesMu sync.Mutex
 // attached as catalog "lake"; the attachment is shared by every pooled
 // connection of the instance.
 type Lake struct {
-	mu       sync.Mutex
+	// mu is a RWMutex, not a plain Mutex: every normal operation
+	// (Query/Exec/QueryRow/Ping/InsertSpans/InsertScores) takes the shared
+	// RLock so concurrent calls run in parallel across the connection pool
+	// instead of fully serializing within this process. Only reconnect()
+	// — which swaps l.db itself — needs the exclusive Lock, and only for
+	// the brief duration of re-attaching.
+	mu       sync.RWMutex
 	db       *sql.DB
 	readOnly bool
 	cfg      Config // retained for reconnection after Quack Server restarts
@@ -105,14 +157,15 @@ func Open(ctx context.Context, cfg Config) (*Lake, error) {
 	}
 
 	// DuckLake's quack: catalog driver ties a DuckLake transaction/snapshot
-	// to the DuckDB connection that started it (#111/#105 spike). database/sql
-	// pools connections across calls on *sql.DB, so a DELETE and the
-	// following ducklake_rewrite_data_files (reclaim) can land on different
-	// pooled connections and hit "Scanning a DuckLake table after the
-	// transaction has ended". Pinning the pool to a single connection makes
-	// every statement on this *Lake run on the same DuckDB session, matching
-	// the spike's verified same-session DELETE+rewrite pattern.
-	db.SetMaxOpenConns(1)
+	// to the DuckDB connection that started it (#111/#105 spike): a DELETE
+	// and the following ducklake_rewrite_data_files (reclaim) must land on
+	// the SAME connection or it hits "Scanning a DuckLake table after the
+	// transaction has ended". DeleteProject/reclaim handle this by pinning
+	// their statement sequence to one explicit *sql.Conn (see reclaim),
+	// so the pool itself can run multiple connections — required so a
+	// single slow query doesn't serialize every other call on this Lake,
+	// including the readiness/liveness Ping (see MaxOpenConns doc).
+	db.SetMaxOpenConns(maxOpenConnsOrDefault(cfg.MaxOpenConns))
 
 	l := &Lake{db: db, readOnly: cfg.ReadOnly, cfg: cfg}
 
@@ -125,6 +178,18 @@ func Open(ctx context.Context, cfg Config) (*Lake, error) {
 	if err := l.attachWithRetry(ctx, cfg); err != nil {
 		db.Close()
 		return nil, err
+	}
+	if cfg.MemoryLimit != "" {
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("SET memory_limit = %s", sqlQuote(cfg.MemoryLimit))); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("lake: set memory_limit: %w", err)
+		}
+	}
+	if cfg.Threads > 0 {
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("SET threads = %d", cfg.Threads)); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("lake: set threads: %w", err)
+		}
 	}
 	if !cfg.ReadOnly {
 		if err := l.ensureTablesWithRetry(ctx); err != nil {
@@ -290,7 +355,9 @@ func isStaleConn(err error) bool {
 const reconnectTimeout = 10 * time.Second
 
 // reconnect closes the current DuckDB in-memory instance, opens a fresh one,
-// and re-establishes the Quack Server attachment. Callers must hold l.mu.
+// and re-establishes the Quack Server attachment. Callers must hold l.mu for
+// writing (the exclusive Lock) — use reconnectExclusive rather than calling
+// this directly.
 func (l *Lake) reconnect(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reconnectTimeout)
 	defer cancel()
@@ -299,11 +366,23 @@ func (l *Lake) reconnect(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("lake: reconnect open: %w", err)
 	}
-	db.SetMaxOpenConns(1)
+	db.SetMaxOpenConns(maxOpenConnsOrDefault(l.cfg.MaxOpenConns))
 	tmp := &Lake{db: db, readOnly: l.readOnly}
 	if err := tmp.attach(ctx, l.cfg); err != nil {
 		db.Close()
 		return err
+	}
+	if l.cfg.MemoryLimit != "" {
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("SET memory_limit = %s", sqlQuote(l.cfg.MemoryLimit))); err != nil {
+			db.Close()
+			return fmt.Errorf("lake: set memory_limit: %w", err)
+		}
+	}
+	if l.cfg.Threads > 0 {
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("SET threads = %d", l.cfg.Threads)); err != nil {
+			db.Close()
+			return fmt.Errorf("lake: set threads: %w", err)
+		}
 	}
 	if !l.readOnly {
 		if err := tmp.ensureTables(ctx); err != nil {
@@ -315,6 +394,17 @@ func (l *Lake) reconnect(ctx context.Context) error {
 	l.db = db
 	slog.Info("lake: reconnected to quack server", "addr", l.cfg.QuackAddr)
 	return nil
+}
+
+// reconnectExclusive takes the exclusive lock and reconnects. Multiple
+// concurrent callers may each observe the same stale connection (e.g. right
+// after a Quack Server restart) and each call this; redundant reconnects
+// are wasteful but harmless — the lock serializes them and the last one to
+// run leaves l.db in a healthy, internally-consistent state.
+func (l *Lake) reconnectExclusive(ctx context.Context) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.reconnect(ctx)
 }
 
 // attachSQL builds the ATTACH statement for the Lake via the Quack Server's
@@ -345,6 +435,18 @@ func attachSQL(cfg Config) string {
 		options = append(options, fmt.Sprintf("META_TOKEN %s", sqlQuote(cfg.QuackToken)))
 	}
 	options = append(options, "META_DISABLE_SSL true")
+	// Disables DuckLake data inlining (small writes held as catalog-resident
+	// mini-tables instead of Parquet files). DuckLake never prunes an inlined
+	// table from ducklake_inlined_data_tables even once ducklake_flush_inlined_data
+	// has emptied it, and its planner unions across every entry in that
+	// registry when scanning a table — thousands of long-dead empty entries
+	// made a trivial query take minutes in production. This must be set as
+	// an ATTACH option on the quack: client connection itself: neither the
+	// GLOBAL DuckDB setting ducklake_default_data_inlining_row_limit nor the
+	// catalog-level ducklake_set_option('lake', 'data_inlining_row_limit', ...)
+	// metadata key has any effect on writes routed through a remote Quack
+	// Server attachment.
+	options = append(options, "DATA_INLINING_ROW_LIMIT 0")
 	if cfg.ReadOnly {
 		options = append(options, "READ_ONLY")
 	}
@@ -508,16 +610,20 @@ func (l *Lake) DB() *sql.DB { return l.db }
 
 // QueryContext executes a query that returns rows against the Lake. On a
 // stale Quack Server connection ("Invalid connection id") the Lake
-// reconnects and retries once. Satisfies handler.DBHandle.
+// reconnects and retries once. Runs under the shared RLock so it can
+// proceed concurrently with other queries/inserts/pings on this Lake
+// instead of serializing behind them. Satisfies handler.DBHandle.
 func (l *Lake) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
 	rows, err := l.db.QueryContext(ctx, query, args...)
+	l.mu.RUnlock()
 	if isStaleConn(err) {
-		if rerr := l.reconnect(ctx); rerr != nil {
+		if rerr := l.reconnectExclusive(ctx); rerr != nil {
 			return nil, fmt.Errorf("lake: reconnect: %w", rerr)
 		}
+		l.mu.RLock()
 		rows, err = l.db.QueryContext(ctx, query, args...)
+		l.mu.RUnlock()
 	}
 	return rows, err
 }
@@ -528,17 +634,20 @@ func (l *Lake) Query(query string, args ...any) (*sql.Rows, error) {
 }
 
 // ExecContext executes a query without returning rows. On a stale Quack
-// Server connection the Lake reconnects and retries once. Satisfies
-// handler.DBHandle.
+// Server connection the Lake reconnects and retries once. Runs under the
+// shared RLock so it can proceed concurrently with other Lake calls.
+// Satisfies handler.DBHandle.
 func (l *Lake) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
 	res, err := l.db.ExecContext(ctx, query, args...)
+	l.mu.RUnlock()
 	if isStaleConn(err) {
-		if rerr := l.reconnect(ctx); rerr != nil {
+		if rerr := l.reconnectExclusive(ctx); rerr != nil {
 			return nil, fmt.Errorf("lake: reconnect: %w", rerr)
 		}
+		l.mu.RLock()
 		res, err = l.db.ExecContext(ctx, query, args...)
+		l.mu.RUnlock()
 	}
 	return res, err
 }
@@ -550,12 +659,13 @@ func (l *Lake) Exec(query string, args ...any) (sql.Result, error) {
 
 // QueryRowContext executes a query expected to return at most one row.
 // Unlike QueryContext, transparent reconnection is not possible here because
-// *sql.Row defers the error to Scan. The call is serialised under the Lake
-// mutex so any reconnect by a concurrent Ping provides a fresh connection
-// before this call proceeds. Satisfies handler.DBHandle.
+// *sql.Row defers the error to Scan. The call runs under the shared RLock
+// (concurrent with other reads/writes/pings); RLock still blocks until any
+// in-progress reconnectExclusive completes, so a concurrent Ping's reconnect
+// is guaranteed to land before this call proceeds. Satisfies handler.DBHandle.
 func (l *Lake) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	return l.db.QueryRowContext(ctx, query, args...)
 }
 
@@ -587,16 +697,18 @@ func (l *Lake) InsertSpans(ctx context.Context, spans []*domain.Span) error {
 	if len(spans) == 0 {
 		return nil
 	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if err := l.insertSpansLocked(ctx, spans); isStaleConn(err) {
-		if rerr := l.reconnect(ctx); rerr != nil {
+	l.mu.RLock()
+	err := l.insertSpansLocked(ctx, spans)
+	l.mu.RUnlock()
+	if isStaleConn(err) {
+		if rerr := l.reconnectExclusive(ctx); rerr != nil {
 			return fmt.Errorf("lake: reconnect: %w", rerr)
 		}
-		return l.insertSpansLocked(ctx, spans)
-	} else {
-		return err
+		l.mu.RLock()
+		err = l.insertSpansLocked(ctx, spans)
+		l.mu.RUnlock()
 	}
+	return err
 }
 
 func (l *Lake) insertSpansLocked(ctx context.Context, spans []*domain.Span) error {
@@ -706,16 +818,18 @@ func (l *Lake) InsertScores(ctx context.Context, scores []*domain.Score) error {
 	if len(scores) == 0 {
 		return nil
 	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if err := l.insertScoresLocked(ctx, scores); isStaleConn(err) {
-		if rerr := l.reconnect(ctx); rerr != nil {
+	l.mu.RLock()
+	err := l.insertScoresLocked(ctx, scores)
+	l.mu.RUnlock()
+	if isStaleConn(err) {
+		if rerr := l.reconnectExclusive(ctx); rerr != nil {
 			return fmt.Errorf("lake: reconnect: %w", rerr)
 		}
-		return l.insertScoresLocked(ctx, scores)
-	} else {
-		return err
+		l.mu.RLock()
+		err = l.insertScoresLocked(ctx, scores)
+		l.mu.RUnlock()
 	}
+	return err
 }
 
 func (l *Lake) insertScoresLocked(ctx context.Context, scores []*domain.Score) error {
@@ -818,18 +932,26 @@ const pingRetryTimeout = 3 * time.Second
 // "SELECT 1" would not detect a stale Quack connection. On a stale
 // connection, Ping reconnects and retries once so the readiness probe
 // self-heals after a Quack Server restart.
+//
+// Runs under the shared RLock, not the exclusive Lock: Ping backs the
+// readiness/liveness probes, so it must never queue behind an unrelated
+// slow query on the same Lake instance — that queuing (when this used a
+// plain Mutex) is exactly what let one slow UI query make a pod's health
+// checks hang even though the Quack Server itself was healthy.
 func (l *Lake) Ping(ctx context.Context) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
 	var n int64
 	err := l.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM lake.spans WHERE 1 = 0").Scan(&n)
+	l.mu.RUnlock()
 	if isStaleConn(err) {
-		if rerr := l.reconnect(ctx); rerr != nil {
+		if rerr := l.reconnectExclusive(ctx); rerr != nil {
 			return fmt.Errorf("lake: reconnect: %w", rerr)
 		}
 		retryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pingRetryTimeout)
 		defer cancel()
+		l.mu.RLock()
 		err = l.db.QueryRowContext(retryCtx, "SELECT COUNT(*) FROM lake.spans WHERE 1 = 0").Scan(&n)
+		l.mu.RUnlock()
 	}
 	return err
 }
@@ -856,17 +978,32 @@ func (l *Lake) FlushInlinedData(ctx context.Context) error {
 // and cleaning up orphaned/old files — so the deleted rows' physical
 // storage is reclaimed immediately rather than waiting for the next
 // scheduled Table Maintenance pass (services/quack).
+//
+// Pins the whole DELETE+reclaim statement sequence to one explicit
+// *sql.Conn (see reclaim's doc comment for why) rather than relying on the
+// pool being capped at a single connection — the pool now runs multiple
+// connections (see MaxOpenConns) so every other Lake operation can proceed
+// concurrently instead of serializing behind this one.
 func (l *Lake) DeleteProject(ctx context.Context, projectID string) error {
 	if l.readOnly {
 		return fmt.Errorf("lake: cannot delete from a read-only attachment")
 	}
-	if _, err := l.db.ExecContext(ctx, "DELETE FROM lake.spans WHERE project_id = ?", projectID); err != nil {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	conn, err := l.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("lake: delete project conn: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "DELETE FROM lake.spans WHERE project_id = ?", projectID); err != nil {
 		return fmt.Errorf("lake: delete spans for project %s: %w", projectID, err)
 	}
-	if _, err := l.db.ExecContext(ctx, "DELETE FROM lake.scores WHERE project_id = ?", projectID); err != nil {
+	if _, err := conn.ExecContext(ctx, "DELETE FROM lake.scores WHERE project_id = ?", projectID); err != nil {
 		return fmt.Errorf("lake: delete scores for project %s: %w", projectID, err)
 	}
-	return l.reclaim(ctx)
+	return l.reclaim(ctx, conn)
 }
 
 // reclaim rewrites data files to physically drop deleted rows, then expires
@@ -892,8 +1029,10 @@ func (l *Lake) DeleteProject(ctx context.Context, projectID string) error {
 // attached AFTER another client's DELETE already committed still hits the
 // "Scanning a DuckLake table after the transaction has ended" error when
 // calling ducklake_rewrite_data_files — but that case does not arise here:
-// reclaim always runs on the same l.db/session that performed the DELETE.
-func (l *Lake) reclaim(ctx context.Context) error {
+// reclaim always runs on the same *sql.Conn that performed the DELETE
+// (passed in by DeleteProject), regardless of how many other connections
+// the pool has open for unrelated concurrent operations.
+func (l *Lake) reclaim(ctx context.Context, conn *sql.Conn) error {
 	stmts := []string{
 		"CALL ducklake_rewrite_data_files('lake', 'spans')",
 		"CALL ducklake_rewrite_data_files('lake', 'scores')",
@@ -902,7 +1041,7 @@ func (l *Lake) reclaim(ctx context.Context) error {
 		"CALL ducklake_cleanup_old_files('lake', cleanup_all => true)",
 	}
 	for _, stmt := range stmts {
-		if _, err := l.db.ExecContext(ctx, stmt); err != nil {
+		if _, err := conn.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("lake: %s: %w", firstWords(stmt, 2), err)
 		}
 	}

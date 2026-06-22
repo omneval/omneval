@@ -62,6 +62,13 @@ tests:
         isNotEmpty:
           path: spec.template.spec.containers[0].resources
 
+  - it: should set checksum/config annotation to trigger restarts on config changes
+    asserts:
+      - documentIndex: 0
+        matchRegex:
+          path: spec.template.metadata.annotations["checksum/config"]
+          pattern: '^[a-f0-9]{64}$'
+
   - it: should read the quack token from the shared secret by default
     asserts:
       - documentIndex: 0

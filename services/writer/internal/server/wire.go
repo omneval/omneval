@@ -163,7 +163,14 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		return rc.Ping(ctx).Err()
 	}})
 	if deps.Lake != nil {
-		p.AddCheck("catalog", &probe.CatalogReachable{
+		// Critical: even with the Lake's connection pool sized above 1
+		// (lake.Config.MaxOpenConns) so a slow operation doesn't serialize
+		// every other call on this Lake, the pool can still be exhausted by
+		// enough concurrent wedged calls; if that happens, readiness alone
+		// would only pull this pod out of Service routing forever — it
+		// needs to also gate liveness so Kubernetes eventually restarts it
+		// instead of requiring manual intervention.
+		p.AddCriticalCheck("catalog", &probe.CatalogReachable{
 			Ping: deps.Lake.Ping,
 		})
 	}

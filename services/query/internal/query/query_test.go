@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -645,7 +646,7 @@ func TestNewSpanQuery_ContainsOpAccepted(t *testing.T) {
 
 // ─── Issue #85: Lake single-table reads ───
 
-func TestLakeSQL_FirstPage(t *testing.T) {
+func TestPhaseOneSQL_FirstPage(t *testing.T) {
 	req := SpanQueryRequest{
 		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
@@ -657,9 +658,72 @@ func TestLakeSQL_FirstPage(t *testing.T) {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
 
-	sql, args, err := q.LakeSQL()
+	sql, args := q.PhaseOneSQL()
+
+	// Phase 1 must never read the wide input/output LLM payload columns —
+	// it's the cheap scan that resolves which trace_ids the page contains
+	// (issue #229).
+	if strings.Contains(sql, "input") || strings.Contains(sql, "output") {
+		t.Errorf("phase1 query must not read input/output columns, got:\n%s", sql)
+	}
+	if !strings.Contains(sql, "SELECT trace_id, span_id, parent_id, start_time, project_id FROM lake.spans") {
+		t.Errorf("expected narrow 5-column scan, got:\n%s", sql)
+	}
+	if !strings.Contains(sql, "ROW_NUMBER() OVER") {
+		t.Errorf("expected window function for root-span selection, got:\n%s", sql)
+	}
+	// args: project_id, from, to, limit+1 (no cursor).
+	if len(args) != 4 {
+		t.Fatalf("expected 4 args (project_id, from, to, limit+1), got %d: %v", len(args), args)
+	}
+	if args[len(args)-1] != 11 {
+		t.Errorf("last arg should be limit+1 (11), got %v", args[len(args)-1])
+	}
+}
+
+func TestPhaseOneSQL_WithCursor(t *testing.T) {
+	req := SpanQueryRequest{
+		From:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:     time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Limit:  10,
+		Cursor: "eyJzdGFydF90aW1lIjoiMjAyNS0wMS0wMVQxMDowMDowMFoiLCJzcGFuX2lkIjoic3BhbjAxIn0",
+	}
+
+	q, err := NewSpanQuery("proj-abc", req)
 	if err != nil {
-		t.Fatalf("LakeSQL error: %v", err)
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	sql, args := q.PhaseOneSQL()
+
+	if !strings.Contains(sql, "AND (start_time < ? OR (start_time = ? AND span_id < ?))") {
+		t.Errorf("expected keyset cursor predicate, got:\n%s", sql)
+	}
+	// args: project_id, from, to, cursor x3, limit+1.
+	if len(args) != 7 {
+		t.Fatalf("expected 7 args, got %d: %v", len(args), args)
+	}
+	if args[len(args)-1] != 11 {
+		t.Errorf("last arg should be limit+1 (11), got %v", args[len(args)-1])
+	}
+}
+
+func TestMainSQL_FirstPage(t *testing.T) {
+	req := SpanQueryRequest{
+		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Limit: 10,
+	}
+
+	q, err := NewSpanQuery("proj-abc", req)
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
+	}
+
+	traceIDs := []string{"trace-1", "trace-2", "trace-3"}
+	sql, args, err := q.MainSQL(traceIDs)
+	if err != nil {
+		t.Fatalf("MainSQL error: %v", err)
 	}
 
 	if !strings.Contains(sql, "FROM lake.spans") {
@@ -667,10 +731,6 @@ func TestLakeSQL_FirstPage(t *testing.T) {
 	}
 	if strings.Contains(sql, "UNION") {
 		t.Errorf("Lake reads must not UNION hot+cold, got:\n%s", sql)
-	}
-	// Issue #154: query uses inline subqueries (no CTEs).
-	if got := strings.Count(sql, "WHERE"); got != 10 {
-		t.Errorf("expected ten WHERE clauses (3 base + 3 phase1 × 2 + 3 WHERE rn=1 + 1 outer), got %d:\n%s", got, sql)
 	}
 	if !strings.Contains(sql, "GROUP BY trace_id") {
 		t.Errorf("expected trace-level rollup aggregation, got:\n%s", sql)
@@ -680,9 +740,6 @@ func TestLakeSQL_FirstPage(t *testing.T) {
 	}
 	if !strings.Contains(sql, "FROM (\n  SELECT *,") {
 		t.Errorf("expected ranked inline subquery, got:\n%s", sql)
-	}
-	if !strings.Contains(sql, "SELECT *,\n      ") {
-		t.Errorf("expected ranked subquery with ROW_NUMBER inline after SELECT *, got:\n%s", sql)
 	}
 	if !strings.Contains(sql, ") r\n") {
 		t.Errorf("expected ranked alias 'r', got:\n%s", sql)
@@ -696,57 +753,66 @@ func TestLakeSQL_FirstPage(t *testing.T) {
 	if !strings.Contains(sql, "WHERE r.rn = 1") {
 		t.Errorf("expected root-span selection WHERE r.rn = 1, got:\n%s", sql)
 	}
-	// 6 base WHERE clauses × 3 args each = 18, + 3 phase1 LIMIT args × 1 = 3,
-	// + 1 outer LIMIT = 1 → 22 total. (3 WHERE rn=1 inside phase1 SQLs
-	// are literal, not placeholders.)
-	if len(args) != 22 {
-		t.Fatalf("expected 22 args (6 WHEREs × 3 + 3 phase1 LIMITs + 1 outer LIMIT), got %d: %v", len(args), args)
+	// MainSQL no longer inlines the phase1 subquery — traceIDs is filtered
+	// as a literal `trace_id IN (?, ?, ...)` list, scoped 3 times (ranked,
+	// rollup, kind_rollup) — see PhaseOneSQL's doc for why a literal list
+	// (rather than a subquery) is the actual fix for issue #229.
+	if got := strings.Count(sql, "trace_id IN"); got != 3 {
+		t.Errorf("expected 3 literal trace_id IN clauses (ranked, rollup, kind_rollup), got %d:\n%s", got, sql)
 	}
-	if args[len(args)-1] != 11 {
-		t.Errorf("last arg should be limit+1 (11), got %v", args[len(args)-1])
+	// Each of the 3 sites contributes whereArgs (project_id, from, to = 3)
+	// + len(traceIDs) (3) = 6 args; 3 sites × 6 = 18.
+	if len(args) != 18 {
+		t.Fatalf("expected 18 args, got %d: %v", len(args), args)
 	}
 }
 
-func TestLakeSQL_CursorPage(t *testing.T) {
-	req := SpanQueryRequest{
-		From:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-		To:     time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
-		Limit:  10,
-		Cursor: "eyJzdGFydF90aW1lIjoiMjAyNS0wMS0wMVQxMDowMDowMFoiLCJzcGFuX2lkIjoic3BhbjAxIn0",
+// TestMainSQL_NoCursorNeeded verifies MainSQL's output is identical whether
+// or not the originating SpanQuery had a cursor set — cursor filtering is
+// fully resolved by PhaseOneSQL, so MainSQL only needs the already-resolved
+// trace_ids.
+func TestMainSQL_NoCursorNeeded(t *testing.T) {
+	base := SpanQueryRequest{
+		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Limit: 10,
 	}
+	withCursor := base
+	withCursor.Cursor = "eyJzdGFydF90aW1lIjoiMjAyNS0wMS0wMVQxMDowMDowMFoiLCJzcGFuX2lkIjoic3BhbjAxIn0"
 
-	q, err := NewSpanQuery("proj-abc", req)
+	traceIDs := []string{"trace-1", "trace-2"}
+
+	q1, err := NewSpanQuery("proj-abc", base)
 	if err != nil {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
-
-	sql, args, err := q.LakeSQL()
+	sql1, args1, err := q1.MainSQL(traceIDs)
 	if err != nil {
-		t.Fatalf("LakeSQL error: %v", err)
+		t.Fatalf("MainSQL error: %v", err)
 	}
 
-	// The cursor predicate is ANDed onto the root-span selection WHERE
-	// (r.rn = 1). SQL contains: 3 base filtered subqueries + 3 phase1 filtered
-	// subqueries + 3 WHERE rn=1 inside phase1 SQLs + 1 outer WHERE rn=1 = 10.
-	if got := strings.Count(sql, "WHERE"); got != 10 {
-		t.Errorf("expected ten WHERE clauses, got %d:\n%s", got, sql)
+	q2, err := NewSpanQuery("proj-abc", withCursor)
+	if err != nil {
+		t.Fatalf("NewSpanQuery error: %v", err)
 	}
-	if !strings.Contains(sql, "AND (r.start_time < ? OR (r.start_time = ? AND r.span_id < ?))") {
-		t.Errorf("expected keyset cursor predicate ANDed into root-span WHERE, got:\n%s", sql)
+	sql2, args2, err := q2.MainSQL(traceIDs)
+	if err != nil {
+		t.Fatalf("MainSQL error: %v", err)
 	}
-	// 6 WHERE clauses × 3 args each = 18, + 3 phase1 cursor args × 3 = 9,
-	// + 3 phase1 LIMIT args × 1 = 3, + 1 outer cursor × 3 = 3,
-	// + 1 outer LIMIT = 1 → 34 total.
-	if len(args) != 34 {
-		t.Fatalf("expected 34 args, got %d: %v", len(args), args)
+
+	if sql1 != sql2 {
+		t.Errorf("MainSQL output must not depend on the cursor:\nwithout cursor:\n%s\nwith cursor:\n%s", sql1, sql2)
+	}
+	if len(args1) != len(args2) {
+		t.Errorf("MainSQL args must not depend on the cursor: got %d vs %d", len(args1), len(args2))
 	}
 }
 
-// TestLakeSQL_NoCTEs verifies that the traces-list query (LakeSQL) uses
-// inline subqueries (derived tables) rather than CTEs — so that DuckDB
-// does NOT materialize the full filtered span set before applying the LIMIT
+// TestMainSQL_NoCTEs verifies that the traces-list main query uses inline
+// subqueries (derived tables) rather than CTEs — so that DuckDB does NOT
+// materialize the full filtered span set before applying the LIMIT
 // (issue #154). The query must not contain the "WITH" keyword.
-func TestLakeSQL_NoCTEs(t *testing.T) {
+func TestMainSQL_NoCTEs(t *testing.T) {
 	req := SpanQueryRequest{
 		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
@@ -758,9 +824,9 @@ func TestLakeSQL_NoCTEs(t *testing.T) {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
 
-	sql, _, err := q.LakeSQL()
+	sql, _, err := q.MainSQL([]string{"trace-1"})
 	if err != nil {
-		t.Fatalf("LakeSQL error: %v", err)
+		t.Fatalf("MainSQL error: %v", err)
 	}
 
 	if strings.Contains(strings.ToUpper(sql), "WITH ") {
@@ -772,9 +838,9 @@ func TestLakeSQL_NoCTEs(t *testing.T) {
 	}
 }
 
-// TestLakeSQL_NoFilteredCTE verifies that the old "filtered" CTE has been
+// TestMainSQL_NoFilteredCTE verifies that the old "filtered" CTE has been
 // inlined — there is no standalone CTE named filtered in the generated SQL.
-func TestLakeSQL_NoFilteredCTE(t *testing.T) {
+func TestMainSQL_NoFilteredCTE(t *testing.T) {
 	req := SpanQueryRequest{
 		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
@@ -786,9 +852,9 @@ func TestLakeSQL_NoFilteredCTE(t *testing.T) {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
 
-	sql, _, err := q.LakeSQL()
+	sql, _, err := q.MainSQL([]string{"trace-1"})
 	if err != nil {
-		t.Fatalf("LakeSQL error: %v", err)
+		t.Fatalf("MainSQL error: %v", err)
 	}
 
 	// The old query had: "WITH filtered AS (SELECT * FROM lake.spans WHERE ...)"
@@ -800,9 +866,9 @@ func TestLakeSQL_NoFilteredCTE(t *testing.T) {
 	}
 }
 
-// TestLakeSQL_NoRankedCTE verifies that the "ranked" CTE has been replaced
+// TestMainSQL_NoRankedCTE verifies that the "ranked" CTE has been replaced
 // with an inline subquery alias.
-func TestLakeSQL_NoRankedCTE(t *testing.T) {
+func TestMainSQL_NoRankedCTE(t *testing.T) {
 	req := SpanQueryRequest{
 		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
@@ -814,9 +880,9 @@ func TestLakeSQL_NoRankedCTE(t *testing.T) {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
 
-	sql, _, err := q.LakeSQL()
+	sql, _, err := q.MainSQL([]string{"trace-1"})
 	if err != nil {
-		t.Fatalf("LakeSQL error: %v", err)
+		t.Fatalf("MainSQL error: %v", err)
 	}
 
 	if strings.Contains(sql, "ranked AS") {
@@ -827,9 +893,9 @@ func TestLakeSQL_NoRankedCTE(t *testing.T) {
 	}
 }
 
-// TestLakeSQL_NoRollupCTEs verifies that "rollups" and "kind_rollups" are
+// TestMainSQL_NoRollupCTEs verifies that "rollups" and "kind_rollups" are
 // inline subqueries, not CTEs.
-func TestLakeSQL_NoRollupCTEs(t *testing.T) {
+func TestMainSQL_NoRollupCTEs(t *testing.T) {
 	req := SpanQueryRequest{
 		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
@@ -841,9 +907,9 @@ func TestLakeSQL_NoRollupCTEs(t *testing.T) {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
 
-	sql, _, err := q.LakeSQL()
+	sql, _, err := q.MainSQL([]string{"trace-1"})
 	if err != nil {
-		t.Fatalf("LakeSQL error: %v", err)
+		t.Fatalf("MainSQL error: %v", err)
 	}
 
 	if strings.Contains(sql, "rollups AS") {
@@ -988,6 +1054,68 @@ func TestLakeTraceSpansSQL_TimeBoundsBeforeDedup(t *testing.T) {
 	}
 }
 
+// execLakeSQL runs the two-phase Lake query (PhaseOneSQL then MainSQL)
+// against db and returns the scanned spans. This mirrors what
+// querybuild.QueryBuilder.ExecuteSpan does in production — duplicated here
+// rather than imported because querybuild imports this package.
+func execLakeSQL(ctx context.Context, db *sql.DB, q *SpanQuery) ([]*domain.Span, error) {
+	phase1SQL, phase1Args := q.PhaseOneSQL()
+	phase1Rows, err := db.QueryContext(ctx, phase1SQL, phase1Args...)
+	if err != nil {
+		return nil, fmt.Errorf("phase1 query: %w (sql=%s)", err, phase1SQL)
+	}
+	var traceIDs []string
+	for phase1Rows.Next() {
+		var id string
+		if err := phase1Rows.Scan(&id); err != nil {
+			phase1Rows.Close()
+			return nil, fmt.Errorf("phase1 scan: %w", err)
+		}
+		traceIDs = append(traceIDs, id)
+	}
+	if err := phase1Rows.Err(); err != nil {
+		phase1Rows.Close()
+		return nil, fmt.Errorf("phase1 rows iteration: %w", err)
+	}
+	phase1Rows.Close()
+
+	if len(traceIDs) == 0 {
+		return nil, nil
+	}
+
+	sqlStr, args, err := q.MainSQL(traceIDs)
+	if err != nil {
+		return nil, fmt.Errorf("MainSQL: %w", err)
+	}
+	rows, err := db.QueryContext(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("main query: %w (sql=%s)", err, sqlStr)
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("columns: %w", err)
+	}
+	var raw [][]any
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+		raw = append(raw, vals)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+
+	return ScanRows(raw)
+}
+
 // TestLakeSQL_CursorPagination_Integration walks a multi-page span list
 // against a real local Lake and verifies keyset pagination behaves like the
 // legacy path: every span appears exactly once, newest first.
@@ -1025,35 +1153,9 @@ func TestLakeSQL_CursorPagination_Integration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewSpanQuery: %v", err)
 		}
-		sqlStr, args, err := q.LakeSQL()
+		pageSpans, err := execLakeSQL(ctx, lk.DB(), q)
 		if err != nil {
-			t.Fatalf("LakeSQL: %v", err)
-		}
-		rows, err := lk.DB().QueryContext(ctx, sqlStr, args...)
-		if err != nil {
-			t.Fatalf("page %d query: %v\nSQL:\n%s", page, err, sqlStr)
-		}
-		cols, err := rows.Columns()
-		if err != nil {
-			t.Fatalf("columns: %v", err)
-		}
-		var raw [][]any
-		for rows.Next() {
-			vals := make([]any, len(cols))
-			ptrs := make([]any, len(cols))
-			for i := range vals {
-				ptrs[i] = &vals[i]
-			}
-			if err := rows.Scan(ptrs...); err != nil {
-				t.Fatalf("scan: %v", err)
-			}
-			raw = append(raw, vals)
-		}
-		rows.Close()
-
-		pageSpans, err := ScanRows(raw)
-		if err != nil {
-			t.Fatalf("ScanRows: %v", err)
+			t.Fatalf("page %d query: %v", page, err)
 		}
 
 		next := NextCursor(pageSpans, q.EffectiveLimit())
@@ -1182,36 +1284,9 @@ func TestLakeSQL_OneRowPerTrace(t *testing.T) {
 		t.Fatalf("NewSpanQuery: %v", err)
 	}
 
-	sqlStr, args, err := q.LakeSQL()
+	traces, err := execLakeSQL(ctx, lk.DB(), q)
 	if err != nil {
-		t.Fatalf("LakeSQL: %v", err)
-	}
-
-	rows, err := lk.DB().QueryContext(ctx, sqlStr, args...)
-	if err != nil {
-		t.Fatalf("query: %v\nSQL:\n%s", err, sqlStr)
-	}
-	cols, err := rows.Columns()
-	if err != nil {
-		t.Fatalf("columns: %v", err)
-	}
-	var raw [][]any
-	for rows.Next() {
-		vals := make([]any, len(cols))
-		ptrs := make([]any, len(cols))
-		for i := range vals {
-			ptrs[i] = &vals[i]
-		}
-		if err := rows.Scan(ptrs...); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		raw = append(raw, vals)
-	}
-	rows.Close()
-
-	traces, err := ScanRows(raw)
-	if err != nil {
-		t.Fatalf("ScanRows: %v", err)
+		t.Fatalf("execLakeSQL: %v", err)
 	}
 
 	if len(traces) != 2 {
@@ -1282,15 +1357,11 @@ func TestLakeSQL_OneRowPerTrace(t *testing.T) {
 	}
 }
 
-// TestLakeSQL_RollupScopedToLimit verifies that the LakeSQL query scopes its
-// rollup and kind_rollup subqueries to the limited set of trace_ids rather
-// than scanning the full time range. This prevents OOM on wide time-range
-// queries (issue #188).
-//
-// The query must use a two-phase pattern where both rollup subqueries have a
-// `WHERE trace_id IN (phase1_subquery)` filter so that rollup computation
-// only scans the limited page of trace_ids, not the full time range.
-func TestLakeSQL_RollupScopedToLimit(t *testing.T) {
+// TestMainSQL_RollupScopedToLimit verifies that MainSQL scopes its rollup
+// and kind_rollup subqueries to the resolved set of trace_ids rather than
+// scanning the full time range. This prevents OOM on wide time-range queries
+// (issue #188).
+func TestMainSQL_RollupScopedToLimit(t *testing.T) {
 	req := SpanQueryRequest{
 		From:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 		To:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
@@ -1302,17 +1373,17 @@ func TestLakeSQL_RollupScopedToLimit(t *testing.T) {
 		t.Fatalf("NewSpanQuery error: %v", err)
 	}
 
-	sql, _, err := q.LakeSQL()
+	sql, _, err := q.MainSQL([]string{"trace-1", "trace-2"})
 	if err != nil {
-		t.Fatalf("LakeSQL error: %v", err)
+		t.Fatalf("MainSQL error: %v", err)
 	}
 
-	// The SQL must contain `trace_id IN` for the rollup subqueries.
-	// After the fix, both the rollup and kind_rollup subqueries will have:
-	//   WHERE ... AND trace_id IN (phase1_subquery)
-	// The current buggy query has NO `trace_id IN` for either rollup.
-	if !strings.Contains(sql, "trace_id IN") {
-		t.Errorf("LakeSQL rollup subqueries must scope to limited trace_ids via `trace_id IN (phase1)`;\nthis prevents OOM on wide time ranges (issue #188).\ngot:\n%s", sql)
+	// The SQL must contain `trace_id IN` for the ranked/rollup/kind_rollup
+	// subqueries, scoping them to the resolved trace_ids rather than the
+	// full time range (issue #188, and issue #229 for why it's a literal
+	// list rather than an inlined phase1 subquery).
+	if got := strings.Count(sql, "trace_id IN"); got != 3 {
+		t.Errorf("MainSQL subqueries must scope to resolved trace_ids via `trace_id IN (...)`;\nthis prevents OOM on wide time ranges (issue #188).\ngot %d occurrences:\n%s", got, sql)
 	}
 }
 
@@ -1390,36 +1461,9 @@ func TestLakeSQL_RollupExecution(t *testing.T) {
 		t.Fatalf("NewSpanQuery: %v", err)
 	}
 
-	sqlStr, args, err := q.LakeSQL()
+	result, err := execLakeSQL(ctx, lk.DB(), q)
 	if err != nil {
-		t.Fatalf("LakeSQL: %v", err)
-	}
-
-	rows, err := lk.DB().QueryContext(ctx, sqlStr, args...)
-	if err != nil {
-		t.Fatalf("query: %v\nSQL:\n%s", err, sqlStr)
-	}
-	cols, err := rows.Columns()
-	if err != nil {
-		t.Fatalf("columns: %v", err)
-	}
-	var raw [][]any
-	for rows.Next() {
-		vals := make([]any, len(cols))
-		ptrs := make([]any, len(cols))
-		for i := range vals {
-			ptrs[i] = &vals[i]
-		}
-		if err := rows.Scan(ptrs...); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		raw = append(raw, vals)
-	}
-	rows.Close()
-
-	result, err := ScanRows(raw)
-	if err != nil {
-		t.Fatalf("ScanRows: %v", err)
+		t.Fatalf("execLakeSQL: %v", err)
 	}
 
 	// We requested limit=2, but the query uses limit+1 for NextCursor detection,

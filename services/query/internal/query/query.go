@@ -680,8 +680,8 @@ func MarshalResponse(r SpanResponse) ([]byte, error) {
 	return json.Marshal(r)
 }
 
-// LakeSQL returns the SQL for the Traces list: one row per distinct
-// trace_id, representing that trace's root span (the span with no
+// PhaseOneSQL + MainSQL together produce the Traces list query: one row per
+// distinct trace_id, representing that trace's root span (the span with no
 // parent_id, or the earliest-starting span if no explicit root is present)
 // annotated with trace-level rollups (issue #136):
 //
@@ -710,6 +710,9 @@ func MarshalResponse(r SpanResponse) ([]byte, error) {
 // into memory before any LIMIT is applied. By using inline subqueries, DuckDB
 // can push down filters and limits more aggressively, reducing memory pressure
 // and improving query performance for large datasets.
+//
+// The query is split into two round trips (PhaseOneSQL then MainSQL) rather
+// than one inlined statement — see PhaseOneSQL's doc for why (issue #229).
 // rankClause builds the ROW_NUMBER window function used by the ranked
 // subquery to pick one row per trace (the root span or earliest span).
 const rankClause = `      ROW_NUMBER() OVER (
@@ -752,12 +755,21 @@ func (q *SpanQuery) phase1Args() []any {
 // limited page of trace_ids.  When a cursor is set, it adds a cursor predicate
 // so that only trace_ids whose root span appears before the cursor are
 // included — this is essential for correct pagination.
+//
+// The inner scan lists its columns explicitly (trace_id, span_id, parent_id,
+// start_time, project_id) instead of `SELECT *`: DuckDB's projection pushdown
+// does not reach through a `SELECT *` wrapped in a window function, so an
+// unqualified `SELECT *` here was forcing every span's full row — including
+// the input/output LLM payload columns, which dominate row size — to be read
+// for every span in the time window purely to compute a rank that only needs
+// these five narrow columns (confirmed via EXPLAIN ANALYZE: the wide scan
+// showed up under the WINDOW operator reading all 16 span columns).
 func (q *SpanQuery) buildPhase1SQL(cursorArgs []any) string {
 	sql := fmt.Sprintf(`
     SELECT trace_id FROM (
       SELECT trace_id, span_id, start_time, %s
       FROM (
-        SELECT * FROM lake.spans%s
+        SELECT trace_id, span_id, parent_id, start_time, project_id FROM lake.spans%s
       )
     ) WHERE rn = 1`, rankClause, q.phase1Where())
 	if len(cursorArgs) == 3 {
@@ -767,7 +779,55 @@ func (q *SpanQuery) buildPhase1SQL(cursorArgs []any) string {
 	return sql
 }
 
-func (q *SpanQuery) LakeSQL() (sql string, args []any, err error) {
+// PhaseOneSQL returns the SQL and args for the cheap phase-1 query that
+// resolves the page's candidate trace_ids — only the five narrow columns
+// (trace_id, span_id, parent_id, start_time, project_id), never the wide
+// input/output LLM payload columns.
+//
+// Callers must execute this first and pass the resulting trace_ids into
+// MainSQL, rather than inlining this query as a subquery filter. This two-
+// step shape is the fix for a production incident (issue #229) where the
+// single-query design — filtering the wide-column "ranked" scan via
+// `trace_id IN (<phase1 subquery>)` — still read every span's full row
+// across the *entire* query time range: DuckDB evaluates an IN-subquery as
+// a post-scan join, and its column-projection pushdown does not reach
+// through that join, so wide columns were materialized for rows that got
+// filtered out afterward anyway. Resolving phase 1 to a concrete Go []string
+// first and filtering with a literal `trace_id IN (?, ?, ...)` list in
+// MainSQL gives DuckDB a normal scan-time predicate, which it does push
+// projection through.
+func (q *SpanQuery) PhaseOneSQL() (sql string, args []any) {
+	var cursorArgs []any
+	if !q.cursor.StartTime.IsZero() || q.cursor.SpanID != "" {
+		cursorArgs = append(cursorArgs, q.cursor.StartTime, q.cursor.StartTime, q.cursor.SpanID)
+	}
+	sql = q.buildPhase1SQL(cursorArgs)
+	args = append(args, q.phase1Args()...)
+	args = append(args, cursorArgs...)
+	args = append(args, q.limit+1)
+	return sql, args
+}
+
+// traceIDInClause builds a literal `?, ?, ...` placeholder list (one per
+// traceID) plus the matching args, for use in a `trace_id IN (...)` filter.
+// Callers must not call this with an empty traceIDs slice — `IN ()` is
+// invalid SQL; skip calling MainSQL entirely when PhaseOneSQL returns none.
+func traceIDInClause(traceIDs []string) (placeholders string, args []any) {
+	parts := make([]string, len(traceIDs))
+	args = make([]any, len(traceIDs))
+	for i, id := range traceIDs {
+		parts[i] = "?"
+		args[i] = id
+	}
+	return strings.Join(parts, ", "), args
+}
+
+// MainSQL returns the SQL for the Traces list main query: one row per
+// distinct trace_id (root span + rollups), restricted to traceIDs — the
+// concrete list resolved by a prior PhaseOneSQL execution (see its doc for
+// why this two-step shape, rather than inlining phase1 as a subquery,
+// matters). traceIDs must be non-empty.
+func (q *SpanQuery) MainSQL(traceIDs []string) (sql string, args []any, err error) {
 	// buildWhereClause always emits a WHERE clause — project_id is
 	// unconditionally injected.
 	whereArgs, where, err := q.buildWhereClause()
@@ -775,18 +835,7 @@ func (q *SpanQuery) LakeSQL() (sql string, args []any, err error) {
 		return "", nil, fmt.Errorf("buildWhereClause: %w", err)
 	}
 
-	// Collect cursor args for use in phase 1 subqueries.
-	var cursorArgs []any
-	if !q.cursor.StartTime.IsZero() || q.cursor.SpanID != "" {
-		cursorArgs = append(cursorArgs, q.cursor.StartTime, q.cursor.StartTime, q.cursor.SpanID)
-	}
-
-	// Phase 1: select the limited page of trace_ids (cheap: only needs
-	// trace_id, span_id, start_time + a simple window function).  The
-	// trace_ids are returned ordered by start_time DESC, span_id ASC so
-	// that downstream rollups only process the traces that will actually
-	// appear in the result page, not every trace in the time window.
-	phase1SQL := q.buildPhase1SQL(cursorArgs)
+	idPlaceholders, idArgs := traceIDInClause(traceIDs)
 
 	var sb strings.Builder
 	// Build the SELECT clause for readability — one column per line.
@@ -803,52 +852,43 @@ func (q *SpanQuery) LakeSQL() (sql string, args []any, err error) {
 	sb.WriteString("  r.status_message,\n")
 	sb.WriteString("  ru.span_count,\n")
 	sb.WriteString("  kr.kind_counts\n")
-	// ranked: inline subquery with ROW_NUMBER for root-span selection.
+	// ranked: inline subquery with ROW_NUMBER for root-span selection, scoped
+	// to the resolved traceIDs via a literal IN-list (not a subquery) so
+	// DuckDB pushes projection through the filter and only materializes the
+	// wide input/output columns for the page's candidate traces.
 	sb.WriteString("FROM (\n  SELECT *,\n    ")
 	sb.WriteString(rankClause)
 	sb.WriteString("\n  FROM (\n    SELECT * FROM lake.spans")
 	sb.WriteString(where)
-	sb.WriteString("\n  )\n) r\n")
+	sb.WriteString("\n    AND trace_id IN (")
+	sb.WriteString(idPlaceholders)
+	sb.WriteString(")\n  )\n) r\n")
+	args = append(args, whereArgs...)
+	args = append(args, idArgs...)
 	// rollups: inline subquery computing per-trace aggregates, scoped to the
-	// phase 1 trace_ids so memory does not scale with the full time range.
+	// same resolved traceIDs so memory does not scale with the full time
+	// range.
 	sb.WriteString("JOIN (\n  SELECT\n    trace_id,\n    CAST(COUNT(*) AS BIGINT) AS span_count,\n    CAST(COALESCE(SUM(input_tokens), 0) AS BIGINT) AS total_input_tokens,\n    CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT) AS total_output_tokens,\n    COALESCE(SUM(cost_usd), 0) AS total_cost_usd,\n    MAX(end_time) AS trace_end_time,\n    MAX(CASE WHEN status_code = 'error' THEN 1 ELSE 0 END) AS has_error\n  FROM lake.spans")
 	sb.WriteString(where)
-	sb.WriteString("\n  AND trace_id IN (\n    ")
-	sb.WriteString(phase1SQL)
-	sb.WriteString("\n  )\n  GROUP BY trace_id\n) ru ON r.trace_id = ru.trace_id\n")
+	sb.WriteString("\n  AND trace_id IN (")
+	sb.WriteString(idPlaceholders)
+	sb.WriteString(")\n  GROUP BY trace_id\n) ru ON r.trace_id = ru.trace_id\n")
+	args = append(args, whereArgs...)
+	args = append(args, idArgs...)
 	// kind_rollups: inline subquery computing per-trace kind counts, also
-	// scoped to the phase 1 trace_ids.
+	// scoped to the resolved traceIDs.
 	sb.WriteString("JOIN (\n  SELECT\n    trace_id,\n    to_json(MAP(LIST(kind), LIST(kind_count))) AS kind_counts\n  FROM (\n    SELECT trace_id, COALESCE(kind, 'unknown') AS kind, CAST(COUNT(*) AS BIGINT) AS kind_count\n    FROM lake.spans")
 	sb.WriteString(where)
-	sb.WriteString("\n    AND trace_id IN (\n      ")
-	sb.WriteString(phase1SQL)
-	sb.WriteString("\n    )\n    GROUP BY trace_id, COALESCE(kind, 'unknown')\n  )\n  GROUP BY trace_id\n) kr ON r.trace_id = kr.trace_id\nWHERE r.rn = 1\n  AND r.trace_id IN (\n    ")
-	sb.WriteString(phase1SQL)
-	sb.WriteString("\n  )")
+	sb.WriteString("\n    AND trace_id IN (")
+	sb.WriteString(idPlaceholders)
+	sb.WriteString(")\n    GROUP BY trace_id, COALESCE(kind, 'unknown')\n  )\n  GROUP BY trace_id\n) kr ON r.trace_id = kr.trace_id\nWHERE r.rn = 1")
+	args = append(args, whereArgs...)
+	args = append(args, idArgs...)
 
-	// Collect args: 6 WHERE clauses (3 from `where` + 3 from inlined phase1),
-	// 3 phase1 LIMITs (one per inlined phase1), 1 outer LIMIT.
-	// 6 WHEREs × 3 + 3 phase1 LIMITs + 1 outer LIMIT = 22 (no cursor)
-	args = append(args, whereArgs...)         // ranked subquery WHERE (project, from, to)
-	args = append(args, whereArgs...)         // rollup WHERE (project, from, to)
-	args = append(args, q.phase1Args()...)   // rollup phase1 (where)
-	args = append(args, cursorArgs...)        // rollup cursor
-	args = append(args, q.limit+1)            // rollup phase1 LIMIT
-	args = append(args, whereArgs...)         // kind_rollup WHERE (project, from, to)
-	args = append(args, q.phase1Args()...)   // kind_rollup phase1 (where)
-	args = append(args, cursorArgs...)        // kind_rollup cursor
-	args = append(args, q.limit+1)            // kind_rollup phase1 LIMIT
-	args = append(args, q.phase1Args()...)   // main WHERE (phase1 IN clause)
-	args = append(args, cursorArgs...)        // main WHERE cursor
-	args = append(args, q.limit+1)            // main WHERE phase1 LIMIT
-
-	if !q.cursor.StartTime.IsZero() || q.cursor.SpanID != "" {
-		sb.WriteString("\n  AND (r.start_time < ? OR (r.start_time = ? AND r.span_id < ?))")
-		args = append(args, q.cursor.StartTime, q.cursor.StartTime, q.cursor.SpanID)
-	}
+	// No cursor or LIMIT here: traceIDs is already the correctly paginated,
+	// limit+1-bounded page resolved by PhaseOneSQL — this query only needs
+	// to reproduce the same order for those specific rows.
 	sb.WriteString("\n  ORDER BY r.start_time DESC, r.span_id ASC")
-	sb.WriteString("\n  LIMIT ?")
-	args = append(args, q.limit+1)
 
 	return sb.String(), args, nil
 }

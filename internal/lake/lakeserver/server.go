@@ -98,6 +98,12 @@ type Config struct {
 	// no pragma is set (DuckDB's auto-detected default, which sizes against
 	// the host's total RAM rather than any container memory limit).
 	MemoryLimit string
+	// Threads caps DuckDB's intra-query parallelism, applied via
+	// `SET threads`. Zero means no pragma is set, so DuckDB auto-detects
+	// against the host's total CPU count rather than the container's
+	// cgroup CPU limit. See quack.client.threads' doc (internal/lake) for
+	// why this matters under Kubernetes.
+	Threads int
 }
 
 // ConfigFromApp derives the Quack Server's catalog settings from the
@@ -110,6 +116,7 @@ func ConfigFromApp(cfg *config.Config) Config {
 		CatalogDriver: cfg.Quack.Server.CatalogDriver,
 		CatalogDSN:    cfg.Quack.Server.CatalogDSN,
 		MemoryLimit:   cfg.Quack.Server.MemoryLimit,
+		Threads:       cfg.Quack.Server.Threads,
 	}
 	if sc.ListenAddr == "" {
 		sc.ListenAddr = ":9494"
@@ -173,6 +180,12 @@ func Serve(ctx context.Context, cfg Config) (*Server, error) {
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("SET memory_limit = %s", sqlQuote(cfg.MemoryLimit))); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("lakeserver: set memory_limit: %w", err)
+		}
+	}
+	if cfg.Threads > 0 {
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("SET threads = %d", cfg.Threads)); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("lakeserver: set threads: %w", err)
 		}
 	}
 

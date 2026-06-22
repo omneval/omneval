@@ -21,10 +21,20 @@ tests:
           path: spec.template.spec.containers.livenessProbe
       - isNotEmpty:
           path: spec.template.spec.containers.readinessProbe
+  - it: should give liveness a lenient failureThreshold (catalog check is critical now)
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.failureThreshold
+          value: 18
   - it: should have resource limits
     asserts:
       - isNotEmpty:
           path: spec.template.spec.containers.resources
+  - it: should set checksum/config annotation to trigger restarts on config changes
+    asserts:
+      - matchRegex:
+          path: spec.template.metadata.annotations["checksum/config"]
+          pattern: '^[a-f0-9]{64}$'
   - it: should create HPA when autoscaling is enabled
     set:
       query.autoscaling.enabled: true

@@ -243,8 +243,15 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 
 	// Ping is catalog-touching and reconnect-aware (lake.go); on stale
 	// connection it re-attaches and retries so the pod self-heals after a
-	// Quack Server restart without a manual rollout restart.
-	p.AddCheck("catalog", &probe.CatalogReachable{Ping: lk.Ping})
+	// Quack Server restart without a manual rollout restart. Critical: even
+	// with the Lake's connection pool sized above 1 (lake.Config.MaxOpenConns)
+	// so a slow query doesn't serialize every other call on this Lake, the
+	// pool can still be exhausted by enough concurrent wedged calls; if that
+	// happens, readiness alone would only pull this pod out of Service
+	// routing forever — it needs to also gate liveness so Kubernetes
+	// eventually restarts it instead of requiring a human to notice and
+	// intervene manually.
+	p.AddCriticalCheck("catalog", &probe.CatalogReachable{Ping: lk.Ping})
 	slog.Info("query: routing all span reads to lake.spans")
 	deps.Prober = p
 
