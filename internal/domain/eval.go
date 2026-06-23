@@ -238,6 +238,7 @@ type EvalRule struct {
 	JudgeModel    string     `json:"judge_model"`
 	PromptName    string     `json:"prompt_name"`
 	PromptVersion int64      `json:"prompt_version"`
+	PromptLabel   string     `json:"prompt_label"`
 	Filter        EvalFilter `json:"filter"`
 	SampleRate    float64    `json:"sample_rate"` // 0.0–1.0; 1.0 = score every matching span
 	Enabled       bool       `json:"enabled"`

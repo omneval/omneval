@@ -457,5 +457,34 @@ describe("OmnevalClient", () => {
         "prompt_name is required"
       );
     });
+
+    it("includes prompt_label in payload when provided", async () => {
+      let capturedBody: Record<string, unknown> = {};
+      const fetchSpy = mockFetch(async (_url, init) => {
+        capturedBody = JSON.parse((init?.body as string) ?? "{}");
+        return createResponse(201, {
+          rule_id: "rule-456",
+          name: "helpfulness",
+          judge_model: "gpt-4o-mini",
+          prompt_name: "eval-prompt",
+          prompt_version: 3,
+          prompt_label: "production",
+          filter: {},
+          sample_rate: 1.0,
+          enabled: true,
+        });
+      });
+
+      const client = new OmnevalClient({ baseUrl: "http://localhost:3000" });
+      const result = await client.createEvalRule("helpfulness", "eval-prompt", {
+        prompt_version: 3,
+        prompt_label: "production",
+      });
+
+      expect(capturedBody.prompt_version).toBe(3);
+      expect(capturedBody.prompt_label).toBe("production");
+      expect(result.prompt_label).toBe("production");
+      expect(fetchSpy).toHaveBeenCalledOnce();
+    });
   });
 });

@@ -44,6 +44,7 @@ interface CreateEvalRuleRequest {
   judge_model: string;
   prompt_name: string;
   prompt_version?: number;
+  prompt_label?: string;
   sample_rate: number;
   enabled?: boolean;
   filter: EvalFilter;
@@ -520,6 +521,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
       judge_model: createForm.judgeModel.trim(),
       prompt_name: createForm.promptName.trim(),
       prompt_version: createForm.promptVersion,
+      prompt_label: createForm.promptLabel || undefined,
       sample_rate: createForm.sampleRate / 100,
       enabled: true,
       filter: normalizeFilter(createForm.filter),

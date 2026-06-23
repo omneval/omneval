@@ -52,6 +52,7 @@ type CreateEvalRuleRequest struct {
 	JudgeModel    string            `json:"judge_model"`
 	PromptName    string            `json:"prompt_name"`
 	PromptVersion int64             `json:"prompt_version"`
+	PromptLabel   string            `json:"prompt_label"`
 	SampleRate    float64           `json:"sample_rate"`
 	Enabled       bool              `json:"enabled"`
 	Filter        domain.EvalFilter `json:"filter"`
@@ -126,7 +127,14 @@ func (h *EvalRuleHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 
 	// Validate that the judge prompt exists in the registry.
 	if req.PromptName != "" && h.PromptStore != nil {
-		// Check by version first if provided (>= 1).
+		// Check by label first if provided.
+		if req.PromptLabel != "" {
+			if _, err := h.PromptStore.GetPromptByLabel(r.Context(), projectID, req.PromptName, req.PromptLabel); err != nil {
+				http.Error(w, "prompt '"+req.PromptName+"' label '"+req.PromptLabel+"' not found", http.StatusBadRequest)
+				return
+			}
+		}
+		// Check by version if provided (>= 1).
 		if req.PromptVersion > 0 {
 			if _, err := h.PromptStore.GetPromptVersion(r.Context(), projectID, req.PromptName, req.PromptVersion); err != nil {
 				http.Error(w, "prompt '"+req.PromptName+"' version "+fmt.Sprintf("%d", req.PromptVersion)+" not found", http.StatusBadRequest)
@@ -163,6 +171,7 @@ func (h *EvalRuleHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		JudgeModel:    req.JudgeModel,
 		PromptName:    req.PromptName,
 		PromptVersion: req.PromptVersion,
+		PromptLabel:   req.PromptLabel,
 		Filter:        req.Filter,
 		SampleRate:    sampleRate,
 		Enabled:       enabled,
