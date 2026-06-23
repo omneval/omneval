@@ -29,6 +29,9 @@ var migrationSQL4 string
 //go:embed migrations/0005_add_api_key_name.up.sql
 var migrationSQL5 string
 
+//go:embed migrations/0006_add_prompt_kind_messages.up.sql
+var migrationSQL6 string
+
 // Store is the Postgres-backed implementation of metadata.Store.
 type Store struct {
 	db       *sql.DB
@@ -123,6 +126,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		{3, migrationSQL3},
 		{4, migrationSQL4},
 		{5, migrationSQL5},
+		{6, migrationSQL6},
 	}
 	for _, m := range migrations {
 		var count int
@@ -510,10 +514,14 @@ func (s *Store) GetUserByResetToken(ctx context.Context, token string) (*domain.
 // ---- Prompt Registry ----
 
 func (s *Store) CreatePromptVersion(ctx context.Context, pv *domain.PromptVersion) error {
+	var messagesJSON []byte
+	if len(pv.Messages) > 0 {
+		messagesJSON, _ = json.Marshal(pv.Messages)
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO prompt_versions (version_id, project_id, name, version, template, model, temperature, max_tokens, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		pv.VersionID, pv.ProjectID, pv.Name, pv.Version, pv.Template,
+		`INSERT INTO prompt_versions (version_id, project_id, name, version, kind, template, messages, model, temperature, max_tokens, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		pv.VersionID, pv.ProjectID, pv.Name, pv.Version, string(pv.Kind), pv.Template, messagesJSON,
 		pv.ModelConfig.Model, pv.ModelConfig.Temperature, pv.ModelConfig.MaxTokens, pv.CreatedAt,
 	)
 	if err != nil {
@@ -524,15 +532,16 @@ func (s *Store) CreatePromptVersion(ctx context.Context, pv *domain.PromptVersio
 
 func (s *Store) GetPromptVersion(ctx context.Context, projectID, name string, version int64) (*domain.PromptVersion, error) {
 	var pv domain.PromptVersion
-	var model string
+	var model, kindStr string
+	var messagesRaw *string
 	var temperature *float64
 	var maxTokens *int
 	var createdAt time.Time
 	err := s.db.QueryRowContext(ctx,
-		`SELECT version_id, template, model, temperature, max_tokens, created_at
+		`SELECT version_id, kind, template, messages, model, temperature, max_tokens, created_at
 		 FROM prompt_versions WHERE project_id = $1 AND name = $2 AND version = $3`,
 		projectID, name, version,
-	).Scan(&pv.VersionID, &pv.Template, &model, &temperature, &maxTokens, &createdAt)
+	).Scan(&pv.VersionID, &kindStr, &pv.Template, &messagesRaw, &model, &temperature, &maxTokens, &createdAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrNotFound
@@ -540,7 +549,11 @@ func (s *Store) GetPromptVersion(ctx context.Context, projectID, name string, ve
 		return nil, fmt.Errorf("postgres: get prompt version: %w", err)
 	}
 	pv.Version = version
+	pv.Kind = domain.PromptKind(kindStr)
 	pv.CreatedAt = createdAt
+	if messagesRaw != nil && *messagesRaw != "" {
+		_ = json.Unmarshal([]byte(*messagesRaw), &pv.Messages)
+	}
 	pv.ModelConfig = domain.PromptModelConfig{
 		Model:       model,
 		Temperature: derefOr(temperature, 0.7),
@@ -567,7 +580,7 @@ func (s *Store) GetPromptByLabel(ctx context.Context, projectID, name, label str
 
 func (s *Store) ListPromptVersions(ctx context.Context, projectID, name string) ([]*domain.PromptVersion, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT version_id, name, version, template, model, temperature, max_tokens, created_at
+		`SELECT version_id, name, version, kind, template, messages, model, temperature, max_tokens, created_at
 		 FROM prompt_versions WHERE project_id = $1 AND name = $2 ORDER BY version`, projectID, name,
 	)
 	if err != nil {
@@ -578,12 +591,17 @@ func (s *Store) ListPromptVersions(ctx context.Context, projectID, name string) 
 	var versions []*domain.PromptVersion
 	for rows.Next() {
 		var pv domain.PromptVersion
-		var model string
+		var model, kindStr string
+		var messagesJSON *string
 		var temperature *float64
 		var maxTokens *int
 		var createdAt time.Time
-		if err := rows.Scan(&pv.VersionID, &pv.Name, &pv.Version, &pv.Template, &model, &temperature, &maxTokens, &createdAt); err != nil {
+		if err := rows.Scan(&pv.VersionID, &pv.Name, &pv.Version, &kindStr, &pv.Template, &messagesJSON, &model, &temperature, &maxTokens, &createdAt); err != nil {
 			return nil, fmt.Errorf("postgres: scan prompt version: %w", err)
+		}
+		pv.Kind = domain.PromptKind(kindStr)
+		if messagesJSON != nil && *messagesJSON != "" {
+			_ = json.Unmarshal([]byte(*messagesJSON), &pv.Messages)
 		}
 		pv.CreatedAt = createdAt
 		pv.ProjectID = projectID

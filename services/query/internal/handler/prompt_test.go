@@ -1990,3 +1990,165 @@ func (f *FakePromptStore) IsBookmarked(_ context.Context, _, _ string) (bool, er
 func (f *FakePromptStore) ListBookmarkedTraceIDs(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }
+
+// ---- Issue #241: Handler integration tests for kind/messages fields ----
+
+// TestPromptHandler_CreatePrompt_ChatKind verifies that creating a prompt with
+// kind='chat' and an array of messages round-trips correctly through the
+// POST /api/v1/prompts and GET /api/v1/prompts endpoints.
+func TestPromptHandler_CreatePrompt_ChatKind(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		PromptStore: store,
+		Cache:       cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	messages := []domain.PromptMessage{
+		{Role: "system", Content: "You are a helpful assistant."},
+		{Role: "user", Content: "Hello, {{name}}!"},
+		{Role: "assistant", Content: "Hi {{name}}, how can I help?"},
+	}
+
+	body := `{"name":"chat-test","version":1,"kind":"chat",` +
+		`"messages":[{"role":"system","content":"You are a helpful assistant."},` +
+		`{"role":"user","content":"Hello, {{name}}!"},` +
+		`{"role":"assistant","content":"Hi {{name}}, how can I help?"}]}`
+
+	_ = messages // verify domain.PromptMessage type is available; actual JSON body is tested
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.HandleCreatePrompt(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	// Parse the response and verify kind and messages round-tripped.
+	var resp domain.PromptVersionJSON
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Kind != domain.PromptKindChat {
+		t.Errorf("kind: got %q, want %q", resp.Kind, domain.PromptKindChat)
+	}
+	if len(resp.Messages) != 3 {
+		t.Fatalf("messages count: got %d, want 3", len(resp.Messages))
+	}
+	if resp.Messages[0].Role != "system" {
+		t.Errorf("messages[0].role: got %q, want %q", resp.Messages[0].Role, "system")
+	}
+	if resp.Messages[1].Content != "Hello, {{name}}!" {
+		t.Errorf("messages[1].content: got %q, want %q", resp.Messages[1].Content, "Hello, {{name}}!")
+	}
+	if resp.Messages[2].Role != "assistant" {
+		t.Errorf("messages[2].role: got %q, want %q", resp.Messages[2].Role, "assistant")
+	}
+
+	// Verify GET returns the same data.
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/chat-test?version=1", nil)
+	wGet := httptest.NewRecorder()
+	handler.HandleGetPrompt(wGet, reqGet)
+
+	if wGet.Code != http.StatusOK {
+		t.Fatalf("GET status: got %d, want %d\nbody: %s", wGet.Code, http.StatusOK, wGet.Body.String())
+	}
+
+	var getResp domain.PromptVersionJSON
+	if err := json.NewDecoder(wGet.Body).Decode(&getResp); err != nil {
+		t.Fatalf("GET decode: %v", err)
+	}
+	if getResp.Kind != domain.PromptKindChat {
+		t.Errorf("GET kind: got %q, want %q", getResp.Kind, domain.PromptKindChat)
+	}
+	if len(getResp.Messages) != 3 {
+		t.Fatalf("GET messages count: got %d, want 3", len(getResp.Messages))
+	}
+}
+
+// TestPromptHandler_CreatePrompt_TextKindDefaults verifies that when kind is
+// omitted, it defaults to 'text' and template is used.
+func TestPromptHandler_CreatePrompt_TextKindDefaults(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		PromptStore: store,
+		Cache:       cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	body := `{"name":"text-test","version":1,` +
+		`"template":"Hello {{name}}!",` +
+		`"model":"gpt-4","temperature":0.7,"max_tokens":256}`
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.HandleCreatePrompt(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp domain.PromptVersionJSON
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Kind != domain.PromptKindText {
+		t.Errorf("kind: got %q, want %q (default)", resp.Kind, domain.PromptKindText)
+	}
+	if resp.Template != "Hello {{name}}!" {
+		t.Errorf("template: got %q, want %q", resp.Template, "Hello {{name}}!")
+	}
+	if resp.Messages != nil && len(resp.Messages) > 0 {
+		t.Errorf("expected nil/empty messages, got %v", resp.Messages)
+	}
+
+	// Verify GET returns the same.
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/v1/prompts/text-test?version=1", nil)
+	wGet := httptest.NewRecorder()
+	handler.HandleGetPrompt(wGet, reqGet)
+
+	if wGet.Code != http.StatusOK {
+		t.Fatalf("GET status: got %d, want %d\nbody: %s", wGet.Code, http.StatusOK, wGet.Body.String())
+	}
+
+	var getResp domain.PromptVersionJSON
+	if err := json.NewDecoder(wGet.Body).Decode(&getResp); err != nil {
+		t.Fatalf("GET decode: %v", err)
+	}
+	if getResp.Kind != domain.PromptKindText {
+		t.Errorf("GET kind: got %q, want %q", getResp.Kind, domain.PromptKindText)
+	}
+}
+
+// TestPromptHandler_CreatePrompt_ChatKindWithEmptyMessages verifies that a chat
+// prompt with an empty messages array is accepted and round-trips correctly.
+func TestPromptHandler_CreatePrompt_ChatKindWithEmptyMessages(t *testing.T) {
+	store := newFakePromptStore()
+	cache := NewPromptCache(store)
+	handler := &PromptHandler{
+		PromptStore: store,
+		Cache:       cache,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	body := `{"name":"empty-chat","version":1,"kind":"chat","messages":[]}`
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/prompts", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.HandleCreatePrompt(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp domain.PromptVersionJSON
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Kind != domain.PromptKindChat {
+		t.Errorf("kind: got %q, want %q", resp.Kind, domain.PromptKindChat)
+	}
+}
