@@ -1149,6 +1149,9 @@ func TestEvalRuleHandler_CreateEvalRule_PromptValidation_ValidPrompt(t *testing.
 				Version: 1,
 			}, nil
 		},
+		listVersions: func(ctx context.Context, projectID, name string) ([]*domain.PromptVersion, error) {
+			return []*domain.PromptVersion{{Name: "judge-v1", Version: 1}}, nil
+		},
 	}
 	handler := &EvalRuleHandler{
 		EvalRuleStore: store,
