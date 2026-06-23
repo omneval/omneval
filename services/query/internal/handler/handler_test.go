@@ -2636,3 +2636,145 @@ func TestLakeSQL_Integration(t *testing.T) {
 		t.Errorf("next trace after trace-c: got %v, want trace-b", resp3.Spans)
 	}
 }
+
+// ── HandleSpansBatch tests ──────────────────────────────────────────
+
+func TestHandleSpansBatch_MissingBody(t *testing.T) {
+	h := &SpanHandler{
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/batch", nil)
+	w := httptest.NewRecorder()
+	h.HandleSpansBatch(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleSpansBatch_EmptySpanIDs(t *testing.T) {
+	h := &SpanHandler{
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/batch", strings.NewReader(`{"span_ids": []}`))
+	w := httptest.NewRecorder()
+	h.HandleSpansBatch(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleSpansBatch_MethodNotAllowed(t *testing.T) {
+	h := &SpanHandler{
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/spans/batch", nil)
+	w := httptest.NewRecorder()
+	h.HandleSpansBatch(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestHandleSpansBatch_AuthRequired(t *testing.T) {
+	h := &SpanHandler{
+		SessionStore: &FakeSessionStore{},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/batch", strings.NewReader(`{"span_ids": ["span-1"]}`))
+	w := httptest.NewRecorder()
+	h.HandleSpansBatch(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestHandleSpansBatch_Success(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omneval-spans-batch-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	// Insert test spans with NULL input/output.
+	// Columns: span_id, trace_id, parent_id, conversation_id, project_id,
+	//          service_name, name, kind, start_time, end_time, model,
+	//          input, output, input_tokens, output_tokens, cost_usd,
+	//          prompt_name, prompt_version, status_code, status_message, attributes
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans VALUES ('span-1', 'trace-a', NULL, NULL, 'test-proj', 'svc', `+
+			`'span-one', 'llm', '2025-01-01T00:00:00Z', '2025-01-01T00:00:01Z', `+
+			`'gpt-4', NULL, NULL, 10, 20, 0.5, NULL, 0, 'ok', '', NULL)`,
+	); err != nil {
+		t.Fatalf("insert span-1: %v", err)
+	}
+
+	// Insert a span with actual input/output JSON strings.
+	inputJSON := `{"key":"value1"}`
+	outputJSON := `{"key":"value2"}`
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans VALUES ('span-2', 'trace-a', 'span-1', NULL, 'test-proj', 'svc', `+
+			`'span-two', 'tool', '2025-01-01T00:00:02Z', '2025-01-01T00:00:03Z', `+
+			`'gpt-4', ?, ?, 5, 15, 0.3, NULL, 0, 'ok', '', NULL)`,
+		inputJSON, outputJSON,
+	); err != nil {
+		t.Fatalf("insert span-2: %v", err)
+	}
+
+	h := &SpanHandler{
+		Lake:         db,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/batch",
+		strings.NewReader(`{"span_ids": ["span-1", "span-2", "span-nonexistent"]}`))
+	w := httptest.NewRecorder()
+	h.HandleSpansBatch(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Spans []struct {
+			SpanID string `json:"span_id"`
+			Name   string `json:"name"`
+			Input  string `json:"input"`
+			Output string `json:"output"`
+		} `json:"spans"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// Should have 2 spans (nonexistent span is skipped).
+	if len(resp.Spans) != 2 {
+		t.Errorf("spans count: got %d, want 2\nbody: %s", len(resp.Spans), w.Body.String())
+	}
+
+	// Verify data integrity.
+	spanMap := make(map[string]struct{ name, input, output string })
+	for _, s := range resp.Spans {
+		spanMap[s.SpanID] = struct{ name, input, output string }{s.Name, s.Input, s.Output}
+	}
+
+	if s, ok := spanMap["span-1"]; !ok {
+		t.Error("span-1 not found in response")
+	} else if s.name != "span-one" {
+		t.Errorf("span-1 name: got %q, want %q", s.name, "span-one")
+	}
+	if s, ok := spanMap["span-2"]; !ok {
+		t.Error("span-2 not found in response")
+	} else if s.input == "" || s.output == "" {
+		t.Errorf("span-2 input/output should not be empty: input=%q output=%q", s.input, s.output)
+	}
+}
