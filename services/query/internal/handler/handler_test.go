@@ -2778,3 +2778,80 @@ func TestHandleSpansBatch_Success(t *testing.T) {
 		t.Errorf("span-2 input/output should not be empty: input=%q output=%q", s.input, s.output)
 	}
 }
+
+// TestHandleSpansBatch_ScopesByProjectID is a regression test for #267:
+// the handler resolved the caller's project ID but never used it to filter
+// the span_id IN (...) query, letting any authenticated session pull
+// input/output for spans belonging to a different project.
+func TestHandleSpansBatch_ScopesByProjectID(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omneval-spans-batch-scope-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	// span-a belongs to project A, span-b belongs to project B.
+	secretInput := `{"key":"project-b-secret-input"}`
+	secretOutput := `{"key":"project-b-secret-output"}`
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans VALUES ('span-a', 'trace-a', NULL, NULL, 'project-a', 'svc', `+
+			`'span-a-name', 'llm', '2025-01-01T00:00:00Z', '2025-01-01T00:00:01Z', `+
+			`'gpt-4', '{"key":"a"}', '{"key":"a"}', 10, 20, 0.5, NULL, 0, 'ok', '', NULL)`,
+	); err != nil {
+		t.Fatalf("insert span-a: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO spans VALUES ('span-b', 'trace-b', NULL, NULL, 'project-b', 'svc', `+
+			`'span-b-name', 'llm', '2025-01-01T00:00:00Z', '2025-01-01T00:00:01Z', `+
+			`'gpt-4', ?, ?, 10, 20, 0.5, NULL, 0, 'ok', '', NULL)`,
+		secretInput, secretOutput,
+	); err != nil {
+		t.Fatalf("insert span-b: %v", err)
+	}
+
+	// Authenticated for project A, but requests both span-a and project B's span-b.
+	h := &SpanHandler{
+		Lake:         db,
+		SessionStore: &FakeSessionStore{projectID: "project-a"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/batch",
+		strings.NewReader(`{"span_ids": ["span-a", "span-b"]}`))
+	w := httptest.NewRecorder()
+	h.HandleSpansBatch(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		Spans []struct {
+			SpanID string `json:"span_id"`
+			Input  string `json:"input"`
+			Output string `json:"output"`
+		} `json:"spans"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	for _, s := range resp.Spans {
+		if s.SpanID == "span-b" {
+			t.Fatalf("cross-tenant leak: project A's session received project B's span-b: input=%q output=%q", s.Input, s.Output)
+		}
+	}
+	if len(resp.Spans) != 1 || resp.Spans[0].SpanID != "span-a" {
+		t.Fatalf("expected only span-a scoped to project-a, got %+v", resp.Spans)
+	}
+}

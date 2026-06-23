@@ -424,9 +424,11 @@ func (h *SpanHandler) HandleSpansBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify project access using the same pattern as other handlers.
+	// Resolve project access using the same pattern as other handlers, and
+	// scope the query by it below so a session can only read spans from its
+	// own project.
 	resolver := h.resolveProjectID()
-	_, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
+	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
 	if !ok {
 		return
 	}
@@ -439,7 +441,8 @@ func (h *SpanHandler) HandleSpansBatch(w http.ResponseWriter, r *http.Request) {
 		placeholders[i] = "?"
 		args[i] = id
 	}
-	query := fmt.Sprintf("SELECT span_id, name, CAST(input AS VARCHAR), CAST(output AS VARCHAR) FROM lake.spans WHERE span_id IN (%s)", strings.Join(placeholders, ", "))
+	args = append(args, projectID)
+	query := fmt.Sprintf("SELECT span_id, name, CAST(input AS VARCHAR), CAST(output AS VARCHAR) FROM lake.spans WHERE span_id IN (%s) AND project_id = ?", strings.Join(placeholders, ", "))
 
 	rows, err := h.Lake.QueryContext(r.Context(), query, args...)
 	if err != nil {
