@@ -518,7 +518,7 @@ describe("EvalRulesPage", () => {
 
     // FilterGroup renders a condition row with a condition type selector
     expect(screen.getByTestId("condition-row")).toBeInTheDocument();
-    expect(screen.getByRole("combobox")).toBeInTheDocument();
+    expect(screen.getByLabelText("Condition Type")).toBeInTheDocument();
   });
 
   it("renders the filter conditions section header", async () => {
@@ -547,12 +547,12 @@ describe("EvalRulesPage", () => {
     fireEvent.click(openNewRuleForm());
 
     // Set first condition: kind = llm
-    const kindSelect = screen.getByRole("combobox");
+    const kindSelect = screen.getByLabelText("Condition Type");
     fireEvent.change(kindSelect, { target: { value: "kind" } });
     await waitFor(() => {
       expect(screen.getByText("Kind Value")).toBeInTheDocument();
     });
-    const kindValueSelect = screen.getAllByRole("combobox")[1];
+    const kindValueSelect = screen.getByLabelText("Kind Value");
     fireEvent.change(kindValueSelect, { target: { value: "llm" } });
 
     // Add second condition – converts to AND group
@@ -562,8 +562,9 @@ describe("EvalRulesPage", () => {
     // The form now has two condition rows (AND group at depth 0)
     expect(screen.getAllByTestId("condition-row")).toHaveLength(2);
     // The second row should be empty (fresh condition)
-    const secondRowCombobox = screen.getAllByRole("combobox")[2];
-    expect(secondRowCombobox).toHaveValue("");
+    const conditionTypeSelectors = screen.getAllByLabelText("Condition Type");
+    expect(conditionTypeSelectors).toHaveLength(2);
+    expect(conditionTypeSelectors[1]).toHaveValue("");
   });
 
   it("sends grouped filter to preview endpoint when preview is clicked", async () => {
@@ -599,7 +600,7 @@ describe("EvalRulesPage", () => {
     fireEvent.click(openNewRuleForm());
 
     // Set model = gpt-4
-    const typeSelect = screen.getByRole("combobox");
+    const typeSelect = screen.getByLabelText("Condition Type");
     fireEvent.change(typeSelect, { target: { value: "model" } });
     await waitFor(() => {
       expect(screen.getByPlaceholderText(/gpt-4-turbo/)).toBeInTheDocument();
