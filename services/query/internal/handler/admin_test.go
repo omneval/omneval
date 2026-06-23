@@ -30,6 +30,7 @@ func TestAdminRoutes(t *testing.T) {
 		"GET /api/v1/admin/traces/":         AuthPolicyAdmin,
 		"DELETE /api/v1/admin/traces/":      AuthPolicyAdmin,
 		"DELETE /api/v1/admin/projects/":    AuthPolicyAdmin,
+		"GET /api/v1/admin/ops":             AuthPolicyAdmin,
 	}
 
 	for _, r := range routes {
@@ -224,6 +225,102 @@ func TestAdminHandler_TracesCount_Lake(t *testing.T) {
 	if got := countProj1(); got != 0 {
 		t.Errorf("count after delete: got %d, want 0", got)
 	}
+}
+
+func TestAdminHandler_Ops(t *testing.T) {
+	t.Parallel()
+
+	db := setupTestDB(t)
+	fakeRedis := &fakeRedisLLEN{depth: 42}
+	handler := &AdminHandler{
+		DB:            db,
+		APIKeyStore:   newFakeAdminStore(),
+		ProjectStore:  newFakeAdminStore(),
+		SessionStore:  &FakeSessionStore{projectID: "proj-1"},
+		IngestQueueDB: fakeRedis,
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/ops", nil)
+	req = withAdminContext(req, "admin@test.com")
+
+	w := httptest.NewRecorder()
+	handler.HandleAdminOps(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]int
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	if resp["ingest_queue_depth"] != 42 {
+		t.Errorf("ingest_queue_depth = %d, want 42", resp["ingest_queue_depth"])
+	}
+}
+
+func TestAdminHandler_OpsMethodNotAllowed(t *testing.T) {
+	t.Parallel()
+
+	db := setupTestDB(t)
+	handler := &AdminHandler{
+		DB:            db,
+		APIKeyStore:   newFakeAdminStore(),
+		ProjectStore:  newFakeAdminStore(),
+		SessionStore:  &FakeSessionStore{projectID: "proj-1"},
+		IngestQueueDB: &fakeRedisLLEN{depth: 0},
+	}
+
+	req := httptest.NewRequest("POST", "/api/v1/admin/ops", nil)
+	req = withAdminContext(req, "admin@test.com")
+
+	w := httptest.NewRecorder()
+	handler.HandleAdminOps(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAdminHandler_OpsNonAdminForbidden(t *testing.T) {
+	t.Parallel()
+
+	db := setupTestDB(t)
+	handler := &AdminHandler{
+		DB:            db,
+		APIKeyStore:   newFakeAdminStore(),
+		ProjectStore:  newFakeAdminStore(),
+		SessionStore:  &FakeSessionStore{projectID: "proj-1"},
+		IngestQueueDB: &fakeRedisLLEN{depth: 0},
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/ops", nil)
+	ctx := req.Context()
+	ctx = context.WithValue(ctx, auth.AdminContextKey, "admin@test.com")
+	ctx = context.WithValue(ctx, auth.CurrentUserKey, &auth.CurrentUser{
+		UserID: "test-user",
+		Email:  "non-admin@test.com",
+	})
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	handler.HandleAdminOps(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// fakeRedisLLEN is a hand-written fake for the ingest queue depth check.
+type fakeRedisLLEN struct {
+	depth int
+}
+
+var _ ingestQueueLLEN = (*fakeRedisLLEN)(nil)
+
+func (f *fakeRedisLLEN) LLen(ctx context.Context, key string) (int64, error) {
+	return int64(f.depth), nil
 }
 
 func TestAdminHandler_MethodNotAllowed(t *testing.T) {

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -9,8 +10,15 @@ import (
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/metadata"
+	"github.com/omneval/omneval/internal/queue"
 	"github.com/omneval/omneval/services/query/internal/auth"
 )
+
+// ingestQueueLLEN is the minimal interface for reading a Redis list length.
+// It allows injecting a real Redis client or a mock in tests.
+type ingestQueueLLEN interface {
+	LLen(ctx context.Context, key string) (int64, error)
+}
 
 // adminAPIKeyInfo is the JSON shape returned by the admin API keys list endpoint.
 // It extends the per-project APIKeyInfo shape with a project_id field so admins
@@ -31,12 +39,17 @@ type adminAPIKeyInfo struct {
 // - DEL  /api/v1/admin/projects/:id   — delete a project and its data
 // - GET  /api/v1/admin/traces/:projId/count — count traces for a project
 // - DEL  /api/v1/admin/traces/:projId — delete all traces for a project
+// - GET  /api/v1/admin/ops              — read-only ops metrics (e.g. queue depth)
 type AdminHandler struct {
 	DB            DBHandle
 	APIKeyStore   metadata.APIKeyStore
 	BookmarkStore metadata.BookmarkStore
 	ProjectStore  metadata.ProjectStore
 	SessionStore  metadata.SessionStore
+
+	// IngestQueueDB provides a read-only view of the ingest queue (e.g.
+	// Redis LLEN). Nil when the Query API has no Redis connectivity.
+	IngestQueueDB ingestQueueLLEN
 
 	// LakeRW is a read-write Lake attachment used for durable admin deletes
 	// (ADR-0004 / #91). Always set in Lake mode (the only mode now).
@@ -233,6 +246,33 @@ func (h *AdminHandler) HandleAdminProjectsDelete(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// HandleAdminOps handles GET /api/v1/admin/ops.
+// Returns read-only ops metrics (e.g. ingest queue depth). This endpoint
+// is deliberately kept separate from destructive admin actions (delete).
+func (h *AdminHandler) HandleAdminOps(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !auth.IsAdminUser(r) {
+		writeJSONError(w, "forbidden: admin access required", http.StatusForbidden)
+		return
+	}
+
+	metrics := make(map[string]int)
+
+	if h.IngestQueueDB != nil {
+		depth, err := h.IngestQueueDB.LLen(r.Context(), queue.KeyIngestSpans)
+		if err == nil {
+			metrics["ingest_queue_depth"] = int(depth)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(metrics)
+}
+
 // AdminRoutes returns the admin endpoints as AuthRoute entries with
 // AuthPolicyAdmin so the Router can use them for policy-based auth dispatch.
 func (h *AdminHandler) AdminRoutes() []AuthRoute {
@@ -242,6 +282,7 @@ func (h *AdminHandler) AdminRoutes() []AuthRoute {
 		{Method: http.MethodGet, Path: "/api/v1/admin/traces/", Handler: http.HandlerFunc(h.HandleAdminTracesCount), Policy: AuthPolicyAdmin},
 		{Method: http.MethodDelete, Path: "/api/v1/admin/traces/", Handler: http.HandlerFunc(h.HandleAdminTracesDelete), Policy: AuthPolicyAdmin},
 		{Method: http.MethodDelete, Path: "/api/v1/admin/projects/", Handler: http.HandlerFunc(h.HandleAdminProjectsDelete), Policy: AuthPolicyAdmin},
+		{Method: http.MethodGet, Path: "/api/v1/admin/ops", Handler: http.HandlerFunc(h.HandleAdminOps), Policy: AuthPolicyAdmin},
 	}
 }
 
@@ -253,4 +294,5 @@ func (h *AdminHandler) RegisterAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/admin/traces/", h.HandleAdminTracesCount)
 	mux.HandleFunc("DELETE /api/v1/admin/traces/", h.HandleAdminTracesDelete)
 	mux.HandleFunc("DELETE /api/v1/admin/projects/", h.HandleAdminProjectsDelete)
+	mux.HandleFunc("GET /api/v1/admin/ops", h.HandleAdminOps)
 }
