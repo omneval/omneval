@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ import (
 type EvalRuleHandler struct {
 	DB            DBHandle
 	EvalRuleStore metadata.EvalRuleStore
+	PromptStore   metadata.PromptStore
 	SessionStore  SessionStore
 	ProjectResolver auth.ProjectResolver
 	// DefaultJudgeModel is the model used when the request omits judge_model.
@@ -50,6 +52,7 @@ type CreateEvalRuleRequest struct {
 	JudgeModel    string            `json:"judge_model"`
 	PromptName    string            `json:"prompt_name"`
 	PromptVersion int64             `json:"prompt_version"`
+	PromptLabel   string            `json:"prompt_label"`
 	SampleRate    float64           `json:"sample_rate"`
 	Enabled       bool              `json:"enabled"`
 	Filter        domain.EvalFilter `json:"filter"`
@@ -122,6 +125,32 @@ func (h *EvalRuleHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate that the judge prompt exists in the registry.
+	if req.PromptName != "" && h.PromptStore != nil {
+		// Check by label first if provided.
+		if req.PromptLabel != "" {
+			if _, err := h.PromptStore.GetPromptByLabel(r.Context(), projectID, req.PromptName, req.PromptLabel); err != nil {
+				http.Error(w, "prompt '"+req.PromptName+"' label '"+req.PromptLabel+"' not found", http.StatusBadRequest)
+				return
+			}
+		}
+		// Check by version if provided (>= 1).
+		if req.PromptVersion > 0 {
+			if _, err := h.PromptStore.GetPromptVersion(r.Context(), projectID, req.PromptName, req.PromptVersion); err != nil {
+				http.Error(w, "prompt '"+req.PromptName+"' version "+fmt.Sprintf("%d", req.PromptVersion)+" not found", http.StatusBadRequest)
+				return
+			}
+		}
+		// Validate the prompt name exists (at least one version).
+		if versions, err := h.PromptStore.ListPromptVersions(r.Context(), projectID, req.PromptName); err != nil {
+			http.Error(w, "prompt '"+req.PromptName+"' not found", http.StatusBadRequest)
+			return
+		} else if len(versions) == 0 {
+			http.Error(w, "prompt '"+req.PromptName+"' not found", http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Validate and default sample_rate.
 	sampleRate := req.SampleRate
 	if sampleRate < 0.0 || sampleRate > 1.0 {
@@ -142,6 +171,7 @@ func (h *EvalRuleHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		JudgeModel:    req.JudgeModel,
 		PromptName:    req.PromptName,
 		PromptVersion: req.PromptVersion,
+		PromptLabel:   req.PromptLabel,
 		Filter:        req.Filter,
 		SampleRate:    sampleRate,
 		Enabled:       enabled,

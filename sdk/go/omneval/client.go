@@ -177,11 +177,13 @@ type EvalRuleSummary struct {
 
 // CreateEvalRuleRequest is the body sent to POST /api/v1/eval-rules.
 type CreateEvalRuleRequest struct {
-	Name       string                 `json:"name"`
-	PromptName string                 `json:"prompt_name"`
-	JudgeModel string                 `json:"judge_model,omitempty"`
-	Filter     map[string]interface{} `json:"filter"`
-	SampleRate float64                `json:"sample_rate"`
+	Name          string                 `json:"name"`
+	PromptName    string                 `json:"prompt_name"`
+	PromptVersion int64                  `json:"prompt_version,omitempty"`
+	PromptLabel   string                 `json:"prompt_label,omitempty"`
+	JudgeModel    string                 `json:"judge_model,omitempty"`
+	Filter        map[string]interface{} `json:"filter"`
+	SampleRate    float64                `json:"sample_rate"`
 }
 
 // CreatePrompt creates a new prompt version via POST /api/v1/prompts.
@@ -361,6 +363,12 @@ func (c *Client) CreateEvalRule(name, promptName string, opts *CreateEvalRuleReq
 		}
 		if opts.SampleRate > 0 {
 			req.SampleRate = opts.SampleRate
+		}
+		if opts.PromptVersion > 0 {
+			req.PromptVersion = opts.PromptVersion
+		}
+		if opts.PromptLabel != "" {
+			req.PromptLabel = opts.PromptLabel
 		}
 	}
 

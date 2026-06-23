@@ -275,6 +275,12 @@ export class OmnevalClient {
     if (options?.judge_model) {
       payload.judge_model = options.judge_model;
     }
+    if (options?.prompt_version != null) {
+      payload.prompt_version = options.prompt_version;
+    }
+    if (options?.prompt_label != null) {
+      payload.prompt_label = options.prompt_label;
+    }
 
     const url = `${this.baseUrl}/api/v1/eval-rules`;
     const headers: Record<string, string> = { "Content-Type": "application/json" };

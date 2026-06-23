@@ -696,6 +696,40 @@ class TestCreateEvalRule:
         except ValueError as e:
             assert "prompt_name is required" in str(e)
 
+    @responses.activate
+    def test_create_eval_rule_includes_prompt_label(self):
+        """create_eval_rule sends prompt_label in the payload when provided."""
+        responses.add(
+            responses.POST,
+            "http://localhost:8080/api/v1/eval-rules",
+            json={
+                "rule_id": "rule-123",
+                "name": "helpfulness",
+                "judge_model": "gpt-4o-mini",
+                "prompt_name": "eval-prompt",
+                "prompt_version": 3,
+                "prompt_label": "production",
+                "filter": {},
+                "sample_rate": 1.0,
+                "enabled": True,
+            },
+            status=201,
+        )
+
+        client = OmnevalClient("http://localhost:8080", "oev_proj_test")
+        result = client.create_eval_rule(
+            "helpfulness",
+            "eval-prompt",
+            prompt_version=3,
+            prompt_label="production",
+        )
+
+        assert len(responses.calls) == 1
+        body = json.loads(responses.calls[0].request.body)
+        assert body["prompt_label"] == "production"
+        assert body["prompt_version"] == 3
+        assert result["prompt_label"] == "production"
+
 
 class TestGetPromptVersion:
     """Tests for OmnevalClient.get_prompt_version."""

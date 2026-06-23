@@ -518,7 +518,7 @@ describe("EvalRulesPage", () => {
 
     // FilterGroup renders a condition row with a condition type selector
     expect(screen.getByTestId("condition-row")).toBeInTheDocument();
-    expect(screen.getByRole("combobox")).toBeInTheDocument();
+    expect(screen.getByLabelText("Condition Type")).toBeInTheDocument();
   });
 
   it("renders the filter conditions section header", async () => {
@@ -547,12 +547,12 @@ describe("EvalRulesPage", () => {
     fireEvent.click(openNewRuleForm());
 
     // Set first condition: kind = llm
-    const kindSelect = screen.getByRole("combobox");
+    const kindSelect = screen.getByLabelText("Condition Type");
     fireEvent.change(kindSelect, { target: { value: "kind" } });
     await waitFor(() => {
       expect(screen.getByText("Kind Value")).toBeInTheDocument();
     });
-    const kindValueSelect = screen.getAllByRole("combobox")[1];
+    const kindValueSelect = screen.getByLabelText("Kind Value");
     fireEvent.change(kindValueSelect, { target: { value: "llm" } });
 
     // Add second condition – converts to AND group
@@ -562,8 +562,9 @@ describe("EvalRulesPage", () => {
     // The form now has two condition rows (AND group at depth 0)
     expect(screen.getAllByTestId("condition-row")).toHaveLength(2);
     // The second row should be empty (fresh condition)
-    const secondRowCombobox = screen.getAllByRole("combobox")[2];
-    expect(secondRowCombobox).toHaveValue("");
+    const conditionTypeSelectors = screen.getAllByLabelText("Condition Type");
+    expect(conditionTypeSelectors).toHaveLength(2);
+    expect(conditionTypeSelectors[1]).toHaveValue("");
   });
 
   it("sends grouped filter to preview endpoint when preview is clicked", async () => {
@@ -599,7 +600,7 @@ describe("EvalRulesPage", () => {
     fireEvent.click(openNewRuleForm());
 
     // Set model = gpt-4
-    const typeSelect = screen.getByRole("combobox");
+    const typeSelect = screen.getByLabelText("Condition Type");
     fireEvent.change(typeSelect, { target: { value: "model" } });
     await waitFor(() => {
       expect(screen.getByPlaceholderText(/gpt-4-turbo/)).toBeInTheDocument();
@@ -762,13 +763,8 @@ describe("EvalRulesPage", () => {
     const modelInput = screen.getByLabelText("Model") as HTMLInputElement;
     fireEvent.change(modelInput, { target: { value: "gpt-4" } });
 
-    // Set prompt name
-    const promptInputs = screen
-      .getAllByRole("textbox")
-      .filter((el) => el.getAttribute("placeholder")?.includes("judge-v1"));
-    if (promptInputs.length > 0) {
-      fireEvent.change(promptInputs[0], { target: { value: "judge-v1" } });
-    }
+    // Judge Prompt is now a registry picker (select); leaving it unselected
+    // is valid since prompt_name is optional in validation.
 
     // Click Create Rule
     const createBtn = screen.getByRole("button", { name: /create rule/i });
@@ -885,6 +881,185 @@ describe("EvalRulesPage", () => {
         body.filter.or != null ||
         body.filter.not != null;
       expect(hasCondition).toBe(true);
+    });
+  });
+
+  describe("judge prompt picker", () => {
+    const mockPrompts = [
+      { name: "judge-v1", latest_version: 3, labels: { production: 3, staging: 2, dev: 1 } },
+      { name: "cost-check", latest_version: 2, labels: { production: 2 } },
+      { name: "quality-assessor", latest_version: 5, labels: { production: 5, staging: 3, dev: 1 } },
+    ];
+
+    const resolveRules = (rules: any[]) =>
+      ({ ok: true, json: () => Promise.resolve({ rules }) } as Response);
+
+    const resolvePrompts = (prompts: typeof mockPrompts) =>
+      ({ ok: true, json: () => Promise.resolve(prompts) } as Response);
+
+    const renderWithMockedPrompts = () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        (input: RequestInfo | URL) => {
+          const url = typeof input === "string" ? input : input.toString();
+          if (url.includes("/api/v1/eval-rules") && !url.includes("/api/v1/eval-rules/")) {
+            return Promise.resolve(resolveRules([]));
+          }
+          if (url.includes("/api/v1/prompts")) {
+            return Promise.resolve(resolvePrompts(mockPrompts));
+          }
+          return Promise.resolve(resolveRules([]));
+        }
+      );
+      renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+    };
+
+    const openNewRuleForm = async () => {
+      await waitFor(() => {
+        expect(screen.getByText(/no eval rules yet/i)).toBeInTheDocument();
+      });
+      const buttons = screen.getAllByRole("button", { name: /new rule/i });
+      fireEvent.click(buttons[0]);
+    };
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("fetches prompts from the registry when creating a new rule", async () => {
+      renderWithMockedPrompts();
+      await openNewRuleForm();
+
+      await waitFor(() => {
+        expect(fetch).toHaveBeenCalledWith(
+          expect.stringContaining("/api/v1/prompts?project_id=proj-1")
+        );
+      });
+    });
+
+    it("renders the prompt picker as a select element with registry options", async () => {
+      renderWithMockedPrompts();
+      await openNewRuleForm();
+
+      // Wait for prompts to load and verify picker options are visible
+      await waitFor(() => {
+        expect(screen.getByText(/judge-v1 \(v3\)/)).toBeInTheDocument();
+      });
+
+      // All prompt options should be visible in the select
+      expect(screen.getByText(/judge-v1 \(v3\)/)).toBeInTheDocument();
+      expect(screen.getByText(/cost-check \(v2\)/)).toBeInTheDocument();
+      expect(screen.getByText(/quality-assessor \(v5\)/)).toBeInTheDocument();
+    });
+
+    it("shows a prompt label selector when a prompt is selected", async () => {
+      renderWithMockedPrompts();
+      await openNewRuleForm();
+
+      await waitFor(() => {
+        expect(screen.getByText(/judge-v1 \(v3\)/)).toBeInTheDocument();
+      });
+
+      // Find the judge prompt select by its label text
+      const judgePromptLabel = screen.getByText("Judge Prompt");
+      const promptSelect = judgePromptLabel.closest("div")?.querySelector("select") as HTMLSelectElement;
+      fireEvent.change(promptSelect, { target: { value: "judge-v1" } });
+
+      await waitFor(() => {
+        expect(screen.getByText("Prompt Label")).toBeInTheDocument();
+      });
+    });
+
+    it("updates version dropdown based on selected prompt's latest version", async () => {
+      renderWithMockedPrompts();
+      await openNewRuleForm();
+
+      await waitFor(() => {
+        expect(screen.getByText(/quality-assessor \(v5\)/)).toBeInTheDocument();
+      });
+
+      // Find the judge prompt select by its label text
+      const judgePromptLabel = screen.getByText("Judge Prompt");
+      const promptSelect = judgePromptLabel.closest("div")?.querySelector("select") as HTMLSelectElement;
+      fireEvent.change(promptSelect, { target: { value: "quality-assessor" } });
+
+      // Find the version dropdown by its label
+      const versionLabel = screen.getByText("Prompt Version");
+      const versionDiv = versionLabel.closest("div");
+      const versionSelect = versionDiv?.querySelector("select") as HTMLSelectElement;
+      // The latest version should be among the options
+      const options = Array.from(versionSelect?.options || []);
+      const hasV5 = options.some((opt) => opt.value === "5");
+      expect(hasV5).toBe(true);
+    });
+
+    it("prevents creating a rule when no prompt is selected (validation)", async () => {
+      renderWithMockedPrompts();
+      await openNewRuleForm();
+
+      // Wait for prompts to load (so validation can check against registry)
+      await waitFor(() => {
+        expect(screen.getByText(/judge-v1 \(v3\)/)).toBeInTheDocument();
+      });
+
+      // Try to create without selecting a prompt (promptName is still empty string)
+      const createButton = screen.getByRole("button", { name: /create rule/i });
+      fireEvent.click(createButton);
+
+      expect(fetch).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          method: "POST",
+        })
+      );
+    });
+
+    it("allows creating a rule with a selected prompt from the picker", async () => {
+      let postCalled = false;
+
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/v1/eval-rules") && !url.includes("/api/v1/eval-rules/")) {
+          if (init?.method === "POST") {
+            postCalled = true;
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({ rule_id: "new-rule" }) } as Response);
+          }
+          return Promise.resolve(resolveRules([]));
+        }
+        if (url.includes("/api/v1/prompts")) {
+          return Promise.resolve(resolvePrompts(mockPrompts));
+        }
+        return Promise.resolve(resolveRules([]));
+      });
+
+      renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+      await openNewRuleForm();
+
+      // Wait for prompts to be loaded and visible in the picker
+      await waitFor(() => {
+        expect(screen.getByText(/judge-v1 \(v3\)/)).toBeInTheDocument();
+      });
+
+      // Fill in rule name (required by validation) via placeholder text
+      const ruleNameInput = screen.getByPlaceholderText(/Production LLM Eval/);
+      fireEvent.change(ruleNameInput, { target: { value: "Test Rule" } });
+
+      // Find the judge prompt select by its label text
+      const judgePromptLabel = screen.getByText("Judge Prompt");
+      const promptSelect = judgePromptLabel.closest("div")?.querySelector("select") as HTMLSelectElement;
+
+      // Select a prompt and wait for state to flush
+      fireEvent.change(promptSelect, { target: { value: "judge-v1" } });
+      await new Promise((r) => setTimeout(r, 0));
+      await waitFor(() => {
+        expect(promptSelect.value).toBe("judge-v1");
+      });
+
+      const createButton = screen.getByRole("button", { name: /create rule/i });
+      fireEvent.click(createButton);
+
+      await waitFor(() => {
+        expect(postCalled).toBe(true);
+      });
     });
   });
 });

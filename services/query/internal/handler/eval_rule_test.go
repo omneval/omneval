@@ -1075,3 +1075,374 @@ func TestEvalRuleHandler_HandlePreview_DBNil(t *testing.T) {
 		t.Errorf("match_count_24h: got %d, want 0 (no DB)", resp.MatchCount24h)
 	}
 }
+
+// ---- Prompt validation tests ----
+
+// mockPromptStore is a minimal PromptStore implementation for tests.
+type mockPromptStore struct {
+	getPromptVersion func(ctx context.Context, projectID, name string, version int64) (*domain.PromptVersion, error)
+	getByLabel       func(ctx context.Context, projectID, name, label string) (*domain.PromptVersion, error)
+	listVersions     func(ctx context.Context, projectID, name string) ([]*domain.PromptVersion, error)
+}
+
+func (m *mockPromptStore) CreatePromptVersion(ctx context.Context, pv *domain.PromptVersion) error {
+	return nil
+}
+func (m *mockPromptStore) GetPromptVersion(ctx context.Context, projectID, name string, version int64) (*domain.PromptVersion, error) {
+	if m.getPromptVersion != nil {
+		return m.getPromptVersion(ctx, projectID, name, version)
+	}
+	return nil, nil
+}
+func (m *mockPromptStore) GetPromptByLabel(ctx context.Context, projectID, name, label string) (*domain.PromptVersion, error) {
+	if m.getByLabel != nil {
+		return m.getByLabel(ctx, projectID, name, label)
+	}
+	return nil, nil
+}
+func (m *mockPromptStore) ListPromptNames(ctx context.Context, projectID string) ([]string, error) {
+	return nil, nil
+}
+func (m *mockPromptStore) ListPromptVersions(ctx context.Context, projectID, name string) ([]*domain.PromptVersion, error) {
+	if m.listVersions != nil {
+		return m.listVersions(ctx, projectID, name)
+	}
+	return nil, nil
+}
+func (m *mockPromptStore) SetPromptLabel(ctx context.Context, label *domain.PromptLabel) error {
+	return nil
+}
+
+func TestEvalRuleHandler_CreateEvalRule_PromptValidation_PromptNotFound(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	promptStore := &mockPromptStore{
+		getPromptVersion: func(ctx context.Context, projectID, name string, version int64) (*domain.PromptVersion, error) {
+			return nil, errors.New("prompt not found")
+		},
+	}
+	handler := &EvalRuleHandler{
+		EvalRuleStore: store,
+		PromptStore:   promptStore,
+		SessionStore:  &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
+		"name": "my-eval",
+		"judge_model": "gpt-4",
+		"prompt_name": "nonexistent-prompt",
+		"sample_rate": 1.0
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+func TestEvalRuleHandler_CreateEvalRule_PromptValidation_ValidPrompt(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	promptStore := &mockPromptStore{
+		getPromptVersion: func(ctx context.Context, projectID, name string, version int64) (*domain.PromptVersion, error) {
+			return &domain.PromptVersion{
+				Name:    "judge-v1",
+				Version: 1,
+			}, nil
+		},
+		listVersions: func(ctx context.Context, projectID, name string) ([]*domain.PromptVersion, error) {
+			return []*domain.PromptVersion{{Name: "judge-v1", Version: 1}}, nil
+		},
+	}
+	handler := &EvalRuleHandler{
+		EvalRuleStore: store,
+		PromptStore:   promptStore,
+		SessionStore:  &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
+		"name": "my-eval",
+		"judge_model": "gpt-4",
+		"prompt_name": "judge-v1",
+		"sample_rate": 1.0
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreate(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+}
+
+func TestEvalRuleHandler_CreateEvalRule_PromptValidation_InvalidVersion(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	promptStore := &mockPromptStore{
+		getPromptVersion: func(ctx context.Context, projectID, name string, version int64) (*domain.PromptVersion, error) {
+			return nil, errors.New("version not found")
+		},
+	}
+	handler := &EvalRuleHandler{
+		EvalRuleStore: store,
+		PromptStore:   promptStore,
+		SessionStore:  &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
+		"name": "my-eval",
+		"judge_model": "gpt-4",
+		"prompt_name": "judge-v1",
+		"prompt_version": 999,
+		"sample_rate": 1.0
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+func TestEvalRuleHandler_CreateEvalRule_PromptValidation_EmptyPromptNameSkipsValidation(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	promptStore := newFakePromptStore()
+	handler := &EvalRuleHandler{
+		EvalRuleStore: store,
+		PromptStore:   promptStore,
+		SessionStore:  &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	// No prompt_name means validation should be skipped, so it still succeeds.
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
+		"name": "my-eval",
+		"judge_model": "gpt-4",
+		"sample_rate": 1.0
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreate(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+}
+
+func TestEvalRuleHandler_CreateEvalRule_InvalidPromptLabel(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	promptStore := newFakePromptStore()
+	// Add a valid prompt but NO label "nonexistent-label"
+	promptStore.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v1-id", ProjectID: "test-proj", Name: "judge-v1", Version: 1,
+		Template: "judge template",
+		ModelConfig: domain.PromptModelConfig{
+			Model:       "gpt-4",
+			Temperature: 0.1,
+			MaxTokens:   100,
+		},
+	})
+	// Note: no SetPromptLabel for "nonexistent-label"
+
+	handler := &EvalRuleHandler{
+		EvalRuleStore: store,
+		PromptStore:   promptStore,
+		SessionStore:  &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	// Invalid prompt_label should return 400
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
+		"name": "label-eval",
+		"judge_model": "gpt-4",
+		"prompt_name": "judge-v1",
+		"prompt_label": "nonexistent-label",
+		"sample_rate": 0.5,
+		"filter": {}
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Invalid prompt_label: status: got %d, want %d\nbody: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+func TestEvalRuleHandler_CreateEvalRule_ValidPromptLabel(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	promptStore := newFakePromptStore()
+	// Add a valid prompt with label
+	promptStore.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v1-id", ProjectID: "test-proj", Name: "judge-v1", Version: 1,
+		Template: "judge template",
+		ModelConfig: domain.PromptModelConfig{
+			Model:       "gpt-4",
+			Temperature: 0.1,
+			MaxTokens:   100,
+		},
+	})
+	promptStore.SetPromptLabel(context.Background(), &domain.PromptLabel{
+		ProjectID: "test-proj", Name: "judge-v1", Label: "production", Version: 1,
+	})
+
+	handler := &EvalRuleHandler{
+		EvalRuleStore: store,
+		PromptStore:   promptStore,
+		SessionStore:  &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	// Valid prompt_label should succeed
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
+		"name": "label-eval",
+		"judge_model": "gpt-4",
+		"prompt_name": "judge-v1",
+		"prompt_label": "production",
+		"sample_rate": 0.5,
+		"filter": {}
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreate(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("Valid prompt_label: status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp domain.EvalRule
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.PromptLabel != "production" {
+		t.Errorf("prompt_label: got %q, want %q", resp.PromptLabel, "production")
+	}
+	if resp.PromptName != "judge-v1" {
+		t.Errorf("prompt_name: got %q, want %q", resp.PromptName, "judge-v1")
+	}
+}
+
+func TestEvalRuleHandler_CreateEvalRule_ValidPromptVersion(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	promptStore := newFakePromptStore()
+	// Add prompt version 2 (not version 1)
+	promptStore.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v2-id", ProjectID: "test-proj", Name: "judge-v1", Version: 2,
+		Template: "judge template v2",
+		ModelConfig: domain.PromptModelConfig{
+			Model:       "gpt-4",
+			Temperature: 0.1,
+			MaxTokens:   100,
+		},
+	})
+
+	handler := &EvalRuleHandler{
+		EvalRuleStore: store,
+		PromptStore:   promptStore,
+		SessionStore:  &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	// Valid prompt_version should succeed
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
+		"name": "version-eval",
+		"judge_model": "gpt-4",
+		"prompt_name": "judge-v1",
+		"prompt_version": 2,
+		"sample_rate": 0.5,
+		"filter": {}
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreate(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("Valid prompt_version: status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp domain.EvalRule
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.PromptVersion != 2 {
+		t.Errorf("prompt_version: got %d, want 2", resp.PromptVersion)
+	}
+}
+
+func TestEvalRuleHandler_CreateEvalRule_InvalidPromptVersion(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	promptStore := newFakePromptStore()
+	// Only has version 1
+	promptStore.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v1-id", ProjectID: "test-proj", Name: "judge-v1", Version: 1,
+		Template: "judge template v1",
+		ModelConfig: domain.PromptModelConfig{
+			Model:       "gpt-4",
+			Temperature: 0.1,
+			MaxTokens:   100,
+		},
+	})
+
+	handler := &EvalRuleHandler{
+		EvalRuleStore: store,
+		PromptStore:   promptStore,
+		SessionStore:  &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	// Invalid prompt_version should return 400
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
+		"name": "version-eval",
+		"judge_model": "gpt-4",
+		"prompt_name": "judge-v1",
+		"prompt_version": 999,
+		"sample_rate": 0.5,
+		"filter": {}
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Invalid prompt_version: status: got %d, want %d\nbody: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+func TestEvalRuleHandler_CreateEvalRule_PromptLabelAndVersionBothGiven(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	promptStore := newFakePromptStore()
+	// Add prompt with version 2 and label "production" pointing to version 2
+	promptStore.CreatePromptVersion(context.Background(), &domain.PromptVersion{
+		VersionID: "v2-id", ProjectID: "test-proj", Name: "judge-v1", Version: 2,
+		Template: "judge template v2",
+		ModelConfig: domain.PromptModelConfig{
+			Model:       "gpt-4",
+			Temperature: 0.1,
+			MaxTokens:   100,
+		},
+	})
+	promptStore.SetPromptLabel(context.Background(), &domain.PromptLabel{
+		ProjectID: "test-proj", Name: "judge-v1", Label: "production", Version: 2,
+	})
+
+	handler := &EvalRuleHandler{
+		EvalRuleStore: store,
+		PromptStore:   promptStore,
+		SessionStore:  &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	// Both label and version given — both must validate, version takes precedence in the rule
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/eval-rules", strings.NewReader(`{
+		"name": "both-eval",
+		"judge_model": "gpt-4",
+		"prompt_name": "judge-v1",
+		"prompt_version": 2,
+		"prompt_label": "production",
+		"sample_rate": 0.5,
+		"filter": {}
+	}`))
+	w := httptest.NewRecorder()
+	handler.HandleCreate(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("Both label and version: status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp domain.EvalRule
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.PromptVersion != 2 {
+		t.Errorf("prompt_version: got %d, want 2", resp.PromptVersion)
+	}
+	if resp.PromptLabel != "production" {
+		t.Errorf("prompt_label: got %q, want %q", resp.PromptLabel, "production")
+	}
+}

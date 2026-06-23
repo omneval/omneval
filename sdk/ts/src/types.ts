@@ -95,6 +95,7 @@ export interface EvalRule {
   judge_model: string;
   prompt_name: string;
   prompt_version: number;
+  prompt_label?: string;
   filter: Record<string, unknown>;
   sample_rate: number;
   enabled: boolean;
@@ -109,4 +110,8 @@ export interface CreateEvalRuleOptions {
   judge_model?: string;
   /** Fraction of matching spans to evaluate (0.0–1.0). Defaults to 1.0. */
   sample_rate?: number;
+  /** Explicit prompt version number (defaults to production label resolution). */
+  prompt_version?: number;
+  /** Prompt label (e.g. "production", "staging") to reference a specific version. */
+  prompt_label?: string;
 }
