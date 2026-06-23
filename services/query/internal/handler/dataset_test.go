@@ -665,7 +665,7 @@ func TestDatasetHandler_AddItemsBatch_SkipsEmptyInput(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/datasets/"+ds.DatasetID+"/items/batch", strings.NewReader(`{
 		"items": [
 			{"input": "valid", "expected_output": "yes"},
-			{"input": "", "expected_output": "no"},
+			{"input": "", "expected_output": "no", "source_span_id": "span-skipped"},
 			{"input": "also valid"}
 		]
 	}`))
@@ -684,6 +684,18 @@ func TestDatasetHandler_AddItemsBatch_SkipsEmptyInput(t *testing.T) {
 	// Only 2 items created (empty input skipped)
 	if resp.Created != 2 {
 		t.Errorf("created count: got %d, want 2", resp.Created)
+	}
+
+	// The skipped item must be identified by source_span_id and reason so
+	// callers can tell the user which spans were dropped and why (#269).
+	if len(resp.Skipped) != 1 {
+		t.Fatalf("skipped count: got %d, want 1\nbody: %+v", len(resp.Skipped), resp)
+	}
+	if resp.Skipped[0].SourceSpanID != "span-skipped" {
+		t.Errorf("skipped source_span_id: got %q, want %q", resp.Skipped[0].SourceSpanID, "span-skipped")
+	}
+	if resp.Skipped[0].Reason == "" {
+		t.Error("skipped reason should not be empty")
 	}
 
 	// Verify only 2 items exist in store

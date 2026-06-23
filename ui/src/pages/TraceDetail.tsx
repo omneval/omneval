@@ -536,38 +536,42 @@ interface FormattedChatMessagesProps {
 function FormattedChatMessages({ messages, toolCalls }: FormattedChatMessagesProps) {
   return (
     <div>
-      <div className="text-xs font-medium text-omneval-text-muted mb-2 uppercase tracking-wider">
-        Messages
-      </div>
-      <div
-        className="rounded-md border overflow-hidden"
-        style={{
-          backgroundColor: colors.backgrounds.abyssBlack,
-          borderColor: colors.backgrounds.caveWall,
-        }}
-      >
-        {messages.map((msg, i) => (
+      {messages.length > 0 && (
+        <>
+          <div className="text-xs font-medium text-omneval-text-muted mb-2 uppercase tracking-wider">
+            Messages
+          </div>
           <div
-            key={i}
-            className="px-3 py-2 text-xs"
+            className="rounded-md border overflow-hidden"
             style={{
-              borderBottom: i < messages.length - 1
-                ? `1px solid ${colors.backgrounds.caveWall}`
-                : undefined,
+              backgroundColor: colors.backgrounds.abyssBlack,
+              borderColor: colors.backgrounds.caveWall,
             }}
           >
-            <span
-              className="font-semibold uppercase tracking-wider mr-2"
-              style={{ color: ROLE_COLORS[msg.role] ?? colors.typography.ashGrey, fontSize: "0.65rem" }}
-            >
-              {msg.role}
-            </span>
-            <span className="text-omneval-text-pure">
-              {msg.content}
-            </span>
+            {messages.map((msg, i) => (
+              <div
+                key={i}
+                className="px-3 py-2 text-xs"
+                style={{
+                  borderBottom: i < messages.length - 1
+                    ? `1px solid ${colors.backgrounds.caveWall}`
+                    : undefined,
+                }}
+              >
+                <span
+                  className="font-semibold uppercase tracking-wider mr-2"
+                  style={{ color: ROLE_COLORS[msg.role] ?? colors.typography.ashGrey, fontSize: "0.65rem" }}
+                >
+                  {msg.role}
+                </span>
+                <span className="text-omneval-text-pure">
+                  {msg.content}
+                </span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
 
       {/* Tool calls */}
       {toolCalls != null && toolCalls.length > 0 && (
@@ -794,7 +798,8 @@ function SlideInDetailPanel({
   }, [span.attributes]);
 
   const hasChatContent =
-    extracted.messages != null && extracted.messages.length > 0;
+    (extracted.messages != null && extracted.messages.length > 0) ||
+    (extracted.toolCalls != null && extracted.toolCalls.length > 0);
 
   return (
     <>
@@ -954,9 +959,9 @@ function SlideInDetailPanel({
           )}
 
           {/* ── Chat view: formatted messages ── */}
-          {hasChatContent && activeTab === "chat" && extracted.messages != null && (
+          {hasChatContent && activeTab === "chat" && (
             <FormattedChatMessages
-              messages={extracted.messages}
+              messages={extracted.messages ?? []}
               toolCalls={extracted.toolCalls}
             />
           )}

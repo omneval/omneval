@@ -835,6 +835,26 @@ func (s *Store) CreateDatasetItem(ctx context.Context, item *domain.DatasetItem)
 	return nil
 }
 
+func (s *Store) CreateDatasetItemsBatch(ctx context.Context, items []*domain.DatasetItem) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("postgres: begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	for _, item := range items {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO dataset_items (item_id, dataset_id, source_span_id, input, expected_output, created_at)
+			 VALUES ($1, $2, $3, $4, $5, $6)`,
+			item.ItemID, item.DatasetID, item.SourceSpanID, item.Input, item.ExpectedOutput, item.CreatedAt,
+		); err != nil {
+			return fmt.Errorf("postgres: create dataset items batch: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (s *Store) ListDatasetItems(ctx context.Context, datasetID string) ([]*domain.DatasetItem, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT item_id, dataset_id, source_span_id, input, expected_output, created_at

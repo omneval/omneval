@@ -686,6 +686,9 @@ func (f *fakeAdminStore) DeleteDataset(_ context.Context, _ string) error { retu
 func (f *fakeAdminStore) CreateDatasetItem(_ context.Context, _ *domain.DatasetItem) error {
 	return nil
 }
+func (f *fakeAdminStore) CreateDatasetItemsBatch(_ context.Context, _ []*domain.DatasetItem) error {
+	return nil
+}
 func (f *fakeAdminStore) ListDatasetItems(_ context.Context, _ string) ([]*domain.DatasetItem, error) {
 	return nil, nil
 }

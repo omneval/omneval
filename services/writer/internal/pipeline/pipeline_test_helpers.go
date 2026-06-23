@@ -146,6 +146,9 @@ func (f *fakeMetaStore) DeleteDataset(ctx context.Context, datasetID string) err
 func (f *fakeMetaStore) CreateDatasetItem(ctx context.Context, item *domain.DatasetItem) error {
 	return nil
 }
+func (f *fakeMetaStore) CreateDatasetItemsBatch(ctx context.Context, items []*domain.DatasetItem) error {
+	return nil
+}
 func (f *fakeMetaStore) ListDatasetItems(ctx context.Context, datasetID string) ([]*domain.DatasetItem, error) {
 	return nil, nil
 }

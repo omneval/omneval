@@ -969,6 +969,27 @@ func (s *Store) CreateDatasetItem(ctx context.Context, item *domain.DatasetItem)
 	return nil
 }
 
+func (s *Store) CreateDatasetItemsBatch(ctx context.Context, items []*domain.DatasetItem) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("sqlite: begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, item := range items {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO dataset_items (item_id, dataset_id, source_span_id, input, expected_output, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			item.ItemID, item.DatasetID, item.SourceSpanID, item.Input, item.ExpectedOutput, now,
+		); err != nil {
+			return fmt.Errorf("sqlite: create dataset items batch: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (s *Store) ListDatasetItems(ctx context.Context, datasetID string) ([]*domain.DatasetItem, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT item_id, dataset_id, source_span_id, input, expected_output, created_at

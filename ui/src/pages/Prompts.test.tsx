@@ -550,6 +550,258 @@ describe("PromptsPage", () => {
     });
   });
 
+  // Regression tests for #270: #241's backend chat-type support
+  // (PromptKind/PromptMessage, InterpolateChat, prompt.go handler) was
+  // never wired up in the UI — there was no type selector, no
+  // multi-message editor, and the version history had no branch to
+  // render a chat-type version's messages.
+  describe("chat-type prompt support", () => {
+    it("shows a Text/Chat type selector in the New Prompt form, defaulting to Text", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        (input: RequestInfo | URL) => {
+          const url = typeof input === "string" ? input : input.toString();
+          if (url.includes("/api/v1/prompts") && !url.includes("/api/v1/prompts/")) {
+            return Promise.resolve(mockListPrompts([]));
+          }
+          if (url.includes("/api/v1/models")) {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve(["gpt-4"]) } as Response);
+          }
+          return Promise.resolve({ ok: false } as Response);
+        }
+      );
+      renderWithToast(<PromptsPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("+ New Prompt")).toHaveLength(2);
+      });
+      fireEvent.click(screen.getAllByText("+ New Prompt")[0]);
+
+      await screen.findByLabelText("Prompt Name");
+
+      const textRadio = screen.getByRole("radio", { name: "Text" });
+      const chatRadio = screen.getByRole("radio", { name: "Chat" });
+      expect(textRadio).toBeChecked();
+      expect(chatRadio).not.toBeChecked();
+
+      // Flat template textarea is the default view.
+      expect(screen.getByPlaceholderText(/Hello.*{{name}}/)).toBeInTheDocument();
+    });
+
+    it("switches to a multi-message editor when Chat is selected", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        (input: RequestInfo | URL) => {
+          const url = typeof input === "string" ? input : input.toString();
+          if (url.includes("/api/v1/prompts") && !url.includes("/api/v1/prompts/")) {
+            return Promise.resolve(mockListPrompts([]));
+          }
+          if (url.includes("/api/v1/models")) {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve(["gpt-4"]) } as Response);
+          }
+          return Promise.resolve({ ok: false } as Response);
+        }
+      );
+      renderWithToast(<PromptsPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("+ New Prompt")).toHaveLength(2);
+      });
+      fireEvent.click(screen.getAllByText("+ New Prompt")[0]);
+      await screen.findByLabelText("Prompt Name");
+
+      fireEvent.click(screen.getByRole("radio", { name: "Chat" }));
+
+      // Flat template textarea is gone, replaced by a message editor.
+      expect(screen.queryByPlaceholderText(/Hello.*{{name}}/)).not.toBeInTheDocument();
+      expect(screen.getByText("+ Add message")).toBeInTheDocument();
+      // One message row exists by default.
+      expect(screen.getAllByPlaceholderText("Message content...")).toHaveLength(1);
+    });
+
+    it("submits a chat-type prompt with kind and messages instead of template", async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = typeof input === "string" ? input : input.toString();
+          if (url.includes("/api/v1/prompts") && !url.includes("/api/v1/prompts/")) {
+            if (init?.method === "POST") {
+              capturedBody = JSON.parse(init.body as string);
+            }
+            return Promise.resolve(mockListPrompts([]));
+          }
+          if (url.includes("/api/v1/models")) {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve(["gpt-4"]) } as Response);
+          }
+          return Promise.resolve({ ok: false } as Response);
+        }
+      );
+      renderWithToast(<PromptsPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("+ New Prompt")).toHaveLength(2);
+      });
+      fireEvent.click(screen.getAllByText("+ New Prompt")[0]);
+      await screen.findByLabelText("Prompt Name");
+
+      fireEvent.change(screen.getByLabelText("Prompt Name"), { target: { value: "chat-prompt" } });
+      fireEvent.click(screen.getByRole("radio", { name: "Chat" }));
+
+      // Fill the default message row.
+      const roleSelects = screen.getAllByLabelText(/Message \d+ role/i);
+      fireEvent.change(roleSelects[0], { target: { value: "system" } });
+      const contentBoxes = screen.getAllByPlaceholderText("Message content...");
+      fireEvent.change(contentBoxes[0], { target: { value: "You are helpful." } });
+
+      // Add a second message.
+      fireEvent.click(screen.getByText("+ Add message"));
+      const contentBoxes2 = screen.getAllByPlaceholderText("Message content...");
+      fireEvent.change(contentBoxes2[1], { target: { value: "Hello {{name}}" } });
+      const roleSelects2 = screen.getAllByLabelText(/Message \d+ role/i);
+      fireEvent.change(roleSelects2[1], { target: { value: "user" } });
+
+      fireEvent.click(screen.getByRole("button", { name: /Create/ }));
+
+      await waitFor(() => {
+        expect(capturedBody).not.toBeNull();
+      });
+
+      expect(capturedBody!.kind).toBe("chat");
+      expect(capturedBody!.messages).toEqual([
+        { role: "system", content: "You are helpful." },
+        { role: "user", content: "Hello {{name}}" },
+      ]);
+      expect(capturedBody!.template).toBeUndefined();
+    });
+
+    it("renders a chat-type version's message list in version history instead of the template", async () => {
+      const chatVersions = [
+        {
+          version_id: "v1-id",
+          project_id: "proj-1",
+          name: "chatty",
+          version: 1,
+          kind: "chat",
+          messages: [
+            { role: "system", content: "You are concise." },
+            { role: "user", content: "Summarize {{text}}" },
+          ],
+          template: "",
+          model: "gpt-4",
+          temperature: 0.2,
+          max_tokens: 256,
+          created_at: "2026-05-10T10:00:00Z",
+        },
+      ];
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        (input: RequestInfo | URL) => {
+          const url = typeof input === "string" ? input : input.toString();
+          if (url.includes("/api/v1/prompts") && !url.includes("/api/v1/prompts/")) {
+            return Promise.resolve(mockListPrompts([
+              { name: "chatty", latest_version: 1, labels: {} },
+            ]));
+          }
+          if (url.includes("/api/v1/prompts/chatty/versions")) {
+            return Promise.resolve({
+              ok: true,
+              json: () => Promise.resolve({ name: "chatty", versions: chatVersions, count: 1 }),
+            } as Response);
+          }
+          return Promise.resolve({ ok: false } as Response);
+        }
+      );
+      renderWithToast(<PromptsPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("chatty")).toBeInTheDocument();
+      });
+
+      const expandButtons = screen.getAllByRole("button");
+      const chevronButtons = expandButtons.filter((btn) => btn.querySelector("svg") !== null);
+      fireEvent.click(chevronButtons[0]);
+
+      await waitFor(() => {
+        expect(screen.getByText("Version 1")).toBeInTheDocument();
+      });
+
+      // Message list rendered instead of a flat template block.
+      expect(screen.getByText("You are concise.")).toBeInTheDocument();
+      expect(screen.getByText("Summarize {{text}}")).toBeInTheDocument();
+      expect(screen.getByText("system", { exact: false })).toBeInTheDocument();
+    });
+
+    it("compares two chat-type versions in the diff panel without crashing", async () => {
+      const chatVersions = [
+        {
+          version_id: "v1-id",
+          project_id: "proj-1",
+          name: "chatty",
+          version: 1,
+          kind: "chat",
+          messages: [{ role: "system", content: "You are concise." }],
+          template: "",
+          model: "gpt-4",
+          temperature: 0.2,
+          max_tokens: 256,
+          created_at: "2026-05-10T10:00:00Z",
+        },
+        {
+          version_id: "v2-id",
+          project_id: "proj-1",
+          name: "chatty",
+          version: 2,
+          kind: "chat",
+          messages: [
+            { role: "system", content: "You are concise." },
+            { role: "user", content: "Summarize {{text}}" },
+          ],
+          template: "",
+          model: "gpt-4",
+          temperature: 0.2,
+          max_tokens: 256,
+          created_at: "2026-05-12T10:00:00Z",
+        },
+      ];
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        (input: RequestInfo | URL) => {
+          const url = typeof input === "string" ? input : input.toString();
+          if (url.includes("/api/v1/prompts") && !url.includes("/api/v1/prompts/")) {
+            return Promise.resolve(mockListPrompts([
+              { name: "chatty", latest_version: 2, labels: {} },
+            ]));
+          }
+          if (url.includes("/api/v1/prompts/chatty/versions")) {
+            return Promise.resolve({
+              ok: true,
+              json: () => Promise.resolve({ name: "chatty", versions: chatVersions, count: 2 }),
+            } as Response);
+          }
+          return Promise.resolve({ ok: false } as Response);
+        }
+      );
+      renderWithToast(<PromptsPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("chatty")).toBeInTheDocument();
+      });
+
+      const expandButtons = screen.getAllByRole("button");
+      const chevronButtons = expandButtons.filter((btn) => btn.querySelector("svg") !== null);
+      fireEvent.click(chevronButtons[0]);
+
+      await waitFor(() => {
+        expect(screen.getByText("Compare versions")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("Compare versions"));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Compare: chatty/)).toBeInTheDocument();
+      });
+
+      // The added user message line should appear in the rendered diff.
+      expect(screen.getByText(/user: Summarize \{\{text\}\}/)).toBeInTheDocument();
+    });
+  });
+
   it("shows Compare versions button is hidden when only one version exists", async () => {
     const singleVersion: typeof mockVersionsData = [
       {

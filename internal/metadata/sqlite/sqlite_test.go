@@ -771,6 +771,38 @@ func TestDatasetItems_CreateAndList(t *testing.T) {
 	}
 }
 
+// TestDatasetItemsBatch_RollsBackOnError is a regression test for #269:
+// the bulk add-to-dataset path must commit all-or-nothing so a mid-batch
+// store error never leaves a partial set of items committed.
+func TestDatasetItemsBatch_RollsBackOnError(t *testing.T) {
+	s, _ := openTestStore(t)
+	defer s.Close()
+
+	s.CreateDataset(context.Background(), &domain.Dataset{DatasetID: "ds-1", ProjectID: "proj-1", Name: "Set"})
+	// Pre-existing item occupies "item-2"'s ID so the batch insert below
+	// hits a PRIMARY KEY conflict partway through.
+	s.CreateDatasetItem(context.Background(), &domain.DatasetItem{ItemID: "item-2", DatasetID: "ds-1", Input: "existing"})
+
+	err := s.CreateDatasetItemsBatch(context.Background(), []*domain.DatasetItem{
+		{ItemID: "item-1", DatasetID: "ds-1", Input: "first"},
+		{ItemID: "item-2", DatasetID: "ds-1", Input: "conflict"},
+	})
+	if err == nil {
+		t.Fatal("expected error from duplicate item_id, got nil")
+	}
+
+	items, err := s.ListDatasetItems(context.Background(), "ds-1")
+	if err != nil {
+		t.Fatalf("list dataset items: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected batch to roll back leaving only the pre-existing item, got %d items: %v", len(items), items)
+	}
+	if items[0].ItemID != "item-2" || items[0].Input != "existing" {
+		t.Errorf("unexpected surviving item: %v", items[0])
+	}
+}
+
 func TestDatasetRun_CreateAndGet(t *testing.T) {
 	s, _ := openTestStore(t)
 	defer s.Close()

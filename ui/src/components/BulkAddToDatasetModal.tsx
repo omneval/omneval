@@ -105,7 +105,17 @@ export default function BulkAddToDatasetModal({
         },
       );
       if (res.ok) {
-        onSuccess();
+        const data: { created?: number; skipped?: { source_span_id?: string; reason: string }[] } =
+          await res.json();
+        const createdCount = data.created ?? 0;
+        if (createdCount < items.length) {
+          const skippedCount = data.skipped?.length ?? items.length - createdCount;
+          setError(
+            `Added ${createdCount} of ${items.length} spans — ${skippedCount} skipped (no input)`,
+          );
+        } else {
+          onSuccess();
+        }
       } else {
         const text = await res.text();
         setError(text || "Failed to save to dataset");

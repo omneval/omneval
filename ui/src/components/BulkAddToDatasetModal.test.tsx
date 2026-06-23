@@ -237,6 +237,66 @@ describe("BulkAddToDatasetModal", () => {
     });
   });
 
+  // Regression test for #269: the modal previously called onSuccess()
+  // whenever the HTTP request itself succeeded (res.ok), even if the
+  // server only created some of the requested items (e.g. spans with
+  // empty input get silently skipped server-side). It must check the
+  // `created` count against the number of spans requested and surface a
+  // partial-save message instead of reporting blanket success.
+  it("surfaces a partial-save message and does not call onSuccess when fewer items were created than requested", async () => {
+    let onSuccessCalled = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, _init) => {
+      if (String(url).includes("/api/v1/datasets") && !String(url).includes("/items")) {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              datasets: [
+                { dataset_id: "ds-1", name: "Target DS", item_count: 0 },
+              ],
+            }),
+        } as Response;
+      }
+      if (String(url).includes("/items/batch")) {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              created: 2,
+              skipped: [{ source_span_id: "span-3", reason: "empty input" }],
+            }),
+        } as Response;
+      }
+      return { ok: true, json: () => Promise.resolve({ spans: [], next: "", limit: 100 }) } as Response;
+    });
+
+    renderModal({
+      onSuccess: () => {
+        onSuccessCalled = true;
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "Target DS (0 items)" })).toBeInTheDocument();
+    });
+
+    const select = screen.getByRole("combobox");
+    await act(async () => {
+      fireEvent.change(select, { target: { value: "ds-1" } });
+    });
+
+    const saveBtn = screen.getByRole("button", { name: /Save/i });
+    await act(async () => {
+      fireEvent.click(saveBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Added 2 of 3 spans — 1 skipped (no input)")).toBeInTheDocument();
+    });
+
+    expect(onSuccessCalled).toBe(false);
+  });
+
   it("shows no datasets message when there are none", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,

@@ -552,6 +552,24 @@ func (f *FakeMetadataStore) CreateDatasetItem(ctx context.Context, item *domain.
 	return nil
 }
 
+// CreateDatasetItemsBatch inserts all items, or none if any item_id already
+// exists, mirroring the all-or-nothing transaction semantics of the real
+// stores (a duplicate item_id is the in-memory equivalent of a PRIMARY KEY
+// conflict rolling back the batch).
+func (f *FakeMetadataStore) CreateDatasetItemsBatch(ctx context.Context, items []*domain.DatasetItem) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, item := range items {
+		if _, exists := f.datasetItems[item.ItemID]; exists {
+			return fmt.Errorf("fake: duplicate item_id %q", item.ItemID)
+		}
+	}
+	for _, item := range items {
+		f.datasetItems[item.ItemID] = item
+	}
+	return nil
+}
+
 func (f *FakeMetadataStore) ListDatasetItems(ctx context.Context, datasetID string) ([]*domain.DatasetItem, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
