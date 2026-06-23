@@ -96,6 +96,15 @@ interface ConversationListResponse {
 
 // ── Observation Level Pills ────────────────────────────────────────
 
+// Full label for each span kind — used for tooltips and aria-labels.
+const SPAN_KIND_LABELS: Record<string, string> = {
+  llm: "LLM",
+  tool: "Tool",
+  agent: "Agent",
+  chain: "Chain",
+  internal: "Internal",
+};
+
 interface ObservationPillsProps {
   kindCounts?: Record<string, number>;
 }
@@ -105,19 +114,27 @@ function ObservationPills({ kindCounts }: ObservationPillsProps) {
 
   return (
     <div className="flex items-center gap-1 flex-wrap">
-      {Object.entries(kindCounts).map(([kind, count]) => (
-        <span
-          key={kind}
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-          style={{
-            background: colors.toRgba(colors.accents.emberFlare, 0.13),
-            color: colors.accents.softGlow,
-            border: `1px solid ${colors.toRgba(colors.accents.emberFlare, 0.27)}`,
-          }}
-        >
-          {kind.slice(0, 3).toUpperCase()} {count}
-        </span>
-      ))}
+      {Object.entries(kindCounts).map(([kind, count]) => {
+        const label = SPAN_KIND_LABELS[kind] ?? kind.slice(0, 3).toUpperCase();
+        const displayName = `${label} ${count}`;
+        return (
+          <span
+            key={kind}
+            role="status"
+            tabIndex={0}
+            title={displayName}
+            aria-label={displayName}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+            style={{
+              background: colors.toRgba(colors.accents.emberFlare, 0.13),
+              color: colors.accents.softGlow,
+              border: `1px solid ${colors.toRgba(colors.accents.emberFlare, 0.27)}`,
+            }}
+          >
+            {kind.slice(0, 3).toUpperCase()} {count}
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -655,13 +672,13 @@ function TableCellRenderer({
     case "input":
       return (
         <div key={col.key} className="max-w-[200px] text-omneval-text-muted text-xs font-mono">
-          {span.input ? formatJsonPreview(span.input, 40) : "\u2014"}
+          {span.input ? formatJsonPreview(span.input, 40) : "—"}
         </div>
       );
     case "output":
       return (
         <div key={col.key} className="max-w-[200px] text-omneval-text-muted text-xs font-mono">
-          {span.output ? formatJsonPreview(span.output, 40) : "\u2014"}
+          {span.output ? formatJsonPreview(span.output, 40) : "—"}
         </div>
       );
     case "observationLevels":
