@@ -90,10 +90,18 @@ func RunWired(deps *WiredDeps) error {
 	slog.Info("writer: pipeline started")
 	pipelineErr := deps.Pipeline.Run(ctx)
 
-	// Graceful shutdown.
+	// Graceful shutdown. Signal the Lake before draining the HTTP server so
+	// any reconnect() already in flight (or queued behind one) aborts
+	// immediately instead of running its own ~10s budget per queued caller —
+	// see Lake.Shutdown's doc for the production incident this avoids.
 	cancel()
+	if deps.Lake != nil {
+		deps.Lake.Shutdown()
+	}
 	deps.Meta.Close()
-	if err := gracefulShutdown(scoreServer, 30*time.Second); err != nil {
+	// Drain timeout kept below the pod's default terminationGracePeriodSeconds
+	// (30s) so a slow drain returns cleanly instead of racing kubelet's SIGKILL.
+	if err := gracefulShutdown(scoreServer, 20*time.Second); err != nil {
 		return fmt.Errorf("writer: shutdown: %w", err)
 	}
 	slog.Info("writer: stopped")

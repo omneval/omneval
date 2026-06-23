@@ -166,6 +166,59 @@ func TestPingDoesNotBlockOnConcurrentSlowOperation(t *testing.T) {
 	}
 }
 
+// TestShutdownAbortsInFlightReconnectPromptly reproduces the second half of
+// the production incident behind raceContext: a reconnect() already running
+// (e.g. against a Quack Server that is slow or refusing connections during
+// compaction) must give up as soon as Shutdown is called instead of running
+// its full reconnectTimeout. Before this fix, a process SIGTERM did nothing
+// to in-flight or queued reconnect attempts, so several callers queued
+// behind reconnectExclusive's lock could each burn ~10s before the next got
+// a turn — long enough to blow through a Kubernetes pod's
+// terminationGracePeriodSeconds and turn a graceful exit into a SIGKILL.
+func TestShutdownAbortsInFlightReconnectPromptly(t *testing.T) {
+	parent := context.Background()
+	stopCh := make(chan struct{})
+
+	raced, cancel := raceContext(parent, stopCh)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		<-raced.Done()
+		close(done)
+	}()
+
+	// Nothing has signaled yet: the raced context must stay alive.
+	select {
+	case <-done:
+		t.Fatal("raceContext canceled before stopCh was closed or parent was done")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	start := time.Now()
+	close(stopCh)
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("raceContext did not cancel promptly after stopCh was closed")
+	}
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		t.Errorf("raceContext took %v to cancel after stopCh closed, want near-instant", elapsed)
+	}
+}
+
+// TestLakeShutdownIsIdempotent proves Shutdown can be called more than once
+// without panicking on a double-close of shutdownCh — services call it once
+// at signal time, but defensive double-calls (or a future caller) must not
+// crash the process during shutdown. Uses a bare Lake value (no real Quack
+// Server) since Shutdown only touches shutdownCh/shutdownOnce.
+func TestLakeShutdownIsIdempotent(t *testing.T) {
+	l := &Lake{shutdownCh: make(chan struct{})}
+	l.Shutdown()
+	l.Shutdown() // must not panic (double close)
+}
+
 // TestConcurrentQueriesRunInParallelNotSerialized proves two real queries
 // issued concurrently through the public Lake API run in parallel rather
 // than serializing end-to-end, comparing wall-clock time for one query

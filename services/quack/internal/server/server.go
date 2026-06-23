@@ -168,6 +168,11 @@ func Run() error {
 	<-ctx.Done()
 	slog.Info("quack: shutting down")
 
+	// Tell the loopback maintenance Lake client first: any reconnect() it has
+	// in flight aborts immediately instead of running its own ~10s budget
+	// (see Lake.Shutdown's doc).
+	maintLake.Shutdown()
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	httpSrv.Shutdown(shutdownCtx)

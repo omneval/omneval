@@ -132,8 +132,19 @@ func RunWired(deps *WiredDeps) error {
 	<-ctx.Done()
 	slog.Info("query: shutting down...")
 
-	// Graceful shutdown with 30-second drain timeout.
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Tell the Lake first: any reconnect() already in flight (or queued
+	// behind one) aborts immediately instead of running its own ~10s budget,
+	// which otherwise stacks across queued callers and can exceed the
+	// shutdown drain timeout below (production incident: query pod logged
+	// "shutting down..." and then kept retrying "reconnected to quack
+	// server" until kubelet's SIGKILL, because reconnect() ignored shutdown
+	// and ran to completion regardless).
+	deps.Lake.Shutdown()
+
+	// Graceful shutdown with a drain timeout kept below the pod's default
+	// terminationGracePeriodSeconds (30s): with no margin, any slow drain
+	// races kubelet's SIGKILL instead of returning cleanly first.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer shutdownCancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("query: shutdown: %w", err)
