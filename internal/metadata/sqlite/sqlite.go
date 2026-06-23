@@ -631,10 +631,14 @@ func (s *Store) ListAPIKeys(ctx context.Context, projectID string) ([]*domain.AP
 
 func (s *Store) CreatePromptVersion(ctx context.Context, pv *domain.PromptVersion) error {
 	now := time.Now().UTC().Format(time.RFC3339)
+	var messagesJSON []byte
+	if len(pv.Messages) > 0 {
+		messagesJSON, _ = json.Marshal(pv.Messages)
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO prompt_versions (version_id, project_id, name, version, template, model, temperature, max_tokens, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		pv.VersionID, pv.ProjectID, pv.Name, pv.Version, pv.Template,
+		`INSERT INTO prompt_versions (version_id, project_id, name, version, kind, template, messages, model, temperature, max_tokens, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		pv.VersionID, pv.ProjectID, pv.Name, pv.Version, string(pv.Kind), pv.Template, messagesJSON,
 		pv.ModelConfig.Model, pv.ModelConfig.Temperature, pv.ModelConfig.MaxTokens, now,
 	)
 	if err != nil {
@@ -644,26 +648,33 @@ func (s *Store) CreatePromptVersion(ctx context.Context, pv *domain.PromptVersio
 }
 
 func (s *Store) GetPromptVersion(ctx context.Context, projectID, name string, version int64) (*domain.PromptVersion, error) {
-	var versionID, template, model, createdAt string
+	var versionID, kindStr, template, model, createdAt string
+	var messagesJSON *string
 	var temperature *float64
 	var maxTokens *int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT version_id, template, model, temperature, max_tokens, created_at
+		`SELECT version_id, kind, template, messages, model, temperature, max_tokens, created_at
 		 FROM prompt_versions WHERE project_id = ? AND name = ? AND version = ?`,
 		projectID, name, version,
-	).Scan(&versionID, &template, &model, &temperature, &maxTokens, &createdAt)
+	).Scan(&versionID, &kindStr, &template, &messagesJSON, &model, &temperature, &maxTokens, &createdAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("sqlite: get prompt version: %w", err)
 	}
+	var messages []domain.PromptMessage
+	if messagesJSON != nil && *messagesJSON != "" {
+		_ = json.Unmarshal([]byte(*messagesJSON), &messages)
+	}
 	pv := &domain.PromptVersion{
 		VersionID: versionID,
 		ProjectID: projectID,
 		Name:      name,
 		Version:   version,
+		Kind:      domain.PromptKind(kindStr),
 		Template:  template,
+		Messages:  messages,
 		ModelConfig: domain.PromptModelConfig{
 			Model:       model,
 			Temperature: derefOr(temperature, 0.7),
@@ -692,7 +703,7 @@ func (s *Store) GetPromptByLabel(ctx context.Context, projectID, name, label str
 
 func (s *Store) ListPromptVersions(ctx context.Context, projectID, name string) ([]*domain.PromptVersion, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT version_id, name, version, template, model, temperature, max_tokens, created_at
+		`SELECT version_id, name, version, kind, template, messages, model, temperature, max_tokens, created_at
 		 FROM prompt_versions WHERE project_id = ? AND name = ? ORDER BY version`, projectID, name,
 	)
 	if err != nil {
@@ -703,11 +714,16 @@ func (s *Store) ListPromptVersions(ctx context.Context, projectID, name string) 
 	var versions []*domain.PromptVersion
 	for rows.Next() {
 		var pv domain.PromptVersion
-		var model, createdAt string
+		var model, createdAt, kindStr string
+		var messagesJSON *string
 		var temperature *float64
 		var maxTokens *int
-		if err := rows.Scan(&pv.VersionID, &pv.Name, &pv.Version, &pv.Template, &model, &temperature, &maxTokens, &createdAt); err != nil {
+		if err := rows.Scan(&pv.VersionID, &pv.Name, &pv.Version, &kindStr, &pv.Template, &messagesJSON, &model, &temperature, &maxTokens, &createdAt); err != nil {
 			return nil, fmt.Errorf("sqlite: scan prompt version: %w", err)
+		}
+		pv.Kind = domain.PromptKind(kindStr)
+		if messagesJSON != nil && *messagesJSON != "" {
+			_ = json.Unmarshal([]byte(*messagesJSON), &pv.Messages)
 		}
 		pv.CreatedAt = parseSQLiteTime(createdAt)
 		pv.ProjectID = projectID
