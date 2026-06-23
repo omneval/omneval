@@ -7,17 +7,26 @@ import { useToast } from "@/components/Toast";
 
 // ── Types ──────────────────────────────────────────────────────────
 
+interface PromptMessage {
+  role: string;
+  content: string;
+}
+
 interface PromptVersion {
   version_id: string;
   project_id: string;
   name: string;
   version: number;
+  kind?: "text" | "chat";
   template: string;
+  messages?: PromptMessage[];
   model: string;
   temperature: number;
   max_tokens: number;
   created_at: string;
 }
+
+const MESSAGE_ROLES = ["system", "user", "assistant"] as const;
 
 interface PromptListItem {
   name: string;
@@ -69,7 +78,11 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
   // New prompt form state
   const [showNewPromptForm, setShowNewPromptForm] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newKind, setNewKind] = useState<"text" | "chat">("text");
   const [newTemplate, setNewTemplate] = useState("");
+  const [newMessages, setNewMessages] = useState<PromptMessage[]>([
+    { role: "system", content: "" },
+  ]);
   const [newModel, setNewModel] = useState("gpt-4");
   const [newTemperature, setNewTemperature] = useState(0.7);
   const [newMaxTokens, setNewMaxTokens] = useState(256);
@@ -195,7 +208,11 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
       errors.name = "Name can only contain letters, numbers, underscores, and hyphens";
     }
 
-    if (!newTemplate.trim()) {
+    if (newKind === "chat") {
+      if (newMessages.length === 0 || newMessages.every((m) => !m.content.trim())) {
+        errors.template = "At least one message with content is required";
+      }
+    } else if (!newTemplate.trim()) {
       errors.template = "Template is required";
     } else if (newTemplate.length > 32000) {
       errors.template = "Template must be 32000 characters or fewer";
@@ -228,17 +245,29 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
       return;
     }
     try {
+      const payload =
+        newKind === "chat"
+          ? {
+              name: newName.trim(),
+              version: 1,
+              kind: "chat",
+              messages: newMessages.filter((m) => m.content.trim()),
+              model: effectiveModel,
+              temperature: newTemperature,
+              max_tokens: newMaxTokens,
+            }
+          : {
+              name: newName.trim(),
+              version: 1,
+              template: newTemplate,
+              model: effectiveModel,
+              temperature: newTemperature,
+              max_tokens: newMaxTokens,
+            };
       const res = await fetch(`/api/v1/prompts?project_id=${activeProject}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: newName.trim(),
-          version: 1,
-          template: newTemplate,
-          model: effectiveModel,
-          temperature: newTemperature,
-          max_tokens: newMaxTokens,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const body = await res.text();
@@ -253,6 +282,8 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
       setCreateSuccess(`Created prompt "${newName.trim()}" version 1`);
       setNewName("");
       setNewTemplate("");
+      setNewKind("text");
+      setNewMessages([{ role: "system", content: "" }]);
       setShowNewPromptForm(false);
       await fetchPrompts();
     } catch (e: unknown) {
@@ -270,6 +301,17 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
     computeDiff(versions, 1, maxVer > 1 ? maxVer : 2);
   };
 
+  // Chat-type versions have no flat `template` string; serialize their
+  // messages into a comparable text form so the existing line-based
+  // diffText can render them the same way as a text-type template.
+  const versionDiffText = (v: PromptVersion | undefined): string => {
+    if (!v) return "";
+    if (v.kind === "chat") {
+      return (v.messages ?? []).map((m) => `${m.role}: ${m.content}`).join("\n");
+    }
+    return v.template;
+  };
+
   const computeDiff = (
     versions: PromptVersion[],
     oldVer: number,
@@ -280,8 +322,8 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
     const oldVerData = versions.find((v) => v.version === oldVer);
     const newVerData = versions.find((v) => v.version === newVer);
     const textDiff = diffText(
-      oldVerData?.template ?? "",
-      newVerData?.template ?? ""
+      versionDiffText(oldVerData),
+      versionDiffText(newVerData)
     );
     const modelDiff = diffModelConfig(oldVerData, newVerData);
     setDiffData({ textDiff, modelDiff });
@@ -354,6 +396,32 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
               {createSuccess}
             </div>
           )}
+
+          <div className="mb-4">
+            <label className="block text-xs text-omneval-text-muted mb-1">Type</label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-1.5 text-sm text-omneval-text-pure cursor-pointer">
+                <input
+                  type="radio"
+                  name="new-prompt-kind"
+                  value="text"
+                  checked={newKind === "text"}
+                  onChange={() => { setNewKind("text"); setFormErrors((prev) => ({ ...prev, template: "" })); }}
+                />
+                Text
+              </label>
+              <label className="flex items-center gap-1.5 text-sm text-omneval-text-pure cursor-pointer">
+                <input
+                  type="radio"
+                  name="new-prompt-kind"
+                  value="chat"
+                  checked={newKind === "chat"}
+                  onChange={() => { setNewKind("chat"); setFormErrors((prev) => ({ ...prev, template: "" })); }}
+                />
+                Chat
+              </label>
+            </div>
+          </div>
 
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div>
@@ -477,30 +545,105 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
             </div>
           </div>
 
-          <div className="mb-4">
-            <label className="block text-xs text-omneval-text-muted mb-1">
-              Template
-              <span className="text-omneval-text-muted ml-2 text-xs">
-                (use <code className="text-omneval-violet-pale">{'{{variable}}'}</code> syntax)
-              </span>
-            </label>
-            <textarea
-              value={newTemplate}
-              onChange={(e) => { setNewTemplate(e.target.value); setFormErrors((prev) => ({ ...prev, template: "" })); }}
-              placeholder="Hello {{name}}, welcome to {{place}}!"
-              rows={4}
-              className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors font-mono resize-none input-focus ${formErrors.template ? "border-omneval-danger focus-danger" : ""}`}
-              style={{
-                backgroundColor: colors.backgrounds.abyssBlack,
-                borderColor: formErrors.template ? colors.accents.dangerRed : colors.backgrounds.caveWall,
-                color: colors.typography.pureLight,
-              }}
-            />
-            {formErrors.template && (
-              <p className="text-xs mt-1" style={{ color: colors.accents.dangerRed }}>{formErrors.template}</p>
-            )}
-            <p className="text-xs text-omneval-text-muted mt-1 opacity-60">{newTemplate.length.toLocaleString()} / 32,000 chars</p>
-          </div>
+          {newKind === "text" ? (
+            <div className="mb-4">
+              <label className="block text-xs text-omneval-text-muted mb-1">
+                Template
+                <span className="text-omneval-text-muted ml-2 text-xs">
+                  (use <code className="text-omneval-violet-pale">{'{{variable}}'}</code> syntax)
+                </span>
+              </label>
+              <textarea
+                value={newTemplate}
+                onChange={(e) => { setNewTemplate(e.target.value); setFormErrors((prev) => ({ ...prev, template: "" })); }}
+                placeholder="Hello {{name}}, welcome to {{place}}!"
+                rows={4}
+                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors font-mono resize-none input-focus ${formErrors.template ? "border-omneval-danger focus-danger" : ""}`}
+                style={{
+                  backgroundColor: colors.backgrounds.abyssBlack,
+                  borderColor: formErrors.template ? colors.accents.dangerRed : colors.backgrounds.caveWall,
+                  color: colors.typography.pureLight,
+                }}
+              />
+              {formErrors.template && (
+                <p className="text-xs mt-1" style={{ color: colors.accents.dangerRed }}>{formErrors.template}</p>
+              )}
+              <p className="text-xs text-omneval-text-muted mt-1 opacity-60">{newTemplate.length.toLocaleString()} / 32,000 chars</p>
+            </div>
+          ) : (
+            <div className="mb-4">
+              <label className="block text-xs text-omneval-text-muted mb-1">
+                Messages
+                <span className="text-omneval-text-muted ml-2 text-xs">
+                  (use <code className="text-omneval-violet-pale">{'{{variable}}'}</code> syntax)
+                </span>
+              </label>
+              <div className="space-y-2">
+                {newMessages.map((msg, idx) => (
+                  <div key={idx} className="flex gap-2 items-start">
+                    <select
+                      aria-label={`Message ${idx + 1} role`}
+                      value={msg.role}
+                      onChange={(e) => {
+                        const next = [...newMessages];
+                        next[idx] = { ...next[idx], role: e.target.value };
+                        setNewMessages(next);
+                        setFormErrors((prev) => ({ ...prev, template: "" }));
+                      }}
+                      className="px-2 py-2 text-sm rounded-md border outline-none input-focus"
+                      style={{
+                        backgroundColor: colors.backgrounds.abyssBlack,
+                        borderColor: colors.backgrounds.caveWall,
+                        color: colors.typography.pureLight,
+                      }}
+                    >
+                      {MESSAGE_ROLES.map((role) => (
+                        <option key={role} value={role}>{role}</option>
+                      ))}
+                    </select>
+                    <textarea
+                      value={msg.content}
+                      onChange={(e) => {
+                        const next = [...newMessages];
+                        next[idx] = { ...next[idx], content: e.target.value };
+                        setNewMessages(next);
+                        setFormErrors((prev) => ({ ...prev, template: "" }));
+                      }}
+                      placeholder="Message content..."
+                      rows={2}
+                      className="flex-1 px-3 py-2 text-sm rounded-md border outline-none transition-colors font-mono resize-none input-focus"
+                      style={{
+                        backgroundColor: colors.backgrounds.abyssBlack,
+                        borderColor: colors.backgrounds.caveWall,
+                        color: colors.typography.pureLight,
+                      }}
+                    />
+                    {newMessages.length > 1 && (
+                      <button
+                        type="button"
+                        aria-label={`Remove message ${idx + 1}`}
+                        onClick={() => setNewMessages(newMessages.filter((_, i) => i !== idx))}
+                        className="px-2 py-2 text-xs rounded transition-colors"
+                        style={{ color: colors.typography.ashGrey }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {formErrors.template && (
+                <p className="text-xs mt-1" style={{ color: colors.accents.dangerRed }}>{formErrors.template}</p>
+              )}
+              <button
+                type="button"
+                onClick={() => setNewMessages([...newMessages, { role: "user", content: "" }])}
+                className="mt-2 text-xs text-omneval-violet-pale hover:underline"
+              >
+                + Add message
+              </button>
+            </div>
+          )}
 
           <div className="flex gap-3">
             <button
@@ -639,16 +782,38 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
                               <span className="text-xs text-omneval-text-muted">{formatTime(v.created_at)}</span>
                             </div>
 
-                            {/* Template */}
-                            <div className="mb-2">
-                              <div className="text-xs text-omneval-text-muted mb-1">Template</div>
-                              <pre
-                                className="text-xs font-mono text-omneval-text-pure p-2 rounded"
-                                style={{ backgroundColor: colors.backgrounds.charcoalDepth, overflow: "auto", maxHeight: "120px" }}
-                              >
-                                {v.template}
-                              </pre>
-                            </div>
+                            {/* Template or Messages */}
+                            {v.kind === "chat" ? (
+                              <div className="mb-2">
+                                <div className="text-xs text-omneval-text-muted mb-1">Messages</div>
+                                <div
+                                  className="rounded overflow-hidden"
+                                  style={{ backgroundColor: colors.backgrounds.charcoalDepth, maxHeight: "160px", overflow: "auto" }}
+                                >
+                                  {(v.messages ?? []).map((msg, i) => (
+                                    <div key={i} className="px-2 py-1.5 text-xs">
+                                      <span
+                                        className="font-semibold uppercase tracking-wider mr-2"
+                                        style={{ color: colors.typography.ashGrey, fontSize: "0.65rem" }}
+                                      >
+                                        {msg.role}
+                                      </span>
+                                      <span className="text-omneval-text-pure font-mono">{msg.content}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="mb-2">
+                                <div className="text-xs text-omneval-text-muted mb-1">Template</div>
+                                <pre
+                                  className="text-xs font-mono text-omneval-text-pure p-2 rounded"
+                                  style={{ backgroundColor: colors.backgrounds.charcoalDepth, overflow: "auto", maxHeight: "120px" }}
+                                >
+                                  {v.template}
+                                </pre>
+                              </div>
+                            )}
 
                             {/* Model config */}
                             <div className="flex gap-4 text-xs text-omneval-text-muted">
