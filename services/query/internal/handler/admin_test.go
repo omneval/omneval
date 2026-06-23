@@ -25,12 +25,12 @@ func TestAdminRoutes(t *testing.T) {
 
 	// Verify all expected admin routes are present with AuthPolicyAdmin.
 	expectedPaths := map[string]AuthPolicy{
-		"GET /api/v1/admin/api-keys":       AuthPolicyAdmin,
-		"DELETE /api/v1/admin/api-keys/":    AuthPolicyAdmin,
-		"GET /api/v1/admin/traces/":         AuthPolicyAdmin,
-		"DELETE /api/v1/admin/traces/":      AuthPolicyAdmin,
-		"DELETE /api/v1/admin/projects/":    AuthPolicyAdmin,
-		"GET /api/v1/admin/ops":             AuthPolicyAdmin,
+		"GET /api/v1/admin/api-keys":     AuthPolicyAdmin,
+		"DELETE /api/v1/admin/api-keys/": AuthPolicyAdmin,
+		"GET /api/v1/admin/traces/":      AuthPolicyAdmin,
+		"DELETE /api/v1/admin/traces/":   AuthPolicyAdmin,
+		"DELETE /api/v1/admin/projects/": AuthPolicyAdmin,
+		"GET /api/v1/admin/ops":          AuthPolicyAdmin,
 	}
 
 	for _, r := range routes {

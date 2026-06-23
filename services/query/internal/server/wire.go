@@ -151,10 +151,10 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		BookmarkStore: store,
 	}
 	deps.Span = &handler.SpanHandler{
-		SessionStore: h,
+		SessionStore:    h,
 		ProjectResolver: h,
-		Lake:           deps.Lake,
-		QueryBuilder:   deps.QueryBuilder,
+		Lake:            deps.Lake,
+		QueryBuilder:    deps.QueryBuilder,
 	}
 	deps.Bookmark = &handler.BookmarkHandler{BookmarkStore: store, SessionStore: h, ProjectResolver: h}
 	deps.Conversation = &handler.ConversationHandler{SessionStore: h, ProjectResolver: h}
@@ -165,17 +165,17 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	deps.PromptCache = handler.NewPromptCache(store)
 	deps.APIKeyValidator = internalauth.NewCachingValidator(store)
 	deps.Prompt = &handler.PromptHandler{
-		PromptStore:   store,
-		Cache:         deps.PromptCache,
-		SessionStore:  h,
+		PromptStore:     store,
+		Cache:           deps.PromptCache,
+		SessionStore:    h,
 		ProjectResolver: h,
-		Validator:     deps.APIKeyValidator,
+		Validator:       deps.APIKeyValidator,
 	}
 
 	deps.EvalRule = &handler.EvalRuleHandler{
-		EvalRuleStore: store,
-		PromptStore:   store,
-		SessionStore:  h,
+		EvalRuleStore:   store,
+		PromptStore:     store,
+		SessionStore:    h,
 		ProjectResolver: h,
 		// DefaultJudgeModel is set below.
 	}
@@ -197,9 +197,9 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	// Dataset run handler — read endpoints are always available; POST
 	// (create run) additionally requires the judge LLM client (see routes).
 	deps.DatasetRun = &handler.DatasetRunHandler{
-		DatasetStore:  store,
-		EvalRuleStore: store,
-		SessionStore:  h,
+		DatasetStore:    store,
+		EvalRuleStore:   store,
+		SessionStore:    h,
 		ProjectResolver: h,
 	}
 	deps.EvalRule.DefaultJudgeModel = cfg.Eval.LLMModel
