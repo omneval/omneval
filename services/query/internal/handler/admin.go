@@ -12,12 +12,14 @@ import (
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/queue"
 	"github.com/omneval/omneval/services/query/internal/auth"
+	"github.com/redis/go-redis/v9"
 )
 
 // ingestQueueLLEN is the minimal interface for reading a Redis list length.
-// It allows injecting a real Redis client or a mock in tests.
+// *redis.Client implements this via its LLen method, which returns *redis.IntCmd.
+// Tests can provide a mock that also returns *redis.IntCmd.
 type ingestQueueLLEN interface {
-	LLen(ctx context.Context, key string) (int64, error)
+	LLen(ctx context.Context, key string) *redis.IntCmd
 }
 
 // adminAPIKeyInfo is the JSON shape returned by the admin API keys list endpoint.
@@ -263,9 +265,9 @@ func (h *AdminHandler) HandleAdminOps(w http.ResponseWriter, r *http.Request) {
 	metrics := make(map[string]int)
 
 	if h.IngestQueueDB != nil {
-		depth, err := h.IngestQueueDB.LLen(r.Context(), queue.KeyIngestSpans)
-		if err == nil {
-			metrics["ingest_queue_depth"] = int(depth)
+		result := h.IngestQueueDB.LLen(r.Context(), queue.KeyIngestSpans)
+		if val, err := result.Result(); err == nil {
+			metrics["ingest_queue_depth"] = int(val)
 		}
 	}
 

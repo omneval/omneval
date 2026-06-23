@@ -15,6 +15,7 @@ import (
 	"github.com/omneval/omneval/internal/lake/lakeservertest"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/services/query/internal/auth"
+	"github.com/redis/go-redis/v9"
 )
 
 func TestAdminRoutes(t *testing.T) {
@@ -319,8 +320,8 @@ type fakeRedisLLEN struct {
 
 var _ ingestQueueLLEN = (*fakeRedisLLEN)(nil)
 
-func (f *fakeRedisLLEN) LLen(ctx context.Context, key string) (int64, error) {
-	return int64(f.depth), nil
+func (f *fakeRedisLLEN) LLen(ctx context.Context, key string) *redis.IntCmd {
+	return redis.NewIntResult(int64(f.depth), nil)
 }
 
 func TestAdminHandler_MethodNotAllowed(t *testing.T) {

@@ -13,7 +13,6 @@ import (
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/pricing"
 	"github.com/omneval/omneval/internal/probe"
-	"github.com/omneval/omneval/internal/queue"
 	s3 "github.com/omneval/omneval/internal/storage/s3"
 	"github.com/omneval/omneval/services/query/internal/auth"
 	"github.com/omneval/omneval/services/query/internal/handler"
