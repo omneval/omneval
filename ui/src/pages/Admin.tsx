@@ -33,7 +33,7 @@ interface TraceCount {
 }
 
 interface OpsMetrics {
-  ingest_queue_depth: number;
+  ingest_queue_depth?: number;
 }
 
 // ── Ops metric card ─────────────────────────────────────────────────
@@ -529,7 +529,10 @@ function AdminOpsSection({
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <MetricCard label="Ingest Queue Depth" value={ingest_queue_depth} />
+        <MetricCard
+          label="Ingest Queue Depth"
+          value={ingest_queue_depth ?? "Unavailable"}
+        />
       </div>
     </div>
   );
