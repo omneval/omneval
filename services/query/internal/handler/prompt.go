@@ -58,13 +58,15 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req struct {
-		Name        string  `json:"name"`
-		Version     int64   `json:"version"`
-		Template    string  `json:"template"`
-		Model       string  `json:"model"`
-		Temperature float64 `json:"temperature"`
-		MaxTokens   int     `json:"max_tokens"`
-		Label       string  `json:"label"` // optional: assign a label at creation time
+		Name        string          `json:"name"`
+		Version     int64           `json:"version"`
+		Kind        domain.PromptKind `json:"kind"` // "text" or "chat"; defaults to "text"
+		Template    string          `json:"template"`
+		Messages    []domain.PromptMessage `json:"messages"`
+		Model       string         `json:"model"`
+		Temperature float64        `json:"temperature"`
+		MaxTokens   int            `json:"max_tokens"`
+		Label       string         `json:"label"` // optional: assign a label at creation time
 		ModelConfig *struct {
 			Model       string  `json:"model"`
 			Temperature float64 `json:"temperature"`
@@ -120,12 +122,20 @@ func (h *PromptHandler) HandleCreatePrompt(w http.ResponseWriter, r *http.Reques
 		modelCfg.MaxTokens = req.ModelConfig.MaxTokens
 	}
 
+	// Default kind to "text" for backwards compatibility.
+	kind := req.Kind
+	if kind == "" {
+		kind = domain.PromptKindText
+	}
+
 	pv := &domain.PromptVersion{
 		VersionID:   uuid.New().String(),
 		ProjectID:   projectID,
 		Name:        req.Name,
 		Version:     req.Version,
+		Kind:        kind,
 		Template:    req.Template,
+		Messages:    req.Messages,
 		ModelConfig: modelCfg,
 		CreatedAt:   time.Now().UTC(),
 	}
