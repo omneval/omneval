@@ -32,27 +32,53 @@ interface TraceCount {
   count: number;
 }
 
+interface OpsMetrics {
+  ingest_queue_depth?: number;
+}
+
+// ── Ops metric card ─────────────────────────────────────────────────
+
+function MetricCard({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-md border border-omneval-border bg-omneval-surface px-4 py-3">
+      <dt className="text-xs font-medium text-omneval-text-muted uppercase tracking-wide">
+        {label}
+      </dt>
+      <dd className="mt-1 text-2xl font-semibold text-omneval-text-pure tabular-nums">
+        {value}
+      </dd>
+    </div>
+  );
+}
+
 // ── Components ─────────────────────────────────────────────────────
 
 function TabButton({
   label,
   active,
   onClick,
+  badge,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
+  badge?: string;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${
+      className={`px-4 py-2 text-sm font-medium rounded-t-md transition-colors inline-flex items-center gap-2 ${
         active
           ? "text-omneval-violet-pale bg-omneval-violet-active border-b-2 border-omneval-violet"
           : "text-omneval-text-muted hover:text-omneval-text-pure hover:bg-omneval-violet-hover"
       }`}
     >
-      {label}
+      <span>{label}</span>
+      {badge && (
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          {badge}
+        </span>
+      )}
     </button>
   );
 }
@@ -472,6 +498,46 @@ function AdminTracesSection({
   );
 }
 
+// ── Admin Ops Section (read-only health metrics) ───────────────────
+
+function AdminOpsSection({
+  metrics,
+  loading,
+}: {
+  metrics: OpsMetrics | null;
+  loading: boolean;
+}) {
+  if (loading) {
+    return <Skeleton className="h-24 rounded-md" />;
+  }
+
+  if (!metrics) {
+    return (
+      <div className="text-sm text-omneval-text-muted py-8 text-center bg-omneval-depth/30 rounded-md border border-omneval-border">
+        No metrics available.
+      </div>
+    );
+  }
+
+  const { ingest_queue_depth } = metrics;
+
+  return (
+    <div>
+      <SectionHeader
+        title="Operations"
+        description="Read-only system health metrics. No destructive actions here."
+      />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <MetricCard
+          label="Ingest Queue Depth"
+          value={ingest_queue_depth ?? "Unavailable"}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ── Admin Page ─────────────────────────────────────────────────────
 
 export default function AdminPage({
@@ -480,7 +546,7 @@ export default function AdminPage({
   activeProject: string;
 }) {
   const { addToast } = useToast();
-  const [activeTab, setActiveTab] = useState<"keys" | "projects" | "traces">("keys");
+  const [activeTab, setActiveTab] = useState<"keys" | "projects" | "traces" | "ops">("keys");
 
   // Keys
   const [allKeys, setAllKeys] = useState<APIKey[]>([]);
@@ -493,6 +559,10 @@ export default function AdminPage({
   // Traces
   const [traceCount, setTraceCount] = useState<TraceCount | null>(null);
   const [tracesLoading, setTracesLoading] = useState(true);
+
+  // Ops
+  const [opsMetrics, setOpsMetrics] = useState<OpsMetrics | null>(null);
+  const [opsLoading, setOpsLoading] = useState(true);
 
   const fetchAll = useCallback(async () => {
     // Fetch API keys across all projects
@@ -537,6 +607,22 @@ export default function AdminPage({
       setTraceCount({ count: 0 });
     } finally {
       setTracesLoading(false);
+    }
+
+    // Fetch ops metrics
+    setOpsLoading(true);
+    try {
+      const res = await fetch("/api/v1/admin/ops");
+      if (res.ok) {
+        const data = await res.json();
+        setOpsMetrics(data);
+      } else {
+        setOpsMetrics(null);
+      }
+    } catch {
+      setOpsMetrics(null);
+    } finally {
+      setOpsLoading(false);
     }
   }, [activeProject]);
 
@@ -597,9 +683,10 @@ export default function AdminPage({
 
   const tabs = useMemo(
     () => [
-      { id: "keys" as const, label: "API Keys" },
-      { id: "projects" as const, label: "Projects" },
-      { id: "traces" as const, label: "Traces" },
+      { id: "keys" as const, label: "API Keys", badge: undefined as string | undefined },
+      { id: "projects" as const, label: "Projects", badge: undefined as string | undefined },
+      { id: "traces" as const, label: "Traces", badge: undefined as string | undefined },
+      { id: "ops" as const, label: "Ops", badge: "Read-only" },
     ],
     []
   );
@@ -614,6 +701,7 @@ export default function AdminPage({
             label={tab.label}
             active={activeTab === tab.id}
             onClick={() => setActiveTab(tab.id)}
+            badge={tab.badge}
           />
         ))}
       </div>
@@ -639,6 +727,12 @@ export default function AdminPage({
           traceCount={traceCount}
           loading={tracesLoading}
           onDeleteAllTraces={handleDeleteAllTraces}
+        />
+      )}
+      {activeTab === "ops" && (
+        <AdminOpsSection
+          metrics={opsMetrics}
+          loading={opsLoading}
         />
       )}
     </div>

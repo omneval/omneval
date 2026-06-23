@@ -20,6 +20,7 @@ import (
 	"github.com/omneval/omneval/services/query/internal/playground"
 	"github.com/omneval/omneval/services/query/internal/querybuild"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/redis/go-redis/v9"
 )
 
 // WiredDeps holds every component the Query API needs to run, fully
@@ -32,6 +33,7 @@ type WiredDeps struct {
 	SessionTTL   time.Duration
 	QueryMetrics *metrics.QueryMetrics
 	Prober       *probe.Prober
+	Redis        *redis.Client
 
 	// Lake is the read-only Lake attachment. All span reads compile against
 	// this handle (ADR-0004). It implements handler.DBHandle with transparent
@@ -117,6 +119,17 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		deps.S3 = s3.New(&cfg.Storage)
 	}
 
+	// Connect to Redis for health-check reads (read-only ops metrics).
+	// If the Redis address is empty, deps.Redis stays nil and the ops
+	// endpoint gracefully returns an empty metrics map.
+	if cfg.Redis.Addr != "" {
+		deps.Redis = redis.NewClient(&redis.Options{
+			Addr:     cfg.Redis.Addr,
+			Password: cfg.Redis.Password,
+			DB:       cfg.Redis.DB,
+		})
+	}
+
 	// Bootstrap admin user if no users exist.
 	h := auth.NewHandler(store, cfg.Auth.SecureCookie, deps.SessionTTL, cfg.Auth.AdminEmail, cfg.Auth.AdminPassword)
 	created, err := h.BootstrapAdmin(context.Background())
@@ -137,10 +150,10 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		BookmarkStore: store,
 	}
 	deps.Span = &handler.SpanHandler{
-		SessionStore: h,
+		SessionStore:    h,
 		ProjectResolver: h,
-		Lake:           deps.Lake,
-		QueryBuilder:   deps.QueryBuilder,
+		Lake:            deps.Lake,
+		QueryBuilder:    deps.QueryBuilder,
 	}
 	deps.Bookmark = &handler.BookmarkHandler{BookmarkStore: store, SessionStore: h, ProjectResolver: h}
 	deps.Conversation = &handler.ConversationHandler{SessionStore: h, ProjectResolver: h}
@@ -151,17 +164,17 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	deps.PromptCache = handler.NewPromptCache(store)
 	deps.APIKeyValidator = internalauth.NewCachingValidator(store)
 	deps.Prompt = &handler.PromptHandler{
-		PromptStore:   store,
-		Cache:         deps.PromptCache,
-		SessionStore:  h,
+		PromptStore:     store,
+		Cache:           deps.PromptCache,
+		SessionStore:    h,
 		ProjectResolver: h,
-		Validator:     deps.APIKeyValidator,
+		Validator:       deps.APIKeyValidator,
 	}
 
 	deps.EvalRule = &handler.EvalRuleHandler{
-		EvalRuleStore: store,
-		PromptStore:   store,
-		SessionStore:  h,
+		EvalRuleStore:   store,
+		PromptStore:     store,
+		SessionStore:    h,
 		ProjectResolver: h,
 		// DefaultJudgeModel is set below.
 	}
@@ -172,15 +185,20 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		ProjectStore:  store,
 		SessionStore:  h,
 	}
+	// Wire Redis as the ingest queue depth source for the ops endpoint.
+	// *redis.Client satisfies ingestQueueLLEN via its LLen method.
+	if deps.Redis != nil {
+		deps.Admin.IngestQueueDB = deps.Redis
+	}
 
 	deps.Dataset = &handler.DatasetHandler{DatasetStore: store, SessionStore: h, ProjectResolver: h}
 
 	// Dataset run handler — read endpoints are always available; POST
 	// (create run) additionally requires the judge LLM client (see routes).
 	deps.DatasetRun = &handler.DatasetRunHandler{
-		DatasetStore:  store,
-		EvalRuleStore: store,
-		SessionStore:  h,
+		DatasetStore:    store,
+		EvalRuleStore:   store,
+		SessionStore:    h,
 		ProjectResolver: h,
 	}
 	deps.EvalRule.DefaultJudgeModel = cfg.Eval.LLMModel
