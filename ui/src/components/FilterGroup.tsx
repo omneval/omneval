@@ -1,3 +1,4 @@
+import React, { useId } from "react";
 import { colors } from "@/theme";
 
 // ---------------------------------------------------------------------------
@@ -125,10 +126,13 @@ function Select({
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  const id = useId();
+  const child = React.Children.only(children) as React.ReactElement;
+  const newProps = { ...child.props, id: child.props.id ?? id } as React.ComponentPropsWithRef<"input" | "select">;
   return (
     <div>
-      <label className="block text-xs text-omneval-text-muted mb-1">{label}</label>
-      {children}
+      <label htmlFor={id} className="block text-xs text-omneval-text-muted mb-1">{label}</label>
+      {React.cloneElement(child, newProps)}
     </div>
   );
 }
