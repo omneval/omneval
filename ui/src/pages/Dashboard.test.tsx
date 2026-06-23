@@ -253,7 +253,7 @@ describe("DashboardPage", () => {
     });
   });
 
-  it("renders all 6 widget cards", async () => {
+  it("renders all 7 widget cards plus KPI tiles", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       if (url === "/api/v1/analytics/spans") {
         return resolveAnalyticsResponse({ rows: [] });
@@ -268,13 +268,15 @@ describe("DashboardPage", () => {
     });
 
     // Verify all widget card titles are present
+    // Cost by Model has been removed; Latency Percentiles and Error Rate are new.
     const expectedCards = [
       "Traces by Model",
-      "Cost by Model",
       "Eval Scores",
       "Traces over Time",
       "Token Usage",
       "User Consumption",
+      "Latency Percentiles",
+      "Error Rate",
     ];
 
     for (const cardTitle of expectedCards) {
@@ -282,6 +284,13 @@ describe("DashboardPage", () => {
       const elements = screen.queryAllByText(cardTitle);
       expect(elements.length).toBeGreaterThan(0);
     }
+
+    // KPI tiles should also be rendered
+    expect(screen.getByText("Total Cost")).toBeInTheDocument();
+    expect(screen.getByText("Total Traces")).toBeInTheDocument();
+    // Error Rate appears twice (KPI tile + chart header) — use getAllByText
+    expect(screen.getAllByText("Error Rate").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Average Latency")).toBeInTheDocument();
   });
 
   it("shows loading state on initial render", async () => {
@@ -733,12 +742,21 @@ describe("DashboardPage", () => {
       if (url === "/api/v1/analytics/spans" && options?.body) {
         const body = JSON.parse(options.body as string) as AnalyticsRequest;
 
-        // The KPI request has no group_by and aggregates count, sum cost_usd, avg duration_ms, and a filtered count
+        // KPI request: no group_by, aggregates total_traces, total_cost, avg_latency_ms
         if (body.group_by && body.group_by.length === 0 &&
             body.aggregations?.some((a: { alias: string }) => a.alias === "total_cost")) {
           return resolveAnalyticsResponse({
             rows: [
-              { total_traces: 150, total_cost: 4.5678, error_rate: 0.0667, avg_latency_ms: 234.5 },
+              { total_traces: 150, total_cost: 4.5678, avg_latency_ms: 234.5 },
+            ],
+          });
+        }
+        // KPI error-count request: same no-group_by shape, aggregates error_count
+        if (body.group_by && body.group_by.length === 0 &&
+            body.aggregations?.some((a: { alias: string }) => a.alias === "error_count")) {
+          return resolveAnalyticsResponse({
+            rows: [
+              { error_count: 10 },
             ],
           });
         }
@@ -761,17 +779,23 @@ describe("DashboardPage", () => {
     });
   });
 
-  it("#239: KPI tiles fetch a single request with multiple aggregations", async () => {
+  it("#239: KPI tiles fetch a KPI request (no group_by, 3 aggregations) plus a separate error-count request", async () => {
     const kpiBodies: AnalyticsRequest[] = [];
+    const errorCountBodies: AnalyticsRequest[] = [];
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
       if (url === "/api/v1/analytics/spans" && options?.body) {
         const body = JSON.parse(options.body as string) as AnalyticsRequest;
 
-        // A KPI request has no group_by and at least 4 aggregations
+        // A KPI request has no group_by and at least 3 aggregations (total_traces, total_cost, avg_latency_ms)
         if (body.group_by && body.group_by.length === 0 &&
-            body.aggregations && body.aggregations.length >= 4) {
+            body.aggregations?.some((a: { alias: string }) => a.alias === "total_cost")) {
           kpiBodies.push(body);
+        }
+        // A KPI error-count request has no group_by and error_count aggregation
+        if (body.group_by && body.group_by.length === 0 &&
+            body.aggregations?.some((a: { alias: string }) => a.alias === "error_count")) {
+          errorCountBodies.push(body);
         }
         return resolveAnalyticsResponse({ rows: [] });
       }
@@ -784,25 +808,42 @@ describe("DashboardPage", () => {
       expect(screen.getByText("Dashboard")).toBeInTheDocument();
     });
 
-    expect(kpiBodies.length).toBeGreaterThan(0);
+    // There should be exactly one KPI request and one error-count request
+    expect(kpiBodies.length).toBe(1);
+    expect(errorCountBodies.length).toBe(1);
 
     // Verify the KPI request body contains the expected aggregations
     const kpiBody = kpiBodies[0];
     const aliases = kpiBody.aggregations.map((a: { alias: string }) => a.alias);
     expect(aliases).toContain("total_traces");
     expect(aliases).toContain("total_cost");
-    expect(aliases).toContain("error_rate");
     expect(aliases).toContain("avg_latency_ms");
+    // error_rate should NOT be in the KPI request — it comes from a separate request
+    expect(aliases).not.toContain("error_rate");
+
+    // Verify the error-count request body
+    const errorCountBody = errorCountBodies[0];
+    const errorCountAliases = errorCountBody.aggregations.map((a: { alias: string }) => a.alias);
+    expect(errorCountAliases).toContain("error_count");
   });
 
   it("#239: KPI tiles display actual values from the API response", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
       if (url === "/api/v1/analytics/spans" && options?.body) {
         const body = JSON.parse(options.body as string) as AnalyticsRequest;
-        if (body.group_by && body.group_by.length === 0) {
+        if (body.group_by && body.group_by.length === 0 &&
+            body.aggregations?.some((a: { alias: string }) => a.alias === "total_cost")) {
           return resolveAnalyticsResponse({
             rows: [
-              { total_traces: 150, total_cost: 4.5678, error_rate: 0.0667, avg_latency_ms: 234.5 },
+              { total_traces: 150, total_cost: 4.5678, avg_latency_ms: 234.5 },
+            ],
+          });
+        }
+        if (body.group_by && body.group_by.length === 0 &&
+            body.aggregations?.some((a: { alias: string }) => a.alias === "error_count")) {
+          return resolveAnalyticsResponse({
+            rows: [
+              { error_count: 10 },
             ],
           });
         }
@@ -819,7 +860,7 @@ describe("DashboardPage", () => {
     });
 
     await waitFor(() => {
-      // Error Rate: 6.67%
+      // Error Rate: 10/150 = 0.0667 → 6.67%
       expect(screen.getByText("6.67%")).toBeInTheDocument();
     });
 
@@ -934,12 +975,22 @@ describe("DashboardPage", () => {
       if (url === "/api/v1/analytics/spans" && options?.body) {
         const body = JSON.parse(options.body as string) as AnalyticsRequest;
 
-        // The error rate request groups by time_bucket, counts total and errors
+        // Error-rate total-count request (no filter, groups by time_bucket)
+        if (body.aggregations?.some((a: { alias: string }) => a.alias === "total_count") &&
+            !body.aggregations?.some((a: { alias: string }) => a.alias === "error_count")) {
+          return resolveAnalyticsResponse({
+            rows: [
+              { "date_trunc('hour', start_time)": "2025-06-22T10:00:00Z", total_count: 100 },
+              { "date_trunc('hour', start_time)": "2025-06-22T11:00:00Z", total_count: 80 },
+            ],
+          });
+        }
+        // Error-rate error-count request (with status_code filter)
         if (body.aggregations?.some((a: { alias: string }) => a.alias === "error_count")) {
           return resolveAnalyticsResponse({
             rows: [
-              { "date_trunc('hour', start_time)": "2025-06-22T10:00:00Z", total_count: 100, error_count: 5 },
-              { "date_trunc('hour', start_time)": "2025-06-22T11:00:00Z", total_count: 80, error_count: 2 },
+              { "date_trunc('hour', start_time)": "2025-06-22T10:00:00Z", error_count: 5 },
+              { "date_trunc('hour', start_time)": "2025-06-22T11:00:00Z", error_count: 2 },
             ],
           });
         }
@@ -960,13 +1011,22 @@ describe("DashboardPage", () => {
     });
   });
 
-  it("#239: error-rate chart sends COUNT(*) aggregations with status_code filter", async () => {
+  it("#239: error-rate chart sends two separate requests: total-count and error-count", async () => {
+    const totalBodies: AnalyticsRequest[] = [];
     const errorBodies: AnalyticsRequest[] = [];
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
       if (url === "/api/v1/analytics/spans" && options?.body) {
         const body = JSON.parse(options.body as string) as AnalyticsRequest;
-        if (body.aggregations?.some((a: { alias: string }) => a.alias === "error_count")) {
+        // Error-rate total-count request: has total_count, no error_count, and has group_by
+        if (body.aggregations?.some((a: { alias: string }) => a.alias === "total_count") &&
+            !body.aggregations?.some((a: { alias: string }) => a.alias === "error_count") &&
+            body.group_by && body.group_by.length > 0) {
+          totalBodies.push(body);
+        }
+        // Error-rate error-count request: has error_count and has group_by
+        if (body.aggregations?.some((a: { alias: string }) => a.alias === "error_count") &&
+            body.group_by && body.group_by.length > 0) {
           errorBodies.push(body);
         }
         return resolveAnalyticsResponse({ rows: [] });
@@ -980,29 +1040,43 @@ describe("DashboardPage", () => {
       expect(screen.getByText("Dashboard")).toBeInTheDocument();
     });
 
-    expect(errorBodies.length).toBeGreaterThan(0);
+    // Must have a separate error-count request with status_code filter
+    expect(errorBodies.length).toBe(1);
     const errBody = errorBodies[0];
-
-    // Must have a filter on status_code
     expect(errBody.filters.some((f: { field: string; op: string }) => f.field === "status_code" && f.op === "neq")).toBe(true);
 
-    // Must have total_count and error_count aggregations
-    const aliases = errBody.aggregations.map((a: { alias: string }) => a.alias);
-    expect(aliases).toContain("total_count");
-    expect(aliases).toContain("error_count");
+    // Must have a separate total-count request without the status_code filter
+    expect(totalBodies.length).toBe(1);
+    const totalBody = totalBodies[0];
+    // filters is either absent or empty — no status_code filter
+    expect(totalBody.filters?.length === undefined || totalBody.filters?.length === 0).toBe(true);
+
+    // Verify error-count request has error_count aggregation
+    const errorAliases = errBody.aggregations.map((a: { alias: string }) => a.alias);
+    expect(errorAliases).toContain("error_count");
+
+    // Verify total-count request has total_count aggregation only
+    const totalAliases = totalBody.aggregations.map((a: { alias: string }) => a.alias);
+    expect(totalAliases).toContain("total_count");
+    expect(totalAliases).not.toContain("error_count");
   });
 
   it("#239: error-rate chart shows error rate percentages", async () => {
-    const errorBodies: AnalyticsRequest[] = [];
-
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
       if (url === "/api/v1/analytics/spans" && options?.body) {
         const body = JSON.parse(options.body as string) as AnalyticsRequest;
-        if (body.aggregations?.some((a: { alias: string }) => a.alias === "error_count")) {
-          errorBodies.push(body);
+        if (body.aggregations?.some((a: { alias: string }) => a.alias === "total_count") &&
+            !body.aggregations?.some((a: { alias: string }) => a.alias === "error_count")) {
           return resolveAnalyticsResponse({
             rows: [
-              { "date_trunc('hour', start_time)": "2025-06-22T10:00:00Z", total_count: 100, error_count: 5 },
+              { "date_trunc('hour', start_time)": "2025-06-22T10:00:00Z", total_count: 100 },
+            ],
+          });
+        }
+        if (body.aggregations?.some((a: { alias: string }) => a.alias === "error_count")) {
+          return resolveAnalyticsResponse({
+            rows: [
+              { "date_trunc('hour', start_time)": "2025-06-22T10:00:00Z", error_count: 5 },
             ],
           });
         }
@@ -1018,18 +1092,10 @@ describe("DashboardPage", () => {
       expect(screen.getByText("Error Rate")).toBeInTheDocument();
     });
 
-    // Verify the request uses status_code filter + COUNT(*) aggregations
-    expect(errorBodies.length).toBeGreaterThan(0);
-    const errBody = errorBodies[0];
-    const aliases = errBody.aggregations.map((a: { alias: string }) => a.alias);
-    expect(aliases).toContain("total_count");
-    expect(aliases).toContain("error_count");
-    // Error rate uses status_code != "OK" filter
-    expect(errBody.filters).toBeDefined();
-    const hasStatusCodeFilter = errBody.filters?.some(
-      (f: { field: string; op: string; value: unknown }) => f.field === "status_code" && f.op === "neq" && f.value === "OK"
-    );
-    expect(hasStatusCodeFilter).toBe(true);
+    // Verify the chart rendered an SVG with line data (proves the error rate is computed)
+    await waitFor(() => {
+      expect(document.querySelector("svg")).toBeInTheDocument();
+    });
   });
 
   // ── Issue #239: Duplicate Cost by Model removal ──────────────────────

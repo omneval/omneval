@@ -1123,14 +1123,28 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
       };
 
       // ── KPI: total cost, traces, error rate, avg latency ──
+      // NOTE: the error-rate request filters out OK rows; error_count
+      // comes back in a separate variable (errorRateKpiJson) below.
+      // The frontend computes error_rate = error_count / total_traces.
       const kpiReq: AnalyticsRequest = {
         ...body,
         group_by: [],
         aggregations: [
           { function: "count", field: "*", alias: "total_traces" },
           { function: "sum", field: "cost_usd", alias: "total_cost" },
-          { function: "count", field: "status_code", alias: "error_rate" },
           { function: "avg", field: "duration_ms", alias: "avg_latency_ms" },
+        ],
+      };
+
+      // ── KPI error count: separate request so we can compute a ratio ──
+      const kpiErrorCountReq: AnalyticsRequest = {
+        ...body,
+        group_by: [],
+        filters: [
+          { field: "status_code", op: "neq", value: "OK" },
+        ],
+        aggregations: [
+          { function: "count", field: "*", alias: "error_count" },
         ],
       };
 
@@ -1148,8 +1162,21 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         ],
       };
 
-      // ── Error Rate: total count + error count per time bucket ──
-      const errorRateReq: AnalyticsRequest = {
+      // ── Error Rate: separate total-count and error-count queries so the
+      // frontend can compute a true ratio (filtering out OK rows before
+      // aggregation would make total_count == error_count, yielding 100%). ──
+      const errorRateTotalReq: AnalyticsRequest = {
+        ...body,
+        group_by: [
+          { field: "time_bucket", interval: "1h" },
+        ],
+        order_by: [{ field: "start_time", desc: false }],
+        aggregations: [
+          { function: "count", field: "*", alias: "total_count" },
+        ],
+      };
+
+      const errorRateErrorReq: AnalyticsRequest = {
         ...body,
         filters: [
           { field: "status_code", op: "neq", value: "OK" },
@@ -1159,8 +1186,7 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         ],
         order_by: [{ field: "start_time", desc: false }],
         aggregations: [
-          { function: "count", field: "*", alias: "total_count" },
-          { function: "count", field: "status_code", alias: "error_count" },
+          { function: "count", field: "*", alias: "error_count" },
         ],
       };
 
@@ -1171,8 +1197,10 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         kindUsageResp,
         userConsumptionResp,
         kpiResp,
+        kpiErrorCountResp,
         latencyResp,
-        errorRateResp,
+        errorRateTotalResp,
+        errorRateErrorResp,
       ] = await Promise.all([
         fetch("/api/v1/analytics/spans", {
           method: "POST",
@@ -1207,12 +1235,22 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         fetch("/api/v1/analytics/spans", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(kpiErrorCountReq),
+        }),
+        fetch("/api/v1/analytics/spans", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(latencyPercentilesReq),
         }),
         fetch("/api/v1/analytics/spans", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(errorRateReq),
+          body: JSON.stringify(errorRateTotalReq),
+        }),
+        fetch("/api/v1/analytics/spans", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(errorRateErrorReq),
         }),
       ]);
 
@@ -1227,8 +1265,10 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         kindUsageJson,
         userConsumptionJson,
         kpiJson,
+        kpiErrorCountJson,
         latencyJson,
-        errorRateJson,
+        errorRateTotalJson,
+        errorRateErrorJson,
       ] = await Promise.all([
         tracesByNameResp.ok ? tracesByNameResp.json() : { rows: [] },
         tracesByTimeResp.ok ? tracesByTimeResp.json() : { rows: [] },
@@ -1236,8 +1276,10 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         kindUsageResp.ok ? kindUsageResp.json() : { rows: [] },
         userConsumptionResp.ok ? userConsumptionResp.json() : { rows: [] },
         kpiResp.ok ? kpiResp.json() : { rows: [] },
+        kpiErrorCountResp.ok ? kpiErrorCountResp.json() : { rows: [] },
         latencyResp.ok ? latencyResp.json() : { rows: [] },
-        errorRateResp.ok ? errorRateResp.json() : { rows: [] },
+        errorRateTotalResp.ok ? errorRateTotalResp.json() : { rows: [] },
+        errorRateErrorResp.ok ? errorRateErrorResp.json() : { rows: [] },
       ]);
 
       if (seq !== requestSeq.current) return;
@@ -1285,14 +1327,20 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
       );
 
       // KPI data: read row 0 (default to zeros when no rows)
+      // Compute error_rate as a ratio: error_count / total_traces
       const kpiRows = kpiJson.rows ?? [];
       if (kpiRows.length > 0) {
         const r = kpiRows[0] as Record<string, unknown>;
+        const totalTraces = Number(r.total_traces) || 0;
+        const errorCountRows = kpiErrorCountJson.rows ?? [];
+        const errorCount =
+          errorCountRows.length > 0
+            ? Number((errorCountRows[0] as Record<string, unknown>).error_count) || 0
+            : 0;
         setKpiData({
           totalCost: Number(r.total_cost) || 0,
-          totalTraces: Number(r.total_traces) || 0,
-          // error_rate from backend: either a pre-computed ratio or a count
-          errorRate: Number(r.error_rate) || 0,
+          totalTraces,
+          errorRate: totalTraces > 0 ? errorCount / totalTraces : 0,
           avgLatencyMs: Number(r.avg_latency_ms) || 0,
         });
       } else {
@@ -1316,13 +1364,27 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
           .filter((d: LatencyPercentileData) => d.time > 0),
       );
 
-      // Error rate data
+      // Error rate data: merge total-count and error-count rows from
+      // separate queries, then compute error_rate as error_count / total_count.
+      const totalRows = (errorRateTotalJson.rows ?? []).map((row: Record<string, unknown>) => ({
+        time: extractRawTime(row),
+        total_count: Number(row.total_count) || 0,
+      })).filter((d: { time: number }) => d.time > 0);
+
+      const errorMap = new Map<number, number>();
+      (errorRateErrorJson.rows ?? []).forEach((row: Record<string, unknown>) => {
+        const t = extractRawTime(row);
+        if (t > 0) {
+          errorMap.set(t, Number(row.error_count) || 0);
+        }
+      });
+
       setErrorRateData(
-        (errorRateJson.rows ?? [])
-          .map((row: Record<string, unknown>) => ({
-            time: extractRawTime(row),
-            total_count: Number(row.total_count) || 0,
-            error_count: Number(row.error_count) || 0,
+        totalRows
+          .map((d: { time: number; total_count: number }) => ({
+            time: d.time,
+            total_count: d.total_count,
+            error_count: errorMap.get(d.time) || 0,
           }))
           .filter((d: ErrorRateData) => d.time > 0),
       );
