@@ -723,3 +723,92 @@ describe("tool/action span details in tree view", () => {
     expect(screen.getByText(/diagnose/)).toBeInTheDocument();
   });
 });
+
+// ── Regression test for #268 ─────────────────────────────────────
+// hasChatContent previously only checked extracted.messages, so a span
+// whose attributes yield only toolCalls (no gen_ai prompt/completion text)
+// never showed the Chat tab even though FormattedChatMessages can render
+// tool calls on their own.
+
+describe("Chat tab for spans with tool calls but no text messages", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const toolCallsOnlyTraceData = {
+    trace_id: "tool-calls-only-trace",
+    project_id: "test-project",
+    root_span: {
+      span_id: "root-span",
+      trace_id: "tool-calls-only-trace",
+      parent_id: "",
+      project_id: "test-project",
+      name: "main-trace",
+      kind: "chain",
+      start_time: "2025-01-15T10:00:00Z",
+      end_time: "2025-01-15T10:00:30Z",
+      cost_usd: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      children: [
+        {
+          span_id: "tool-call-span",
+          trace_id: "tool-calls-only-trace",
+          parent_id: "root-span",
+          project_id: "test-project",
+          name: "llm-tool-call",
+          kind: "llm",
+          start_time: "2025-01-15T10:00:01Z",
+          end_time: "2025-01-15T10:00:05Z",
+          cost_usd: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          attributes: {
+            "gen_ai.usage.tool_calls": JSON.stringify([
+              { id: "tc_1", type: "function", function: "calculator", input: "1+1" },
+            ]),
+          },
+        },
+      ],
+    },
+  };
+
+  function mockToolCallsOnlyFetchSuccess() {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(toolCallsOnlyTraceData),
+    } as Response);
+  }
+
+  it("shows the Chat tab and renders tool calls for a span with toolCalls but no messages", async () => {
+    mockToolCallsOnlyFetchSuccess();
+
+    renderWithProvider(
+      <TraceDetailPage
+        traceId="tool-calls-only-trace"
+        activeProject="test-project"
+        onBack={() => {}}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText("main-trace").length).toBeGreaterThan(0);
+    });
+
+    const spanRow = screen.getByText("llm-tool-call").closest('[role="button"]');
+    expect(spanRow).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(spanRow!);
+    });
+
+    expect(screen.getByText("Chat")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Chat"));
+    });
+
+    expect(screen.getByText(/Tool Calls/)).toBeInTheDocument();
+    expect(screen.getByText(/calculator/)).toBeInTheDocument();
+  });
+});
