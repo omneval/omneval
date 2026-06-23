@@ -3,6 +3,7 @@ import LoginPage from "./pages/Login";
 import TracesPage from "./pages/Traces";
 import TraceDetailPage from "./pages/TraceDetail";
 import ConversationDetailPage from "./pages/ConversationDetail";
+import ConversationsPage from "./pages/Conversations";
 import DashboardPage from "./pages/Dashboard";
 import PromptsPage from "./pages/Prompts";
 import DatasetDetailPage from "./pages/DatasetDetail";
@@ -24,6 +25,7 @@ type Page =
   | "traces"
   | "trace-detail"
   | "conversation-detail"
+  | "conversations"
   | "dashboard"
   | "prompts"
   | "datasets"
@@ -35,6 +37,7 @@ type Page =
 const NAV_MAP: Record<string, Page> = {
   dashboard: "dashboard",
   traces: "traces",
+  conversations: "conversations",
   prompts: "prompts",
   datasets: "datasets",
   "dataset-detail": "dataset-detail",
@@ -50,6 +53,7 @@ const PAGE_TO_PATH: Record<Page, string> = {
   traces: "traces",
   "trace-detail": "traces",
   "conversation-detail": "traces",
+  conversations: "conversations",
   prompts: "prompts",
   datasets: "datasets",
   "dataset-detail": "datasets",
@@ -83,11 +87,11 @@ export default function App() {
   const [activeTraceId, setActiveTraceId] = useState<string>("");
   const [activeDatasetId, setActiveDatasetId] = useState<string>("");
   const [activeConversationId, setActiveConversationId] = useState<string>("");
-  // Which tab the Traces page opens on (back from ConversationDetail returns
-  // to the Conversations tab), and where TraceDetail's back button leads
-  // (Conversations tab → ConversationDetail → TraceDetail chain, issue #67).
-  const [tracesInitialTab, setTracesInitialTab] = useState<"traces" | "conversations">("traces");
+  // Where TraceDetail's back button leads (issue #67).
   const [traceDetailReturnTo, setTraceDetailReturnTo] = useState<Page>("traces");
+
+  // Which page the user came from before reaching ConversationDetail, so the back button returns to the correct source page.
+  const [conversationDetailReturnTo, setConversationDetailReturnTo] = useState<Page>("conversations");
 
   const [timeRange, setTimeRange] = useState("1d");
   const [showNewProject, setShowNewProject] = useState(false);
@@ -226,8 +230,6 @@ export default function App() {
   const handleNavigate = (id: string) => {
     const route = NAV_MAP[id];
     if (route) {
-      // Direct sidebar navigation to Traces always lands on the default tab.
-      if (route === "traces") setTracesInitialTab("traces");
       setPage(route);
       // Keep the URL in sync so the back button works and hard-reloading
       // the page returns to the same section.
@@ -265,7 +267,15 @@ export default function App() {
       />
 
       {/* Main Content */}
-      <Layout activeNav={page === "trace-detail" || page === "conversation-detail" ? "traces" : page} onNavigate={handleNavigate} onLogout={handleLogout}>
+      <Layout
+        activeNav={
+          page === "trace-detail" || page === "conversation-detail"
+            ? "traces"
+            : page
+        }
+        onNavigate={handleNavigate}
+        onLogout={handleLogout}
+      >
         <ToastProvider>
           <div style={{ background: colors.backgrounds.voidBlack }}>
             {showNewProject && (
@@ -281,15 +291,10 @@ export default function App() {
               <TracesPage
                 activeProject={activeProject}
                 timeRange={timeRange}
-                initialTab={tracesInitialTab}
                 onNavigateToTrace={setActiveTraceId}
                 onNavigateToTraceDetail={() => {
                   setTraceDetailReturnTo("traces");
                   setPage("trace-detail");
-                }}
-                onNavigateToConversation={(conversationId) => {
-                  setActiveConversationId(conversationId);
-                  setPage("conversation-detail");
                 }}
               />
             )}
@@ -300,14 +305,21 @@ export default function App() {
                 onBack={() => setPage(traceDetailReturnTo)}
               />
             )}
+            {page === "conversations" && (
+              <ConversationsPage
+                activeProject={activeProject}
+                onNavigateToConversation={(conversationId) => {
+                  setActiveConversationId(conversationId);
+                  setConversationDetailReturnTo("conversations");
+                  setPage("conversation-detail");
+                }}
+              />
+            )}
             {page === "conversation-detail" && activeConversationId && (
               <ConversationDetailPage
                 conversationId={activeConversationId}
                 activeProject={activeProject}
-                onBack={() => {
-                  setTracesInitialTab("conversations");
-                  setPage("traces");
-                }}
+                onBack={() => setPage(conversationDetailReturnTo)}
                 onNavigateToTrace={setActiveTraceId}
                 onNavigateToTraceDetail={() => {
                   setTraceDetailReturnTo("conversation-detail");
