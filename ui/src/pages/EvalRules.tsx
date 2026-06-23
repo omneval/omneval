@@ -191,30 +191,6 @@ function StyledInput({
   );
 }
 
-function StyledSelect({
-  value,
-  onChange,
-  children,
-  ...rest
-}: Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "onChange"> & {
-  onChange: React.ChangeEventHandler<HTMLSelectElement>;
-}) {
-  return (
-    <select
-      value={value}
-      onChange={onChange}
-      className="input-focus w-full px-3 py-2 text-sm rounded-md border border-omneval-border transition-colors"
-      style={{
-        backgroundColor: colors.backgrounds.abyssBlack,
-        color: colors.typography.pureLight,
-      }}
-      {...rest}
-    >
-      {children}
-    </select>
-  );
-}
-
 function ActionButton({
   children,
   onClick,
