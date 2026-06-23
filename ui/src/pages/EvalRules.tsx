@@ -97,24 +97,29 @@ function StatusBadge({ enabled }: { enabled: boolean }) {
 }
 
 function normalizeFilter(filter: EvalFilter): EvalFilter {
-  /** Convert string values (from FilterGroup inputs) to numbers where needed. */
-  if (typeof filter.min_cost_usd === "string" && filter.min_cost_usd) {
-    filter.min_cost_usd = parseFloat(filter.min_cost_usd);
+  /* Build a new object — never mutate the input (React anti-pattern).
+     Convert string values (from FilterGroup inputs) to numbers where
+     needed so the JSON body matches the Go API contract. */
+  const out: EvalFilter = { ...filter };
+
+  if (typeof out.min_cost_usd === "string" && out.min_cost_usd) {
+    out.min_cost_usd = parseFloat(out.min_cost_usd);
   }
-  if (typeof filter.max_cost_usd === "string" && filter.max_cost_usd) {
-    filter.max_cost_usd = parseFloat(filter.max_cost_usd);
+  if (typeof out.max_cost_usd === "string" && out.max_cost_usd) {
+    out.max_cost_usd = parseFloat(out.max_cost_usd);
   }
-  if (typeof filter.min_duration_ms === "string" && filter.min_duration_ms) {
-    filter.min_duration_ms = parseInt(filter.min_duration_ms);
+  if (typeof out.min_duration_ms === "string" && out.min_duration_ms) {
+    out.min_duration_ms = parseInt(out.min_duration_ms);
   }
-  if (typeof filter.max_duration_ms === "string" && filter.max_duration_ms) {
-    filter.max_duration_ms = parseInt(filter.max_duration_ms);
+  if (typeof out.max_duration_ms === "string" && out.max_duration_ms) {
+    out.max_duration_ms = parseInt(out.max_duration_ms);
   }
-  // Recurse into children.
-  if (filter.and) filter.and = filter.and.map(normalizeFilter);
-  if (filter.or) filter.or = filter.or.map(normalizeFilter);
-  if (filter.not) filter.not = normalizeFilter(filter.not);
-  return filter;
+  // Recurse into children (each recursive call returns a new object).
+  if (out.and) out.and = out.and.map(normalizeFilter);
+  if (out.or) out.or = out.or.map(normalizeFilter);
+  if (out.not) out.not = normalizeFilter(out.not);
+
+  return out;
 }
 
 function sampleRatePercent(rate: unknown): string {

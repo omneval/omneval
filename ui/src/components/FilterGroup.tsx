@@ -5,6 +5,15 @@ import { colors } from "@/theme";
 // Public types
 // ---------------------------------------------------------------------------
 
+// EvalFilter is the UI-side representation of the server's domain EvalFilter
+// (internal/domain/eval.go).  The Go type uses pointer fields (*float64,
+// *SpanKind) so missing values are encoded as JSON null / omitted.  The UI
+// type uses optional fields (number | string) because React form inputs
+// always produce strings — the normalizeFilter() bridge in EvalRules.tsx
+// converts them to the numeric / string values the Go API expects.
+//
+// If more consumers emerge this should be extracted to a shared SDK file
+// (e.g. sdk/ts/eval.ts) to keep UI and server types in sync.
 export type EvalFilter = {
   kind?: string;
   model?: string;
