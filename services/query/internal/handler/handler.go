@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/omneval/omneval/internal/auth"
@@ -403,6 +404,103 @@ type AnalyticsResponse struct {
 	Rows []map[string]any `json:"rows"`
 }
 
+// HandleSpansBatch handles POST /api/v1/spans/batch.
+// It accepts a list of span IDs and returns the span details (input, output, etc.)
+// for bulk add-to-dataset operations.
+func (h *SpanHandler) HandleSpansBatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req BatchSpansRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.SpanIDs) == 0 {
+		writeJSONError(w, "span_ids array is required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify project access using the same pattern as other handlers.
+	resolver := h.resolveProjectID()
+	_, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
+	if !ok {
+		return
+	}
+
+	// Query spans by IDs from the lake.
+	// Build parameter placeholders for the span IDs.
+	placeholders := make([]string, len(req.SpanIDs))
+	args := make([]any, len(req.SpanIDs))
+	for i, id := range req.SpanIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := fmt.Sprintf("SELECT span_id, name, CAST(input AS VARCHAR), CAST(output AS VARCHAR) FROM lake.spans WHERE span_id IN (%s)", strings.Join(placeholders, ", "))
+
+	rows, err := h.Lake.QueryContext(r.Context(), query, args...)
+	if err != nil {
+		writeJSONError(w, "query error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var batchSpans []BatchSpanResponse
+	for rows.Next() {
+		var spanID, name string
+		var inputJSON, outputJSON *string
+		if err := rows.Scan(&spanID, &name, &inputJSON, &outputJSON); err != nil {
+			writeJSONError(w, "scan error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		inputStr := ""
+		if inputJSON != nil {
+			inputStr = *inputJSON
+		}
+		outputStr := ""
+		if outputJSON != nil {
+			outputStr = *outputJSON
+		}
+
+		batchSpans = append(batchSpans, BatchSpanResponse{
+			SpanID: spanID,
+			Name:   name,
+			Input:  inputStr,
+			Output: outputStr,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		writeJSONError(w, "row error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(BatchSpansResponse{Spans: batchSpans})
+}
+
+// BatchSpansRequest is the JSON body for POST /api/v1/spans/batch.
+type BatchSpansRequest struct {
+	SpanIDs []string `json:"span_ids"`
+}
+
+// BatchSpanResponse is a single span in the batch response.
+type BatchSpanResponse struct {
+	SpanID string `json:"span_id"`
+	Name   string `json:"name"`
+	Input  string `json:"input"`
+	Output string `json:"output"`
+}
+
+// BatchSpansResponse is the JSON body for POST /api/v1/spans/batch.
+type BatchSpansResponse struct {
+	Spans []BatchSpanResponse `json:"spans"`
+}
+
 // buildTraceTree groups spans by trace_id and links parent-child relationships.
 // It sets Span.Children for proper waterfall rendering.
 func buildTraceTree(spans []*domain.Span, db DBHandle, traceID, projectID, scoresTable string) domain.Trace {
@@ -619,6 +717,7 @@ func (h *SpanHandler) Routes() []AuthRoute {
 	return []AuthRoute{
 		{Method: http.MethodGet, Path: "/api/v1/projects", Handler: http.HandlerFunc(h.HandleProjects), Policy: AuthPolicySession},
 		{Method: http.MethodPost, Path: "/api/v1/spans/query", Handler: http.HandlerFunc(h.HandleSpansQuery), Policy: AuthPolicySession},
+		{Method: http.MethodPost, Path: "/api/v1/spans/batch", Handler: http.HandlerFunc(h.HandleSpansBatch), Policy: AuthPolicySession},
 		{Method: http.MethodPost, Path: "/api/v1/analytics/spans", Handler: http.HandlerFunc(h.HandleAnalyticsSpans), Policy: AuthPolicySession},
 		{Method: http.MethodGet, Path: "/api/v1/traces/{traceId}", Handler: http.HandlerFunc(h.HandleTraceDetail), Policy: AuthPolicySession},
 	}

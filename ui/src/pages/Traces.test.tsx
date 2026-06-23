@@ -3,7 +3,7 @@ import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 import type { ComponentProps } from "react";
 import TracesPage from "./Traces";
 
-// ── Helper data ───────────────────────────────────────────
+// ── Helper data ──────────────────────────────────────────────────
 
 // Post-#136: the Traces list returns one row per trace — the root span
 // annotated with trace-level rollups (span_count, kind_counts, summed
@@ -66,7 +66,7 @@ const mockSpans = [
   },
 ];
 
-// ── Render helper ──────────────────────────────────────
+// ── Render helper ────────────────────────────────────────────────
 
 function renderTracesPage(
   props: Partial<ComponentProps<typeof TracesPage>> = {}
@@ -82,7 +82,7 @@ function renderTracesPage(
   );
 }
 
-// ── ObservationPills component tests ─────────────────────
+// ── ObservationPills component tests ─────────────────────────────
 
 describe("ObservationPills component", () => {
   beforeEach(() => {
@@ -264,7 +264,7 @@ describe("ObservationPills component", () => {
   });
 });
 
-// ── Column toggle tests ─────────────────────────────
+// ── Column toggle tests ──────────────────────────────────────────
 
 describe("column toggles", () => {
   it("toggles Levels column on then off", async () => {
@@ -551,7 +551,7 @@ describe("column toggles", () => {
   });
 });
 
-// ── Traces tab tests ────────────────────────────────
+// ── Traces tab tests ─────────────────────────────────────────────
 
 describe("traces tab", () => {
   beforeEach(() => {
@@ -582,7 +582,7 @@ describe("traces tab", () => {
   });
 });
 
-// ── Conversations tab tests (issue #67) ──────────────────────
+// ── Conversations tab tests (issue #67) ───────────────────────────
 
 const mockConversations = [
   {
@@ -709,7 +709,7 @@ describe("conversations tab", () => {
   });
 });
 
-// ── Bookmark tests ────────────────────────────────────
+// ── Bookmark tests ───────────────────────────────────────────────
 
 describe("bookmark toggling", () => {
   it("toggles bookmark star on click", async () => {
@@ -748,7 +748,7 @@ describe("bookmark toggling", () => {
   });
 });
 
-// ── Search tests ─────────────────────────────────────
+// ── Search tests ─────────────────────────────────────────────────
 
 describe("search", () => {
   it("initial fetch does NOT include search filter when query is empty", async () => {
@@ -1131,7 +1131,7 @@ describe("fetch correctness", () => {
   });
 });
 
-// ── Pagination tests ──────────────────────────────────
+// ── Pagination tests ─────────────────────────────────────────────
 
 describe("pagination", () => {
   beforeEach(() => {
@@ -1247,7 +1247,7 @@ describe("pagination", () => {
   });
 });
 
-// ── Span rendering tests ─────────────────────────────
+// ── Span rendering tests ─────────────────────────────────────────
 
 describe("span rendering", () => {
   it("renders cost with four decimal places", async () => {
@@ -1279,7 +1279,7 @@ describe("span rendering", () => {
   });
 });
 
-// ── Sentinel token/cost display tests ────────────────────
+// ── Sentinel token/cost display tests ────────────────────────────
 
 describe("sentinel token and cost display", () => {
   it("shows 0 total tokens (not -2) when span has -1 sentinel token values", async () => {
@@ -1344,7 +1344,7 @@ describe("sentinel token and cost display", () => {
   });
 });
 
-// ── Auto-refresh tests ─────────────────────────────────
+// ── Auto-refresh tests ───────────────────────────────────────────
 
 describe("auto-refresh", () => {
   it("indicates auto-refresh is enabled when checkbox is checked", async () => {
@@ -1381,7 +1381,7 @@ describe("auto-refresh", () => {
   });
 });
 
-// ── Filter tests ──────────────────────────────────────
+// ── Filter tests ───────────────────────────────────────────────────
 
 describe("filters", () => {
   beforeEach(() => {
@@ -1906,4 +1906,93 @@ describe("filter panel styling (#142)", () => {
     const clearBtn = screen.getByRole("button", { name: "Clear All Filters" });
     expect(clearBtn.className).toContain("btn-secondary");
   });
+
+  it("renders checkbox column headers for row selection", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    // The selection column header checkbox should be present
+    const selectAllCheckbox = screen.getByRole("checkbox", { name: /select all/i });
+    expect(selectAllCheckbox).toBeInTheDocument();
+  });
+
+  it("renders a checkbox for each trace row", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    // Each row should have a checkbox
+    const rowCheckboxes = screen.getAllByRole("checkbox", { name: /select trace/i });
+    // We have 3 mock spans → 3 checkboxes (one per row)
+    expect(rowCheckboxes).toHaveLength(3);
+  });
+
+  it("toggles selection when a row checkbox is clicked", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    const rowCheckboxes = screen.getAllByRole("checkbox", { name: /select trace/i });
+    expect(rowCheckboxes[0]).not.toBeChecked();
+
+    await act(async () => {
+      fireEvent.click(rowCheckboxes[0]);
+    });
+
+    expect(rowCheckboxes[0]).toBeChecked();
+  });
+
+  it("selects all rows when the header checkbox is clicked", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    const selectAllCheckbox = screen.getByRole("checkbox", { name: /select all/i });
+    expect(selectAllCheckbox).not.toBeChecked();
+
+    await act(async () => {
+      fireEvent.click(selectAllCheckbox);
+    });
+
+    // All row checkboxes should now be checked
+    const rowCheckboxes = screen.getAllByRole("checkbox", { name: /select trace/i });
+    rowCheckboxes.forEach((cb) => expect(cb).toBeChecked());
+  });
+
+  it("toggles select-all checkbox when individual row checkboxes are clicked", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    const selectAllCheckbox = screen.getByRole("checkbox", { name: /select all/i });
+    const rowCheckboxes = screen.getAllByRole("checkbox", { name: /select trace/i });
+
+    // Click first row
+    await act(async () => {
+      fireEvent.click(rowCheckboxes[0]);
+    });
+    // select-all should become indeterminate or checked depending on count
+    // With 3 rows, 1 checked → not all → select-all should not be checked
+    expect(selectAllCheckbox).not.toBeChecked();
+
+    // Click remaining rows
+    for (let i = 1; i < rowCheckboxes.length; i++) {
+      await act(async () => {
+        fireEvent.click(rowCheckboxes[i]);
+      });
+    }
+    expect(selectAllCheckbox).toBeChecked();
+  });
 });
+
