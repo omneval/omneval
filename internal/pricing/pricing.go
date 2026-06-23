@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -178,6 +179,26 @@ func (t *Table) HasModel(model string) bool {
 	_, in := t.inputCost[model]
 	_, out := t.outputCost[model]
 	return in || out
+}
+
+// Models returns a sorted slice of all model names known in the table.
+func (t *Table) Models() []string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	seen := make(map[string]struct{}, len(t.inputCost))
+	for model := range t.inputCost {
+		seen[model] = struct{}{}
+	}
+	for model := range t.outputCost {
+		seen[model] = struct{}{}
+	}
+	models := make([]string, 0, len(seen))
+	for model := range seen {
+		models = append(models, model)
+	}
+	sort.Strings(models)
+	return models
 }
 
 // NormalizeModel canonicalizes a model name for pricing lookup:

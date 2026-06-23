@@ -11,6 +11,7 @@ import (
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/metadata"
+	"github.com/omneval/omneval/internal/pricing"
 	"github.com/omneval/omneval/internal/probe"
 	s3 "github.com/omneval/omneval/internal/storage/s3"
 	"github.com/omneval/omneval/services/query/internal/auth"
@@ -58,6 +59,9 @@ type WiredDeps struct {
 	Dataset         *handler.DatasetHandler
 	DatasetRun      *handler.DatasetRunHandler
 	Playground      *playground.PlaygroundHandler
+
+	// Pricing table used by the models endpoint and cost calculations.
+	Pricing *pricing.Table
 }
 
 // Close releases the infrastructure handles held by the deps. It is used on
@@ -195,6 +199,9 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		LLMClient:    llmClient,
 		SessionStore: h,
 	}
+
+	// Load pricing table for the models endpoint.
+	deps.Pricing = pricing.GetDefaultBundled()
 
 	// Health and readiness probes.
 	p := probe.New()
