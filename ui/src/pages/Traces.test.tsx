@@ -3,7 +3,7 @@ import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 import type { ComponentProps } from "react";
 import TracesPage from "./Traces";
 
-// ── Helper data ──────────────────────────────────────────────────
+// ── Helper data ───────────────────────────────────────────
 
 // Post-#136: the Traces list returns one row per trace — the root span
 // annotated with trace-level rollups (span_count, kind_counts, summed
@@ -66,7 +66,7 @@ const mockSpans = [
   },
 ];
 
-// ── Render helper ────────────────────────────────────────────────
+// ── Render helper ──────────────────────────────────────
 
 function renderTracesPage(
   props: Partial<ComponentProps<typeof TracesPage>> = {}
@@ -82,7 +82,7 @@ function renderTracesPage(
   );
 }
 
-// ── ObservationPills component tests ─────────────────────────────
+// ── ObservationPills component tests ─────────────────────
 
 describe("ObservationPills component", () => {
   beforeEach(() => {
@@ -119,6 +119,83 @@ describe("ObservationPills component", () => {
       fireEvent.click(columnsButton);
     });
   }
+
+  it("#237: each span-kind badge has a title tooltip with the full kind name", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+    await enableLevelsColumn();
+
+    // trace-a's kind_counts is {chain: 1, llm: 2, tool: 1}
+    // each badge pill should carry a title attribute equal to its full label
+    const pills = screen.queryAllByRole("status");
+    const titles = pills.map((p) => (p as HTMLElement).getAttribute("title"));
+    expect(titles).toContain("LLM 2");
+    expect(titles).toContain("Tool 1");
+    expect(titles).toContain("Chain 1");
+  });
+
+  it("#237: agent and internal kinds map to their full labels", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: [
+            {
+              span_id: "root-3",
+              trace_id: "trace-d",
+              parent_id: "",
+              project_id: "test-project",
+              name: "agent-trace",
+              kind: "chain",
+              model: "gpt-4",
+              start_time: "2025-01-15T13:00:00Z",
+              end_time: "2025-01-15T13:00:20Z",
+              cost_usd: 0.08,
+              input_tokens: 100,
+              output_tokens: 200,
+              status_code: "OK",
+              span_count: 3,
+              kind_counts: { chain: 1, agent: 1, internal: 1 },
+            },
+          ],
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("agent-trace")).toBeInTheDocument();
+    });
+    await enableLevelsColumn();
+
+    const pills = screen.queryAllByRole("status");
+    const titles = pills.map((p) => (p as HTMLElement).getAttribute("title"));
+    expect(titles).toContain("Agent 1");
+    expect(titles).toContain("Internal 1");
+    expect(titles).toContain("Chain 1");
+  });
+
+  it("#237: each span-kind badge has aria-label matching its title for screen readers", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+    await enableLevelsColumn();
+
+    const pills = screen.queryAllByRole("status");
+    pills.forEach((pill) => {
+      expect(pill).toHaveAttribute("aria-label");
+      expect(pill).toHaveAttribute("title");
+      expect(pill).toHaveAttribute("tabindex");
+      expect(pill.getAttribute("aria-label")).toBe(pill.getAttribute("title"));
+    });
+  });
 
   it("renders a badge for each kind in kind_counts", async () => {
     renderTracesPage();
@@ -187,7 +264,7 @@ describe("ObservationPills component", () => {
   });
 });
 
-// ── Column toggle tests ──────────────────────────────────────────
+// ── Column toggle tests ─────────────────────────────
 
 describe("column toggles", () => {
   it("toggles Levels column on then off", async () => {
@@ -474,7 +551,7 @@ describe("column toggles", () => {
   });
 });
 
-// ── Traces tab tests ─────────────────────────────────────────────
+// ── Traces tab tests ────────────────────────────────
 
 describe("traces tab", () => {
   beforeEach(() => {
@@ -505,7 +582,7 @@ describe("traces tab", () => {
   });
 });
 
-// ── Conversations tab tests (issue #67) ───────────────────────────
+// ── Conversations tab tests (issue #67) ──────────────────────
 
 const mockConversations = [
   {
@@ -632,7 +709,7 @@ describe("conversations tab", () => {
   });
 });
 
-// ── Bookmark tests ───────────────────────────────────────────────
+// ── Bookmark tests ────────────────────────────────────
 
 describe("bookmark toggling", () => {
   it("toggles bookmark star on click", async () => {
@@ -671,7 +748,7 @@ describe("bookmark toggling", () => {
   });
 });
 
-// ── Search tests ─────────────────────────────────────────────────
+// ── Search tests ─────────────────────────────────────
 
 describe("search", () => {
   it("initial fetch does NOT include search filter when query is empty", async () => {
@@ -1054,7 +1131,7 @@ describe("fetch correctness", () => {
   });
 });
 
-// ── Pagination tests ─────────────────────────────────────────────
+// ── Pagination tests ──────────────────────────────────
 
 describe("pagination", () => {
   beforeEach(() => {
@@ -1170,7 +1247,7 @@ describe("pagination", () => {
   });
 });
 
-// ── Span rendering tests ─────────────────────────────────────────
+// ── Span rendering tests ─────────────────────────────
 
 describe("span rendering", () => {
   it("renders cost with four decimal places", async () => {
@@ -1202,7 +1279,7 @@ describe("span rendering", () => {
   });
 });
 
-// ── Sentinel token/cost display tests ────────────────────────────
+// ── Sentinel token/cost display tests ────────────────────
 
 describe("sentinel token and cost display", () => {
   it("shows 0 total tokens (not -2) when span has -1 sentinel token values", async () => {
@@ -1267,7 +1344,7 @@ describe("sentinel token and cost display", () => {
   });
 });
 
-// ── Auto-refresh tests ───────────────────────────────────────────
+// ── Auto-refresh tests ─────────────────────────────────
 
 describe("auto-refresh", () => {
   it("indicates auto-refresh is enabled when checkbox is checked", async () => {
@@ -1304,7 +1381,7 @@ describe("auto-refresh", () => {
   });
 });
 
-// ── Filter tests ───────────────────────────────────────────────────
+// ── Filter tests ──────────────────────────────────────
 
 describe("filters", () => {
   beforeEach(() => {
@@ -1830,4 +1907,3 @@ describe("filter panel styling (#142)", () => {
     expect(clearBtn.className).toContain("btn-secondary");
   });
 });
-
