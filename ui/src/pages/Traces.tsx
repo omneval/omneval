@@ -643,11 +643,11 @@ function TableCellRenderer({
             onNavigateToTrace(span.trace_id);
             onNavigateToTraceDetail();
           }}
-          className="text-left block w-full"
+          className="text-left block w-full leading-tight"
           title="View trace waterfall"
         >
           <div className="text-omneval-text-pure font-medium">{span.name}</div>
-          <div className="text-omneval-text-muted text-xs font-mono truncate max-w-[120px]">
+          <div className="text-omneval-text-muted text-[11px] font-mono truncate max-w-[120px]">
             {span.trace_id.slice(0, 12)}…
           </div>
         </button>
@@ -803,16 +803,19 @@ export default function TracesPage({
     initialTab ?? "traces",
   );
   const [autoRefresh, setAutoRefresh] = useState(false);
+  // Default-visible columns: Timestamp, Name, Latency, Tokens, Cost.
+  // Input/Output/Levels are available via the column-visibility picker but
+  // off by default so they don't push the key metrics off-screen.
   const [columnVisibility, setColumnVisibility] = useState({
     bookmark: true,
     timestamp: true,
     name: true,
-    input: true,
-    output: true,
-    observationLevels: true,
     latency: true,
     tokens: true,
     cost: true,
+    input: false,
+    output: false,
+    observationLevels: false,
   });
 
   // Filters
@@ -824,16 +827,17 @@ export default function TracesPage({
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
 
   // ── Columns Definition ──
+  // Priority order: Timestamp → Name → Latency → Tokens → Cost → Input → Output → Levels
   const columns = [
     { key: "bookmark", label: "", visible: columnVisibility.bookmark },
     { key: "timestamp", label: "Timestamp", visible: columnVisibility.timestamp },
     { key: "name", label: "Name", visible: columnVisibility.name },
-    { key: "input", label: "Input", visible: columnVisibility.input },
-    { key: "output", label: "Output", visible: columnVisibility.output },
-    { key: "observationLevels", label: "Levels", visible: columnVisibility.observationLevels },
     { key: "latency", label: "Latency", visible: columnVisibility.latency },
     { key: "tokens", label: "Tokens", visible: columnVisibility.tokens },
     { key: "cost", label: "Cost", visible: columnVisibility.cost },
+    { key: "input", label: "Input", visible: columnVisibility.input },
+    { key: "output", label: "Output", visible: columnVisibility.output },
+    { key: "observationLevels", label: "Levels", visible: columnVisibility.observationLevels },
   ];
 
   const columnTooltips: Record<string, string> = {
@@ -1216,7 +1220,7 @@ export default function TracesPage({
                     }}
                   >
                     {visibleColumns.map((col) => (
-                      <td key={col.key} className="px-3 py-2.5 whitespace-nowrap">
+                      <td key={col.key} className="px-2 py-1 whitespace-nowrap">
                         <TableCellRenderer
                           col={col}
                           span={span}
