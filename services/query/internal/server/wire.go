@@ -160,6 +160,7 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 
 	deps.EvalRule = &handler.EvalRuleHandler{
 		EvalRuleStore: store,
+		PromptStore:   store,
 		SessionStore:  h,
 		ProjectResolver: h,
 		// DefaultJudgeModel is set below.

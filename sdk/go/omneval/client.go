@@ -180,6 +180,7 @@ type CreateEvalRuleRequest struct {
 	Name          string                 `json:"name"`
 	PromptName    string                 `json:"prompt_name"`
 	PromptVersion int64                  `json:"prompt_version,omitempty"`
+	PromptLabel   string                 `json:"prompt_label,omitempty"`
 	JudgeModel    string                 `json:"judge_model,omitempty"`
 	Filter        map[string]interface{} `json:"filter"`
 	SampleRate    float64                `json:"sample_rate"`
@@ -365,6 +366,9 @@ func (c *Client) CreateEvalRule(name, promptName string, opts *CreateEvalRuleReq
 		}
 		if opts.PromptVersion > 0 {
 			req.PromptVersion = opts.PromptVersion
+		}
+		if opts.PromptLabel != "" {
+			req.PromptLabel = opts.PromptLabel
 		}
 	}
 
