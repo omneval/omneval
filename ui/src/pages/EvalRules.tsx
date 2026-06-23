@@ -4,6 +4,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { formatTime } from "@/utils/formatters";
 import { truncate } from "@/utils/formatters";
 import { useToast } from "@/components/Toast";
+import { FilterGroup, createEmptyFilter, EvalFilter } from "@/components/FilterGroup";
 
 interface PreviewSpan {
   span_id: string;
@@ -33,21 +34,10 @@ export interface EvalRule {
   filter: EvalFilter | null | undefined;
 }
 
-interface EvalFilter {
-  kind?: string;
-  model?: string;
-  service_name?: string;
-  prompt_name?: string;
-  status_code?: string;
-  min_cost_usd?: number;
-  max_cost_usd?: number;
-  min_duration_ms?: number;
-  max_duration_ms?: number;
-  attributes_match?: Array<{ key: string; pattern: string }>;
-  and?: EvalFilter[];
-  or?: EvalFilter[];
-  not?: EvalFilter;
-}
+// Re-exported from FilterGroup — keep in sync with the component's type.
+// (We import `EvalFilter` above from FilterGroup; this interface is kept for
+//  the `rule.filter` field on `EvalRule` so that the local type matches what
+//  the backend serialises.)
 
 interface CreateEvalRuleRequest {
   name: string;
@@ -69,25 +59,8 @@ interface NewRuleFormState {
   promptName: string;
   promptVersion: number;
   sampleRate: number;
-  filterKind: string;
-  filterModel: string;
-  filterService: string;
-  filterStatus: string;
-  filterMinCost: string;
-  filterMaxCost: string;
-  filterMinDuration: string;
-  filterMaxDuration: string;
+  filter: EvalFilter;
 }
-
-const SPAN_KINDS = [
-  { value: "llm", label: "LLM" },
-  { value: "tool", label: "Tool" },
-  { value: "agent", label: "Agent" },
-  { value: "chain", label: "Chain" },
-  { value: "internal", label: "Internal" },
-] as const;
-
-const STATUS_CODES = ["OK", "ERROR", "CANCELLED", "UNKNOWN"] as const;
 
 const defaultFormState: NewRuleFormState = {
   ruleName: "",
@@ -95,14 +68,7 @@ const defaultFormState: NewRuleFormState = {
   promptName: "",
   promptVersion: 1,
   sampleRate: 100,
-  filterKind: "",
-  filterModel: "",
-  filterService: "",
-  filterStatus: "",
-  filterMinCost: "",
-  filterMaxCost: "",
-  filterMinDuration: "",
-  filterMaxDuration: "",
+  filter: createEmptyFilter(),
 };
 
 function StatusBadge({ enabled }: { enabled: boolean }) {
@@ -130,16 +96,24 @@ function StatusBadge({ enabled }: { enabled: boolean }) {
   );
 }
 
-function buildFilter(form: NewRuleFormState): EvalFilter {
-  const filter: EvalFilter = {};
-  if (form.filterKind) filter.kind = form.filterKind;
-  if (form.filterModel) filter.model = form.filterModel;
-  if (form.filterService) filter.service_name = form.filterService;
-  if (form.filterStatus) filter.status_code = form.filterStatus;
-  if (form.filterMinCost) filter.min_cost_usd = parseFloat(form.filterMinCost);
-  if (form.filterMaxCost) filter.max_cost_usd = parseFloat(form.filterMaxCost);
-  if (form.filterMinDuration) filter.min_duration_ms = parseInt(form.filterMinDuration);
-  if (form.filterMaxDuration) filter.max_duration_ms = parseInt(form.filterMaxDuration);
+function normalizeFilter(filter: EvalFilter): EvalFilter {
+  /** Convert string values (from FilterGroup inputs) to numbers where needed. */
+  if (typeof filter.min_cost_usd === "string" && filter.min_cost_usd) {
+    filter.min_cost_usd = parseFloat(filter.min_cost_usd);
+  }
+  if (typeof filter.max_cost_usd === "string" && filter.max_cost_usd) {
+    filter.max_cost_usd = parseFloat(filter.max_cost_usd);
+  }
+  if (typeof filter.min_duration_ms === "string" && filter.min_duration_ms) {
+    filter.min_duration_ms = parseInt(filter.min_duration_ms);
+  }
+  if (typeof filter.max_duration_ms === "string" && filter.max_duration_ms) {
+    filter.max_duration_ms = parseInt(filter.max_duration_ms);
+  }
+  // Recurse into children.
+  if (filter.and) filter.and = filter.and.map(normalizeFilter);
+  if (filter.or) filter.or = filter.or.map(normalizeFilter);
+  if (filter.not) filter.not = normalizeFilter(filter.not);
   return filter;
 }
 
@@ -150,6 +124,22 @@ function sampleRatePercent(rate: unknown): string {
 
 function filterDisplayText(filter: EvalFilter | null | undefined): string {
   if (!filter) return "no filter";
+
+  // Handle AND group
+  if (filter.and) {
+    return `(${filter.and.map(filterDisplayText).join(" AND ")})`;
+  }
+
+  // Handle OR group
+  if (filter.or) {
+    return `(${filter.or.map(filterDisplayText).join(" OR ")})`;
+  }
+
+  // Handle NOT
+  if (filter.not) {
+    return `(NOT ${filterDisplayText(filter.not)})`;
+  }
+
   const parts: string[] = [];
   if (filter.kind) parts.push(`kind=${filter.kind}`);
   if (filter.model) parts.push(`model=${filter.model}`);
@@ -363,7 +353,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
   };
 
   const handlePreview = useCallback(async () => {
-    const filter = buildFilter(createForm);
+    const filter = normalizeFilter(createForm.filter);
     const hasConditions = Object.keys(filter).length > 0;
 
     if (!hasConditions) {
@@ -438,7 +428,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
       prompt_version: createForm.promptVersion,
       sample_rate: createForm.sampleRate / 100,
       enabled: true,
-      filter: buildFilter(createForm),
+      filter: normalizeFilter(createForm.filter),
     };
 
     try {
@@ -631,92 +621,12 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
             className="p-3 rounded-md border mb-4"
             style={{ backgroundColor: colors.backgrounds.abyssBlack, borderColor: colors.backgrounds.caveWall }}
           >
-            <h4 className="text-xs font-medium text-omneval-text-muted mb-3 uppercase tracking-wider">Filter Conditions (AND logic)</h4>
+            <h4 className="text-xs font-medium text-omneval-text-muted mb-3 uppercase tracking-wider">Filter Conditions</h4>
 
-            <div className="grid grid-cols-3 gap-3 mb-3">
-              <FormField label="Span Kind">
-                <StyledSelect
-                  value={createForm.filterKind}
-                  onChange={(e) => setCreateForm({ ...createForm, filterKind: e.target.value })}
-                >
-                  <option value="">Any</option>
-                  {SPAN_KINDS.map((k) => (
-                    <option key={k.value} value={k.value}>{k.label}</option>
-                  ))}
-                </StyledSelect>
-              </FormField>
-              <FormField label="Model">
-                <StyledInput
-                  type="text"
-                  value={createForm.filterModel}
-                  onChange={(e) => setCreateForm({ ...createForm, filterModel: e.target.value })}
-                  placeholder="e.g. gpt-4-turbo"
-                />
-              </FormField>
-              <FormField label="Service Name">
-                <StyledInput
-                  type="text"
-                  value={createForm.filterService}
-                  onChange={(e) => setCreateForm({ ...createForm, filterService: e.target.value })}
-                  placeholder="e.g. my-service"
-                />
-              </FormField>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3 mb-3">
-              <FormField label="Status Code">
-                <StyledSelect
-                  value={createForm.filterStatus}
-                  onChange={(e) => setCreateForm({ ...createForm, filterStatus: e.target.value })}
-                >
-                  <option value="">Any</option>
-                  {STATUS_CODES.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </StyledSelect>
-              </FormField>
-              <FormField label="Min Cost ($)">
-                <StyledInput
-                  type="number"
-                  value={createForm.filterMinCost}
-                  min={0}
-                  step={0.01}
-                  onChange={(e) => setCreateForm({ ...createForm, filterMinCost: e.target.value })}
-                  placeholder="0.00"
-                />
-              </FormField>
-              <FormField label="Max Cost ($)">
-                <StyledInput
-                  type="number"
-                  value={createForm.filterMaxCost}
-                  min={0}
-                  step={0.01}
-                  onChange={(e) => setCreateForm({ ...createForm, filterMaxCost: e.target.value })}
-                  placeholder="999.99"
-                />
-              </FormField>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <FormField label="Min Duration (ms)">
-                <StyledInput
-                  type="number"
-                  value={createForm.filterMinDuration}
-                  min={0}
-                  onChange={(e) => setCreateForm({ ...createForm, filterMinDuration: e.target.value })}
-                  placeholder="100"
-                />
-              </FormField>
-              <FormField label="Max Duration (ms)">
-                <StyledInput
-                  type="number"
-                  value={createForm.filterMaxDuration}
-                  min={0}
-                  onChange={(e) => setCreateForm({ ...createForm, filterMaxDuration: e.target.value })}
-                  placeholder="30000"
-                />
-              </FormField>
-            </div>
+            <FilterGroup
+              value={createForm.filter}
+              onUpdate={(filter) => setCreateForm({ ...createForm, filter })}
+            />
           </div>
 
           {/* Preview button */}
