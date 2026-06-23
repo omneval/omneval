@@ -139,6 +139,47 @@ type Lake struct {
 	db       *sql.DB
 	readOnly bool
 	cfg      Config // retained for reconnection after Quack Server restarts
+
+	// shutdownCh is closed by Shutdown to tell any in-flight or future
+	// reconnect() call to give up immediately instead of running its full
+	// reconnectTimeout budget. Without this, a process-level SIGTERM arriving
+	// while several callers are queued behind reconnectExclusive's lock (e.g.
+	// because the Quack Server is mid-compaction and refusing connections)
+	// makes each queued reconnect attempt run its own ~10s before the next
+	// one gets a turn — easily exceeding a Kubernetes pod's
+	// terminationGracePeriodSeconds and turning a graceful exit into a
+	// SIGKILL (production incident: query pod logged "shutting down..." and
+	// then kept retrying "reconnected to quack server" until killed).
+	shutdownCh   chan struct{}
+	shutdownOnce sync.Once
+}
+
+// Shutdown tells the Lake that the process is exiting: any reconnect() call
+// already running or started afterward aborts as soon as it next checks its
+// context instead of running its full reconnectTimeout. Safe to call more
+// than once. Does not close the underlying connection pool — callers should
+// still call Close() once in-flight requests have drained.
+func (l *Lake) Shutdown() {
+	l.shutdownOnce.Do(func() { close(l.shutdownCh) })
+}
+
+// raceContext returns a context derived from parent that is also canceled
+// the moment stopCh is closed, whichever happens first. Used so reconnect's
+// detached, fixed-length timeout context can still be cut short by a
+// process-shutdown signal without reintroducing the per-request short
+// deadline that context.WithoutCancel(ctx) was added to avoid.
+func raceContext(parent context.Context, stopCh <-chan struct{}) (context.Context, context.CancelFunc) {
+	out, cancel := context.WithCancel(parent)
+	if stopCh != nil {
+		go func() {
+			select {
+			case <-out.Done():
+			case <-stopCh:
+				cancel()
+			}
+		}()
+	}
+	return out, cancel
 }
 
 // Open attaches the Lake described by cfg via the Quack Server and (unless
@@ -167,7 +208,7 @@ func Open(ctx context.Context, cfg Config) (*Lake, error) {
 	// including the readiness/liveness Ping (see MaxOpenConns doc).
 	db.SetMaxOpenConns(maxOpenConnsOrDefault(cfg.MaxOpenConns))
 
-	l := &Lake{db: db, readOnly: cfg.ReadOnly, cfg: cfg}
+	l := &Lake{db: db, readOnly: cfg.ReadOnly, cfg: cfg, shutdownCh: make(chan struct{})}
 
 	// Retry attach with backoff. When a Quack Server backs its DuckLake
 	// catalog by a local DuckDB file, concurrent Quack-client attachments
@@ -359,7 +400,9 @@ const reconnectTimeout = 10 * time.Second
 // writing (the exclusive Lock) — use reconnectExclusive rather than calling
 // this directly.
 func (l *Lake) reconnect(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reconnectTimeout)
+	base, baseCancel := raceContext(context.WithoutCancel(ctx), l.shutdownCh)
+	defer baseCancel()
+	ctx, cancel := context.WithTimeout(base, reconnectTimeout)
 	defer cancel()
 
 	db, err := sql.Open("duckdb", "")
