@@ -135,6 +135,9 @@ func (f *FakeMetadataStore) GetDataset(_ context.Context, _ string) (*domain.Dat
 func (f *FakeMetadataStore) CreateDatasetItem(_ context.Context, _ *domain.DatasetItem) error {
 	return nil
 }
+func (f *FakeMetadataStore) CreateDatasetItemsBatch(_ context.Context, _ []*domain.DatasetItem) error {
+	return nil
+}
 func (f *FakeMetadataStore) ListDatasets(_ context.Context, _ string) ([]*domain.Dataset, error) {
 	return nil, nil
 }

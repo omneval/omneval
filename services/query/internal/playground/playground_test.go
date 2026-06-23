@@ -402,6 +402,9 @@ func (m *fakePromptStore) DeleteDataset(ctx context.Context, datasetID string) e
 func (m *fakePromptStore) CreateDatasetItem(ctx context.Context, i *domain.DatasetItem) error {
 	return nil
 }
+func (m *fakePromptStore) CreateDatasetItemsBatch(ctx context.Context, items []*domain.DatasetItem) error {
+	return nil
+}
 func (m *fakePromptStore) ListDatasetItems(ctx context.Context, datasetID string) ([]*domain.DatasetItem, error) {
 	return nil, nil
 }

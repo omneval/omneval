@@ -14,6 +14,9 @@ type DatasetStore interface {
 	DeleteDataset(ctx context.Context, datasetID string) error
 
 	CreateDatasetItem(ctx context.Context, item *domain.DatasetItem) error
+	// CreateDatasetItemsBatch inserts all items in a single transaction: if
+	// any insert fails, none of the items are committed.
+	CreateDatasetItemsBatch(ctx context.Context, items []*domain.DatasetItem) error
 	ListDatasetItems(ctx context.Context, datasetID string) ([]*domain.DatasetItem, error)
 	ListDatasetItemsPaginated(ctx context.Context, datasetID, cursor string, limit int) ([]*domain.DatasetItem, string, error)
 

@@ -24,8 +24,8 @@ import (
 //   DELETE /api/v1/datasets/:id                   — delete a dataset and its items
 
 type DatasetHandler struct {
-	DatasetStore  metadata.DatasetStore
-	SessionStore  SessionStore
+	DatasetStore    metadata.DatasetStore
+	SessionStore    SessionStore
 	ProjectResolver auth.ProjectResolver
 }
 
@@ -53,7 +53,14 @@ type AddDatasetItemsBatchRequest struct {
 
 // AddDatasetItemsBatchResponse is returned by the batch items endpoint.
 type AddDatasetItemsBatchResponse struct {
-	Created int `json:"created"`
+	Created int                  `json:"created"`
+	Skipped []SkippedDatasetItem `json:"skipped,omitempty"`
+}
+
+// SkippedDatasetItem identifies a requested item that was not created, and why.
+type SkippedDatasetItem struct {
+	SourceSpanID string `json:"source_span_id,omitempty"`
+	Reason       string `json:"reason"`
 }
 
 // datasetListItem represents a dataset in the list endpoint response.
@@ -115,9 +122,9 @@ func (h *DatasetHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 
 	resolver := h.resolveProjectID()
 	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
-		if !ok {
-			return
-		}
+	if !ok {
+		return
+	}
 
 	var req CreateDatasetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -156,9 +163,9 @@ func (h *DatasetHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 
 	resolver := h.resolveProjectID()
 	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
-		if !ok {
-			return
-		}
+	if !ok {
+		return
+	}
 
 	datasets, err := h.DatasetStore.ListDatasets(r.Context(), projectID)
 	if err != nil {
@@ -189,9 +196,9 @@ func (h *DatasetHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 
 	resolver := h.resolveProjectID()
 	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
-		if !ok {
-			return
-		}
+	if !ok {
+		return
+	}
 
 	datasetID := r.PathValue("id")
 	if datasetID == "" {
@@ -225,9 +232,9 @@ func (h *DatasetHandler) HandleAddItems(w http.ResponseWriter, r *http.Request) 
 
 	resolver := h.resolveProjectID()
 	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
-		if !ok {
-			return
-		}
+	if !ok {
+		return
+	}
 
 	datasetID := r.PathValue("id")
 	if datasetID == "" {
@@ -278,9 +285,9 @@ func (h *DatasetHandler) HandleAddItemsBatch(w http.ResponseWriter, r *http.Requ
 
 	resolver := h.resolveProjectID()
 	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
-		if !ok {
-			return
-		}
+	if !ok {
+		return
+	}
 
 	datasetID := r.PathValue("id")
 	if datasetID == "" {
@@ -303,29 +310,38 @@ func (h *DatasetHandler) HandleAddItemsBatch(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	created := 0
+	var toCreate []*domain.DatasetItem
+	var skipped []SkippedDatasetItem
 	for _, itemReq := range req.Items {
 		if itemReq.Input == "" {
+			skipped = append(skipped, SkippedDatasetItem{
+				SourceSpanID: itemReq.SourceSpanID,
+				Reason:       "empty input",
+			})
 			continue
 		}
-		item := &domain.DatasetItem{
+		toCreate = append(toCreate, &domain.DatasetItem{
 			ItemID:         uuid.New().String(),
 			DatasetID:      datasetID,
 			SourceSpanID:   itemReq.SourceSpanID,
 			Input:          itemReq.Input,
 			ExpectedOutput: itemReq.ExpectedOutput,
 			CreatedAt:      time.Now().UTC(),
-		}
-		if err := h.DatasetStore.CreateDatasetItem(r.Context(), item); err != nil {
+		})
+	}
+
+	// Commit all-or-nothing: a mid-batch store error must never leave a
+	// partial set of items committed (see #269).
+	if len(toCreate) > 0 {
+		if err := h.DatasetStore.CreateDatasetItemsBatch(r.Context(), toCreate); err != nil {
 			http.Error(w, "store error", http.StatusInternalServerError)
 			return
 		}
-		created++
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(AddDatasetItemsBatchResponse{Created: created})
+	json.NewEncoder(w).Encode(AddDatasetItemsBatchResponse{Created: len(toCreate), Skipped: skipped})
 }
 
 // HandleListItems handles GET /api/v1/datasets/:id/items.
@@ -337,9 +353,9 @@ func (h *DatasetHandler) HandleListItems(w http.ResponseWriter, r *http.Request)
 
 	resolver := h.resolveProjectID()
 	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
-		if !ok {
-			return
-		}
+	if !ok {
+		return
+	}
 
 	datasetID := r.PathValue("id")
 	if datasetID == "" {
@@ -397,9 +413,9 @@ func (h *DatasetHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 
 	resolver := h.resolveProjectID()
 	projectID, ok := auth.ProjectIDWithErrorWithResolver(w, r, resolver)
-		if !ok {
-			return
-		}
+	if !ok {
+		return
+	}
 
 	datasetID := r.PathValue("id")
 	if datasetID == "" {
@@ -484,5 +500,3 @@ func (h *DatasetHandler) Routes() []AuthRoute {
 		{Method: http.MethodDelete, Path: "/api/v1/datasets/{datasetId}", Handler: http.HandlerFunc(h.HandleDelete), Policy: AuthPolicySession},
 	}
 }
-
-
