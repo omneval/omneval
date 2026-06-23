@@ -67,7 +67,7 @@ export default function BulkAddToDatasetModal({
 
   const fetchSpanData = async () => {
     try {
-      const res = await fetch("/api/v1/spans", {
+      const res = await fetch("/api/v1/spans/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ span_ids: spanIds }),
@@ -86,8 +86,9 @@ export default function BulkAddToDatasetModal({
     setSaving(true);
     setError(null);
     try {
-      const items = spanIds.map((spanId, idx) => {
-        const spanData = fetchedSpans[idx];
+      const spanIdToData = new Map(fetchedSpans.map((s) => [s.span_id, s]));
+      const items = spanIds.map((spanId) => {
+        const spanData = spanIdToData.get(spanId);
         return {
           input: spanData?.input ?? "",
           expected_output: spanData?.output || undefined,

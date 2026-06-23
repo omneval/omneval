@@ -107,7 +107,7 @@ describe("BulkAddToDatasetModal", () => {
             }),
         } as Response;
       }
-      if (String(url).includes("/api/v1/spans")) {
+      if (String(url) === "/api/v1/spans/batch") {
         return {
           ok: true,
           json: () => Promise.resolve({ spans: spansData, next: "", limit: 100 }),
