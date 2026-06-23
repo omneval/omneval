@@ -122,6 +122,42 @@ func TestNormalizeModel(t *testing.T) {
 	}
 }
 
+func TestModels(t *testing.T) {
+	tbl := NewTableFromBytes([]byte(`{
+		"gpt-4o": {
+			"input_cost_per_token": 0.0000025,
+			"output_cost_per_token": 0.000010
+		},
+		"claude-sonnet-4-6": {
+			"input_cost_per_token": 0.000003,
+			"output_cost_per_token": 0.000015
+		},
+		"gemini-2.0-flash": {
+			"input_cost_per_token": 0.000001,
+			"output_cost_per_token": 0.000005
+		}
+	}`))
+
+	models := tbl.Models()
+	if len(models) != 3 {
+		t.Errorf("Models: expected 3 models, got %d", len(models))
+	}
+	// Models should be sorted alphabetically.
+	for i := 1; i < len(models); i++ {
+		if models[i] < models[i-1] {
+			t.Errorf("Models: expected sorted order, got %s before %s", models[i-1], models[i])
+		}
+	}
+}
+
+func TestModels_EmptyTable(t *testing.T) {
+	tbl := NewTableFromBytes([]byte(`{}`))
+	models := tbl.Models()
+	if len(models) != 0 {
+		t.Errorf("Models: expected 0 models, got %d", len(models))
+	}
+}
+
 func TestApplyOverrides(t *testing.T) {
 	tbl := NewTableFromBytes([]byte(`{
 		"gpt-4o": {

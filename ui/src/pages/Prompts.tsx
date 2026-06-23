@@ -78,6 +78,13 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
+  // Known models from the pricing table
+  const [knownModels, setKnownModels] = useState<string[]>([]);
+  const [modelSource, setModelSource] = useState<"select" | "custom">("select");
+  const [customModel, setCustomModel] = useState("");
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+
   // Label reassignment state: { promptName, label } -> new version
   const [labelAssignments, setLabelAssignments] = useState<Map<string, number>>(new Map());
 
@@ -109,6 +116,25 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
   useEffect(() => {
     fetchPrompts();
   }, [activeProject]);
+
+  // Fetch known models when the form opens
+  useEffect(() => {
+    if (!showNewPromptForm) return;
+    setModelsLoading(true);
+    setModelsError(null);
+    (async () => {
+      try {
+        const res = await fetch("/api/v1/models");
+        if (!res.ok) throw new Error("Failed to fetch models");
+        const data = await res.json();
+        setKnownModels(Array.isArray(data) ? data : []);
+      } catch (e: unknown) {
+        setModelsError(e instanceof Error ? e.message : "Unknown error");
+      } finally {
+        setModelsLoading(false);
+      }
+    })();
+  }, [showNewPromptForm]);
 
   // Toggle expansion
   const toggleExpand = (name: string) => {
@@ -156,6 +182,8 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
   };
 
   // Create new prompt
+  const effectiveModel = modelSource === "custom" ? customModel : newModel;
+
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
 
@@ -173,10 +201,10 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
       errors.template = "Template must be 32000 characters or fewer";
     }
 
-    if (newModel.trim()) {
-      if (newModel.length > 64) {
+    if (effectiveModel.trim()) {
+      if (effectiveModel.length > 64) {
         errors.model = "Model name must be 64 characters or fewer";
-      } else if (!/^[a-zA-Z0-9_\-\./]+$/.test(newModel)) {
+      } else if (!/^[a-zA-Z0-9_\-\./]+$/.test(effectiveModel)) {
         errors.model = "Model name can only contain letters, numbers, underscores, hyphens, dots, and slashes";
       }
     }
@@ -207,7 +235,7 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
           name: newName.trim(),
           version: 1,
           template: newTemplate,
-          model: newModel,
+          model: effectiveModel,
           temperature: newTemperature,
           max_tokens: newMaxTokens,
         }),
@@ -329,8 +357,9 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
 
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div>
-              <label className="block text-xs text-omneval-text-muted mb-1">Prompt Name</label>
+              <label htmlFor="new-prompt-name" className="block text-xs text-omneval-text-muted mb-1">Prompt Name</label>
               <input
+                id="new-prompt-name"
                 type="text"
                 value={newName}
                 onChange={(e) => { setNewName(e.target.value); setFormErrors((prev) => ({ ...prev, name: "" })); }}
@@ -347,19 +376,60 @@ export default function PromptsPage({ activeProject }: PromptsPageProps) {
               )}
             </div>
             <div>
-              <label className="block text-xs text-omneval-text-muted mb-1">Model</label>
-              <input
-                type="text"
-                value={newModel}
-                onChange={(e) => { setNewModel(e.target.value); setFormErrors((prev) => ({ ...prev, model: "" })); }}
-                placeholder="e.g. gpt-4"
-                className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.model ? "border-omneval-danger focus-danger" : ""}`}
-                style={{
+              <label htmlFor="new-prompt-model" className="block text-xs text-omneval-text-muted mb-1">Model</label>
+              {modelsError && (
+                <p className="text-xs mt-1 mb-2" style={{ color: colors.accents.dangerRed }}>{modelsError}</p>
+              )}
+              {modelsLoading ? (
+                <div className="w-full px-3 py-2 text-sm rounded-md border" style={{
                   backgroundColor: colors.backgrounds.abyssBlack,
-                  borderColor: formErrors.model ? colors.accents.dangerRed : colors.backgrounds.caveWall,
-                  color: colors.typography.pureLight,
-                }}
-              />
+                  borderColor: colors.backgrounds.caveWall,
+                  color: colors.typography.ashGrey,
+                }}>Loading models...</div>
+              ) : (
+                <select
+                  id="new-prompt-model"
+                  value={modelSource === "custom" ? customModel : newModel}
+                  onChange={(e) => {
+                    if (e.target.value === "__other__") {
+                      setModelSource("custom");
+                      setCustomModel("");
+                      setFormErrors((prev) => ({ ...prev, model: "" }));
+                    } else {
+                      setModelSource("select");
+                      setNewModel(e.target.value);
+                      setFormErrors((prev) => ({ ...prev, model: "" }));
+                    }
+                  }}
+                  className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus ${formErrors.model ? "border-omneval-danger focus-danger" : ""}`}
+                  style={{
+                    backgroundColor: colors.backgrounds.abyssBlack,
+                    borderColor: formErrors.model ? colors.accents.dangerRed : colors.backgrounds.caveWall,
+                    color: colors.typography.pureLight,
+                  }}
+                >
+                  {knownModels.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                  <option value="__other__">Other...</option>
+                </select>
+              )}
+              {modelSource === "custom" && (
+                <input
+                  id="new-prompt-model-custom"
+                  type="text"
+                  value={customModel}
+                  onChange={(e) => { setCustomModel(e.target.value); setFormErrors((prev) => ({ ...prev, model: "" })); }}
+                  placeholder="Enter custom model name"
+                  className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-colors input-focus mt-2 ${formErrors.model ? "border-omneval-danger focus-danger" : ""}`}
+                  style={{
+                    backgroundColor: colors.backgrounds.abyssBlack,
+                    borderColor: formErrors.model ? colors.accents.dangerRed : colors.backgrounds.caveWall,
+                    color: colors.typography.pureLight,
+                  }}
+                  autoFocus
+                />
+              )}
               {formErrors.model && (
                 <p className="text-xs mt-1" style={{ color: colors.accents.dangerRed }}>{formErrors.model}</p>
               )}

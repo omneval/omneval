@@ -174,6 +174,7 @@ func buildRouter(deps *WiredDeps) http.Handler {
 		Dataset:         deps.Dataset,
 		DatasetRun:      deps.DatasetRun,
 		Playground:      deps.Playground,
+		Models:          &handler.ModelsHandler{Pricing: deps.Pricing},
 		AdminLake:       deps.AdminLake,
 		SessionTTL:      deps.SessionTTL,
 		APIKeyValidator: deps.APIKeyValidator,

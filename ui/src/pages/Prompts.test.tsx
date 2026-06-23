@@ -309,6 +309,168 @@ describe("PromptsPage", () => {
     });
   });
 
+  it("renders model dropdown in the new prompt form", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/v1/prompts") && !url.includes("/api/v1/prompts/")) {
+          return Promise.resolve(mockListPrompts([]));
+        }
+        if (url.includes("/api/v1/models")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(["gpt-4", "gpt-3.5-turbo", "claude-sonnet-4"]) } as Response);
+        }
+        return Promise.resolve({ ok: false } as Response);
+      }
+    );
+    renderWithToast(<PromptsPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("+ New Prompt")).toHaveLength(2);
+    });
+
+    // Click the first "+ New Prompt" button (header) to open the form
+    const buttons = screen.getAllByText("+ New Prompt");
+    fireEvent.click(buttons[0]);
+
+    // Wait for the form to show (form has "Prompt Name" label)
+    await screen.findByLabelText("Prompt Name");
+
+    // Model field should be a dropdown select element (wait for fetch to complete)
+    await waitFor(() => {
+      const select = screen.getByLabelText("Model");
+      expect(select.tagName).toBe("SELECT");
+    });
+  });
+
+  it("shows known models in the dropdown", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/v1/prompts") && !url.includes("/api/v1/prompts/")) {
+          return Promise.resolve(mockListPrompts([]));
+        }
+        if (url.includes("/api/v1/models")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(["gpt-4", "gpt-3.5-turbo", "claude-sonnet-4"]) } as Response);
+        }
+        return Promise.resolve({ ok: false } as Response);
+      }
+    );
+    renderWithToast(<PromptsPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("+ New Prompt")).toHaveLength(2);
+    });
+
+    const buttons = screen.getAllByText("+ New Prompt");
+    fireEvent.click(buttons[0]);
+
+    await screen.findByLabelText("Prompt Name");
+
+    // Wait for dropdown to populate and check options
+    await waitFor(() => {
+      const select = screen.getByLabelText("Model") as HTMLSelectElement;
+      const options = Array.from(select.options).map((o) => o.value);
+      expect(options).toContain("gpt-4");
+      expect(options).toContain("gpt-3.5-turbo");
+      expect(options).toContain("claude-sonnet-4");
+      expect(options).toContain("__other__");
+    });
+  });
+
+  it("shows freeform input when 'Other...' is selected", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/v1/prompts") && !url.includes("/api/v1/prompts/")) {
+          return Promise.resolve(mockListPrompts([]));
+        }
+        if (url.includes("/api/v1/models")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(["gpt-4"]) } as Response);
+        }
+        return Promise.resolve({ ok: false } as Response);
+      }
+    );
+    renderWithToast(<PromptsPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("+ New Prompt")).toHaveLength(2);
+    });
+
+    const buttons = screen.getAllByText("+ New Prompt");
+    fireEvent.click(buttons[0]);
+
+    await screen.findByLabelText("Prompt Name");
+
+    const select = await screen.findByLabelText("Model");
+    // Select "Other..." option
+    fireEvent.change(select, { target: { value: "__other__" } });
+
+    // Custom input should appear
+    const customInput = await screen.findByPlaceholderText("Enter custom model name");
+    expect(customInput).toBeInTheDocument();
+    expect((customInput as HTMLInputElement).value).toBe("");
+  });
+
+  it("submits custom model from 'Other...' option", async () => {
+    let capturedBody: Record<string, unknown> | null = null;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/v1/prompts") && !url.includes("/api/v1/prompts/")) {
+          if (init?.method === "POST") {
+            const body = await (init.body as string);
+            capturedBody = JSON.parse(body);
+          }
+          return Promise.resolve(mockListPrompts([]));
+        }
+        if (url.includes("/api/v1/models")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(["gpt-4"]) } as Response);
+        }
+        return Promise.resolve({ ok: false } as Response);
+      }
+    );
+    renderWithToast(<PromptsPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("+ New Prompt")).toHaveLength(2);
+    });
+
+    const buttons = screen.getAllByText("+ New Prompt");
+    fireEvent.click(buttons[0]);
+
+    await screen.findByLabelText("Prompt Name");
+
+    // Fill in required fields
+    const nameInput = screen.getByLabelText("Prompt Name");
+    fireEvent.change(nameInput, { target: { value: "my-custom-prompt" } });
+
+    // Template textarea (identified by placeholder)
+    const templateInput = screen.getByPlaceholderText(/Hello.*{{name}}/) as HTMLTextAreaElement;
+    fireEvent.change(templateInput, { target: { value: "Hello, {{name}}" } });
+
+    // Select "Other..." and type a custom model
+    const select = await screen.findByLabelText("Model");
+    fireEvent.change(select, { target: { value: "__other__" } });
+
+    await screen.findByPlaceholderText("Enter custom model name");
+    const customInput = screen.getByPlaceholderText("Enter custom model name") as HTMLInputElement;
+    fireEvent.change(customInput, { target: { value: "llama-3.1-70b" } });
+
+    // Click Create button
+    const createBtn = screen.getByRole("button", { name: /Create/ });
+    fireEvent.click(createBtn);
+
+    // Wait for success
+    await waitFor(() => {
+      expect(screen.getByText(/Created prompt/)).toBeInTheDocument();
+    });
+
+    // Verify the custom model was submitted in the request body
+    expect(capturedBody).not.toBeNull();
+    expect(capturedBody!.model).toBe("llama-3.1-70b");
+    expect(capturedBody!.name).toBe("my-custom-prompt");
+  });
+
   it("shows new prompt form when + New Prompt is clicked", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(mockListPrompts([]));
     renderWithToast(<PromptsPage activeProject="proj-1" />);

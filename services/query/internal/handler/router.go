@@ -73,6 +73,7 @@ type RouterDeps struct {
 	Dataset         *DatasetHandler
 	DatasetRun      *DatasetRunHandler
 	Playground      playgroundHandler
+	Models          *ModelsHandler
 	AdminLake       *lake.Lake
 	SessionTTL      time.Duration
 	APIKeyValidator internalauth.Validator
@@ -126,6 +127,7 @@ type Router struct {
 	dataset      *DatasetHandler
 	datasetRun   *DatasetRunHandler
 	playground   playgroundHandler
+	models       *ModelsHandler
 	adminLake    *lake.Lake
 	sessionTTL   time.Duration
 	apiValidator internalauth.Validator
@@ -148,6 +150,7 @@ func NewRouter(deps *RouterDeps) *Router {
 		dataset:      deps.Dataset,
 		datasetRun:   deps.DatasetRun,
 		playground:   deps.Playground,
+		models:       deps.Models,
 		adminLake:    deps.AdminLake,
 		sessionTTL:   deps.SessionTTL,
 		apiValidator: deps.APIKeyValidator,
@@ -212,6 +215,14 @@ func (rt *Router) RegisterRoutes(mux *http.ServeMux) http.Handler {
 		Method: http.MethodPost, Path: "/api/v1/playground/run",
 		Handler: http.HandlerFunc(rt.playground.HandleRun),
 		Policy:  AuthPolicySession,
+	})
+
+	// --- Models route (public — returns known model list) ---
+	routes = append(routes, AuthRoute{
+		Method:  http.MethodGet,
+		Path:    "/api/v1/models",
+		Handler: http.HandlerFunc(rt.models.HandleModels),
+		Policy:  AuthPolicyPublic,
 	})
 
 	// --- Score route (public — used by eval worker) ---
