@@ -57,21 +57,28 @@ function TabButton({
   label,
   active,
   onClick,
+  badge,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
+  badge?: string;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${
+      className={`px-4 py-2 text-sm font-medium rounded-t-md transition-colors inline-flex items-center gap-2 ${
         active
           ? "text-omneval-violet-pale bg-omneval-violet-active border-b-2 border-omneval-violet"
           : "text-omneval-text-muted hover:text-omneval-text-pure hover:bg-omneval-violet-hover"
       }`}
     >
-      {label}
+      <span>{label}</span>
+      {badge && (
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          {badge}
+        </span>
+      )}
     </button>
   );
 }
@@ -673,10 +680,10 @@ export default function AdminPage({
 
   const tabs = useMemo(
     () => [
-      { id: "keys" as const, label: "API Keys" },
-      { id: "projects" as const, label: "Projects" },
-      { id: "traces" as const, label: "Traces" },
-      { id: "ops" as const, label: "Ops" },
+      { id: "keys" as const, label: "API Keys", badge: undefined as string | undefined },
+      { id: "projects" as const, label: "Projects", badge: undefined as string | undefined },
+      { id: "traces" as const, label: "Traces", badge: undefined as string | undefined },
+      { id: "ops" as const, label: "Ops", badge: "Read-only" },
     ],
     []
   );
@@ -691,6 +698,7 @@ export default function AdminPage({
             label={tab.label}
             active={activeTab === tab.id}
             onClick={() => setActiveTab(tab.id)}
+            badge={tab.badge}
           />
         ))}
       </div>

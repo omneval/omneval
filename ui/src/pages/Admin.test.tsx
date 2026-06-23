@@ -827,6 +827,31 @@ describe("AdminPage", () => {
       });
     });
 
+    it("renders the Ops tab with a visual read-only indicator distinct from destructive tabs", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+        if (url === "/api/v1/admin/api-keys") {
+          return resolveKeys([]);
+        }
+        if (url === "/api/v1/projects") {
+          return resolveProjects([]);
+        }
+        if (url === "/api/v1/admin/traces/proj-1/count") {
+          return Promise.resolve(({ ok: true, json: () => Promise.resolve({ count: 0 }) }) as Response);
+        }
+        return Promise.resolve(({ ok: true, json: () => Promise.resolve({ ingest_queue_depth: 0 }) }) as Response);
+      });
+
+      renderWithToast(<AdminPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Ops")).toBeInTheDocument();
+      });
+
+      // The Ops tab should have a visual "read-only" badge,
+      // distinguishing it from the destructive tabs (API Keys / Projects / Traces).
+      expect(screen.getByText("Read-only")).toBeInTheDocument();
+    });
+
     it("shows ingest_queue_depth metric when Ops tab is active", async () => {
       vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
         if (url === "/api/v1/admin/api-keys") {
