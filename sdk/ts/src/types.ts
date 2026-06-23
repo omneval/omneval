@@ -109,4 +109,6 @@ export interface CreateEvalRuleOptions {
   judge_model?: string;
   /** Fraction of matching spans to evaluate (0.0–1.0). Defaults to 1.0. */
   sample_rate?: number;
+  /** Explicit prompt version number (defaults to production label resolution). */
+  prompt_version?: number;
 }

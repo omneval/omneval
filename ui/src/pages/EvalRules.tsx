@@ -53,20 +53,36 @@ interface EvalRulesPageProps {
   activeProject: string;
 }
 
+interface PromptVersionInfo {
+  version: number;
+  template: string;
+  model: string;
+}
+
+interface PromptListItem {
+  name: string;
+  latest_version: number;
+  labels: Record<string, number>;
+}
+
 interface NewRuleFormState {
   ruleName: string;
   judgeModel: string;
   promptName: string;
   promptVersion: number;
+  promptLabel: string;
   sampleRate: number;
   filter: EvalFilter;
 }
+
+const LABELS = ["production", "staging", "dev"] as const;
 
 const defaultFormState: NewRuleFormState = {
   ruleName: "",
   judgeModel: "gpt-4",
   promptName: "",
   promptVersion: 1,
+  promptLabel: "",
   sampleRate: 100,
   filter: createEmptyFilter(),
 };
@@ -193,6 +209,30 @@ function StyledInput({
       }}
       {...rest}
     />
+  );
+}
+
+function StyledSelect({
+  value,
+  onChange,
+  children,
+  ...rest
+}: Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "onChange"> & {
+  onChange: React.ChangeEventHandler<HTMLSelectElement>;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={onChange}
+      className="input-focus w-full px-3 py-2 text-sm rounded-md border border-omneval-border transition-colors"
+      style={{
+        backgroundColor: colors.backgrounds.abyssBlack,
+        color: colors.typography.pureLight,
+      }}
+      {...rest}
+    >
+      {children}
+    </select>
   );
 }
 
@@ -323,6 +363,78 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
     fetchRules();
   }, [activeProject]);
 
+  // Fetch prompts from the registry for the picker
+  const [promptList, setPromptList] = useState<PromptListItem[]>([]);
+  const [promptVersions, setPromptVersions] = useState<Map<string, PromptVersionInfo[]>>(new Map());
+  const [promptLoading, setPromptLoading] = useState(false);
+
+  useEffect(() => {
+    if (!showNewRuleForm) return;
+    const fetchPrompts = async () => {
+      setPromptLoading(true);
+      try {
+        const res = await fetch(`/api/v1/prompts?project_id=${activeProject}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setPromptList(Array.isArray(data) ? data : []);
+      } catch {
+        // silently fail
+      } finally {
+        setPromptLoading(false);
+      }
+    };
+    fetchPrompts();
+  }, [activeProject, showNewRuleForm]);
+
+  // Fetch versions when a prompt is selected
+  const fetchPromptVersions = useCallback(async (name: string) => {
+    if (promptVersions.has(name)) return;
+    try {
+      const res = await fetch(`/api/v1/prompts/${name}/versions?project_id=${activeProject}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const versions = Array.isArray(data) ? data : (data.versions || []);
+      setPromptVersions((prev) => new Map(prev).set(name, versions));
+    } catch {
+      // silently fail
+    }
+  }, [promptVersions, activeProject]);
+
+  // Handle prompt selection: update version and label
+  const handlePromptSelect = (name: string) => {
+    setCreateForm((prev) => {
+      const newForm = { ...prev, promptName: name, promptVersion: 1, promptLabel: "" };
+      if (name) {
+        fetchPromptVersions(name);
+        const prompt = promptList.find((p) => p.name === name);
+        if (prompt) {
+          newForm.promptVersion = prompt.latest_version;
+        }
+      }
+      return newForm;
+    });
+  };
+
+  // Handle label selection: resolve label to version
+  const handleLabelSelect = (label: string) => {
+    setCreateForm((prev) => {
+      const newForm = { ...prev, promptLabel: label, promptVersion: 1 };
+      if (label && prev.promptName) {
+        const prompt = promptList.find((p) => p.name === prev.promptName);
+        if (prompt && prompt.labels[label]) {
+          newForm.promptVersion = prompt.labels[label];
+        }
+      } else if (!label) {
+        // Reset version to latest when label is cleared
+        const prompt = promptList.find((p) => p.name === prev.promptName);
+        if (prompt) {
+          newForm.promptVersion = prompt.latest_version;
+        }
+      }
+      return newForm;
+    });
+  };
+
   const resetCreateForm = () => {
     setCreateForm(defaultFormState);
     setCreateError(null);
@@ -386,9 +498,10 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
       errors.sampleRate = "Sample rate must be between 0 and 100";
     }
 
-    if (createForm.promptName.trim()) {
-      if (createForm.promptName.length > 128) {
-        errors.promptName = "Prompt name must be 128 characters or fewer";
+    if (createForm.promptName) {
+      const exists = promptList.some((p) => p.name === createForm.promptName);
+      if (!exists) {
+        errors.promptName = "Selected prompt does not exist in the registry";
       }
     }
 
@@ -480,11 +593,18 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
           </p>
         </div>
         <button
-          onClick={() => setShowNewRuleForm(!showNewRuleForm)}
+          onClick={() => {
+            setCreateForm(defaultFormState);
+            setShowNewRuleForm(true);
+            setPreviewResult(null);
+            setPreviewError(null);
+            setFormErrors({});
+          }}
           className="px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 text-white"
           style={{ backgroundColor: colors.accents.emberFlare }}
           onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.85")}
           onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+          data-testid="new-rule-button-empty"
         >
           + New Rule
         </button>
@@ -548,33 +668,60 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
             </FormField>
           </div>
 
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            <FormField label="Judge Prompt Name">
-              <StyledInput
-                type="text"
+          <div className="grid grid-cols-4 gap-4 mb-4">
+            <FormField label="Judge Prompt">
+              <StyledSelect
                 value={createForm.promptName}
-                onChange={(e) => { setCreateForm({ ...createForm, promptName: e.target.value }); setFormErrors((prev) => ({ ...prev, promptName: "" })); }}
-                placeholder="e.g. judge-v1"
-                style={{
-                  ...{
-                    backgroundColor: colors.backgrounds.abyssBlack,
-                    borderColor: colors.backgrounds.caveWall,
-                    color: colors.typography.pureLight,
-                  },
-                  ...(formErrors.promptName ? { borderColor: colors.accents.dangerRed } : {}),
-                }}
-              />
+                onChange={(e) => handlePromptSelect(e.target.value)}
+              >
+                <option value="">— No prompt —</option>
+                {promptLoading ? (
+                  <option value="" disabled>Loading prompts...</option>
+                ) : (
+                  promptList.map((prompt) => (
+                    <option key={prompt.name} value={prompt.name}>
+                      {prompt.name} (v{prompt.latest_version})
+                    </option>
+                  ))
+                )}
+              </StyledSelect>
               {formErrors.promptName && (
                 <p className="text-xs mt-1" style={{ color: colors.accents.dangerRed }}>{formErrors.promptName}</p>
               )}
             </FormField>
+            <FormField label="Prompt Label">
+              <StyledSelect
+                value={createForm.promptLabel}
+                onChange={(e) => handleLabelSelect(e.target.value)}
+                disabled={!createForm.promptName}
+              >
+                <option value="">— Auto —</option>
+                {createForm.promptName && LABELS.map((label) => (
+                  <option key={label} value={label}>
+                    {label}
+                  </option>
+                ))}
+              </StyledSelect>
+            </FormField>
             <FormField label="Prompt Version">
-              <StyledInput
-                type="number"
+              <StyledSelect
                 value={createForm.promptVersion}
-                min={1}
                 onChange={(e) => setCreateForm({ ...createForm, promptVersion: parseInt(e.target.value) || 1 })}
-              />
+              >
+                {(() => {
+                  const versions = promptVersions.get(createForm.promptName) || [];
+                  const prompt = promptList.find((p) => p.name === createForm.promptName);
+                  const allVersions = prompt ? Array.from({ length: prompt.latest_version }, (_, i) => i + 1) : [1];
+                  const uniqueVersions = new Set([...allVersions, ...versions.map((v: PromptVersionInfo) => v.version)]);
+                  return Array.from(uniqueVersions)
+                    .sort((a, b) => a - b)
+                    .map((v) => (
+                      <option key={v} value={v}>
+                        v{v}
+                      </option>
+                    ));
+                })()}
+              </StyledSelect>
             </FormField>
             <FormField label="Sample Rate (%)">
               <StyledInput

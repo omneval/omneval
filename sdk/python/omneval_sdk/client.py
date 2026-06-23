@@ -319,6 +319,7 @@ class OmnevalClient:
         filter: Optional[dict[str, Any]] = None,
         judge_model: str = "",
         sample_rate: float = 1.0,
+        prompt_version: Optional[int] = None,
     ) -> dict[str, Any]:
         """Create an eval rule.
 
@@ -328,6 +329,7 @@ class OmnevalClient:
             filter: Optional filter dict to match spans.
             judge_model: Optional judge model name (defaults to server default).
             sample_rate: Fraction of matching spans to evaluate (0.0–1.0).
+            prompt_version: Optional explicit version number of the prompt.
 
         Returns:
             Dict containing the created eval rule data.
@@ -349,6 +351,8 @@ class OmnevalClient:
         }
         if judge_model:
             payload["judge_model"] = judge_model
+        if prompt_version is not None:
+            payload["prompt_version"] = prompt_version
 
         url = f"{self._base_url}/api/v1/eval-rules"
         resp = self._http.post(url, json=payload, timeout=10.0)
