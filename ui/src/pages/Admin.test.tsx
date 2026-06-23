@@ -801,4 +801,126 @@ describe("AdminPage", () => {
       });
     });
   });
+
+  describe("Ops tab", () => {
+    it("renders the Ops tab alongside the destructive tabs", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+        if (url === "/api/v1/admin/api-keys") {
+          return resolveKeys([]);
+        }
+        if (url === "/api/v1/projects") {
+          return resolveProjects([]);
+        }
+        if (url === "/api/v1/admin/traces/proj-1/count") {
+          return Promise.resolve(({ ok: true, json: () => Promise.resolve({ count: 0 }) }) as Response);
+        }
+        return Promise.resolve(({ ok: true, json: () => Promise.resolve({ ingest_queue_depth: 0 }) }) as Response);
+      });
+
+      renderWithToast(<AdminPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("API Keys")).toBeInTheDocument();
+        expect(screen.getByText("Projects")).toBeInTheDocument();
+        expect(screen.getByText("Traces")).toBeInTheDocument();
+        expect(screen.getByText("Ops")).toBeInTheDocument();
+      });
+    });
+
+    it("shows ingest_queue_depth metric when Ops tab is active", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+        if (url === "/api/v1/admin/api-keys") {
+          return resolveKeys([]);
+        }
+        if (url === "/api/v1/projects") {
+          return resolveProjects([]);
+        }
+        if (url === "/api/v1/admin/traces/proj-1/count") {
+          return Promise.resolve(({ ok: true, json: () => Promise.resolve({ count: 0 }) }) as Response);
+        }
+        if (url === "/api/v1/admin/ops") {
+          return Promise.resolve(({ ok: true, json: () => Promise.resolve({ ingest_queue_depth: 17 }) }) as Response);
+        }
+        return Promise.resolve(({ ok: true, json: () => Promise.resolve({}) }) as Response);
+      });
+
+      renderWithToast(<AdminPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Ops")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("Ops"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Ingest Queue Depth")).toBeInTheDocument();
+        expect(screen.getByText("17")).toBeInTheDocument();
+      });
+    });
+
+    it("shows zero when ingest_queue_depth is 0", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+        if (url === "/api/v1/admin/api-keys") {
+          return resolveKeys([]);
+        }
+        if (url === "/api/v1/projects") {
+          return resolveProjects([]);
+        }
+        if (url === "/api/v1/admin/traces/proj-1/count") {
+          return Promise.resolve(({ ok: true, json: () => Promise.resolve({ count: 0 }) }) as Response);
+        }
+        if (url === "/api/v1/admin/ops") {
+          return Promise.resolve(({ ok: true, json: () => Promise.resolve({ ingest_queue_depth: 0 }) }) as Response);
+        }
+        return Promise.resolve(({ ok: true, json: () => Promise.resolve({}) }) as Response);
+      });
+
+      renderWithToast(<AdminPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Ops")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("Ops"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Ingest Queue Depth")).toBeInTheDocument();
+        expect(screen.getByText("0")).toBeInTheDocument();
+      });
+    });
+
+    it("shows a loading skeleton for the Ops tab while fetching metrics", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+        if (url === "/api/v1/admin/api-keys") {
+          return resolveKeys([]);
+        }
+        if (url === "/api/v1/projects") {
+          return resolveProjects([]);
+        }
+        if (url === "/api/v1/admin/traces/proj-1/count") {
+          return Promise.resolve(({ ok: true, json: () => Promise.resolve({ count: 0 }) }) as Response);
+        }
+        // Delay the ops response
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        if (url === "/api/v1/admin/ops") {
+          return Promise.resolve(({ ok: true, json: () => Promise.resolve({ ingest_queue_depth: 5 }) }) as Response);
+        }
+        return Promise.resolve(({ ok: true, json: () => Promise.resolve({}) }) as Response);
+      });
+
+      renderWithToast(<AdminPage activeProject="proj-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Ops")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("Ops"));
+
+      // Immediately after switching tab, value should not be present yet
+      // (skeleton loading state), and after delay the metric should appear
+      await waitFor(() => {
+        expect(screen.getByText("5")).toBeInTheDocument();
+      });
+    });
+  });
 });
