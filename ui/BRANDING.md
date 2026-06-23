@@ -101,6 +101,7 @@ All colors are available as CSS variables under the `:root` scope.
 |---|---|
 | `--omneval-cyan` | `#06B6D4` |
 | `--omneval-cyan-light` | `#22D3EE` |
+| `--omneval-cyan-dark` | `#0891B2` |
 
 ### Semantic States
 
