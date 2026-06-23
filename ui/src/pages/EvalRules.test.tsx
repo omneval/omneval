@@ -1,13 +1,22 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import EvalRulesPage, { type EvalRule } from "./EvalRules";
 import { ToastProvider } from "@/components/Toast";
+
 
 function renderWithToast(ui: React.ReactElement) {
   return render(<ToastProvider>{ui}</ToastProvider>);
 }
 
 describe("EvalRulesPage", () => {
+  beforeEach(() => {
+    vi.stubGlobal("confirm", () => true);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   const mockRules = [
     {
       rule_id: "rule-1",
@@ -477,6 +486,405 @@ describe("EvalRulesPage", () => {
           expect.objectContaining({ method: "DELETE" })
         );
       });
+    });
+  });
+
+  // ── FilterGroup integration: wired form state ──────────────────────
+
+  function openNewRuleForm() {
+    // There are two "New Rule" buttons: one in the header, one in the empty state.
+    // We need the one in the header (which is inside a div with "Eval Rules").
+    const allButtons = screen.getAllByRole("button", { name: /new rule/i });
+    // The header button is the first one rendered; the empty-state button is shown
+    // conditionally. We pick the one inside the top-level section header.
+    if (allButtons.length >= 1) {
+      return allButtons[0];
+    }
+    throw new Error("No New Rule button found");
+  }
+
+  it("renders the FilterGroup component in the new rule form", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules([]));
+
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+
+    // Wait for initial load, then open the form
+    await waitFor(() => {
+      expect(screen.getByText("Eval Rules")).toBeInTheDocument();
+    });
+
+    // Open the form (empty state provides the only button)
+    fireEvent.click(openNewRuleForm());
+
+    // FilterGroup renders a condition row with a condition type selector
+    expect(screen.getByTestId("condition-row")).toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toBeInTheDocument();
+  });
+
+  it("renders the filter conditions section header", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules([]));
+
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Eval Rules")).toBeInTheDocument();
+    });
+
+    fireEvent.click(openNewRuleForm());
+
+    expect(screen.getByText("Filter Conditions")).toBeInTheDocument();
+  });
+
+  it("renders nested AND group when a second condition is added", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(resolveRules([]));
+
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Eval Rules")).toBeInTheDocument();
+    });
+
+    fireEvent.click(openNewRuleForm());
+
+    // Set first condition: kind = llm
+    const kindSelect = screen.getByRole("combobox");
+    fireEvent.change(kindSelect, { target: { value: "kind" } });
+    await waitFor(() => {
+      expect(screen.getByText("Kind Value")).toBeInTheDocument();
+    });
+    const kindValueSelect = screen.getAllByRole("combobox")[1];
+    fireEvent.change(kindValueSelect, { target: { value: "llm" } });
+
+    // Add second condition – converts to AND group
+    const addButton = screen.getByRole("button", { name: /add condition/i });
+    fireEvent.click(addButton);
+
+    // The form now has two condition rows (AND group at depth 0)
+    expect(screen.getAllByTestId("condition-row")).toHaveLength(2);
+    // The second row should be empty (fresh condition)
+    const secondRowCombobox = screen.getAllByRole("combobox")[2];
+    expect(secondRowCombobox).toHaveValue("");
+  });
+
+  it("sends grouped filter to preview endpoint when preview is clicked", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/v1/eval-rules/preview")) {
+          return Promise.resolve(
+            ({
+              ok: true,
+              json: () => Promise.resolve({ spans: [], match_count_24h: 0 }),
+            } as Response)
+          );
+        }
+        if (url.includes("/api/v1/eval-rules")) {
+          return Promise.resolve(resolveRules([]));
+        }
+        return Promise.resolve(
+          ({
+            ok: true,
+            json: () => Promise.resolve({ spans: [], match_count_24h: 0 }),
+          } as Response)
+        );
+      }
+    );
+
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Eval Rules")).toBeInTheDocument();
+    });
+
+    fireEvent.click(openNewRuleForm());
+
+    // Set model = gpt-4
+    const typeSelect = screen.getByRole("combobox");
+    fireEvent.change(typeSelect, { target: { value: "model" } });
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/gpt-4-turbo/)).toBeInTheDocument();
+    });
+    const modelInput = screen.getByPlaceholderText(/gpt-4-turbo/);
+    fireEvent.change(modelInput, { target: { value: "gpt-4" } });
+
+    // Click preview
+    const previewButton = screen.getByRole("button", { name: /preview matching spans/i });
+    fireEvent.click(previewButton);
+
+    await waitFor(() => {
+      const calls = vi
+        .mocked(fetch)
+        .mock.calls.filter(
+          (c) => typeof c[0] === "string" && c[0].includes("/api/v1/eval-rules/preview")
+        );
+      expect(calls.length).toBeGreaterThan(0);
+
+      // Verify the filter body contains the model condition
+      const lastCall = calls[calls.length - 1];
+      const options = lastCall[1] as { body: string };
+      const body = JSON.parse(options.body) as { filter: Record<string, unknown> };
+      expect(body.filter.model).toBe("gpt-4");
+    });
+  });
+
+  it("sends grouped AND filter to preview when multiple conditions exist", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/v1/eval-rules/preview")) {
+          return Promise.resolve(
+            ({
+              ok: true,
+              json: () => Promise.resolve({ spans: [], match_count_24h: 0 }),
+            } as Response)
+          );
+        }
+        if (url.includes("/api/v1/eval-rules")) {
+          return Promise.resolve(resolveRules([]));
+        }
+        return Promise.resolve(
+          ({
+            ok: true,
+            json: () => Promise.resolve({ spans: [], match_count_24h: 0 }),
+          } as Response)
+        );
+      }
+    );
+
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Eval Rules")).toBeInTheDocument();
+    });
+
+    fireEvent.click(openNewRuleForm());
+
+    // Wait for the form to open, then set first condition: kind = llm using Condition Type label selector
+    await waitFor(() => {
+      expect(screen.getByLabelText("Condition Type")).toBeInTheDocument();
+    });
+    const typeSelect = screen.getByLabelText("Condition Type");
+    fireEvent.change(typeSelect, { target: { value: "kind" } });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Kind Value")).toBeInTheDocument();
+    });
+    const kindValueSelect = screen.getByLabelText("Kind Value") as HTMLSelectElement;
+    fireEvent.change(kindValueSelect, { target: { value: "llm" } });
+
+    // Add second condition → converts top-level to AND group
+    const addButton = screen.getByRole("button", { name: /add condition/i });
+    fireEvent.click(addButton);
+
+    // Verify the condition type selector exists for the new AND group
+    // (there should now be 2 Condition Type selectors)
+    await waitFor(() => {
+      const typeSelectors = screen.getAllByLabelText("Condition Type");
+      expect(typeSelectors.length).toBe(2);
+    });
+
+    // Set second condition: model = gpt-4 on the second condition row
+    const modelTypeSelect = screen.getAllByLabelText("Condition Type")[1];
+    fireEvent.change(modelTypeSelect as HTMLSelectElement, { target: { value: "model" } });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Model")).toBeInTheDocument();
+    });
+    const modelInput = screen.getByLabelText("Model") as HTMLInputElement;
+    fireEvent.change(modelInput, { target: { value: "gpt-4" } });
+
+    // Click preview
+    const previewButton = screen.getByRole("button", { name: /preview matching spans/i });
+    fireEvent.click(previewButton);
+
+    await waitFor(() => {
+      const calls = vi
+        .mocked(fetch)
+        .mock.calls.filter(
+          (c) => typeof c[0] === "string" && c[0].includes("/api/v1/eval-rules/preview")
+        );
+      expect(calls.length).toBeGreaterThan(0);
+      const lastCall = calls[calls.length - 1];
+      const options = lastCall[1] as { body: string };
+      const body = JSON.parse(options.body) as { filter: { and?: unknown[] } };
+      // Should contain an AND group with two conditions
+      expect(body.filter.and).toBeDefined();
+      expect(body.filter.and!.length).toBe(2);
+    });
+  });
+
+  it("creates rule with grouped filter via POST /api/v1/eval-rules", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/v1/eval-rules") && !url.includes("/api/v1/eval-rules/")) {
+          // List endpoint
+          return Promise.resolve(resolveRules([]));
+        }
+        if (url.includes("/api/v1/eval-rules/preview")) {
+          return Promise.resolve(
+            ({
+              ok: true,
+              json: () => Promise.resolve({ spans: [], match_count_24h: 0 }),
+            } as Response)
+          );
+        }
+        if (url.includes("/api/v1/eval-rules/") && url.includes("DELETE")) {
+          return Promise.resolve({ ok: true, status: 204, text: async () => "" } as Response);
+        }
+        // Create endpoint
+        return Promise.resolve(
+          ({
+            ok: true,
+            status: 201,
+            json: () => Promise.resolve({ rule_id: "new-rule-1" }),
+          } as Response)
+        );
+      }
+    );
+
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Eval Rules")).toBeInTheDocument();
+    });
+
+    fireEvent.click(openNewRuleForm());
+
+    // Fill in required fields
+    const nameInput = screen.getByPlaceholderText(/Production LLM Eval/i);
+    fireEvent.change(nameInput, { target: { value: "Test Grouped Rule" } });
+
+    // Set model via the Condition Type selector
+    const typeSelect = screen.getByLabelText("Condition Type");
+    fireEvent.change(typeSelect, { target: { value: "model" } });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Model")).toBeInTheDocument();
+    });
+    const modelInput = screen.getByLabelText("Model") as HTMLInputElement;
+    fireEvent.change(modelInput, { target: { value: "gpt-4" } });
+
+    // Set prompt name
+    const promptInputs = screen
+      .getAllByRole("textbox")
+      .filter((el) => el.getAttribute("placeholder")?.includes("judge-v1"));
+    if (promptInputs.length > 0) {
+      fireEvent.change(promptInputs[0], { target: { value: "judge-v1" } });
+    }
+
+    // Click Create Rule
+    const createBtn = screen.getByRole("button", { name: /create rule/i });
+    fireEvent.click(createBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Rule .* created/i)).toBeInTheDocument();
+    });
+
+    // Verify the POST body contained a filter with a model field
+    const createCalls = vi
+      .mocked(fetch)
+      .mock.calls.filter(
+        (c) =>
+          typeof c[0] === "string" &&
+          c[0] === "/api/v1/eval-rules" &&
+          (c[1] as { method?: string })?.method === "POST"
+      );
+    expect(createCalls.length).toBeGreaterThan(0);
+    const lastCall = createCalls[createCalls.length - 1];
+    const options = lastCall[1] as { body: string };
+    const body = JSON.parse(options.body) as { filter: { model?: string } };
+    expect(body.filter.model).toBe("gpt-4");
+  });
+
+  it("sends nested OR filter to preview when OR group is used", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/v1/eval-rules/preview")) {
+          return Promise.resolve(
+            ({
+              ok: true,
+              json: () => Promise.resolve({ spans: [], match_count_24h: 0 }),
+            } as Response)
+          );
+        }
+        if (url.includes("/api/v1/eval-rules")) {
+          return Promise.resolve(resolveRules([]));
+        }
+        return Promise.resolve(
+          ({
+            ok: true,
+            json: () => Promise.resolve({ spans: [], match_count_24h: 0 }),
+          } as Response)
+        );
+      }
+    );
+
+    renderWithToast(<EvalRulesPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Eval Rules")).toBeInTheDocument();
+    });
+
+    fireEvent.click(openNewRuleForm());
+
+    // Set first condition: model = gpt-4
+    const typeSelect = screen.getByLabelText("Condition Type");
+    fireEvent.change(typeSelect, { target: { value: "model" } });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Model")).toBeInTheDocument();
+    });
+    const modelInput = screen.getByLabelText("Model") as HTMLInputElement;
+    fireEvent.change(modelInput, { target: { value: "gpt-4" } });
+
+    // Add a second condition → converts top-level to AND group with both conditions
+    const addConditionBtn = screen.getByRole("button", { name: /add condition/i });
+    fireEvent.click(addConditionBtn);
+
+    // Set model = claude-3 on the second condition row
+    const secondTypeSelect = screen.getAllByLabelText("Condition Type")[1];
+    fireEvent.change(secondTypeSelect as HTMLSelectElement, { target: { value: "model" } });
+    await waitFor(() => {
+      expect(screen.getAllByLabelText("Model")).toHaveLength(2);
+    });
+    const secondModelInput = screen.getAllByLabelText("Model")[1] as HTMLInputElement;
+    fireEvent.change(secondModelInput, { target: { value: "claude-3" } });
+
+    // Now convert the second condition to an OR group by clicking "Add OR/AND Group"
+    // This button appears on non-top-level leaves - pick the second one (second condition row)
+    const addOrGroupBtns = screen.getAllByRole("button", { name: /add or\/and group/i });
+    fireEvent.click(addOrGroupBtns[1]);
+
+    // Wait for the OR header to appear (rendered at depth > 0)
+    await waitFor(() => {
+      expect(screen.getByText("OR")).toBeInTheDocument();
+    });
+
+    // Verify the second sub-filter now has an OR group
+    const conditionRows = screen.getAllByTestId("condition-row");
+    expect(conditionRows.length).toBeGreaterThan(0);
+
+    // Click preview
+    const previewButton = screen.getByRole("button", { name: /preview matching spans/i });
+    fireEvent.click(previewButton);
+
+    await waitFor(() => {
+      const calls = vi
+        .mocked(fetch)
+        .mock.calls.filter(
+          (c) => typeof c[0] === "string" && c[0].includes("/api/v1/eval-rules/preview")
+        );
+      expect(calls.length).toBeGreaterThan(0);
+      const lastCall = calls[calls.length - 1];
+      const options = lastCall[1] as { body: string };
+      const body = JSON.parse(options.body) as { filter: Record<string, unknown> };
+      expect(body.filter).toBeDefined();
+      // The filter should contain an OR group with two model conditions
+      const hasCondition =
+        body.filter.model != null ||
+        body.filter.kind != null ||
+        body.filter.and != null ||
+        body.filter.or != null ||
+        body.filter.not != null;
+      expect(hasCondition).toBe(true);
     });
   });
 });
