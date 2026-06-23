@@ -17,6 +17,7 @@ import { EmptyState, LoadingState } from "@/components/EmptyState";
 import { formatTime, formatDuration, formatMs, totalTokens, parseChatTurns, getToolSummary } from "@/utils/formatters";
 import { useToast } from "@/components/Toast";
 import SaveToDatasetModal from "@/components/SaveToDatasetModal";
+import { extractSpanMessages } from "@/utils/spanMessages";
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -525,6 +526,88 @@ function ChatTurnsView({ value, label, wordWrap }: { value: string; label: strin
   );
 }
 
+// ── Formatted Chat Messages ────────────────────────────────────────
+
+interface FormattedChatMessagesProps {
+  messages: { role: string; content: string }[];
+  toolCalls: { id: string; type: string; function: string; input: string; output?: string }[] | null;
+}
+
+function FormattedChatMessages({ messages, toolCalls }: FormattedChatMessagesProps) {
+  return (
+    <div>
+      <div className="text-xs font-medium text-omneval-text-muted mb-2 uppercase tracking-wider">
+        Messages
+      </div>
+      <div
+        className="rounded-md border overflow-hidden"
+        style={{
+          backgroundColor: colors.backgrounds.abyssBlack,
+          borderColor: colors.backgrounds.caveWall,
+        }}
+      >
+        {messages.map((msg, i) => (
+          <div
+            key={i}
+            className="px-3 py-2 text-xs"
+            style={{
+              borderBottom: i < messages.length - 1
+                ? `1px solid ${colors.backgrounds.caveWall}`
+                : undefined,
+            }}
+          >
+            <span
+              className="font-semibold uppercase tracking-wider mr-2"
+              style={{ color: ROLE_COLORS[msg.role] ?? colors.typography.ashGrey, fontSize: "0.65rem" }}
+            >
+              {msg.role}
+            </span>
+            <span className="text-omneval-text-pure">
+              {msg.content}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Tool calls */}
+      {toolCalls != null && toolCalls.length > 0 && (
+        <div className="mt-3">
+          <div className="text-xs font-medium mb-1 uppercase tracking-wider" style={{ color: colors.typography.ashGrey }}>
+            Tool Calls ({toolCalls.length})
+          </div>
+          {toolCalls.map((tc, i) => (
+            <div
+              key={i}
+              className="rounded-md border overflow-hidden text-xs mb-2"
+              style={{
+                backgroundColor: colors.backgrounds.abyssBlack,
+                borderColor: colors.backgrounds.caveWall,
+              }}
+            >
+              <div
+                className="px-3 py-2 font-mono"
+                style={{ borderBottom: `1px solid ${colors.backgrounds.caveWall}`, color: colors.accents.softGlow }}
+              >
+                <span className="font-semibold">call</span>:{tc.id} · {tc.function}
+              </div>
+              <div className="px-3 py-2" style={{ color: colors.typography.ashGrey }}>
+                <span className="text-omneval-text-muted mr-2">Input:</span>
+                <span className="font-mono whitespace-pre-wrap break-all">{tc.input}</span>
+              </div>
+              {tc.output && (
+                <div className="px-3 py-2 border-t" style={{ borderColor: colors.backgrounds.caveWall }}>
+                  <span className="text-omneval-text-muted mr-2">Output:</span>
+                  <span className="font-mono whitespace-pre-wrap break-all">{tc.output}</span>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Score Badges ───────────────────────────────────────────────────
 
 function ScoreBadges({ scores }: { scores: Score[] }) {
@@ -697,10 +780,21 @@ function SlideInDetailPanel({
   onSave: () => void;
 }) {
   const [wordWrap, setWordWrap] = useState(DEFAULT_WORD_WRAP);
+  const [activeTab, setActiveTab] = useState<"chat" | "raw">("chat");
+
   const hasInput = hasRealContent(span.input);
   const hasOutput = hasRealContent(span.output);
   const hasAttributes =
     span.attributes != null && Object.keys(span.attributes).length > 0;
+
+  // Extract structured messages from attributes
+  const extracted = useMemo(() => {
+    if (span.attributes != null) return extractSpanMessages(span.attributes);
+    return { messages: null, toolCalls: null, raw: {} };
+  }, [span.attributes]);
+
+  const hasChatContent =
+    extracted.messages != null && extracted.messages.length > 0;
 
   return (
     <>
@@ -773,6 +867,54 @@ function SlideInDetailPanel({
           </div>
         </div>
 
+        {/* Tab bar — show only when structured content exists */}
+        {hasChatContent && (
+          <div className="flex border-b" style={{ borderColor: colors.backgrounds.caveWall }}>
+            <button
+              onClick={() => setActiveTab("chat")}
+              className={`flex-1 px-4 py-2.5 text-xs font-medium transition-colors ${
+                activeTab === "chat"
+                  ? "border-b-2"
+                  : "opacity-50 hover:opacity-100"
+              }`}
+              style={
+                activeTab === "chat"
+                  ? {
+                      borderColor: colors.accents.emberFlare,
+                      color: colors.typography.pureLight,
+                    }
+                  : {
+                      borderColor: "transparent",
+                      color: colors.typography.ashGrey,
+                    }
+              }
+            >
+              Chat
+            </button>
+            <button
+              onClick={() => setActiveTab("raw")}
+              className={`flex-1 px-4 py-2.5 text-xs font-medium transition-colors ${
+                activeTab === "raw"
+                  ? "border-b-2"
+                  : "opacity-50 hover:opacity-100"
+              }`}
+              style={
+                activeTab === "raw"
+                  ? {
+                      borderColor: colors.accents.emberFlare,
+                      color: colors.typography.pureLight,
+                    }
+                  : {
+                      borderColor: "transparent",
+                      color: colors.typography.ashGrey,
+                    }
+              }
+            >
+              Raw
+            </button>
+          </div>
+        )}
+
         {/* Content */}
         <div className="flex-1 overflow-auto px-4 py-4 space-y-4">
           {/* Metadata */}
@@ -811,28 +953,36 @@ function SlideInDetailPanel({
             </div>
           )}
 
-          {/* Input */}
-          {hasInput && (
-            <ChatTurnsView value={span.input!} label="Input" wordWrap={wordWrap} />
+          {/* ── Chat view: formatted messages ── */}
+          {hasChatContent && activeTab === "chat" && extracted.messages != null && (
+            <FormattedChatMessages
+              messages={extracted.messages}
+              toolCalls={extracted.toolCalls}
+            />
           )}
 
-          {/* Output */}
-          {hasOutput && (
-            <ChatTurnsView value={span.output!} label="Output" wordWrap={wordWrap} />
-          )}
-
-          {/* Attributes — shown when non-empty; primary content for non-LLM spans */}
-          {hasAttributes && (
-            <div>
-              <div className="text-xs font-medium text-omneval-text-muted mb-2 uppercase tracking-wider">
-                Attributes
-              </div>
-              <JsonCodeBlock
-                value={JSON.stringify(span.attributes, null, 2)}
-                label="Attributes"
-                maxHeight={hasInput || hasOutput ? 200 : 400}
-              />
-            </div>
+          {/* ── Raw view (or fallback when no structured content exists) ── */}
+          {(!hasChatContent || activeTab === "raw") && (
+            <>
+              {hasInput && (
+                <ChatTurnsView value={span.input!} label="Input" wordWrap={wordWrap} />
+              )}
+              {hasOutput && (
+                <ChatTurnsView value={span.output!} label="Output" wordWrap={wordWrap} />
+              )}
+              {hasAttributes && (
+                <div>
+                  <div className="text-xs font-medium text-omneval-text-muted mb-2 uppercase tracking-wider">
+                    Attributes
+                  </div>
+                  <JsonCodeBlock
+                    value={JSON.stringify(span.attributes, null, 2)}
+                    label="Attributes"
+                    maxHeight={400}
+                  />
+                </div>
+              )}
+            </>
           )}
 
           {hasInput && (

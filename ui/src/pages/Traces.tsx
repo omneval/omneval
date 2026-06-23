@@ -97,6 +97,15 @@ interface ConversationListResponse {
 
 // ── Observation Level Pills ────────────────────────────────────────
 
+// Full label for each span kind — used for tooltips and aria-labels.
+const SPAN_KIND_LABELS: Record<string, string> = {
+  llm: "LLM",
+  tool: "Tool",
+  agent: "Agent",
+  chain: "Chain",
+  internal: "Internal",
+};
+
 interface ObservationPillsProps {
   kindCounts?: Record<string, number>;
 }
@@ -106,19 +115,27 @@ function ObservationPills({ kindCounts }: ObservationPillsProps) {
 
   return (
     <div className="flex items-center gap-1 flex-wrap">
-      {Object.entries(kindCounts).map(([kind, count]) => (
-        <span
-          key={kind}
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-          style={{
-            background: colors.toRgba(colors.accents.emberFlare, 0.13),
-            color: colors.accents.softGlow,
-            border: `1px solid ${colors.toRgba(colors.accents.emberFlare, 0.27)}`,
-          }}
-        >
-          {kind.slice(0, 3).toUpperCase()} {count}
-        </span>
-      ))}
+      {Object.entries(kindCounts).map(([kind, count]) => {
+        const label = SPAN_KIND_LABELS[kind] ?? kind.slice(0, 3).toUpperCase();
+        const displayName = `${label} ${count}`;
+        return (
+          <span
+            key={kind}
+            role="status"
+            tabIndex={0}
+            title={displayName}
+            aria-label={displayName}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+            style={{
+              background: colors.toRgba(colors.accents.emberFlare, 0.13),
+              color: colors.accents.softGlow,
+              border: `1px solid ${colors.toRgba(colors.accents.emberFlare, 0.27)}`,
+            }}
+          >
+            {kind.slice(0, 3).toUpperCase()} {count}
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -644,11 +661,12 @@ function TableCellRenderer({
             onNavigateToTrace(span.trace_id);
             onNavigateToTraceDetail();
           }}
-          className="text-left block w-full"
+          className="text-left block w-full leading-tight"
           title="View trace waterfall"
         >
           <div className="text-omneval-text-pure font-medium">{span.name}</div>
-          <div className="text-omneval-text-muted text-xs font-mono truncate max-w-[120px]">
+          <div className="text-omneval-text-muted text-[11px] font-mono truncate max-w-[120px]">
+
             {span.trace_id.slice(0, 12)}…
           </div>
         </button>
@@ -656,13 +674,13 @@ function TableCellRenderer({
     case "input":
       return (
         <div key={col.key} className="max-w-[200px] text-omneval-text-muted text-xs font-mono">
-          {span.input ? formatJsonPreview(span.input, 40) : "\u2014"}
+          {span.input ? formatJsonPreview(span.input, 40) : "—"}
         </div>
       );
     case "output":
       return (
         <div key={col.key} className="max-w-[200px] text-omneval-text-muted text-xs font-mono">
-          {span.output ? formatJsonPreview(span.output, 40) : "\u2014"}
+          {span.output ? formatJsonPreview(span.output, 40) : "—"}
         </div>
       );
     case "observationLevels":
@@ -804,16 +822,19 @@ export default function TracesPage({
     initialTab ?? "traces",
   );
   const [autoRefresh, setAutoRefresh] = useState(false);
+  // Default-visible columns: Timestamp, Name, Latency, Tokens, Cost.
+  // Input/Output/Levels are available via the column-visibility picker but
+  // off by default so they don't push the key metrics off-screen.
   const [columnVisibility, setColumnVisibility] = useState({
     bookmark: true,
     timestamp: true,
     name: true,
-    input: true,
-    output: true,
-    observationLevels: true,
     latency: true,
     tokens: true,
     cost: true,
+    input: false,
+    output: false,
+    observationLevels: false,
   });
 
   // Filters
@@ -850,17 +871,18 @@ export default function TracesPage({
   }, []);
 
   // ── Columns Definition ──
+  // Priority order: Timestamp → Name → Latency → Tokens → Cost → Input → Output → Levels
   const allColumns = [
     { key: "selection", label: "", visible: true },
     { key: "bookmark", label: "", visible: columnVisibility.bookmark },
     { key: "timestamp", label: "Timestamp", visible: columnVisibility.timestamp },
     { key: "name", label: "Name", visible: columnVisibility.name },
-    { key: "input", label: "Input", visible: columnVisibility.input },
-    { key: "output", label: "Output", visible: columnVisibility.output },
-    { key: "observationLevels", label: "Levels", visible: columnVisibility.observationLevels },
     { key: "latency", label: "Latency", visible: columnVisibility.latency },
     { key: "tokens", label: "Tokens", visible: columnVisibility.tokens },
     { key: "cost", label: "Cost", visible: columnVisibility.cost },
+    { key: "input", label: "Input", visible: columnVisibility.input },
+    { key: "output", label: "Output", visible: columnVisibility.output },
+    { key: "observationLevels", label: "Levels", visible: columnVisibility.observationLevels },
   ];
 
   // "selection" and "bookmark" are not toggleable column visibility
@@ -1302,7 +1324,7 @@ export default function TracesPage({
                         return (
                           <td
                             key={col.key}
-                            className="px-3 py-2.5 whitespace-nowrap"
+                            className="px-2 py-1 whitespace-nowrap"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <input
@@ -1316,7 +1338,7 @@ export default function TracesPage({
                         );
                       }
                       return (
-                        <td key={col.key} className="px-3 py-2.5 whitespace-nowrap">
+                        <td key={col.key} className="px-2 py-1 whitespace-nowrap">
                           <TableCellRenderer
                             col={col}
                             span={span}

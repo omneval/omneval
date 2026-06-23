@@ -101,12 +101,111 @@ describe("ObservationPills component", () => {
     vi.restoreAllMocks();
   });
 
+  // Helper to enable the Levels column via the picker so pills render in the table.
+  async function enableLevelsColumn() {
+    const columnsButton = screen.getByRole("button", {
+      name: "Column visibility",
+    });
+    await act(async () => {
+      fireEvent.click(columnsButton);
+    });
+    const levelsToggle = screen.getByRole("button", {
+      name: "Toggle Levels column",
+    });
+    await act(async () => {
+      fireEvent.click(levelsToggle);
+    });
+    await act(async () => {
+      fireEvent.click(columnsButton);
+    });
+  }
+
+  it("#237: each span-kind badge has a title tooltip with the full kind name", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+    await enableLevelsColumn();
+
+    // trace-a's kind_counts is {chain: 1, llm: 2, tool: 1}
+    // each badge pill should carry a title attribute equal to its full label
+    const pills = screen.queryAllByRole("status");
+    const titles = pills.map((p) => (p as HTMLElement).getAttribute("title"));
+    expect(titles).toContain("LLM 2");
+    expect(titles).toContain("Tool 1");
+    expect(titles).toContain("Chain 1");
+  });
+
+  it("#237: agent and internal kinds map to their full labels", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: [
+            {
+              span_id: "root-3",
+              trace_id: "trace-d",
+              parent_id: "",
+              project_id: "test-project",
+              name: "agent-trace",
+              kind: "chain",
+              model: "gpt-4",
+              start_time: "2025-01-15T13:00:00Z",
+              end_time: "2025-01-15T13:00:20Z",
+              cost_usd: 0.08,
+              input_tokens: 100,
+              output_tokens: 200,
+              status_code: "OK",
+              span_count: 3,
+              kind_counts: { chain: 1, agent: 1, internal: 1 },
+            },
+          ],
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("agent-trace")).toBeInTheDocument();
+    });
+    await enableLevelsColumn();
+
+    const pills = screen.queryAllByRole("status");
+    const titles = pills.map((p) => (p as HTMLElement).getAttribute("title"));
+    expect(titles).toContain("Agent 1");
+    expect(titles).toContain("Internal 1");
+    expect(titles).toContain("Chain 1");
+  });
+
+  it("#237: each span-kind badge has aria-label matching its title for screen readers", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+    await enableLevelsColumn();
+
+    const pills = screen.queryAllByRole("status");
+    pills.forEach((pill) => {
+      expect(pill).toHaveAttribute("aria-label");
+      expect(pill).toHaveAttribute("title");
+      expect(pill).toHaveAttribute("tabindex");
+      expect(pill.getAttribute("aria-label")).toBe(pill.getAttribute("title"));
+    });
+  });
+
   it("renders a badge for each kind in kind_counts", async () => {
     renderTracesPage();
 
     await waitFor(() => {
       expect(screen.getByText("main-trace")).toBeInTheDocument();
     });
+
+    // Levels column is off by default — enable it so the pills render.
+    await enableLevelsColumn();
 
     // trace-a's kind_counts is {chain: 1, llm: 2, tool: 1} — the LLM and
     // TOOL badges should be present (CHA/LLM/TOO are the 3-char prefixes).
@@ -121,6 +220,9 @@ describe("ObservationPills component", () => {
       expect(screen.getByText("main-trace")).toBeInTheDocument();
     });
 
+    // Enable Levels so pills appear in the table.
+    await enableLevelsColumn();
+
     // trace-a has kind_counts {chain: 1, llm: 2, tool: 1} — both LLM and
     // TOOL pills should render.
     const allText = screen.queryAllByText(/LLM|TOO/);
@@ -134,6 +236,9 @@ describe("ObservationPills component", () => {
       expect(screen.getByText("simple-trace")).toBeInTheDocument();
     });
 
+    // Enable Levels so the pill renders.
+    await enableLevelsColumn();
+
     // trace-b's kind_counts is {chain: 1, llm: 1} — should show "LLM 1".
     const llmBadges = screen.queryAllByText(/LLM 1/);
     expect(llmBadges.length).toBeGreaterThanOrEqual(1);
@@ -146,13 +251,15 @@ describe("ObservationPills component", () => {
       expect(screen.getByText("leaf-span")).toBeInTheDocument();
     });
 
-    // trace-c's kind_counts is {llm: 1} — even a single-span trace
-    // (span_count: 1) shows its own kind as a badge.
+    // Enable Levels so the pill renders.
+    await enableLevelsColumn();
+
     const leafRow = screen.getByText("leaf-span").closest("tr");
     expect(leafRow).toBeInTheDocument();
+
+    // observationLevels is now the last visible column.
     const leafRowCells = leafRow?.querySelectorAll("td");
-    // observationLevels is the 7th column (0-indexed = 6) after bookmark column
-    const levelsCell = leafRowCells?.[6];
+    const levelsCell = leafRowCells?.[leafRowCells!.length - 1];
     expect(levelsCell?.textContent).toContain("LLM 1");
   });
 });
@@ -160,7 +267,7 @@ describe("ObservationPills component", () => {
 // ── Column toggle tests ──────────────────────────────────────────
 
 describe("column toggles", () => {
-  it("hides Levels column when toggle is clicked", async () => {
+  it("toggles Levels column on then off", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       json: () =>
@@ -177,17 +284,44 @@ describe("column toggles", () => {
       expect(screen.getByText("main-trace")).toBeInTheDocument();
     });
 
-    const olButton = screen.getByRole("button", {
+    // Levels is off by default — enable it first.
+    const columnsButton = screen.getByRole("button", {
+      name: "Column visibility",
+    });
+
+    await act(async () => {
+      fireEvent.click(columnsButton);
+    });
+    const levelsToggle = screen.getByRole("button", {
       name: "Toggle Levels column",
     });
     await act(async () => {
-      fireEvent.click(olButton);
+      fireEvent.click(levelsToggle);
+    });
+
+    // Close the picker and verify the header is now visible.
+    await act(async () => {
+      fireEvent.click(columnsButton);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Levels")).toBeInTheDocument();
+    });
+
+    // Now toggle it off again.
+    await act(async () => {
+      fireEvent.click(columnsButton);
+    });
+    await act(async () => {
+      fireEvent.click(levelsToggle);
+    });
+    await act(async () => {
+      fireEvent.click(columnsButton);
     });
 
     expect(screen.queryByText("Levels")).not.toBeInTheDocument();
   });
 
-  it("shows Levels column header by default", async () => {
+  it("hides Levels column by default", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       json: () =>
@@ -204,7 +338,216 @@ describe("column toggles", () => {
       expect(screen.getByText("main-trace")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Levels")).toBeInTheDocument();
+    // Levels is not visible by default; it can be toggled on via the picker.
+    const tableHeaders = screen.queryAllByRole("columnheader");
+    const levelsVisible = tableHeaders.some(h => h.textContent === "Levels");
+    expect(levelsVisible).toBe(false);
+  });
+
+  it("hides Input column by default", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: mockSpans,
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // Input column header should not be visible by default — query the table
+    // headers specifically to avoid picking up text elsewhere in the page.
+    const tableHeaders = screen.queryAllByRole("columnheader");
+    const inputVisible = tableHeaders.some(h => h.textContent === "Input");
+    expect(inputVisible).toBe(false);
+  });
+
+  it("hides Output column by default", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: mockSpans,
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    const tableHeaders = screen.queryAllByRole("columnheader");
+    const outputVisible = tableHeaders.some(h => h.textContent === "Output");
+    expect(outputVisible).toBe(false);
+  });
+
+  it("shows Latency column header by default", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: mockSpans,
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("columnheader", { name: "Latency" })).toBeInTheDocument();
+  });
+
+  it("shows Tokens column header by default", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: mockSpans,
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("columnheader", { name: "Tokens" })).toBeInTheDocument();
+  });
+
+  it("shows Cost column header by default", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: mockSpans,
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("columnheader", { name: "Cost" })).toBeInTheDocument();
+  });
+
+  it("Latency/Tokens/Cost columns appear before Input/Output in column order", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: mockSpans,
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // Enable Input and Output via the column picker so we can verify ordering.
+    const columnsButton = screen.getByRole("button", {
+      name: "Column visibility",
+    });
+    await act(async () => {
+      fireEvent.click(columnsButton);
+    });
+
+    // Toggle Input on via the picker button.
+    const inputToggle = screen.getByRole("button", {
+      name: "Toggle Input column",
+    });
+    await act(async () => {
+      fireEvent.click(inputToggle);
+    });
+
+    // Close the menu first so the column header re-renders.
+    await act(async () => {
+      fireEvent.click(columnsButton);
+    });
+
+    // Toggle Output on.
+    const outputToggle = screen.getByRole("button", {
+      name: "Toggle Output column",
+    });
+    await act(async () => {
+      fireEvent.click(outputToggle);
+    });
+
+    // Close the menu so column headers settle.
+    await act(async () => {
+      fireEvent.click(columnsButton);
+    });
+
+    // Collect visible column headers in rendered order.
+    const headers = Array.from(screen.queryAllByRole("columnheader"));
+    const labels = headers.map(h => h.textContent ?? "").filter(Boolean);
+
+    const latencyIdx = labels.indexOf("Latency");
+    const tokensIdx = labels.indexOf("Tokens");
+    const costIdx = labels.indexOf("Cost");
+    const inputIdx = labels.indexOf("Input");
+    const outputIdx = labels.indexOf("Output");
+
+    // Verify Input and Output come after Latency, Tokens, and Cost.
+    expect(latencyIdx).toBeLessThan(inputIdx);
+    expect(latencyIdx).toBeLessThan(outputIdx);
+    expect(tokensIdx).toBeLessThan(inputIdx);
+    expect(tokensIdx).toBeLessThan(outputIdx);
+    expect(costIdx).toBeLessThan(inputIdx);
+    expect(costIdx).toBeLessThan(outputIdx);
+  });
+
+  it("table rows have reduced padding for denser layout", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: mockSpans,
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // Every <td> in the table body should have py-1 (4px vertical padding)
+    // for a denser single-line row, not py-2.5 (10px) or larger.
+    const rows = document.querySelectorAll("tbody tr");
+    expect(rows.length).toBeGreaterThan(0);
+
+    rows.forEach(row => {
+      const cells = row.querySelectorAll("td");
+      cells.forEach(cell => {
+        expect(cell.classList.contains("py-1")).toBe(true);
+      });
+    });
   });
 });
 
