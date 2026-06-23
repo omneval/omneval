@@ -72,6 +72,21 @@ function TracesIcon() {
   );
 }
 
+function ChatIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <path
+        d="M3.5 3h11a1 1 0 011 1v6a1 1 0 01-1 1h-3.5L7 13.5V11h-2.5a1 1 0 01-1-1V4a1 1 0 011-1z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M6 6h2M6 8.5h2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function PromptIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
@@ -160,6 +175,7 @@ const NAV_SECTIONS: {
     items: [
       { id: "dashboard", label: "Dashboard", section: "home", icon: <HomeIcon /> },
       { id: "traces", label: "Traces", section: "traces", icon: <TracesIcon /> },
+      { id: "conversations", label: "Conversations", section: "traces", icon: <ChatIcon /> },
     ],
   },
 
