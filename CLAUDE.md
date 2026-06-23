@@ -71,3 +71,17 @@ ADR-0004 (`docs/adr/0004-ducklake-storage-core.md`) and ADR-0005 (`docs/adr/0005
 The UI (`ui/src/`) is React + Vite + Tailwind v4 with a custom dark theme (see `ui/BRANDING.md`); pages: Dashboard, Traces, TraceDetail, Conversations, Prompts, EvalRules, Datasets, Settings, Admin, Login.
 
 Domain language lives in `CONTEXT.md` — follow it exactly (Span, Trace, Conversation, Score, Lake, Catalog, Ingest Buffer, Batch Ledger, End User vs User). Architecture decisions are in `docs/adr/`. The PRD is `omneval-prd.md`; progress tracking in `ROADMAP.md`. Coding standards in `.devloop/CODING_STANDARDS.md`.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `omneval/omneval`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles map to this repo's existing labels — notably `ready-for-agent` maps to the pre-existing `agent-ready` label rather than a new one. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
