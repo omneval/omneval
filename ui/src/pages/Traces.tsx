@@ -666,7 +666,6 @@ function TableCellRenderer({
         >
           <div className="text-omneval-text-pure font-medium">{span.name}</div>
           <div className="text-omneval-text-muted text-[11px] font-mono truncate max-w-[120px]">
-
             {span.trace_id.slice(0, 12)}…
           </div>
         </button>
