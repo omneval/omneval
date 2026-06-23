@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -796,6 +797,79 @@ func TestDatasetHandler_AddItemsBatch_WithSourceSpanID(t *testing.T) {
 	}
 	if items[0].SourceSpanID != "span-abc-123" {
 		t.Errorf("source_span_id: got %q, want %q", items[0].SourceSpanID, "span-abc-123")
+	}
+}
+
+func TestDatasetHandler_AddItemsBatch_NSpansProduceNItems(t *testing.T) {
+	store := fake.NewFakeMetadataStore()
+	handler := &DatasetHandler{
+		DatasetStore: store,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	ds := &domain.Dataset{DatasetID: uuid.New().String(), ProjectID: "test-proj", Name: "my-ds"}
+	store.CreateDataset(context.Background(), ds)
+
+	n := 5
+	spanIDs := make([]string, n)
+	inputs := make([]string, n)
+	for i := 0; i < n; i++ {
+		spanIDs[i] = fmt.Sprintf("span-%d", i)
+		inputs[i] = fmt.Sprintf("input %d", i)
+	}
+
+	itemsJSON := ""
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			itemsJSON += ","
+		}
+		itemsJSON += fmt.Sprintf(`{"input":"%s","expected_output":"expected %d","source_span_id":"%s"}`, inputs[i], i, spanIDs[i])
+	}
+	payload := fmt.Sprintf(`{"items":[%s]}`, itemsJSON)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/datasets/"+ds.DatasetID+"/items/batch", strings.NewReader(payload))
+	w := httptest.NewRecorder()
+	handler.HandleAddItemsBatch(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp AddDatasetItemsBatchResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.Created != n {
+		t.Errorf("created count: got %d, want %d", resp.Created, n)
+	}
+
+	items, err := store.ListDatasetItems(context.Background(), ds.DatasetID)
+	if err != nil {
+		t.Fatalf("ListDatasetItems: %v", err)
+	}
+
+	if len(items) != n {
+		t.Fatalf("items count: got %d, want %d", len(items), n)
+	}
+
+	spanIDToItem := make(map[string]*domain.DatasetItem)
+	for _, item := range items {
+		spanIDToItem[item.SourceSpanID] = item
+	}
+
+	for i := 0; i < n; i++ {
+		sid := spanIDs[i]
+		item, ok := spanIDToItem[sid]
+		if !ok {
+			t.Fatalf("missing item for span_id %q", sid)
+		}
+		if item.Input != inputs[i] {
+			t.Errorf("item for span %q: input got %q, want %q", sid, item.Input, inputs[i])
+		}
+		if item.ExpectedOutput != fmt.Sprintf("expected %d", i) {
+			t.Errorf("item for span %q: expected_output got %q, want %q", sid, item.ExpectedOutput, fmt.Sprintf("expected %d", i))
+		}
 	}
 }
 

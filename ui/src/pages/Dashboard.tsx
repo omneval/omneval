@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/Skeleton";
 import { EmptyState, LoadingState } from "@/components/EmptyState";
 import {
   formatNumber,
+  formatMs,
   timeRangeLabel,
 } from "@/utils/formatters";
 
@@ -134,6 +135,123 @@ function Card({ title, children, subtitle }: { title: string; children: React.Re
         </div>
       </div>
       <div className="p-4">{children}</div>
+    </div>
+  );
+}
+
+// ── KPI Tile ──────────────────────────────────────────────────────
+
+interface KPIValue {
+  totalCost: number;
+  totalTraces: number;
+  errorRate: number;
+  avgLatencyMs: number;
+}
+
+interface KPITileProps {
+  label: string;
+  value: string;
+  subtitle: string;
+  color: string;
+  icon: React.ReactNode;
+}
+
+function KPITile({ label, value, subtitle, color, icon }: KPITileProps) {
+  return (
+    <div className="rounded-lg p-4 text-center transition-all duration-200 hover:brightness-125"
+      style={{
+        background: `${color}15`,
+        border: `1px solid ${color}30`,
+      }}
+    >
+      <div className="flex items-center justify-center gap-1.5 mb-2">
+        <span style={{ color }}>{icon}</span>
+        <span className="text-xs font-medium text-omneval-text-muted uppercase tracking-wider">{label}</span>
+      </div>
+      <div className="text-2xl font-semibold mb-1" style={{ color }}>
+        {value}
+      </div>
+      <div className="text-xs text-omneval-text-muted">{subtitle}</div>
+    </div>
+  );
+}
+
+// ── KPI Tiles ──────────────────────────────────────────────────────
+
+const KPISVGIcons = {
+  dollar: (
+    <svg width="16" height="16" viewBox="0 0 48 48" fill="none">
+      <circle cx="24" cy="24" r="18" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 12v24M19 17h7.5a4.5 4.5 0 010 9h-5a4.5 4.5 0 000 9H29" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  ),
+  traces: (
+    <svg width="16" height="16" viewBox="0 0 48 48" fill="none">
+      <rect x="6" y="28" width="8" height="14" rx="1" stroke="currentColor" strokeWidth="2" />
+      <rect x="20" y="18" width="8" height="24" rx="1" stroke="currentColor" strokeWidth="2" />
+      <rect x="34" y="10" width="8" height="32" rx="1" stroke="currentColor" strokeWidth="2" />
+      <path d="M4 44h40" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  ),
+  error: (
+    <svg width="16" height="16" viewBox="0 0 48 48" fill="none">
+      <circle cx="24" cy="24" r="18" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 16v12M24 32v0" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  ),
+  latency: (
+    <svg width="16" height="16" viewBox="0 0 48 48" fill="none">
+      <circle cx="24" cy="24" r="18" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 14v10l7 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+};
+
+function KPITiles({ data, loading }: { data: KPIValue | null; loading: boolean }) {
+  if (loading || !data) {
+    return (
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="rounded-lg p-4" style={{ background: colors.backgrounds.surface }}>
+            <Skeleton className="h-4 rounded mb-2" />
+            <Skeleton className="h-8 rounded mb-1" />
+            <Skeleton className="h-3 rounded" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <KPITile
+        label="Total Cost"
+        value={`$${data.totalCost.toFixed(2)}`}
+        subtitle="sum of cost_usd"
+        color={colors.accents.violet}
+        icon={KPISVGIcons.dollar}
+      />
+      <KPITile
+        label="Total Traces"
+        value={formatNumber(data.totalTraces)}
+        subtitle="count of spans"
+        color={colors.chartColors.series[0]}
+        icon={KPISVGIcons.traces}
+      />
+      <KPITile
+        label="Error Rate"
+        value={`${(data.errorRate * 100).toFixed(2)}%`}
+        subtitle="errors / total"
+        color={data.errorRate > 0.1 ? colors.accents.dangerRed : colors.accents.greenSuccess}
+        icon={KPISVGIcons.error}
+      />
+      <KPITile
+        label="Average Latency"
+        value={formatMs(data.avgLatencyMs)}
+        subtitle="avg duration_ms"
+        color={colors.chartColors.series[2]}
+        icon={KPISVGIcons.latency}
+      />
     </div>
   );
 }
@@ -745,6 +863,148 @@ function UserConsumptionChart({ data, loading }: { data: UserConsumptionData[]; 
   );
 }
 
+// ── Chart: Latency Percentiles (p50/p95/p99) ──────────────────────
+
+interface LatencyPercentileData {
+  time: number;
+  p50_ms: number;
+  p95_ms: number;
+  p99_ms: number;
+}
+
+const LatencyPercentileChart = ({ data, loading }: { data: LatencyPercentileData[]; loading: boolean }) => {
+  if (loading && data.length === 0) {
+    return <LoadingState rows={1} rowHeight="8rem" />;
+  }
+
+  if (data.length === 0) {
+    return (
+      <EmptyState
+        variant="default"
+        icon={<ClockIcon />}
+        title="No latency data"
+        description="Latency percentiles will appear once traces are ingested"
+      />
+    );
+  }
+
+  return (
+    <div>
+      {/* Legend */}
+      <div className="flex gap-4 mb-3 text-xs text-omneval-text-muted">
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-0.5 rounded" style={{ background: colors.chartColors.series[0] }}></span>
+          p50
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-0.5 rounded" style={{ background: colors.chartColors.series[1] }}></span>
+          p95
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-0.5 rounded" style={{ background: colors.chartColors.series[2] }}></span>
+          p99
+        </span>
+      </div>
+      <ResponsiveContainer width="100%" height={200}>
+        <LineChart data={data} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+          <XAxis
+            type="number"
+            dataKey="time"
+            tick={{ fill: colors.typography.ashGrey, fontSize: 11 }}
+            axisLine={{ stroke: gridColor }}
+            tickLine={false}
+            tickFormatter={(val: number) => formatTraceTimeTick(val, "1d")}
+          />
+          <YAxis
+            tick={{ fill: colors.typography.ashGrey, fontSize: 11 }}
+            axisLine={{ stroke: gridColor }}
+            tickLine={false}
+            tickFormatter={(val: number) => `${Math.round(val)}ms`}
+          />
+          <Tooltip
+            contentStyle={chartTooltipStyle}
+            formatter={(value: number, name: string) => [`${Math.round(value)}ms`, name]}
+            labelFormatter={(val: number) => new Date(val).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+          />
+          <Line type="monotone" dataKey="p50_ms" name="p50" stroke={colors.chartColors.series[0]} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+          <Line type="monotone" dataKey="p95_ms" name="p95" stroke={colors.chartColors.series[1]} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+          <Line type="monotone" dataKey="p99_ms" name="p99" stroke={colors.chartColors.series[2]} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+};
+
+// ── Chart: Error Rate ─────────────────────────────────────────────
+
+interface ErrorRateData {
+  time: number;
+  total_count: number;
+  error_count: number;
+}
+
+const ErrorRateChart = ({ data, loading }: { data: ErrorRateData[]; loading: boolean }) => {
+  if (loading && data.length === 0) {
+    return <LoadingState rows={1} rowHeight="8rem" />;
+  }
+
+  if (data.length === 0) {
+    return (
+      <EmptyState
+        variant="default"
+        icon={<StarIcon />}
+        title="No error data"
+        description="Error rate will appear once traces are ingested"
+      />
+    );
+  }
+
+  // Compute percentage from raw counts
+  const chartData = data
+    .map((d) => ({
+      time: d.time,
+      errorRate: d.total_count > 0 ? (d.error_count / d.total_count) * 100 : 0,
+    }))
+    .filter((d) => d.time > 0);
+
+  return (
+    <ResponsiveContainer width="100%" height={200}>
+      <LineChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+        <XAxis
+          type="number"
+          dataKey="time"
+          tick={{ fill: colors.typography.ashGrey, fontSize: 11 }}
+          axisLine={{ stroke: gridColor }}
+          tickLine={false}
+          tickFormatter={(val: number) => formatTraceTimeTick(val, "1d")}
+        />
+        <YAxis
+          tick={{ fill: colors.typography.ashGrey, fontSize: 11 }}
+          axisLine={{ stroke: gridColor }}
+          tickLine={false}
+          tickFormatter={(val: number) => `${Math.round(val)}%`}
+        />
+        <Tooltip
+          contentStyle={chartTooltipStyle}
+          formatter={(value: number) => [`${Number(value).toFixed(2)}%`, "Error Rate"]}
+          labelFormatter={(val: number) => new Date(val).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+        />
+        <Line
+          type="monotone"
+          dataKey="errorRate"
+          name="Error Rate"
+          stroke={colors.accents.dangerRed}
+          strokeWidth={2}
+          dot={false}
+          activeDot={{ r: 4 }}
+        />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+};
+
 // ── Main Dashboard ─────────────────────────────────────────────────
 
 export default function DashboardPage({ activeProject, timeRange }: DashboardPageProps) {
@@ -766,13 +1026,19 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
   // Dashboard state
   const [tracesByName, setTracesByName] = useState<TracesByNameData[]>([]);
   const [tracesByTime, setTracesByTime] = useState<TimeSeriesData[]>([]);
-  const [modelCosts, setModelCosts] = useState<CostData[]>([]);
   const [userConsumption, setUserConsumption] = useState<UserConsumptionData[]>([]);
 
   // Token Usage tab data (model-grouped, for "by Model" tabs)
   const [tokenUsageData, setTokenUsageData] = useState<CostData[]>([]);
   // Token Usage tab data (kind-grouped, for "by Type" tabs)
   const [kindUsageData, setKindUsageData] = useState<CostData[]>([]);
+
+  // KPI state (total cost, traces, error rate, avg latency)
+  const [kpiData, setKpiData] = useState<KPIValue | null>(null);
+  // Latency percentile state
+  const [latencyData, setLatencyData] = useState<LatencyPercentileData[]>([]);
+  // Error rate state
+  const [errorRateData, setErrorRateData] = useState<ErrorRateData[]>([]);
 
   // Monotonic sequence so a slow in-flight response (e.g. for a previous
   // project) can never overwrite the latest results.
@@ -846,18 +1112,6 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         ],
       };
 
-      // ── Model Costs ──
-      const modelCostsReq: AnalyticsRequest = {
-        ...body,
-        group_by: [{ field: "model" }],
-        order_by: [{ field: "total_cost", desc: true }],
-        aggregations: [
-          { function: "sum", field: "input_tokens", alias: "input_tokens" },
-          { function: "sum", field: "output_tokens", alias: "output_tokens" },
-          { function: "sum", field: "cost_usd", alias: "total_cost" },
-        ],
-      };
-
       // ── User Consumption (by service_name) ──
       const userConsumptionReq: AnalyticsRequest = {
         ...body,
@@ -868,13 +1122,85 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         ],
       };
 
+      // ── KPI: total cost, traces, error rate, avg latency ──
+      // NOTE: the error-rate request filters out OK rows; error_count
+      // comes back in a separate variable (errorRateKpiJson) below.
+      // The frontend computes error_rate = error_count / total_traces.
+      const kpiReq: AnalyticsRequest = {
+        ...body,
+        group_by: [],
+        aggregations: [
+          { function: "count", field: "*", alias: "total_traces" },
+          { function: "sum", field: "cost_usd", alias: "total_cost" },
+          { function: "avg", field: "duration_ms", alias: "avg_latency_ms" },
+        ],
+      };
+
+      // ── KPI error count: separate request so we can compute a ratio ──
+      const kpiErrorCountReq: AnalyticsRequest = {
+        ...body,
+        group_by: [],
+        filters: [
+          { field: "status_code", op: "neq", value: "OK" },
+        ],
+        aggregations: [
+          { function: "count", field: "*", alias: "error_count" },
+        ],
+      };
+
+      // ── Latency Percentiles: p50/p95/p99 over time ──
+      const latencyPercentilesReq: AnalyticsRequest = {
+        ...body,
+        group_by: [
+          { field: "time_bucket", interval: "1h" },
+        ],
+        order_by: [{ field: "start_time", desc: false }],
+        aggregations: [
+          { function: "p50", field: "duration_ms", alias: "p50_ms" },
+          { function: "p95", field: "duration_ms", alias: "p95_ms" },
+          { function: "p99", field: "duration_ms", alias: "p99_ms" },
+        ],
+      };
+
+      // ── Error Rate: separate total-count and error-count queries so the
+      // frontend can compute a true ratio (filtering out OK rows before
+      // aggregation would make total_count == error_count, yielding 100%). ──
+      const errorRateTotalReq: AnalyticsRequest = {
+        ...body,
+        group_by: [
+          { field: "time_bucket", interval: "1h" },
+        ],
+        order_by: [{ field: "start_time", desc: false }],
+        aggregations: [
+          { function: "count", field: "*", alias: "total_count" },
+        ],
+      };
+
+      const errorRateErrorReq: AnalyticsRequest = {
+        ...body,
+        filters: [
+          { field: "status_code", op: "neq", value: "OK" },
+        ],
+        group_by: [
+          { field: "time_bucket", interval: "1h" },
+        ],
+        order_by: [{ field: "start_time", desc: false }],
+        aggregations: [
+          { function: "count", field: "*", alias: "error_count" },
+        ],
+      };
+
       const [
         tracesByNameResp,
         tracesByTimeResp,
         tokenUsageResp,
         kindUsageResp,
-        modelCostsResp,
         userConsumptionResp,
+        kpiResp,
+        kpiErrorCountResp,
+        latencyResp,
+        errorRateTotalResp,
+        errorRateErrorResp,
       ] = await Promise.all([
         fetch("/api/v1/analytics/spans", {
           method: "POST",
@@ -899,12 +1225,32 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         fetch("/api/v1/analytics/spans", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(modelCostsReq),
+          body: JSON.stringify(userConsumptionReq),
         }),
         fetch("/api/v1/analytics/spans", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(userConsumptionReq),
+          body: JSON.stringify(kpiReq),
+        }),
+        fetch("/api/v1/analytics/spans", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(kpiErrorCountReq),
+        }),
+        fetch("/api/v1/analytics/spans", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(latencyPercentilesReq),
+        }),
+        fetch("/api/v1/analytics/spans", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(errorRateTotalReq),
+        }),
+        fetch("/api/v1/analytics/spans", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(errorRateErrorReq),
         }),
       ]);
 
@@ -917,15 +1263,23 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         tracesByTimeData,
         tokenUsageJson,
         kindUsageJson,
-        modelCostsJson,
         userConsumptionJson,
+        kpiJson,
+        kpiErrorCountJson,
+        latencyJson,
+        errorRateTotalJson,
+        errorRateErrorJson,
       ] = await Promise.all([
         tracesByNameResp.ok ? tracesByNameResp.json() : { rows: [] },
         tracesByTimeResp.ok ? tracesByTimeResp.json() : { rows: [] },
         tokenUsageResp.ok ? tokenUsageResp.json() : { rows: [] },
         kindUsageResp.ok ? kindUsageResp.json() : { rows: [] },
-        modelCostsResp.ok ? modelCostsResp.json() : { rows: [] },
         userConsumptionResp.ok ? userConsumptionResp.json() : { rows: [] },
+        kpiResp.ok ? kpiResp.json() : { rows: [] },
+        kpiErrorCountResp.ok ? kpiErrorCountResp.json() : { rows: [] },
+        latencyResp.ok ? latencyResp.json() : { rows: [] },
+        errorRateTotalResp.ok ? errorRateTotalResp.json() : { rows: [] },
+        errorRateErrorResp.ok ? errorRateErrorResp.json() : { rows: [] },
       ]);
 
       if (seq !== requestSeq.current) return;
@@ -965,12 +1319,74 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
       );
       setTokenUsageData(mapCostRows(tokenUsageJson.rows ?? []));
       setKindUsageData(mapKindRows(kindUsageJson.rows ?? []));
-      setModelCosts(mapCostRows(modelCostsJson.rows ?? []));
       setUserConsumption(
         (userConsumptionJson.rows ?? []).map((row: Record<string, unknown>) => ({
           user: (row.service_name as string) || "anonymous",
           count: Number(row.count) || 0,
         })),
+      );
+
+      // KPI data: read row 0 (default to zeros when no rows)
+      // Compute error_rate as a ratio: error_count / total_traces
+      const kpiRows = kpiJson.rows ?? [];
+      if (kpiRows.length > 0) {
+        const r = kpiRows[0] as Record<string, unknown>;
+        const totalTraces = Number(r.total_traces) || 0;
+        const errorCountRows = kpiErrorCountJson.rows ?? [];
+        const errorCount =
+          errorCountRows.length > 0
+            ? Number((errorCountRows[0] as Record<string, unknown>).error_count) || 0
+            : 0;
+        setKpiData({
+          totalCost: Number(r.total_cost) || 0,
+          totalTraces,
+          errorRate: totalTraces > 0 ? errorCount / totalTraces : 0,
+          avgLatencyMs: Number(r.avg_latency_ms) || 0,
+        });
+      } else {
+        setKpiData({
+          totalCost: 0,
+          totalTraces: 0,
+          errorRate: 0,
+          avgLatencyMs: 0,
+        });
+      }
+
+      // Latency percentile data
+      setLatencyData(
+        (latencyJson.rows ?? [])
+          .map((row: Record<string, unknown>) => ({
+            time: extractRawTime(row),
+            p50_ms: Number(row.p50_ms) || 0,
+            p95_ms: Number(row.p95_ms) || 0,
+            p99_ms: Number(row.p99_ms) || 0,
+          }))
+          .filter((d: LatencyPercentileData) => d.time > 0),
+      );
+
+      // Error rate data: merge total-count and error-count rows from
+      // separate queries, then compute error_rate as error_count / total_count.
+      const totalRows = (errorRateTotalJson.rows ?? []).map((row: Record<string, unknown>) => ({
+        time: extractRawTime(row),
+        total_count: Number(row.total_count) || 0,
+      })).filter((d: { time: number }) => d.time > 0);
+
+      const errorMap = new Map<number, number>();
+      (errorRateErrorJson.rows ?? []).forEach((row: Record<string, unknown>) => {
+        const t = extractRawTime(row);
+        if (t > 0) {
+          errorMap.set(t, Number(row.error_count) || 0);
+        }
+      });
+
+      setErrorRateData(
+        totalRows
+          .map((d: { time: number; total_count: number }) => ({
+            time: d.time,
+            total_count: d.total_count,
+            error_count: errorMap.get(d.time) || 0,
+          }))
+          .filter((d: ErrorRateData) => d.time > 0),
       );
     } catch (err) {
       if (seq !== requestSeq.current) return;
@@ -1063,34 +1479,44 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         />
       )}
 
-      {/* ── 6-Widget Grid ── */}
+      {/* ── KPI Tiles ── */}
+      <div className="mb-4">
+        <KPITiles data={kpiData} loading={loading} />
+      </div>
+
+      {/* ── Latency & Error Rate Row ── */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
+        <Card title="Latency Percentiles" subtitle="ms">
+          <LatencyPercentileChart data={latencyData} loading={loading} />
+        </Card>
+        <Card title="Error Rate" subtitle="% errors">
+          <ErrorRateChart data={errorRateData} loading={loading} />
+        </Card>
+      </div>
+
+      {/* ── Widget Grid ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
         {/* 1. Traces by Name (Horizontal Bar) */}
         <Card title="Traces by Model" subtitle="count">
           <TracesByNameChart data={tracesByName} loading={loading} />
         </Card>
 
-        {/* 2. Model Costs (Data Table) */}
-        <Card title="Cost by Model" subtitle="USD">
-          <ModelCostsTable data={modelCosts} loading={loading} />
-        </Card>
-
-        {/* 3. Scores (Empty State) */}
+        {/* 2. Scores (Empty State) */}
         <Card title="Eval Scores" subtitle="score (0–1)">
           <ScoresWidget loading={loading} />
         </Card>
 
-        {/* 4. Traces by Time (Line Graph) */}
+        {/* 3. Traces by Time (Line Graph) */}
         <Card title="Traces over Time" subtitle="count/hour">
           <TracesByTimeChart data={tracesByTime} loading={loading} from={from} to={to} timeRange={timeRange} />
         </Card>
 
-        {/* 5. Model Usage (Tabbed) */}
+        {/* 4. Model Usage (Tabbed) */}
         <Card title="Token Usage" subtitle="input + output tokens">
           <ModelUsageWidget loading={loading} data={tokenUsageData} typeData={kindUsageData} />
         </Card>
 
-        {/* 6. User Consumption (Horizontal Bar) */}
+        {/* 5. User Consumption (Horizontal Bar) */}
         <Card title="User Consumption" subtitle="traces per service">
           <UserConsumptionChart data={userConsumption} loading={loading} />
         </Card>

@@ -157,6 +157,24 @@ func Interpolate(template string, variables map[string]string) (string, []string
 	return result.String(), missing
 }
 
+// InterpolateChat interpolates every message content in a chat-type PromptVersion
+// with the same variables map. Missing variables are collected across all messages.
+func InterpolateChat(messages []ChatMessage, variables map[string]string) ([]ChatMessage, []string) {
+	var allMissing []string
+	result := make([]ChatMessage, len(messages))
+
+	for i, msg := range messages {
+		rendered, missing := Interpolate(msg.Content, variables)
+		result[i] = ChatMessage{
+			Role:    msg.Role,
+			Content: rendered,
+		}
+		allMissing = append(allMissing, missing...)
+	}
+
+	return result, allMissing
+}
+
 // BuildJudgeMessages constructs OpenAI-compatible messages for judge/eval LLM calls.
 func BuildJudgeMessages(interpolatedTemplate string) []ChatMessage {
 	return []ChatMessage{

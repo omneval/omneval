@@ -10,6 +10,7 @@ import {
   totalTokens,
 } from "@/utils/formatters";
 import { presetToFromTo } from "@/utils/timeRange";
+import BulkAddToDatasetModal from "@/components/BulkAddToDatasetModal";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -17,10 +18,6 @@ interface TracesPageProps {
   activeProject: string;
   onNavigateToTrace: (traceId: string) => void;
   onNavigateToTraceDetail: () => void;
-  onNavigateToConversation: (conversationId: string) => void;
-  /** Tab shown on mount — lets the back button from ConversationDetail
-   *  return to the Conversations tab rather than the default Traces tab. */
-  initialTab?: "traces" | "conversations";
   /** Time-range preset from the Header (e.g. "1h", "1d", "7d"). */
   timeRange?: string;
 }
@@ -73,28 +70,16 @@ interface QueryFilter {
 // Observation-level span kinds (used by the Levels column pills).
 export const OBSERVATION_KINDS: string[] = ["llm", "tool", "agent", "chain"];
 
-// ── Conversation types (issue #67) ─────────────────────────────────
-
-interface ConversationListItem {
-  conversation_id: string;
-  project_id: string;
-  service_name: string;
-  trace_count: number;
-  span_count: number;
-  start_time: string;
-  end_time: string;
-  total_cost_usd: number;
-  total_input_tokens: number;
-  total_output_tokens: number;
-}
-
-interface ConversationListResponse {
-  conversations: ConversationListItem[];
-  next?: string;
-  limit: number;
-}
-
 // ── Observation Level Pills ────────────────────────────────────────
+
+// Full label for each span kind — used for tooltips and aria-labels.
+const SPAN_KIND_LABELS: Record<string, string> = {
+  llm: "LLM",
+  tool: "Tool",
+  agent: "Agent",
+  chain: "Chain",
+  internal: "Internal",
+};
 
 interface ObservationPillsProps {
   kindCounts?: Record<string, number>;
@@ -105,19 +90,27 @@ function ObservationPills({ kindCounts }: ObservationPillsProps) {
 
   return (
     <div className="flex items-center gap-1 flex-wrap">
-      {Object.entries(kindCounts).map(([kind, count]) => (
-        <span
-          key={kind}
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-          style={{
-            background: colors.toRgba(colors.accents.emberFlare, 0.13),
-            color: colors.accents.softGlow,
-            border: `1px solid ${colors.toRgba(colors.accents.emberFlare, 0.27)}`,
-          }}
-        >
-          {kind.slice(0, 3).toUpperCase()} {count}
-        </span>
-      ))}
+      {Object.entries(kindCounts).map(([kind, count]) => {
+        const label = SPAN_KIND_LABELS[kind] ?? kind.slice(0, 3).toUpperCase();
+        const displayName = `${label} ${count}`;
+        return (
+          <span
+            key={kind}
+            role="status"
+            tabIndex={0}
+            title={displayName}
+            aria-label={displayName}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+            style={{
+              background: colors.toRgba(colors.accents.emberFlare, 0.13),
+              color: colors.accents.softGlow,
+              border: `1px solid ${colors.toRgba(colors.accents.emberFlare, 0.27)}`,
+            }}
+          >
+            {kind.slice(0, 3).toUpperCase()} {count}
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -643,11 +636,11 @@ function TableCellRenderer({
             onNavigateToTrace(span.trace_id);
             onNavigateToTraceDetail();
           }}
-          className="text-left block w-full"
+          className="text-left block w-full leading-tight"
           title="View trace waterfall"
         >
           <div className="text-omneval-text-pure font-medium">{span.name}</div>
-          <div className="text-omneval-text-muted text-xs font-mono truncate max-w-[120px]">
+          <div className="text-omneval-text-muted text-[11px] font-mono truncate max-w-[120px]">
             {span.trace_id.slice(0, 12)}…
           </div>
         </button>
@@ -655,13 +648,13 @@ function TableCellRenderer({
     case "input":
       return (
         <div key={col.key} className="max-w-[200px] text-omneval-text-muted text-xs font-mono">
-          {span.input ? formatJsonPreview(span.input, 40) : "\u2014"}
+          {span.input ? formatJsonPreview(span.input, 40) : "—"}
         </div>
       );
     case "output":
       return (
         <div key={col.key} className="max-w-[200px] text-omneval-text-muted text-xs font-mono">
-          {span.output ? formatJsonPreview(span.output, 40) : "\u2014"}
+          {span.output ? formatJsonPreview(span.output, 40) : "—"}
         </div>
       );
     case "observationLevels":
@@ -778,8 +771,6 @@ export default function TracesPage({
   activeProject,
   onNavigateToTrace,
   onNavigateToTraceDetail,
-  onNavigateToConversation,
-  initialTab,
   timeRange,
 }: TracesPageProps) {
   const [spans, setSpans] = useState<Span[]>([]);
@@ -799,20 +790,20 @@ export default function TracesPage({
   // an outdated sequence are dropped so a slow stale request can never
   // overwrite the latest results (filters/search/project switches race).
   const requestSeq = useRef(0);
-  const [activeTab, setActiveTab] = useState<"traces" | "conversations">(
-    initialTab ?? "traces",
-  );
   const [autoRefresh, setAutoRefresh] = useState(false);
+  // Default-visible columns: Timestamp, Name, Latency, Tokens, Cost.
+  // Input/Output/Levels are available via the column-visibility picker but
+  // off by default so they don't push the key metrics off-screen.
   const [columnVisibility, setColumnVisibility] = useState({
     bookmark: true,
     timestamp: true,
     name: true,
-    input: true,
-    output: true,
-    observationLevels: true,
     latency: true,
     tokens: true,
     cost: true,
+    input: false,
+    output: false,
+    observationLevels: false,
   });
 
   // Filters
@@ -823,17 +814,53 @@ export default function TracesPage({
   const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
 
+  // ── Row Selection ────────────────────────────────────────────────
+  const [selectedSpanIds, setSelectedSpanIds] = useState<Set<string>>(new Set());
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+
+  const handleSelectAll = useCallback(() => {
+    setSelectedSpanIds((prev) => {
+      if (prev.size === spans.length) {
+        return new Set();
+      }
+      return new Set(spans.map((s) => s.span_id));
+    });
+  }, [spans]);
+
+  const handleSelectRow = useCallback((spanId: string) => {
+    setSelectedSpanIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(spanId)) {
+        next.delete(spanId);
+      } else {
+        next.add(spanId);
+      }
+      return next;
+    });
+  }, []);
+
   // ── Columns Definition ──
-  const columns = [
+  // Priority order: Timestamp → Name → Latency → Tokens → Cost → Input → Output → Levels
+  const allColumns = [
+    { key: "selection", label: "", visible: true },
     { key: "bookmark", label: "", visible: columnVisibility.bookmark },
     { key: "timestamp", label: "Timestamp", visible: columnVisibility.timestamp },
     { key: "name", label: "Name", visible: columnVisibility.name },
-    { key: "input", label: "Input", visible: columnVisibility.input },
-    { key: "output", label: "Output", visible: columnVisibility.output },
-    { key: "observationLevels", label: "Levels", visible: columnVisibility.observationLevels },
     { key: "latency", label: "Latency", visible: columnVisibility.latency },
     { key: "tokens", label: "Tokens", visible: columnVisibility.tokens },
     { key: "cost", label: "Cost", visible: columnVisibility.cost },
+    { key: "input", label: "Input", visible: columnVisibility.input },
+    { key: "output", label: "Output", visible: columnVisibility.output },
+    { key: "observationLevels", label: "Levels", visible: columnVisibility.observationLevels },
+  ];
+
+  // "selection" and "bookmark" are not toggleable column visibility
+  const toggleableColumns = allColumns.filter((c) => c.key !== "selection" && c.key !== "bookmark");
+
+  const columns = [
+    { key: "selection", label: "", visible: true },
+    { key: "bookmark", label: "", visible: columnVisibility.bookmark },
+    ...toggleableColumns.map((c) => ({ ...c, visible: columnVisibility[c.key as keyof typeof columnVisibility] })),
   ];
 
   const columnTooltips: Record<string, string> = {
@@ -933,6 +960,13 @@ export default function TracesPage({
     return () => clearInterval(interval);
   }, [autoRefresh, fetchSpans]);
 
+  // Reset selection and re-fetch after bulk add succeeds
+  const handleBulkAddSuccess = useCallback(() => {
+    setSelectedSpanIds(new Set());
+    setIsBulkModalOpen(false);
+    fetchSpans("", false);
+  }, [fetchSpans]);
+
   const toggleBookmark = async (traceId: string) => {
     const newBookmarks = new Set(bookmarks);
     if (newBookmarks.has(traceId)) {
@@ -1016,34 +1050,8 @@ export default function TracesPage({
             background: colors.backgrounds.slightIllumination,
           }}
         >
-          {/* Tabs */}
-          <div className="flex gap-1">
-            {(["traces", "conversations"] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-3 py-1.5 text-sm rounded-md transition-colors capitalize ${
-                  tab === activeTab
-                    ? "text-omneval-violet-pale"
-                    : "text-omneval-text-muted hover:text-omneval-text-pure"
-                }`}
-                style={
-                  tab === activeTab
-                    ? {
-                        background: colors.backgrounds.charcoalDepth,
-                        borderBottom: `2px solid ${colors.accents.emberFlare}`,
-                      }
-                    : {}
-                }
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-
           {/* Search */}
           <div className="flex-1" />
-          {activeTab === "traces" && (
           <input
             type="text"
             placeholder="Search by ID/Name..."
@@ -1051,10 +1059,8 @@ export default function TracesPage({
             onChange={(e) => setSearchQuery(e.target.value)}
             className="input-focus w-48 text-sm px-2.5 py-1.5 rounded border border-omneval-border bg-omneval-depth text-omneval-text-pure placeholder-omneval-text-muted"
           />
-          )}
 
           {/* Auto-refresh toggle */}
-          {activeTab === "traces" && (
           <label className="flex items-center gap-2 text-sm text-omneval-text-muted cursor-pointer">
             <input
               type="checkbox"
@@ -1067,10 +1073,27 @@ export default function TracesPage({
               30s
             </span>
           </label>
+
+          {/* Bulk "Add to dataset" button — shown when rows are selected */}
+          {selectedSpanIds.size > 0 && (
+          <button
+            onClick={() => setIsBulkModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border transition-all duration-150"
+            style={{
+              borderColor: colors.accents.violet,
+              background: colors.toRgba(colors.accents.violet, 0.15),
+              color: colors.accents.violet,
+            }}
+            aria-label="Add to dataset"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+            Add to dataset ({selectedSpanIds.size})
+          </button>
           )}
 
           {/* Column visibility menu */}
-          {activeTab === "traces" && (
           <div className="relative">
             {/* Screen-reader / test accessible column toggles — always in DOM, no visible text */}
             <div className="sr-only">
@@ -1144,16 +1167,8 @@ export default function TracesPage({
               </div>
             )}
           </div>
-          )}
         </div>
 
-        {activeTab === "conversations" ? (
-          <ConversationsView
-            activeProject={activeProject}
-            onOpenConversation={onNavigateToConversation}
-          />
-        ) : (
-        <>
         {/* Table */}
         <div className="flex-1 overflow-auto">
           {spans.length === 0 && !loading ? (
@@ -1188,15 +1203,35 @@ export default function TracesPage({
                     color: colors.typography.ashGrey,
                   }}
                 >
-                  {visibleColumns.map((col) => (
-                    <th
-                      key={col.key}
-                      className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider whitespace-nowrap"
-                      title={columnTooltips[col.key] ?? col.label}
-                    >
-                      {col.label}
-                    </th>
-                  ))}
+                  {visibleColumns.map((col) => {
+                    if (col.key === "selection") {
+                      return (
+                        <th
+                          key={col.key}
+                          className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider whitespace-nowrap"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={
+                              spans.length > 0 && selectedSpanIds.size === spans.length
+                            }
+                            onChange={handleSelectAll}
+                            aria-label="Select all traces"
+                            className="rounded accent-[#7C3AED]"
+                          />
+                        </th>
+                      );
+                    }
+                    return (
+                      <th
+                        key={col.key}
+                        className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider whitespace-nowrap"
+                        title={columnTooltips[col.key] ?? col.label}
+                      >
+                        {col.label}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -1215,18 +1250,37 @@ export default function TracesPage({
                       (e.currentTarget as HTMLElement).style.background = "transparent";
                     }}
                   >
-                    {visibleColumns.map((col) => (
-                      <td key={col.key} className="px-3 py-2.5 whitespace-nowrap">
-                        <TableCellRenderer
-                          col={col}
-                          span={span}
-                          bookmarks={bookmarks}
-                          onToggleBookmark={toggleBookmark}
-                          onNavigateToTrace={onNavigateToTrace}
-                          onNavigateToTraceDetail={onNavigateToTraceDetail}
-                        />
-                      </td>
-                    ))}
+                    {visibleColumns.map((col) => {
+                      if (col.key === "selection") {
+                        return (
+                          <td
+                            key={col.key}
+                            className="px-2 py-1 whitespace-nowrap"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedSpanIds.has(span.span_id)}
+                              onChange={() => handleSelectRow(span.span_id)}
+                              aria-label={`Select trace ${span.name}`}
+                              className="rounded accent-[#7C3AED]"
+                            />
+                          </td>
+                        );
+                      }
+                      return (
+                        <td key={col.key} className="px-2 py-1 whitespace-nowrap">
+                          <TableCellRenderer
+                            col={col}
+                            span={span}
+                            bookmarks={bookmarks}
+                            onToggleBookmark={toggleBookmark}
+                            onNavigateToTrace={onNavigateToTrace}
+                            onNavigateToTraceDetail={onNavigateToTraceDetail}
+                          />
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>
@@ -1244,177 +1298,16 @@ export default function TracesPage({
           loading={loading}
           onLoadNext={() => fetchSpans(nextCursor, true)}
         />
-        </>
-        )}
-      </div>
-    </div>
-  );
-}
 
-// ── Conversations Tab (issue #67) ───────────────────────────────────
-
-function ConversationsView({
-  activeProject,
-  onOpenConversation,
-}: {
-  activeProject: string;
-  onOpenConversation: (conversationId: string) => void;
-}) {
-  const [conversations, setConversations] = useState<ConversationListItem[]>([]);
-  const [nextCursor, setNextCursor] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const fetchConversations = useCallback(
-    async (cursor: string, append = false) => {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams({
-          project_id: activeProject,
-          from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-          to: new Date().toISOString(),
-          limit: "50",
-        });
-        if (cursor) params.set("cursor", cursor);
-
-        let res: Response;
-        try {
-          res = await fetch(`/api/v1/conversations?${params.toString()}`);
-        } catch {
-          return;
-        }
-        if (res.ok) {
-          const data: ConversationListResponse = await res.json();
-          if (append) {
-            setConversations((prev) => [...prev, ...(data.conversations ?? [])]);
-          } else {
-            setConversations(data.conversations ?? []);
-          }
-          setNextCursor(data.next ?? "");
-        }
-      } finally {
-        setLoading(false);
-      }
-    },
-    [activeProject],
-  );
-
-  useEffect(() => {
-    fetchConversations("");
-  }, [fetchConversations]);
-
-  const headers = [
-    "Conversation ID",
-    "Service",
-    "Traces",
-    "Spans",
-    "Started",
-    "Duration",
-    "Total Cost",
-    "Tokens",
-  ];
-
-  return (
-    <>
-      <div className="flex-1 overflow-auto">
-        {conversations.length === 0 && !loading ? (
-          <EmptyState
-            variant="default"
-            title="No conversations yet"
-            description="Group an agent session's traces by sending a conversation_id from the SDK — e.g. set_active_conversation_id() in Python, WithConversationID() in Go, or Omneval.setActiveConversationId() in TypeScript"
+        {/* Bulk Add to Dataset Modal */}
+        {isBulkModalOpen && (
+          <BulkAddToDatasetModal
+            spanIds={Array.from(selectedSpanIds)}
+            onClose={() => setIsBulkModalOpen(false)}
+            onSuccess={handleBulkAddSuccess}
           />
-        ) : loading && conversations.length === 0 ? (
-          <div className="flex flex-col gap-2 p-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-6 rounded" style={{ width: "85%" }} />
-            ))}
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr
-                style={{
-                  background: colors.backgrounds.slightIllumination,
-                  borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
-                  color: colors.typography.ashGrey,
-                }}
-              >
-                {headers.map((h) => (
-                  <th
-                    key={h}
-                    className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider whitespace-nowrap"
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {conversations.map((c) => (
-                <tr
-                  key={c.conversation_id}
-                  className="cursor-pointer transition-colors duration-150 hover:bg-omneval-violet-hover"
-                  style={{ borderBottom: `1px solid ${colors.backgrounds.caveWall}` }}
-                  onClick={() => onOpenConversation(c.conversation_id)}
-                  role="button"
-                  aria-label={`Open conversation ${c.conversation_id}`}
-                >
-                  <td className="px-3 py-2.5 whitespace-nowrap">
-                    <span className="font-mono text-xs text-omneval-violet-pale">
-                      {c.conversation_id.slice(0, 12)}…
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap text-omneval-text-pure text-xs">
-                    {c.service_name || "—"}
-                  </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap text-omneval-text-muted font-mono text-xs">
-                    {c.trace_count}
-                  </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap text-omneval-text-muted font-mono text-xs">
-                    {c.span_count}
-                  </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap text-omneval-text-muted text-xs">
-                    {formatTimeWithYear(c.start_time)}
-                  </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap text-omneval-text-muted text-xs">
-                    {formatDuration(c.start_time, c.end_time || c.start_time)}
-                  </td>
-                  <td
-                    className="px-3 py-2.5 whitespace-nowrap font-medium text-xs"
-                    style={{ color: colors.accents.emberFlare }}
-                  >
-                    ${c.total_cost_usd.toFixed(4)}
-                  </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap text-omneval-text-muted font-mono text-xs">
-                    {(c.total_input_tokens + c.total_output_tokens).toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         )}
-      </div>
-
-      {/* Pagination */}
-      <div
-        className="flex items-center justify-end px-4 py-3 border-t"
-        style={{ borderColor: colors.backgrounds.caveWall }}
-      >
-        <button
-          disabled={loading || !nextCursor}
-          onClick={() => fetchConversations(nextCursor, true)}
-          className="text-sm px-4 py-1.5 rounded-md font-medium text-white transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed hover:brightness-110 active:brightness-90"
-          style={
-            nextCursor
-              ? {
-                  background: colors.accents.emberFlare,
-                  boxShadow: "0 2px 8px rgba(124, 58, 237, 0.3)",
-                }
-              : { background: colors.backgrounds.caveWall, boxShadow: "none" }
-          }
-        >
-          {loading ? "Loading..." : nextCursor ? "Load Next Page" : "No more data"}
-        </button>
-      </div>
-    </>
+        </div>
+    </div>
   );
 }
