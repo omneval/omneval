@@ -151,8 +151,8 @@ describe("ObservationPills component", () => {
     const leafRow = screen.getByText("leaf-span").closest("tr");
     expect(leafRow).toBeInTheDocument();
     const leafRowCells = leafRow?.querySelectorAll("td");
-    // observationLevels is the 6th column (0-indexed = 5)
-    const levelsCell = leafRowCells?.[5];
+    // observationLevels is the 7th column (0-indexed = 6) after bookmark column
+    const levelsCell = leafRowCells?.[6];
     expect(levelsCell?.textContent).toContain("LLM 1");
   });
 });
@@ -1562,6 +1562,94 @@ describe("filter panel styling (#142)", () => {
 
     const clearBtn = screen.getByRole("button", { name: "Clear All Filters" });
     expect(clearBtn.className).toContain("btn-secondary");
+  });
+
+  it("renders checkbox column headers for row selection", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    // The selection column header checkbox should be present
+    const selectAllCheckbox = screen.getByRole("checkbox", { name: /select all/i });
+    expect(selectAllCheckbox).toBeInTheDocument();
+  });
+
+  it("renders a checkbox for each trace row", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    // Each row should have a checkbox
+    const rowCheckboxes = screen.getAllByRole("checkbox", { name: /select trace/i });
+    // We have 3 mock spans → 3 checkboxes (one per row)
+    expect(rowCheckboxes).toHaveLength(3);
+  });
+
+  it("toggles selection when a row checkbox is clicked", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    const rowCheckboxes = screen.getAllByRole("checkbox", { name: /select trace/i });
+    expect(rowCheckboxes[0]).not.toBeChecked();
+
+    await act(async () => {
+      fireEvent.click(rowCheckboxes[0]);
+    });
+
+    expect(rowCheckboxes[0]).toBeChecked();
+  });
+
+  it("selects all rows when the header checkbox is clicked", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    const selectAllCheckbox = screen.getByRole("checkbox", { name: /select all/i });
+    expect(selectAllCheckbox).not.toBeChecked();
+
+    await act(async () => {
+      fireEvent.click(selectAllCheckbox);
+    });
+
+    // All row checkboxes should now be checked
+    const rowCheckboxes = screen.getAllByRole("checkbox", { name: /select trace/i });
+    rowCheckboxes.forEach((cb) => expect(cb).toBeChecked());
+  });
+
+  it("toggles select-all checkbox when individual row checkboxes are clicked", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    const selectAllCheckbox = screen.getByRole("checkbox", { name: /select all/i });
+    const rowCheckboxes = screen.getAllByRole("checkbox", { name: /select trace/i });
+
+    // Click first row
+    await act(async () => {
+      fireEvent.click(rowCheckboxes[0]);
+    });
+    // select-all should become indeterminate or checked depending on count
+    // With 3 rows, 1 checked → not all → select-all should not be checked
+    expect(selectAllCheckbox).not.toBeChecked();
+
+    // Click remaining rows
+    for (let i = 1; i < rowCheckboxes.length; i++) {
+      await act(async () => {
+        fireEvent.click(rowCheckboxes[i]);
+      });
+    }
+    expect(selectAllCheckbox).toBeChecked();
   });
 });
 

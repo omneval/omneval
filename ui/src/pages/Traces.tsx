@@ -10,6 +10,7 @@ import {
   totalTokens,
 } from "@/utils/formatters";
 import { presetToFromTo } from "@/utils/timeRange";
+import BulkAddToDatasetModal from "@/components/BulkAddToDatasetModal";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -823,8 +824,34 @@ export default function TracesPage({
   const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
 
+  // ── Row Selection ────────────────────────────────────────────────
+  const [selectedSpanIds, setSelectedSpanIds] = useState<Set<string>>(new Set());
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+
+  const handleSelectAll = useCallback(() => {
+    setSelectedSpanIds((prev) => {
+      if (prev.size === spans.length) {
+        return new Set();
+      }
+      return new Set(spans.map((s) => s.span_id));
+    });
+  }, [spans]);
+
+  const handleSelectRow = useCallback((spanId: string) => {
+    setSelectedSpanIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(spanId)) {
+        next.delete(spanId);
+      } else {
+        next.add(spanId);
+      }
+      return next;
+    });
+  }, []);
+
   // ── Columns Definition ──
-  const columns = [
+  const allColumns = [
+    { key: "selection", label: "", visible: true },
     { key: "bookmark", label: "", visible: columnVisibility.bookmark },
     { key: "timestamp", label: "Timestamp", visible: columnVisibility.timestamp },
     { key: "name", label: "Name", visible: columnVisibility.name },
@@ -834,6 +861,15 @@ export default function TracesPage({
     { key: "latency", label: "Latency", visible: columnVisibility.latency },
     { key: "tokens", label: "Tokens", visible: columnVisibility.tokens },
     { key: "cost", label: "Cost", visible: columnVisibility.cost },
+  ];
+
+  // "selection" and "bookmark" are not toggleable column visibility
+  const toggleableColumns = allColumns.filter((c) => c.key !== "selection" && c.key !== "bookmark");
+
+  const columns = [
+    { key: "selection", label: "", visible: true },
+    { key: "bookmark", label: "", visible: columnVisibility.bookmark },
+    ...toggleableColumns.map((c) => ({ ...c, visible: columnVisibility[c.key as keyof typeof columnVisibility] })),
   ];
 
   const columnTooltips: Record<string, string> = {
@@ -932,6 +968,13 @@ export default function TracesPage({
     }, 30000);
     return () => clearInterval(interval);
   }, [autoRefresh, fetchSpans]);
+
+  // Reset selection and re-fetch after bulk add succeeds
+  const handleBulkAddSuccess = useCallback(() => {
+    setSelectedSpanIds(new Set());
+    setIsBulkModalOpen(false);
+    fetchSpans("", false);
+  }, [fetchSpans]);
 
   const toggleBookmark = async (traceId: string) => {
     const newBookmarks = new Set(bookmarks);
@@ -1069,6 +1112,25 @@ export default function TracesPage({
           </label>
           )}
 
+          {/* Bulk "Add to dataset" button — shown when rows are selected */}
+          {activeTab === "traces" && selectedSpanIds.size > 0 && (
+          <button
+            onClick={() => setIsBulkModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border transition-all duration-150"
+            style={{
+              borderColor: colors.accents.violet,
+              background: colors.toRgba(colors.accents.violet, 0.15),
+              color: colors.accents.violet,
+            }}
+            aria-label="Add to dataset"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+            Add to dataset ({selectedSpanIds.size})
+          </button>
+          )}
+
           {/* Column visibility menu */}
           {activeTab === "traces" && (
           <div className="relative">
@@ -1188,15 +1250,35 @@ export default function TracesPage({
                     color: colors.typography.ashGrey,
                   }}
                 >
-                  {visibleColumns.map((col) => (
-                    <th
-                      key={col.key}
-                      className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider whitespace-nowrap"
-                      title={columnTooltips[col.key] ?? col.label}
-                    >
-                      {col.label}
-                    </th>
-                  ))}
+                  {visibleColumns.map((col) => {
+                    if (col.key === "selection") {
+                      return (
+                        <th
+                          key={col.key}
+                          className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider whitespace-nowrap"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={
+                              spans.length > 0 && selectedSpanIds.size === spans.length
+                            }
+                            onChange={handleSelectAll}
+                            aria-label="Select all traces"
+                            className="rounded accent-[#7C3AED]"
+                          />
+                        </th>
+                      );
+                    }
+                    return (
+                      <th
+                        key={col.key}
+                        className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider whitespace-nowrap"
+                        title={columnTooltips[col.key] ?? col.label}
+                      >
+                        {col.label}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -1215,18 +1297,37 @@ export default function TracesPage({
                       (e.currentTarget as HTMLElement).style.background = "transparent";
                     }}
                   >
-                    {visibleColumns.map((col) => (
-                      <td key={col.key} className="px-3 py-2.5 whitespace-nowrap">
-                        <TableCellRenderer
-                          col={col}
-                          span={span}
-                          bookmarks={bookmarks}
-                          onToggleBookmark={toggleBookmark}
-                          onNavigateToTrace={onNavigateToTrace}
-                          onNavigateToTraceDetail={onNavigateToTraceDetail}
-                        />
-                      </td>
-                    ))}
+                    {visibleColumns.map((col) => {
+                      if (col.key === "selection") {
+                        return (
+                          <td
+                            key={col.key}
+                            className="px-3 py-2.5 whitespace-nowrap"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedSpanIds.has(span.span_id)}
+                              onChange={() => handleSelectRow(span.span_id)}
+                              aria-label={`Select trace ${span.name}`}
+                              className="rounded accent-[#7C3AED]"
+                            />
+                          </td>
+                        );
+                      }
+                      return (
+                        <td key={col.key} className="px-3 py-2.5 whitespace-nowrap">
+                          <TableCellRenderer
+                            col={col}
+                            span={span}
+                            bookmarks={bookmarks}
+                            onToggleBookmark={toggleBookmark}
+                            onNavigateToTrace={onNavigateToTrace}
+                            onNavigateToTraceDetail={onNavigateToTraceDetail}
+                          />
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>
@@ -1244,6 +1345,15 @@ export default function TracesPage({
           loading={loading}
           onLoadNext={() => fetchSpans(nextCursor, true)}
         />
+
+        {/* Bulk Add to Dataset Modal */}
+        {isBulkModalOpen && (
+          <BulkAddToDatasetModal
+            spanIds={Array.from(selectedSpanIds)}
+            onClose={() => setIsBulkModalOpen(false)}
+            onSuccess={handleBulkAddSuccess}
+          />
+        )}
         </>
         )}
       </div>
