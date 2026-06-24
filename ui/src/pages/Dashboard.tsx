@@ -646,9 +646,11 @@ function ModelCostsTable({
               </td>
               <td
                 className="py-2 px-3 text-right font-medium"
-                style={{ color: colors.accents.violet }}
+                style={{ color: row.totalCost === 0 && (row.inputTokens + row.outputTokens) > 0 ? colors.accents.amberWarning : colors.accents.violet }}
               >
-                ${row.totalCost.toFixed(4)}
+                {row.totalCost === 0 && (row.inputTokens + row.outputTokens) > 0
+                  ? "Unpriced"
+                  : `$${row.totalCost.toFixed(4)}`}
               </td>
             </tr>
           ))}
@@ -1058,9 +1060,11 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         order_by: [],
       };
 
-      // ── Traces by Name ──
+      // ── Traces by Name (model) ──
+      // Filter to llm-kind spans so non-LLM spans don't pollute the model bucket.
       const tracesByNameReq: AnalyticsRequest = {
         ...body,
+        filters: [...body.filters, { field: "kind", op: "eq", value: "llm" }],
         group_by: [{ field: "model" }],
         order_by: [{ field: "count", desc: true }],
         aggregations: [
@@ -1088,9 +1092,11 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         ],
       };
 
-      // ── Token Usage: grouped by model ──
+      // ── Token Usage: grouped by model (llm-kind only) ──
+      // Filter to llm-kind spans so non-LLM spans don't pollute the model bucket.
       const tokenUsageReq: AnalyticsRequest = {
         ...body,
+        filters: [...body.filters, { field: "kind", op: "eq", value: "llm" }],
         group_by: [{ field: "model" }],
         order_by: [{ field: "total_cost", desc: true }],
         aggregations: [
