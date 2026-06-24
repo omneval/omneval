@@ -154,10 +154,22 @@ func RunMaintenance(ctx context.Context, db *sql.DB, tables []string, retention 
 		"CALL ducklake_flush_inlined_data('lake')",
 	)
 
+	// Per-statement start/done logging (production incident: a catalog
+	// fragmented into tens of thousands of small Parquet files made a single
+	// CALL — almost certainly ducklake_merge_adjacent_files or
+	// ducklake_rewrite_data_files — run for 45+ minutes with zero log output,
+	// making it indistinguishable from a hung/deadlocked process from the
+	// logs alone. Logging which statement is in flight and how long the
+	// previous one took turns that into an immediately diagnosable "step 3 of
+	// 6 has been running for 40 minutes" instead of total silence).
 	for _, stmt := range stmts {
+		label := firstWords(stmt, 3)
+		slog.InfoContext(ctx, "lakeserver: maintenance: statement starting", "statement", label)
+		start := time.Now()
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
-			return result, fmt.Errorf("lakeserver: maintenance: %s: %w", firstWords(stmt, 3), err)
+			return result, fmt.Errorf("lakeserver: maintenance: %s: %w", label, err)
 		}
+		slog.InfoContext(ctx, "lakeserver: maintenance: statement complete", "statement", label, "duration", time.Since(start))
 	}
 	return result, nil
 }
@@ -282,12 +294,16 @@ func latestSnapshotID(ctx context.Context, db *sql.DB) (int64, error) {
 }
 
 // RunMaintenanceLoop runs RunMaintenance on db on the given interval until
-// ctx is canceled. Errors are logged and the loop continues — a failed
-// pass does not stop future scheduled passes. onResult, if non-nil, is
-// called with the result of each tick (used by services/quack to record
-// retention metrics), including skipped ticks.
+// ctx is canceled. The first pass runs immediately rather than waiting a
+// full interval — a freshly started Quack Server otherwise sits with zero
+// compaction for up to `interval` (15m by default) before its first attempt,
+// which is exactly the window where fragmentation from a busy ingest period
+// can build up uncontested. Errors are logged and the loop continues — a
+// failed pass does not stop future scheduled passes. onResult, if non-nil,
+// is called with the result of each pass (used by services/quack to record
+// retention metrics), including skipped passes.
 //
-// Each tick after the first is skipped — RunMaintenance's
+// Each pass after the first is skipped — RunMaintenance's
 // rewrite/merge/expire/cleanup statements are not run — when no new
 // DuckLake snapshot has been committed since the previous completed pass
 // and retention is disabled. With two idle agents and a short interval,
@@ -304,11 +320,52 @@ func RunMaintenanceLoop(ctx context.Context, db *sql.DB, tables []string, interv
 
 	slog.Info("lakeserver: table maintenance scheduler started", "interval", interval, "tables", tables, "retention_enabled", retention.Enabled)
 
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
 	var lastSnapshotID int64
 	haveBaseline := false
+
+	runPass := func() {
+		if !retention.Enabled && haveBaseline {
+			current, err := latestSnapshotID(ctx, db)
+			if err == nil && current == lastSnapshotID {
+				slog.Info("lakeserver: table maintenance pass skipped (no new snapshot)", "snapshot_id", current)
+				if onResult != nil {
+					onResult(MaintenanceResult{Skipped: true})
+				}
+				return
+			}
+		}
+
+		start := time.Now()
+		result, err := RunMaintenance(ctx, db, tables, retention)
+		if err != nil {
+			slog.Error("lakeserver: table maintenance pass failed", "err", err, "duration", time.Since(start))
+			return
+		}
+		if id, err := latestSnapshotID(ctx, db); err == nil {
+			lastSnapshotID = id
+			haveBaseline = true
+		}
+		if retention.Enabled {
+			slog.Info("lakeserver: table maintenance pass complete",
+				"duration", time.Since(start),
+				"retention_spans_deleted", result.Retention.SpansDeleted,
+				"retention_scores_deleted", result.Retention.ScoresDeleted,
+				"retention_duration", result.Retention.Duration,
+			)
+		} else {
+			slog.Info("lakeserver: table maintenance pass complete", "duration", time.Since(start))
+		}
+		if onResult != nil {
+			onResult(result)
+		}
+	}
+
+	if ctx.Err() == nil {
+		runPass()
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 
 	for {
 		select {
@@ -316,40 +373,7 @@ func RunMaintenanceLoop(ctx context.Context, db *sql.DB, tables []string, interv
 			slog.Info("lakeserver: table maintenance scheduler stopped")
 			return ctx.Err()
 		case <-ticker.C:
-			if !retention.Enabled && haveBaseline {
-				current, err := latestSnapshotID(ctx, db)
-				if err == nil && current == lastSnapshotID {
-					slog.Info("lakeserver: table maintenance pass skipped (no new snapshot)", "snapshot_id", current)
-					if onResult != nil {
-						onResult(MaintenanceResult{Skipped: true})
-					}
-					continue
-				}
-			}
-
-			start := time.Now()
-			result, err := RunMaintenance(ctx, db, tables, retention)
-			if err != nil {
-				slog.Error("lakeserver: table maintenance pass failed", "err", err, "duration", time.Since(start))
-				continue
-			}
-			if id, err := latestSnapshotID(ctx, db); err == nil {
-				lastSnapshotID = id
-				haveBaseline = true
-			}
-			if retention.Enabled {
-				slog.Info("lakeserver: table maintenance pass complete",
-					"duration", time.Since(start),
-					"retention_spans_deleted", result.Retention.SpansDeleted,
-					"retention_scores_deleted", result.Retention.ScoresDeleted,
-					"retention_duration", result.Retention.Duration,
-				)
-			} else {
-				slog.Info("lakeserver: table maintenance pass complete", "duration", time.Since(start))
-			}
-			if onResult != nil {
-				onResult(result)
-			}
+			runPass()
 		}
 	}
 }
