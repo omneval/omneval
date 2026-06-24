@@ -44,6 +44,13 @@ type WiredDeps struct {
 	// admin deletes (#91) and score writes.
 	AdminLake *lake.Lake
 
+	// ProbeLake is a dedicated, single-connection, read-only Lake attachment
+	// used exclusively by the readiness/liveness Catalog check (see
+	// WireDeps). It is never touched by UI query handlers, so a burst of
+	// concurrent UI queries that saturates Lake's own connection pool can
+	// never make the probe's Ping queue behind it.
+	ProbeLake *lake.Lake
+
 	// QueryBuilder encapsulates the full DSL → SQL → execute → scan pipeline
 	// for both span and analytics queries.
 	QueryBuilder *querybuild.QueryBuilder
@@ -75,6 +82,9 @@ func (d *WiredDeps) Close() {
 	}
 	if d.AdminLake != nil {
 		d.AdminLake.Close()
+	}
+	if d.ProbeLake != nil {
+		d.ProbeLake.Close()
 	}
 	if d.Store != nil {
 		d.Store.Close()
@@ -274,17 +284,48 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	// openLakeDB creates resolve that against the Lake.
 	deps.EvalRule.DB = lk
 
-	// Ping is catalog-touching and reconnect-aware (lake.go); on stale
-	// connection it re-attaches and retries so the pod self-heals after a
-	// Quack Server restart without a manual rollout restart. Critical: even
-	// with the Lake's connection pool sized above 1 (lake.Config.MaxOpenConns)
-	// so a slow query doesn't serialize every other call on this Lake, the
-	// pool can still be exhausted by enough concurrent wedged calls; if that
-	// happens, readiness alone would only pull this pod out of Service
+	// A third, dedicated Lake attachment backing only the readiness/
+	// liveness Catalog check — see the AddCriticalCheck comment below for
+	// why this must not share lk's connection pool. MaxOpenConns is forced
+	// to 1 regardless of quack.client.max_open_conns: a health check never
+	// needs more than one connection, and keeping it minimal keeps this
+	// attachment's footprint against the Quack Server negligible.
+	probeLakeCfg := lake.ConfigFromApp(cfg)
+	probeLakeCfg.ReadOnly = true
+	probeLakeCfg.MaxOpenConns = 1
+	probeLake, err := lake.Open(context.Background(), probeLakeCfg)
+	if err != nil {
+		deps.Close()
+		return nil, fmt.Errorf("query: open probe lake: %w", err)
+	}
+	deps.ProbeLake = probeLake
+
+	// The Catalog check pings through a dedicated, single-connection Lake
+	// attachment (ProbeLake) rather than lk — the pool UI query handlers
+	// share. lk's pool (sized by quack.client.max_open_conns, tuned low —
+	// see its history — to avoid contending too hard against the Quack
+	// Server) can legitimately be fully subscribed by ordinary UI load: the
+	// Dashboard alone fans out ten concurrent analytics queries on a single
+	// page load. That's not a wedge, but Ping sharing lk's pool used to
+	// queue behind it exactly the same as a real wedge would, and this check
+	// gates liveness as well as readiness (below) — so a burst of normal
+	// Dashboard traffic was enough to fail healthz and get kubelet to
+	// restart a perfectly healthy pod, which then hit the same Dashboard
+	// load again on the next request and crash-looped (production incident:
+	// query pod liveness/readiness timed out under nothing worse than
+	// normal Dashboard load). ProbeLake's own single connection is never
+	// touched by any query handler, so it can't be starved by one.
+	//
+	// Ping is still catalog-touching and reconnect-aware (lake.go); on a
+	// stale connection it re-attaches and retries so the pod self-heals
+	// after a Quack Server restart without a manual rollout restart.
+	// Critical: even with ProbeLake isolated from lk's pool, ProbeLake's own
+	// single connection can still wedge (e.g. Quack Server itself hangs); if
+	// that happens, readiness alone would only pull this pod out of Service
 	// routing forever — it needs to also gate liveness so Kubernetes
 	// eventually restarts it instead of requiring a human to notice and
 	// intervene manually.
-	p.AddCriticalCheck("catalog", &probe.CatalogReachable{Ping: lk.Ping})
+	p.AddCriticalCheck("catalog", &probe.CatalogReachable{Ping: deps.ProbeLake.Ping})
 	slog.Info("query: routing all span reads to lake.spans")
 	deps.Prober = p
 

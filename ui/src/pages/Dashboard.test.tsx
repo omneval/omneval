@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
-import DashboardPage, { AnalyticsRequest, formatTraceTimeTick } from "./Dashboard";
+import DashboardPage, { AnalyticsRequest, formatTraceTimeTick, fetchAnalyticsBatch } from "./Dashboard";
 import { ToastProvider } from "@/components/Toast";
 
 function renderWithToast(ui: React.ReactElement) {
@@ -1258,5 +1258,62 @@ describe("formatTraceTimeTick", () => {
     const result = formatTraceTimeTick(noonTs, "30d");
     expect(result).toMatch(/Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec/);
     expect(result).not.toMatch(/AM|PM/i);
+  });
+});
+
+// ── fetchAnalyticsBatch ──────────────────────────────────────────────
+// Regression coverage for the production incident where an unbounded
+// Promise.all fan-out of every Dashboard widget's analytics request
+// saturated the Query API's small Lake connection pool, which in turn
+// starved the readiness/liveness Catalog probe sharing that pool and
+// crash-looped the pod under nothing worse than normal Dashboard load.
+
+describe("fetchAnalyticsBatch", () => {
+  const makeReq = (label: string): AnalyticsRequest => ({
+    from: "2025-01-01T00:00:00Z",
+    to: "2025-01-02T00:00:00Z",
+    filters: [{ field: "label", op: "eq", value: label }],
+    group_by: [],
+    order_by: [],
+    aggregations: [],
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("never runs more than `concurrency` requests at once", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return new Response(JSON.stringify({ rows: [] }), { status: 200 });
+    });
+
+    const requests = Array.from({ length: 10 }, (_, i) => makeReq(String(i)));
+    await fetchAnalyticsBatch(requests, 3);
+
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+    expect(maxInFlight).toBeLessThanOrEqual(3);
+  });
+
+  it("resolves responses in request order regardless of completion order", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const body = JSON.parse((init as RequestInit).body as string) as AnalyticsRequest;
+      const label = body.filters[0].value as string;
+      // Earlier requests resolve later, so completion order is reversed.
+      const delay = label === "0" ? 15 : 0;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return new Response(JSON.stringify({ rows: [{ label }] }), { status: 200 });
+    });
+
+    const requests = [makeReq("0"), makeReq("1"), makeReq("2")];
+    const responses = await fetchAnalyticsBatch(requests, 3);
+    const bodies = await Promise.all(responses.map((r) => r.json()));
+
+    expect(bodies.map((b) => b.rows[0].label)).toEqual(["0", "1", "2"]);
   });
 });

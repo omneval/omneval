@@ -38,6 +38,52 @@ export interface AnalyticsRequest {
   aggregations: { function: string; field: string; alias: string }[];
 }
 
+// ── Bounded-concurrency analytics fetch ─────────────────────────────
+
+/**
+ * Concurrency cap for fanning out POST /api/v1/analytics/spans requests.
+ * The Query API's Lake attachment serving these reads shares a small,
+ * deliberately tuned connection pool (quack.client.max_open_conns) with
+ * every other UI page and every other concurrent user of the same pod.
+ * Firing every widget's request at once via an unbounded Promise.all let a
+ * single Dashboard load saturate that pool well past its size, which in
+ * turn queued the readiness/liveness Catalog probe behind it and crashed
+ * the pod under nothing worse than normal load. Kept deliberately low and
+ * independent of the server-side pool size rather than trying to mirror it
+ * exactly — the goal is to never be the thing that saturates the pool, not
+ * to use it maximally.
+ */
+const ANALYTICS_FETCH_CONCURRENCY = 3;
+
+/**
+ * POSTs each request in `requests` to /api/v1/analytics/spans, running at
+ * most `concurrency` requests at a time, and resolves to the responses in
+ * the same order as `requests` regardless of which one completes first.
+ */
+export async function fetchAnalyticsBatch(
+  requests: AnalyticsRequest[],
+  concurrency: number = ANALYTICS_FETCH_CONCURRENCY,
+): Promise<Response[]> {
+  const responses: Response[] = new Array(requests.length);
+  let next = 0;
+
+  async function worker() {
+    for (;;) {
+      const i = next++;
+      if (i >= requests.length) return;
+      responses[i] = await fetch("/api/v1/analytics/spans", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requests[i]),
+      });
+    }
+  }
+
+  const workerCount = Math.max(1, Math.min(concurrency, requests.length));
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return responses;
+}
+
 // ── Chart tick formatter ───────────────────────────────────────────
 
 /**
@@ -1207,57 +1253,17 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
         latencyResp,
         errorRateTotalResp,
         errorRateErrorResp,
-      ] = await Promise.all([
-        fetch("/api/v1/analytics/spans", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(tracesByNameReq),
-        }),
-        fetch("/api/v1/analytics/spans", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(tracesByTimeReq),
-        }),
-        fetch("/api/v1/analytics/spans", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(tokenUsageReq),
-        }),
-        fetch("/api/v1/analytics/spans", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(kindUsageReq),
-        }),
-        fetch("/api/v1/analytics/spans", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(userConsumptionReq),
-        }),
-        fetch("/api/v1/analytics/spans", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(kpiReq),
-        }),
-        fetch("/api/v1/analytics/spans", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(kpiErrorCountReq),
-        }),
-        fetch("/api/v1/analytics/spans", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(latencyPercentilesReq),
-        }),
-        fetch("/api/v1/analytics/spans", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(errorRateTotalReq),
-        }),
-        fetch("/api/v1/analytics/spans", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(errorRateErrorReq),
-        }),
+      ] = await fetchAnalyticsBatch([
+        tracesByNameReq,
+        tracesByTimeReq,
+        tokenUsageReq,
+        kindUsageReq,
+        userConsumptionReq,
+        kpiReq,
+        kpiErrorCountReq,
+        latencyPercentilesReq,
+        errorRateTotalReq,
+        errorRateErrorReq,
       ]);
 
       // Parse all responses, then bail if a newer request superseded this

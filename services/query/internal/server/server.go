@@ -95,6 +95,7 @@ func RunWired(deps *WiredDeps) error {
 	cfg := deps.Cfg
 	defer deps.Store.Close()
 	defer deps.Lake.Close()
+	defer deps.ProbeLake.Close()
 
 	router := buildRouter(deps)
 
