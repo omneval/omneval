@@ -9,13 +9,13 @@ import (
 	"github.com/omneval/omneval/internal/metadata/sqlite"
 )
 
-// Compile-time checks that every driver satisfies the Store interface.
+// Compile-time checks that the adapter types satisfy the Store interface.
 var (
-	_ Store = (*sqlite.Store)(nil)
-	_ Store = (*postgres.Store)(nil)
+	_ Store = (*SQLiteEvalRuleStore)(nil)
+	_ Store = (*PostgresEvalRuleStore)(nil)
 )
 
-// Compile-time checks that every driver satisfies each focused interface.
+// Compile-time checks that each concrete type satisfies the focused interfaces.
 var (
 	_ ProjectStore     = (*sqlite.Store)(nil)
 	_ ProjectStore     = (*postgres.Store)(nil)
@@ -62,7 +62,7 @@ func Open(driver, dsn string) (Store, error) {
 			store.Close()
 			return nil, fmt.Errorf("metadata: migrate sqlite store: %w", err)
 		}
-		return store, nil
+		return &SQLiteEvalRuleStore{Store: store}, nil
 	case "postgres":
 		if dsn == "" {
 			return nil, fmt.Errorf("metadata: postgres driver requires database.dsn")
@@ -76,7 +76,7 @@ func Open(driver, dsn string) (Store, error) {
 			store.Close()
 			return nil, fmt.Errorf("metadata: migrate postgres store: %w", err)
 		}
-		return store, nil
+		return &PostgresEvalRuleStore{Store: store}, nil
 	default:
 		return nil, fmt.Errorf("metadata: unknown database driver: %s", driver)
 	}

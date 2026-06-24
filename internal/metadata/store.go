@@ -26,8 +26,8 @@ type Store interface {
 	APIKeyStore
 	PromptStore
 	BatchLedgerStore
-	EvalRuleStore
 	DatasetStore
+	EvalRuleStore
 
 	// ListUsers is not part of a focused interface because the auth flow
 	// only uses it internally (user listing for admin pages).
@@ -36,4 +36,9 @@ type Store interface {
 	// Migrations and lifecycle are backend-specific concerns.
 	Migrate(ctx context.Context) error
 	Close() error
+
+	// EvalRuleStore returns a focused EvalRuleStore interface that exposes
+	// only the evaluation-rule methods, enabling callers to depend on the
+	// narrower type rather than the god interface.
+	EvalRuleStore() EvalRuleStore
 }
