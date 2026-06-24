@@ -64,6 +64,10 @@ func (f *FakeMetadataStore) ListAPIKeys(_ context.Context, projectID string) ([]
 	return result, nil
 }
 
+// PromptStore returns a focused PromptStore interface for callers that only
+// need prompt operations.
+func (f *FakeMetadataStore) PromptStore() metadata.PromptStore { return f }
+
 // Stub implementations for unused Store methods.
 func (f *FakeMetadataStore) CreateOrganization(_ context.Context, _ *domain.Organization) error {
 	return nil

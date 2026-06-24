@@ -19,6 +19,28 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// openMetadataStore creates a metadata store from config. It supports
+// "sqlite" (default) and "postgres" drivers, mirroring the other services.
+func openMetadataStore(cfg *config.Config) (metadata.Store, error) {
+	driver := cfg.Database.Driver
+	dsn := cfg.Database.DSN
+
+	switch driver {
+	case "", "sqlite":
+		if dsn == "" {
+			dsn = "omneval.db"
+		}
+		return metadata.Open("sqlite", dsn)
+	case "postgres":
+		if dsn == "" {
+			return nil, fmt.Errorf("eval: postgres driver requires database.dsn")
+		}
+		return metadata.Open("postgres", dsn)
+	default:
+		return nil, fmt.Errorf("eval: unknown database driver: %s", driver)
+	}
+}
+
 const workerShutdownTimeout = 120 * time.Second
 
 // Run starts the eval worker pool: drains the Redis eval queue and
@@ -63,15 +85,16 @@ func Run() error {
 	evalQ := redisqueue.NewEvalQueue(rdb)
 
 	// Open the metadata store so the judge can resolve prompt templates
-	// from the Prompt Registry.
-	store, err := metadata.Open(cfg.Database.Driver, cfg.Database.DSN)
+	// from the Prompt Registry. We only need the focused PromptStore.
+	store, err := openMetadataStore(cfg)
 	if err != nil {
 		return fmt.Errorf("eval: open metadata store: %w", err)
 	}
 	defer store.Close()
+	promptStore := store.PromptStore()
 
 	// Initialize judge with the Prompt Registry resolver.
-	judgeLLM := judge.New(cfg, prompts.NewCachingResolver(store))
+	judgeLLM := judge.New(cfg, prompts.NewCachingResolver(promptStore))
 
 	// Create worker.
 	w := worker.New(evalQ, judgeLLM, cfg)

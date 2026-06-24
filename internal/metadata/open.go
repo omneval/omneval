@@ -11,8 +11,8 @@ import (
 
 // Compile-time checks that the adapter types satisfy the Store interface.
 var (
-	_ Store = (*SQLiteEvalRuleStore)(nil)
-	_ Store = (*PostgresEvalRuleStore)(nil)
+	_ Store = (*SQLiteFocusedStore)(nil)
+	_ Store = (*PostgresFocusedStore)(nil)
 )
 
 // Compile-time checks that each concrete type satisfies the focused interfaces.
@@ -62,7 +62,7 @@ func Open(driver, dsn string) (Store, error) {
 			store.Close()
 			return nil, fmt.Errorf("metadata: migrate sqlite store: %w", err)
 		}
-		return &SQLiteEvalRuleStore{Store: store}, nil
+		return &SQLiteFocusedStore{Store: store}, nil
 	case "postgres":
 		if dsn == "" {
 			return nil, fmt.Errorf("metadata: postgres driver requires database.dsn")
@@ -76,7 +76,7 @@ func Open(driver, dsn string) (Store, error) {
 			store.Close()
 			return nil, fmt.Errorf("metadata: migrate postgres store: %w", err)
 		}
-		return &PostgresEvalRuleStore{Store: store}, nil
+		return &PostgresFocusedStore{Store: store}, nil
 	default:
 		return nil, fmt.Errorf("metadata: unknown database driver: %s", driver)
 	}

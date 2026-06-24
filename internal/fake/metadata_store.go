@@ -714,6 +714,10 @@ func (f *FakeMetadataStore) ListDatasetRunItems(ctx context.Context, runID strin
 	return items, nil
 }
 
+// PromptStore returns a focused PromptStore interface for callers that only
+// need prompt operations.
+func (f *FakeMetadataStore) PromptStore() metadata.PromptStore { return f }
+
 // CheckPassword compares plaintext password against stored hash (uses bcrypt).
 func (f *FakeMetadataStore) CheckPassword(hashed, plaintext string) error {
 	return bcrypt.CompareHashAndPassword([]byte(hashed), []byte(plaintext))

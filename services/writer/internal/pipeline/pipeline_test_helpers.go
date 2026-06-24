@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/pricing"
 )
 
@@ -122,7 +123,12 @@ func (f *fakeMetaStore) ListPromptVersions(ctx context.Context, projectID string
 	return nil, nil
 }
 func (f *fakeMetaStore) SetPromptLabel(ctx context.Context, l *domain.PromptLabel) error { return nil }
-func (f *fakeMetaStore) CreateEvalRule(ctx context.Context, r *domain.EvalRule) error    { return nil }
+
+// PromptStore returns a focused PromptStore interface for callers that only
+// need prompt operations.
+func (f *fakeMetaStore) PromptStore() metadata.PromptStore { return f }
+
+func (f *fakeMetaStore) CreateEvalRule(ctx context.Context, r *domain.EvalRule) error { return nil }
 func (f *fakeMetaStore) GetEvalRule(ctx context.Context, ruleID string) (*domain.EvalRule, error) {
 	return nil, nil
 }

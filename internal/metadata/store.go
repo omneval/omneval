@@ -37,6 +37,11 @@ type Store interface {
 	Migrate(ctx context.Context) error
 	Close() error
 
+	// PromptStore returns a focused PromptStore interface that exposes
+	// only the prompt registry methods, enabling callers to depend on the
+	// narrower type rather than the god interface.
+	PromptStore() PromptStore
+
 	// EvalRuleStore returns a focused EvalRuleStore interface that exposes
 	// only the evaluation-rule methods, enabling callers to depend on the
 	// narrower type rather than the god interface.
