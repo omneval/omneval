@@ -1113,7 +1113,7 @@ func (m *mockPromptStore) SetPromptLabel(ctx context.Context, label *domain.Prom
 	return nil
 }
 
-func (m *mockPromptStore) PromptStore() PromptStore { return m }
+func (m *mockPromptStore) PromptStore() metadata.PromptStore { return m }
 
 func TestEvalRuleHandler_CreateEvalRule_PromptValidation_PromptNotFound(t *testing.T) {
 	store := fake.NewFakeMetadataStore()

@@ -1982,7 +1982,7 @@ func TestPromptHandler_ListPromptVersions_ReturnsBareArray(t *testing.T) {
 	}
 }
 
-func (f *FakePromptStore) PromptStore() PromptStore { return f }
+func (f *FakePromptStore) PromptStore() metadata.PromptStore { return f }
 
 func (f *FakePromptStore) SetBookmark(_ context.Context, _ *domain.Bookmark) error { return nil }
 func (f *FakePromptStore) RemoveBookmark(_ context.Context, _, _ string) error     { return nil }
