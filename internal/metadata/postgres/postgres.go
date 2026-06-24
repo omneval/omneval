@@ -14,6 +14,16 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// BookmarkStore is the domain interface for bookmark (starred trace) operations.
+// This local type satisfies metadata.BookmarkStore at the package boundary.
+type BookmarkStore interface {
+	SetBookmark(ctx context.Context, b *domain.Bookmark) error
+	RemoveBookmark(ctx context.Context, projectID, traceID string) error
+	IsBookmarked(ctx context.Context, projectID, traceID string) (bool, error)
+	ListBookmarkedTraceIDs(ctx context.Context, projectID string) ([]string, error)
+	RemoveBookmarksForProject(ctx context.Context, projectID string) error
+}
+
 // PromptStore is the domain interface for prompt registry operations:
 // CRUD for prompt versions and label management.
 type PromptStore interface {
@@ -658,6 +668,14 @@ func (s *Store) SetPromptLabel(ctx context.Context, label *domain.PromptLabel) e
 		return fmt.Errorf("postgres: set prompt label: %w", err)
 	}
 	return nil
+}
+
+// BookmarkStore returns a focused BookmarkStore interface for callers that only
+// need bookmark operations. The Store itself already implements BookmarkStore,
+// so this simply returns the receiver to expose the narrower type at the
+// package boundary.
+func (s *Store) BookmarkStore() BookmarkStore {
+	return s
 }
 
 // PromptStore returns a focused PromptStore interface for callers that only
