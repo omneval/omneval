@@ -18,7 +18,7 @@ import { formatTime, formatDuration, formatMs, totalTokens, parseChatTurns, getT
 import { useToast } from "@/components/Toast";
 import SaveToDatasetModal from "@/components/SaveToDatasetModal";
 import { extractSpanMessages } from "@/utils/spanMessages";
-import { getSpanKindColor, SpanKind } from "@/modules/spanKindVisuals";
+import { getSpanKindColor, getSpanKindIcon, SpanKind } from "@/modules/spanKindVisuals";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -380,17 +380,22 @@ export default function TraceDetailPage({
           >
             <div className="flex items-center gap-3 mb-1">
               <span className="text-sm font-semibold text-omneval-text-pure">{trace.name}</span>
-              {trace.kind && (
+              {trace.kind && (() => {
+              const K = trace.kind as SpanKind;
+              const KindIcon = getSpanKindIcon(K);
+              return (
                 <span
-                  className="text-xs px-2 py-0.5 rounded-full font-medium"
+                  className="text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1"
                   style={{
-                    background: `${getSpanKindColor(trace.kind as SpanKind)}22`,
-                    color: getSpanKindColor(trace.kind as SpanKind),
+                    background: `${getSpanKindColor(K)}22`,
+                    color: getSpanKindColor(K),
                   }}
                 >
+                  <span style={{ display: "inline-flex" }}><KindIcon /></span>
                   {trace.kind}
                 </span>
-              )}
+              );
+            })()}
               {trace.model && (
                 <span className="text-xs font-mono text-omneval-text-muted">{trace.model}</span>
               )}
@@ -814,17 +819,22 @@ function SlideInDetailPanel({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold text-omneval-text-pure truncate">{span.name}</span>
-              {span.kind && (
+              {span.kind && (() => {
+              const K = span.kind as SpanKind;
+              const KindIcon = getSpanKindIcon(K);
+              return (
                 <span
-                  className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0"
+                  className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 flex items-center gap-1"
                   style={{
-                    background: `${getSpanKindColor(span.kind as SpanKind)}22`,
-                    color: getSpanKindColor(span.kind as SpanKind),
+                    background: `${getSpanKindColor(K)}22`,
+                    color: getSpanKindColor(K),
                   }}
                 >
+                  <span style={{ display: "inline-flex" }}><KindIcon /></span>
                   {span.kind}
                 </span>
-              )}
+              );
+            })()}
             </div>
             <div className="flex items-center gap-3 text-xs text-omneval-text-muted mt-1">
               <span>{formatDuration(span.start_time, span.end_time)}</span>

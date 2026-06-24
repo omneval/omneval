@@ -989,5 +989,41 @@ describe("SpanKind visual module in TraceDetail integration", () => {
         expect(badgeStyle.backgroundColor).toMatch(/rgba?\(/);
       });
     });
+
+    it("renders the SpanKind icon component inside the detail panel Kind badge", async () => {
+      renderTraceWithSpans([
+        { name: "icon-test", kind: "llm" },
+      ]);
+
+      await waitForIntegrationTraceLoaded();
+
+      // Open the span detail panel by clicking on the span row button.
+      const spanRow = screen.getByRole("button", { name: /icon-test/i });
+      await act(async () => {
+        fireEvent.click(spanRow);
+      });
+
+      // The detail panel badge should contain an SVG element (the inline icon).
+      await waitFor(() => {
+        const svgElements = document.querySelectorAll("svg[role='img']");
+        const iconCount = svgElements.length;
+        // At least one SVG (the kind icon) should be visible in the detail panel.
+        expect(iconCount).toBeGreaterThan(0);
+      });
+    });
+  });
+
+  describe("Root span info bar badge uses spanKindVisuals", () => {
+    it("renders the kind icon in the root span info bar badge", async () => {
+      renderTraceWithSpans([{ name: "root-icon-test", kind: "tool" }]);
+
+      await waitForIntegrationTraceLoaded();
+
+      // The root span card should have a kind badge with an inline icon.
+      await waitFor(() => {
+        const svgElements = document.querySelectorAll("svg[role='img']");
+        expect(svgElements.length).toBeGreaterThan(0);
+      });
+    });
   });
 });

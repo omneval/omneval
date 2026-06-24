@@ -9,17 +9,18 @@ import {
   formatDuration,
   parseChatTurns,
 } from "@/utils/formatters";
+import { getSpanKindColor } from "@/modules/spanKindVisuals";
 
 // ── Constants ──────────────────────────────────────────────────────
 
-// Mirrors KIND_COLOR_MAP in TraceDetail.tsx so kind pills look identical
-// across the two pages.
+/** Color map sourced from the shared spanKindVisuals module so kind pills
+ *  look identical across all pages. */
 const KIND_COLOR_MAP: Record<string, string> = {
-  llm: colors.accents.emberFlare,
-  tool: colors.accents.softGlow,
-  agent: colors.accents.flicker,
-  chain: "#60a5fa",
-  internal: colors.typography.ashGrey,
+  llm: getSpanKindColor("llm"),
+  tool: getSpanKindColor("tool"),
+  agent: getSpanKindColor("agent"),
+  chain: getSpanKindColor("chain"),
+  internal: getSpanKindColor("internal"),
 };
 
 /** localStorage key persisting the "Show full message history" toggle. */
