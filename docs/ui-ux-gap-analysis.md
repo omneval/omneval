@@ -4,6 +4,42 @@ Live audit of https://omneval.blosshomelab.com (project `omneval`, 2026-06-22) a
 behavior of the three leading LLM observability products. Goal: a concrete punch list, not a
 redesign brief.
 
+## Status as of 2026-06-23 (re-verified live)
+
+10 of the 12 punch-list items below shipped within a day (tracked under PRD #232, issues
+#235-#246). Re-verified directly on the live instance — see the original sections below for what
+each one looked like before; striking through what's now fixed in place rather than rewriting it.
+
+**Shipped and confirmed live:**
+- Span Input/Output formatted chat rendering (#235) — Trace Detail panel now shows SYSTEM/USER
+  messages distinctly, raw Attributes kept as a secondary section.
+- Traces list default Latency/Tokens/Cost columns + denser rows (#236).
+- Levels badge tooltips (#237).
+- Bulk add-to-dataset from Traces list (#238) — checkbox-select → "Add to dataset (N)" button.
+- Dashboard KPI tiles + latency-percentile + error-rate charts, duplicate Cost-by-Model panel
+  removed (#239).
+- Conversations promoted to top-level nav (#240).
+- Chat-type (multi-message) Prompt editor (#241, #270).
+- Eval Rule recursive AND/OR/NOT filter-group builder (#243) — "+ Add OR/AND Group" confirmed.
+- Eval Rule Judge Prompt picker replacing freeform text (#244).
+- Admin Ops view scaffold + Ingest Queue depth metric (#245).
+- `ui/BRANDING.md` rewritten for the purple palette (#246).
+- New Prompt form: model dropdown instead of freeform text (#242) — present, but see new bug below.
+
+**Still open — confirmed still broken/missing on the live instance:**
+- **#233 (P0)** — Cost still reads `$0.0000` everywhere (Dashboard KPI tile and Traces list Cost
+  column both confirmed today) and the same model is still split into `unknown` /
+  `openai/nvidia/Qwen3.6-...` / `nvidia/Qwen3.6-...` rows on the Dashboard's "Traces by Model"
+  chart. Highest-priority remaining item.
+- **#234 (P0)** — Admin → API Keys still reports "No API keys found" for the `omneval` project.
+- **#247 / #248** — Admin Ops view still shows only Ingest Queue depth; Ingest Buffer
+  reconciliation sweep status and Quack Server Table Maintenance status are not yet surfaced.
+
+**New finding (not in the original audit):** the model dropdown shipped for #242 calls
+`GET /api/v1/models`, which returns **502** on the live instance — the New Prompt form shows a red
+"Failed to fetch models" message and falls back to an "Other..." option. The feature is wired up
+correctly client-side; the backend endpoint itself is failing. Not yet filed as an issue.
+
 ## Method
 
 - Browsed every top-level page on the live instance (Dashboard, Traces, Trace Detail, Conversations,
