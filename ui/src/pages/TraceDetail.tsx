@@ -101,6 +101,22 @@ export interface WaterfallEntry {
   model?: string;
 }
 
+/**
+ * Compute the X-axis domain for the waterfall chart.
+ *
+ * The domain is always `[0, maxEnd]` where `maxEnd = max(start + duration)`
+ * across all WaterfallEntry rows.  This ensures the axis labels and tick
+ * marks cover the full temporal extent of the Trace's Spans, preventing the
+ * misleading behaviour where Recharts' default domain (computed from `start`
+ * values only) can compress the visible range to a tiny slice — e.g.
+ * `0ms`–`4ms` for a span that actually ran 26.3 s.
+ */
+export function computeWaterfallAxisDomain(entries: WaterfallEntry[]): [number, number] {
+  if (entries.length === 0) return [0, 0];
+  const maxEnd = Math.max(...entries.map((e) => e.start + e.duration));
+  return [0, maxEnd];
+}
+
 // ── Trace Detail Page ──────────────────────────────────────────────
 
 const LIVE_POLL_INTERVAL_MS = 5_000;
@@ -676,6 +692,7 @@ function GanttWaterfall({
               <XAxis
                 type="number"
                 dataKey="start"
+                domain={computeWaterfallAxisDomain(data)}
                 tick={{ fill: colors.typography.ashGrey, fontSize: 11 }}
                 axisLine={{ stroke: colors.backgrounds.caveWall }}
                 tickFormatter={formatMs}
