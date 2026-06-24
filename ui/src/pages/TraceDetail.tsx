@@ -18,16 +18,7 @@ import { formatTime, formatDuration, formatMs, totalTokens, parseChatTurns, getT
 import { useToast } from "@/components/Toast";
 import SaveToDatasetModal from "@/components/SaveToDatasetModal";
 import { extractSpanMessages } from "@/utils/spanMessages";
-
-// ── Constants ──────────────────────────────────────────────────────
-
-const KIND_COLOR_MAP: Record<string, string> = {
-  llm: colors.accents.emberFlare,
-  tool: colors.accents.softGlow,
-  agent: colors.accents.flicker,
-  chain: "#60a5fa",
-  internal: colors.typography.ashGrey,
-};
+import { getSpanKindColor, SpanKind } from "@/modules/spanKindVisuals";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -244,7 +235,7 @@ export default function TraceDetailPage({
       const start = new Date(span.start_time).getTime() - baseTime;
       const end = new Date(span.end_time).getTime() - baseTime;
       const duration = end - start;
-      const color = KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall;
+      const color = getSpanKindColor(span.kind as SpanKind);
       return {
         name: span.name,
         spanId: span.span_id,
@@ -383,8 +374,8 @@ export default function TraceDetailPage({
             className="mx-4 mt-4 mb-4 px-4 py-3 rounded-lg border"
             style={{
               background: colors.backgrounds.charcoalDepth,
-              borderColor: KIND_COLOR_MAP[trace.kind] ? `${KIND_COLOR_MAP[trace.kind]}44` : colors.backgrounds.caveWall,
-              borderLeft: `3px solid ${KIND_COLOR_MAP[trace.kind] || colors.backgrounds.caveWall}`,
+              borderColor: trace.kind ? `${getSpanKindColor(trace.kind as SpanKind)}44` : colors.backgrounds.caveWall,
+              borderLeft: `3px solid ${trace.kind ? getSpanKindColor(trace.kind as SpanKind) : colors.backgrounds.caveWall}`,
             }}
           >
             <div className="flex items-center gap-3 mb-1">
@@ -393,8 +384,8 @@ export default function TraceDetailPage({
                 <span
                   className="text-xs px-2 py-0.5 rounded-full font-medium"
                   style={{
-                    background: `${KIND_COLOR_MAP[trace.kind] || colors.backgrounds.caveWall}22`,
-                    color: KIND_COLOR_MAP[trace.kind] || colors.typography.ashGrey,
+                    background: `${getSpanKindColor(trace.kind as SpanKind)}22`,
+                    color: getSpanKindColor(trace.kind as SpanKind),
                   }}
                 >
                   {trace.kind}
@@ -827,8 +818,8 @@ function SlideInDetailPanel({
                 <span
                   className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0"
                   style={{
-                    background: `${KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall}22`,
-                    color: KIND_COLOR_MAP[span.kind] || colors.typography.ashGrey,
+                    background: `${getSpanKindColor(span.kind as SpanKind)}22`,
+                    color: getSpanKindColor(span.kind as SpanKind),
                   }}
                 >
                   {span.kind}
@@ -1095,7 +1086,7 @@ function SpanRow({
       >
         <div
           className="w-2 h-2 rounded-full flex-shrink-0"
-          style={{ background: KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall }}
+          style={{ background: getSpanKindColor(span.kind as SpanKind) }}
         />
         {/* Expand/collapse toggle */}
         {hasChildren ? (

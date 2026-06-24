@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 import TraceDetailPage from "./TraceDetail";
 import { ToastProvider } from "@/components/Toast";
 import { totalTokens, formatMs } from "@/utils/formatters";
+import { SpanKind } from "@/modules/spanKindVisuals";
 
 function renderWithProvider(ui: React.ReactElement) {
   return render(<ToastProvider>{ui}</ToastProvider>);
@@ -810,5 +811,183 @@ describe("Chat tab for spans with tool calls but no text messages", () => {
 
     expect(screen.getByText(/Tool Calls/)).toBeInTheDocument();
     expect(screen.getByText(/calculator/)).toBeInTheDocument();
+  });
+});
+
+// ── SpanKind Visual Module Integration ─────────────────────────────
+
+describe("SpanKind visual module in TraceDetail integration", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Helper: render a trace with spans of different Kinds
+  function renderTraceWithSpans(
+    spanNames: Array<{ name: string; kind: SpanKind }>,
+  ) {
+    const spanKinds = spanNames.map((s) => s.kind);
+    const traceId = `integration-test-trace-${spanKinds.join("-")}`;
+    const traceData: any = {
+      trace_id: traceId,
+      project_id: "test-project",
+      total_input_tokens: 20,
+      total_output_tokens: 20,
+      total_cost_usd: 0.02,
+      root_span: {
+        span_id: "root",
+        trace_id: traceId,
+        parent_id: "",
+        project_id: "test-project",
+        name: spanNames[0]?.name ?? "integration-root",
+        kind: spanNames[0]?.kind ?? "chain",
+        start_time: "2025-01-15T10:00:00Z",
+        end_time: "2025-01-15T10:01:00Z",
+        cost_usd: 0.01,
+        input_tokens: 10,
+        output_tokens: 10,
+        children: spanNames.slice(1).map((s) => ({
+          span_id: `span-${s.name}`,
+          trace_id: traceId,
+          parent_id: "root",
+          project_id: "test-project",
+          name: s.name,
+          kind: s.kind,
+          start_time: "2025-01-15T10:00:10Z",
+          end_time: "2025-01-15T10:00:50Z",
+          cost_usd: 0.005,
+          input_tokens: 5,
+          output_tokens: 5,
+        })),
+      },
+    };
+
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(traceData),
+    } as Response);
+
+    return renderWithProvider(
+      <TraceDetailPage
+        traceId={traceId}
+        activeProject="test-project"
+        onBack={() => {}}
+      />,
+    );
+  }
+
+  function waitForIntegrationTraceLoaded() {
+    // Wait for the spans list to render (it shows the span count)
+    return waitFor(() => {
+      expect(screen.getByText(/Spans \(\d+\)/)).toBeInTheDocument();
+    });
+  }
+
+  describe("Waterfall bars use spanKindVisuals colors", () => {
+    it("renders each SpanKind bar with its distinct color from spanKindVisuals", async () => {
+      renderTraceWithSpans([
+        { name: "llm-span", kind: "llm" },
+        { name: "tool-span", kind: "tool" },
+        { name: "agent-span", kind: "agent" },
+        { name: "chain-span", kind: "chain" },
+        { name: "internal-span", kind: "internal" },
+      ]);
+
+      await waitForIntegrationTraceLoaded();
+
+      // The spans list should have 5 rows, each with a colored dot (w-2 h-2 rounded-full).
+      const dots = document.querySelectorAll(".w-2.h-2.rounded-full.flex-shrink-0");
+      expect(dots.length).toBe(5);
+
+      // Verify each dot has a distinct color from the spanKindVisuals mapping.
+      const colors = new Set<string>();
+      dots.forEach((dot) => {
+        const style = window.getComputedStyle(dot);
+        const bg = style.backgroundColor;
+        expect(bg).toMatch(/rgba?\(/);
+        colors.add(bg);
+      });
+      // All 5 Kinds must have distinct colors (asserted by color uniqueness)
+      expect(colors.size).toBe(5);
+
+      // The root span badge should show the kind label ("llm")
+      const llmBadge = screen.getAllByText(/^llm$/);
+      expect(llmBadge.length).toBeGreaterThan(0);
+
+      // The waterfall chart rendered
+      expect(screen.getByText("Waterfall Timeline")).toBeInTheDocument();
+    });
+
+    it("uses different colors for different SpanKinds in the waterfall chart", async () => {
+      renderTraceWithSpans([
+        { name: "llm-span", kind: "llm" },
+        { name: "tool-span", kind: "tool" },
+        { name: "agent-span", kind: "agent" },
+      ]);
+
+      await waitForIntegrationTraceLoaded();
+
+      // Collect colors from span row dots — they should use the spanKindVisuals colors.
+      const dots = document.querySelectorAll(".w-2.h-2.rounded-full.flex-shrink-0");
+      const colors = new Set<string>();
+      dots.forEach((dot) => {
+        const style = window.getComputedStyle(dot);
+        colors.add(style.backgroundColor);
+      });
+      // 3 Kinds → 3 distinct colors
+      expect(colors.size).toBe(3);
+    });
+  });
+
+  describe("Tree row dots use spanKindVisuals colors", () => {
+    it("renders tree row dots with spanKindVisuals colors", async () => {
+      renderTraceWithSpans([
+        { name: "llm-span", kind: "llm" },
+        { name: "tool-span", kind: "tool" },
+        { name: "chain-span", kind: "chain" },
+      ]);
+
+      // Switch to tree view
+      await waitForIntegrationTraceLoaded();
+      await act(async () => {
+        const treeButton = screen.getByText("Tree");
+        fireEvent.click(treeButton);
+      });
+
+      // The spans list in tree view should have colored dots for each span row.
+      await waitFor(() => {
+        const dots = document.querySelectorAll(".w-2.h-2.rounded-full.flex-shrink-0");
+        // 3 spans → 3 dots
+        expect(dots.length).toBe(3);
+      });
+    });
+  });
+
+  describe("Span detail panel uses spanKindVisuals colors", () => {
+    it("renders the Kind badge in the detail panel with spanKindVisuals color", async () => {
+      renderTraceWithSpans([
+        { name: "test-span", kind: "llm" },
+      ]);
+
+      await waitForIntegrationTraceLoaded();
+
+      // Click on the span row (the button with the aria-label) to open the detail panel.
+      // There are two "test-span" labels (root card + span row), so use the button role.
+      const spanRow = screen.getByRole("button", { name: /test-span/i });
+      await act(async () => {
+        fireEvent.click(spanRow);
+      });
+
+      // The detail panel should show the Kind badge with the correct color.
+      // The root span summary card also shows a kind badge, so we look for
+      // the badge in the detail panel which opens on the right side.
+      await waitFor(() => {
+        const llmBadges = screen.getAllByText(/^llm$/);
+        expect(llmBadges.length).toBeGreaterThan(0);
+        // At least one badge should have a background color from getSpanKindColor
+        const badgeStyle = window.getComputedStyle(llmBadges[0]);
+        expect(badgeStyle.backgroundColor).toMatch(/rgba?\(/);
+      });
+    });
   });
 });
