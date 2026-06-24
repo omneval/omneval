@@ -324,6 +324,65 @@ func (f *fakeRedisLLEN) LLen(ctx context.Context, key string) *redis.IntCmd {
 	return redis.NewIntResult(int64(f.depth), nil)
 }
 
+func TestAdminAPIKeysList_WithProjectKeys(t *testing.T) {
+	t.Parallel()
+
+	db := setupTestDB(t)
+	projStore := newFakeAdminStore()
+	apiKeyStore := newFakeAdminStore()
+
+	// Seed a project so that ListProjects returns it.
+	now := time.Now().UTC()
+	projStore.projects = []*domain.Project{
+		{ProjectID: "proj-admin-1", OrgID: "org-1", Name: "admin-project", CreatedAt: now},
+	}
+
+	// Seed an API key for that project on the APIKeyStore.
+	apiKeyStore.keys = []*domain.APIKey{
+		{
+			KeyID:     "key-admin-1",
+			ProjectID: "proj-admin-1",
+			Kind:      domain.APIKeyKindProject,
+			Name:      "test-key",
+			CreatedAt: now,
+		},
+	}
+
+	handler := &AdminHandler{
+		DB:            db,
+		APIKeyStore:   apiKeyStore,
+		ProjectStore:  projStore,
+		SessionStore:  &FakeSessionStore{projectID: "proj-1"},
+		IngestQueueDB: &fakeRedisLLEN{depth: 0},
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/api-keys", nil)
+	req = withAdminContext(req, "admin@test.com")
+
+	w := httptest.NewRecorder()
+	handler.HandleAdminAPIKeysList(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var keys []adminAPIKeyInfo
+	if err := json.Unmarshal(w.Body.Bytes(), &keys); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 API key in admin listing, got %d", len(keys))
+	}
+
+	if keys[0].KeyID != "key-admin-1" {
+		t.Errorf("key_id = %q, want %q", keys[0].KeyID, "key-admin-1")
+	}
+	if keys[0].ProjectID != "proj-admin-1" {
+		t.Errorf("project_id = %q, want %q", keys[0].ProjectID, "proj-admin-1")
+	}
+}
+
 func TestAdminHandler_MethodNotAllowed(t *testing.T) {
 	db := setupTestDB(t)
 	handler := &AdminHandler{DB: db, APIKeyStore: newFakeAdminStore(), ProjectStore: newFakeAdminStore(), SessionStore: &FakeSessionStore{projectID: "proj-1"}}

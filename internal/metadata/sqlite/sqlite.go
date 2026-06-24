@@ -311,7 +311,7 @@ func (s *Store) GetProject(ctx context.Context, projectID string) (*domain.Proje
 
 func (s *Store) ListProjects(ctx context.Context, orgID string) ([]*domain.Project, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT project_id, org_id, name, created_at FROM projects WHERE org_id = ? ORDER BY project_id`, orgID,
+		`SELECT project_id, org_id, name, created_at FROM projects WHERE org_id = ? OR ? = '' ORDER BY project_id`, orgID, orgID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: list projects: %w", err)

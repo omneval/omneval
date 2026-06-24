@@ -216,6 +216,31 @@ func TestProject_ListByOrg(t *testing.T) {
 	}
 }
 
+// TestProject_ListAllWithEmptyOrgID verifies that passing an empty string for
+// orgID returns projects from every organization (i.e. empty string is treated
+// as a wildcard). This is how the admin handler calls ListProjects so that the
+// Admin → API Keys page can enumerate keys across all orgs.
+func TestProject_ListAllWithEmptyOrgID(t *testing.T) {
+	s, _ := openTestStore(t)
+	defer s.Close()
+
+	s.CreateOrganization(context.Background(), &domain.Organization{OrgID: "org-1", Name: "Test Corp"})
+	s.CreateOrganization(context.Background(), &domain.Organization{OrgID: "org-2", Name: "Other Corp"})
+
+	s.CreateProject(context.Background(), &domain.Project{ProjectID: "proj-1", OrgID: "org-1", Name: "P1"})
+	s.CreateProject(context.Background(), &domain.Project{ProjectID: "proj-2", OrgID: "org-1", Name: "P2"})
+	s.CreateProject(context.Background(), &domain.Project{ProjectID: "proj-3", OrgID: "org-2", Name: "P3"})
+
+	// Empty string should return all projects from every org.
+	projects, err := s.ListProjects(context.Background(), "")
+	if err != nil {
+		t.Fatalf("list projects with empty orgID: %v", err)
+	}
+	if len(projects) != 3 {
+		t.Fatalf("expected 3 projects across all orgs, got %d", len(projects))
+	}
+}
+
 // ---- Users ----
 
 func TestUser_CreateAndGetByEmail(t *testing.T) {
