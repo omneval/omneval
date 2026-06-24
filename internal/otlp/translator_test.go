@@ -3,6 +3,7 @@ package otlp
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -778,5 +779,116 @@ func TestTranslate_StatusCodeAndMessagePreserved(t *testing.T) {
 	}
 	if spans[0].StatusMessage != "boom" {
 		t.Errorf("StatusMessage: got %q, want %q", spans[0].StatusMessage, "boom")
+	}
+}
+
+// --- Diagnostic tests for Issue #279 ---
+
+// TestTranslate_SpanEventsNotCaptured_AttributeGap_DiagnosticIssue279 confirms
+// that the translator does NOT read prompt/completion content from Span Events
+// because the internal/otlp.Span struct has no Events field (only Attributes).
+// This is the root cause of issue #279: litellm/Laminar emits content in Span
+// Events, but Omneval's pipeline has never captured it.
+func TestTranslate_SpanEventsNotCaptured_AttributeGap_DiagnosticIssue279(t *testing.T) {
+	// A span that carries ONLY gen_ai attributes (no content) — exactly the shape
+	// confirmed in issue #279 for real litellm/Laminar traffic — produces
+	// normalized Input/Output of empty message arrays.  The Attributes map
+	// contains response metadata, tool definitions, and Laminar bookkeeping
+	// attributes but zero conversation content.
+	rss := []ResourceSpans{{
+		Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+		Spans: []*Span{{
+			SpanID:    "0123456789abcdef",
+			TraceID:   "0123456789abcdef0123456789abcdef",
+			Name:      "litellm.completion",
+			StartTime: time.Now(),
+			EndTime:   time.Now(),
+			Attributes: map[string]any{
+				"gen_ai.response.id":               "chatcmpl-abc123",
+				"gen_ai.response.model":            "gpt-4o",
+				"gen_ai.response.system_fingerprint": "fp_xyz",
+				"gen_ai.system":                    "openai",
+				"gen_ai.tool.definitions":          `[{"name":"search","description":"Search"}]`,
+				"gen_ai.usage.total_tokens":        100,
+				"lmnr.span.ids_path":               "/spans",
+				"lmnr.span.instrumentation_scope.name": "litellm",
+				"lmnr.span.sdk_version":            "0.7.52",
+				"lmnr.span.type":                   "LLM",
+			},
+		}},
+	}}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	// KEY FINDING FOR ISSUE #279: Input and Output are normalized to empty
+	// message arrays ({"content":"","role":"user"}) because the Attributes map
+	// contains zero conversation content.  The litellm/Laminar SDK does not
+	// emit prompt/completion content in Attributes at all.  The raw translator
+	// produces empty strings (no gen_ai.prompt.* keys found), and the
+	// normalizer converts "" to {"content":"","role":"user"} via
+	// normalizeMessageArray.
+	if !strings.Contains(spans[0].Input, `"role":"user"`) || !strings.Contains(spans[0].Input, `"content":""`) {
+		t.Errorf("input: got %q (expected normalized empty message — content is only in Span Events)", spans[0].Input)
+	}
+	if !strings.Contains(spans[0].Output, `"role":"assistant"`) || !strings.Contains(spans[0].Output, `"content":""`) {
+		t.Errorf("output: got %q (expected normalized empty message — content is only in Span Events)", spans[0].Output)
+	}
+}
+
+// TestTranslate_LitellmCompletionSpan_DiagnosticIssue279 reproduces the exact
+// attribute set from the confirmed live production trace in issue #279.  It
+// demonstrates that the translator correctly reads response metadata but
+// produces empty Input/Output because litellm emits content in Span Events,
+// not Attributes.
+func TestTranslate_LitellmCompletionSpan_DiagnosticIssue279(t *testing.T) {
+	rss := []ResourceSpans{{
+		Resource: Resource{Attributes: map[string]any{"service.name": "agent-runtime"}},
+		Spans: []*Span{{
+			SpanID:    "aabbccdd00112233",
+			TraceID:   "deadbeef12345678deadbeef12345678",
+			Name:      "litellm.completion",
+			StartTime: time.Now(),
+			EndTime:   time.Now(),
+			Attributes: map[string]any{
+				"gen_ai.response.id":               "chatcmpl-prod123",
+				"gen_ai.request.model":             "claude-sonnet-4-20250514",
+				"gen_ai.response.system_fingerprint": "fp_prod",
+				"gen_ai.system":                    "anthropic",
+				"gen_ai.usage.input_tokens":        int64(500),
+				"gen_ai.usage.output_tokens":       int64(200),
+				"lmnr.span.ids_path":               "/data/otel/spans",
+				"lmnr.span.instrumentation_scope.name": "litellm",
+				"lmnr.span.instrumentation_scope.version": "1.89.3",
+				"lmnr.span.sdk_version":            "0.7.52",
+				"lmnr.span.type":                   "span",
+			},
+		}},
+	}}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	// These attributes ARE captured (model via gen_ai.request.model, token counts):
+	if spans[0].Model != "claude-sonnet-4-20250514" {
+		t.Errorf("model: got %q, want %q", spans[0].Model, "claude-sonnet-4-20250514")
+	}
+	if spans[0].InputTokens != 500 {
+		t.Errorf("input_tokens: got %d, want 500", spans[0].InputTokens)
+	}
+	if spans[0].OutputTokens != 200 {
+		t.Errorf("output_tokens: got %d, want 200", spans[0].OutputTokens)
+	}
+
+	// These are NOT captured — content lives in Span Events, not Attributes:
+	if !strings.Contains(spans[0].Input, `"role":"user"`) || !strings.Contains(spans[0].Input, `"content":""`) {
+		t.Errorf("input: got %q (expected normalized empty message — content is only in Span Events)", spans[0].Input)
+	}
+	if !strings.Contains(spans[0].Output, `"role":"assistant"`) || !strings.Contains(spans[0].Output, `"content":""`) {
+		t.Errorf("output: got %q (expected normalized empty message — content is only in Span Events)", spans[0].Output)
 	}
 }
