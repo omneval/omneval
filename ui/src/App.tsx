@@ -68,6 +68,21 @@ function pageFromPathname(pathname: string): Page {
   return NAV_MAP[segment] ?? "dashboard";
 }
 
+/**
+ * Extract a trace ID from URLs like `/traces/{traceId}`.
+ * Returns the trace ID if the pathname matches the pattern, `null` otherwise.
+ */
+function extractTraceIdFromPathname(pathname: string): string | null {
+  const parts = pathname.replace(/^\//, "").split("/");
+  if (parts.length >= 3 && parts[0] === "traces") {
+    const thirdPart = parts[2];
+    if (thirdPart && thirdPart !== "") {
+      return thirdPart;
+    }
+  }
+  return null;
+}
+
 interface Project {
   project_id: string;
   name: string;
@@ -161,7 +176,15 @@ export default function App() {
         }
         // Navigate to the page that matches the current URL path on hard load,
         // so that refreshing or deep-linking to /traces, /prompts, etc. works.
-        setPage(pageFromPathname(window.location.pathname));
+        // Also handle /traces/{traceId} direct links (bookmarks, shared links,
+        // In-Progress Trace polling flow).
+        const traceId = extractTraceIdFromPathname(window.location.pathname);
+        if (traceId) {
+          setPage("trace-detail");
+          setActiveTraceId(traceId);
+        } else {
+          setPage(pageFromPathname(window.location.pathname));
+        }
       })
       .catch(() => {
         // No valid session — the page stays on login.
@@ -173,9 +196,15 @@ export default function App() {
   // the back button change the URL but not the rendered page.
   useEffect(() => {
     const onPopState = () => {
-      setPage((current) =>
-        current === "login" ? current : pageFromPathname(window.location.pathname)
-      );
+      const traceId = extractTraceIdFromPathname(window.location.pathname);
+      if (traceId) {
+        setPage("trace-detail");
+        setActiveTraceId(traceId);
+      } else {
+        setPage((current) =>
+          current === "login" ? current : pageFromPathname(window.location.pathname)
+        );
+      }
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -293,11 +322,13 @@ export default function App() {
                 timeRange={timeRange}
               />
             )}
-            {page === "trace-detail" && (
+            {page === "trace-detail" && activeTraceId && (
               <TraceDetailPage
                 traceId={activeTraceId}
                 activeProject={activeProject}
-                onBack={() => setPage(traceDetailReturnTo)}
+                onBack={() => {
+                  setPage(traceDetailReturnTo);
+                }}
               />
             )}
             {page === "conversations" && (

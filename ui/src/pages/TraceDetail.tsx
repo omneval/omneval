@@ -810,7 +810,7 @@ function SlideInDetailPanel({
       />
       {/* Panel */}
       <aside
-        className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-xl border-l overflow-hidden flex flex-col"
+        className="fixed right-0 top-0 bottom-0 z-[60] w-full max-w-xl border-l overflow-hidden flex flex-col"
         style={{
           backgroundColor: colors.backgrounds.charcoalDepth,
           borderColor: colors.backgrounds.caveWall,
