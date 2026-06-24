@@ -1,11 +1,18 @@
 package pipeline
 
 import (
+	"math"
 	"testing"
 
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/pricing"
 )
+
+const floatEpsilon = 1e-9
+
+func approxEq(a, b, eps float64) bool {
+	return math.Abs(a-b) < eps
+}
 
 // TestComputeCosts_NormalizesModelName verifies that computeCosts
 // normalizes model names before pricing lookup, so that provider-prefixed
@@ -24,6 +31,7 @@ func TestComputeCosts_NormalizesModelName(t *testing.T) {
 	p := New(nil, tbl, nil, nil, nil, nil)
 	spans := []*domain.Span{
 		{
+			Kind:        domain.SpanKindLLM,
 			Model:       "openai/gpt-4o",
 			InputTokens: 100,
 			OutputTokens: 50,
@@ -52,6 +60,7 @@ func TestComputeCosts_PreservesRawModelInAttributes(t *testing.T) {
 	p := New(nil, tbl, nil, nil, nil, nil)
 	spans := []*domain.Span{
 		{
+			Kind:  domain.SpanKindLLM,
 			Model: "openai/gpt-4o",
 		},
 	}
@@ -80,9 +89,9 @@ func TestComputeCosts_CostWithNormalizedModel(t *testing.T) {
 
 	p := New(nil, tbl, nil, nil, nil, nil)
 	spans := []*domain.Span{
-		{Model: "openai/gpt-4o", InputTokens: 100, OutputTokens: 50},
-		{Model: "anthropic/gpt-4o", InputTokens: 200, OutputTokens: 100},
-		{Model: "claude-sonnet-4-6", InputTokens: 50, OutputTokens: 25},
+		{Kind: domain.SpanKindLLM, Model: "openai/gpt-4o", InputTokens: 100, OutputTokens: 50},
+		{Kind: domain.SpanKindLLM, Model: "anthropic/gpt-4o", InputTokens: 200, OutputTokens: 100},
+		{Kind: domain.SpanKindLLM, Model: "claude-sonnet-4-6", InputTokens: 50, OutputTokens: 25},
 	}
 
 	p.computeCosts(spans)
@@ -151,7 +160,7 @@ func TestComputeCosts_TimeDefaults(t *testing.T) {
 
 	p := New(nil, tbl, nil, nil, nil, nil)
 	spans := []*domain.Span{
-		{Model: "gpt-4o"},
+		{Kind: domain.SpanKindLLM, Model: "gpt-4o"},
 	}
 
 	p.computeCosts(spans)
@@ -177,6 +186,7 @@ func TestComputeCosts_CaseNormalization(t *testing.T) {
 	p := New(nil, tbl, nil, nil, nil, nil)
 	spans := []*domain.Span{
 		{
+			Kind:        domain.SpanKindLLM,
 			Model:       "GPT-4O",
 			InputTokens: 100,
 			OutputTokens: 50,
@@ -207,8 +217,8 @@ func TestComputeCosts_CollapsesDuplicateModels(t *testing.T) {
 
 	p := New(nil, tbl, nil, nil, nil, nil)
 	spans := []*domain.Span{
-		{Model: "openai/nvidia/qwen3.6-35b-a3b-nvfp4", InputTokens: 60000000, OutputTokens: 500000},
-		{Model: "nvidia/qwen3.6-35b-a3b-nvfp4", InputTokens: 40000000, OutputTokens: 500000},
+		{Kind: domain.SpanKindLLM, Model: "openai/nvidia/qwen3.6-35b-a3b-nvfp4", InputTokens: 60000000, OutputTokens: 500000},
+		{Kind: domain.SpanKindLLM, Model: "nvidia/qwen3.6-35b-a3b-nvfp4", InputTokens: 40000000, OutputTokens: 500000},
 	}
 
 	p.computeCosts(spans)
@@ -262,8 +272,8 @@ func TestComputeCosts_TraceDetailTotalCost(t *testing.T) {
 
 	p := New(nil, tbl, nil, nil, nil, nil)
 	spans := []*domain.Span{
-		{Model: "openai/gpt-4o", InputTokens: 100, OutputTokens: 50},
-		{Model: "anthropic/gpt-4o", InputTokens: 200, OutputTokens: 100},
+		{Kind: domain.SpanKindLLM, Model: "openai/gpt-4o", InputTokens: 100, OutputTokens: 50},
+		{Kind: domain.SpanKindLLM, Model: "anthropic/gpt-4o", InputTokens: 200, OutputTokens: 100},
 	}
 
 	p.computeCosts(spans)
@@ -275,7 +285,7 @@ func TestComputeCosts_TraceDetailTotalCost(t *testing.T) {
 
 	// Total should be the sum of both normalized costs.
 	want := (0.00025 + 0.00050) + (0.00050 + 0.00100)
-	if totalCost != want {
+	if !approxEq(totalCost, want, floatEpsilon) {
 		t.Errorf("total cost: got %f, want %f", totalCost, want)
 	}
 }

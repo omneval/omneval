@@ -202,13 +202,22 @@ func (t *Table) Models() []string {
 }
 
 // NormalizeModel canonicalizes a model name for pricing lookup:
-// strips common prefixes and lowercases.
+// strips all known provider prefixes iteratively and lowercases.
 func NormalizeModel(model string) string {
 	model = strings.TrimSpace(model)
-	// Strip common prefixes.
-	for _, prefix := range []string{"openai/", "anthropic/", "ollama/"} {
-		if strings.HasPrefix(model, prefix) {
-			model = model[len(prefix):]
+	for {
+		stripped := false
+		for _, prefix := range []string{
+			"openai/", "anthropic/", "ollama/", "nvidia/",
+			"vertex_ai/", "bedrock/", "azure/", "groq/",
+		} {
+			if strings.HasPrefix(model, prefix) {
+				model = model[len(prefix):]
+				stripped = true
+				break
+			}
+		}
+		if !stripped {
 			break
 		}
 	}
