@@ -3,6 +3,7 @@ package otlp
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -778,5 +779,182 @@ func TestTranslate_StatusCodeAndMessagePreserved(t *testing.T) {
 	}
 	if spans[0].StatusMessage != "boom" {
 		t.Errorf("StatusMessage: got %q, want %q", spans[0].StatusMessage, "boom")
+	}
+}
+
+// --- Diagnostic tests for Issue #279 ---
+
+// TestTranslate_SpanEventsNotCaptured_AttributeGap_DiagnosticIssue279 confirms
+// that the translator does NOT read prompt/completion content from Span Events
+// because the internal/otlp.Span struct has no Events field (only Attributes).
+//
+// Source investigation (lmnr/opentelemetry_lib/opentelemetry/instrumentation/litellm/
+// wrappers/completions/__init__.py, line 86): set_span_attribute(span,
+// "gen_ai.input.messages", json_dumps(attr_messages)) — the Laminar instrumentor
+// DOES write prompt/completion content to Attributes (gen_ai.input.messages,
+// gen_ai.output.messages).  However the OTLP wire format also supports Span Events,
+// and when content is placed in Events (as some instrumentor paths do), Omneval
+// drops them because convertToResourceSpans only reads s.GetAttributes(), never
+// s.GetEvents().
+//
+// This test proves: the translator struct has no Events field, so content placed
+// in Span Events on the wire is silently dropped.
+func TestTranslate_SpanEventsNotCaptured_AttributeGap_DiagnosticIssue279(t *testing.T) {
+	// A span that carries ONLY gen_ai attributes (no content) — exactly the shape
+	// confirmed in issue #279 for real litellm/Laminar traffic — produces
+	// normalized Input/Output of empty message arrays.  The Attributes map
+	// contains response metadata, tool definitions, and Laminar bookkeeping
+	// attributes but zero conversation content.
+	rss := []ResourceSpans{{
+		Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+		Spans: []*Span{{
+			SpanID:    "0123456789abcdef",
+			TraceID:   "0123456789abcdef0123456789abcdef",
+			Name:      "litellm.completion",
+			StartTime: time.Now(),
+			EndTime:   time.Now(),
+			Attributes: map[string]any{
+				"gen_ai.response.id":               "chatcmpl-abc123",
+				"gen_ai.response.model":            "gpt-4o",
+				"gen_ai.response.system_fingerprint": "fp_xyz",
+				"gen_ai.system":                    "openai",
+				"gen_ai.tool.definitions":          `[{"name":"search","description":"Search"}]`,
+				"gen_ai.usage.total_tokens":        100,
+				"lmnr.span.ids_path":               "/spans",
+				"lmnr.span.instrumentation_scope.name": "litellm",
+				"lmnr.span.sdk_version":            "0.7.52",
+				"lmnr.span.type":                   "LLM",
+			},
+		}},
+	}}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	// KEY FINDING FOR ISSUE #279: Input and Output are normalized to empty
+	// message arrays ({"content":"","role":"user"}) because the Attributes map
+	// contains zero gen_ai.input.messages / gen_ai.output.messages content.
+	// Laminar's LitellmInstrumentor writes gen_ai.input.messages /
+	// gen_ai.output.messages via set_span_attribute when is_litellm_instrumented==true,
+	// but the OpenAI instrumentor path (is_litellm_instrumented==false) may place
+	// content in Span Events, which Omneval does not read.
+	if !strings.Contains(spans[0].Input, `"role":"user"`) || !strings.Contains(spans[0].Input, `"content":""`) {
+		t.Errorf("input: got %q (expected normalized empty message — gen_ai.input.messages not in Attributes)", spans[0].Input)
+	}
+	if !strings.Contains(spans[0].Output, `"role":"assistant"`) || !strings.Contains(spans[0].Output, `"content":""`) {
+		t.Errorf("output: got %q (expected normalized empty message — gen_ai.output.messages not in Attributes)", spans[0].Output)
+	}
+}
+
+// TestTranslate_LitellmCompletionSpan_DiagnosticIssue279 reproduces the exact
+// attribute set from the confirmed live production trace in issue #279.  It
+// demonstrates that the translator correctly reads response metadata but
+// produces empty Input/Output when gen_ai.input.messages / gen_ai.output.messages
+// are absent from Attributes (e.g. when the OpenAI instrumentor path is active,
+// content goes to Span Events, which Omneval does not read).
+func TestTranslate_LitellmCompletionSpan_DiagnosticIssue279(t *testing.T) {
+	rss := []ResourceSpans{{
+		Resource: Resource{Attributes: map[string]any{"service.name": "agent-runtime"}},
+		Spans: []*Span{{
+			SpanID:    "aabbccdd00112233",
+			TraceID:   "deadbeef12345678deadbeef12345678",
+			Name:      "litellm.completion",
+			StartTime: time.Now(),
+			EndTime:   time.Now(),
+			Attributes: map[string]any{
+				"gen_ai.response.id":               "chatcmpl-prod123",
+				"gen_ai.request.model":             "claude-sonnet-4-20250514",
+				"gen_ai.response.system_fingerprint": "fp_prod",
+				"gen_ai.system":                    "anthropic",
+				"gen_ai.usage.input_tokens":        int64(500),
+				"gen_ai.usage.output_tokens":       int64(200),
+				"lmnr.span.ids_path":               "/data/otel/spans",
+				"lmnr.span.instrumentation_scope.name": "litellm",
+				"lmnr.span.instrumentation_scope.version": "1.89.3",
+				"lmnr.span.sdk_version":            "0.7.52",
+				"lmnr.span.type":                   "span",
+			},
+		}},
+	}}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	// These attributes ARE captured (model via gen_ai.request.model, token counts):
+	if spans[0].Model != "claude-sonnet-4-20250514" {
+		t.Errorf("model: got %q, want %q", spans[0].Model, "claude-sonnet-4-20250514")
+	}
+	if spans[0].InputTokens != 500 {
+		t.Errorf("input_tokens: got %d, want 500", spans[0].InputTokens)
+	}
+	if spans[0].OutputTokens != 200 {
+		t.Errorf("output_tokens: got %d, want 200", spans[0].OutputTokens)
+	}
+
+	// These are NOT captured — gen_ai.input.messages / gen_ai.output.messages
+	// are absent from Attributes (in production the OpenAI instrumentor path
+	// may place content in Span Events, which Omneval does not read):
+	if !strings.Contains(spans[0].Input, `"role":"user"`) || !strings.Contains(spans[0].Input, `"content":""`) {
+		t.Errorf("input: got %q (expected normalized empty message — content not in Attributes)", spans[0].Input)
+	}
+	if !strings.Contains(spans[0].Output, `"role":"assistant"`) || !strings.Contains(spans[0].Output, `"content":""`) {
+		t.Errorf("output: got %q (expected normalized empty message — content not in Attributes)", spans[0].Output)
+	}
+}
+
+// TestTranslate_LitellmInputMessagesFromAttributes_DiagnosticIssue279 confirms
+// that Omneval's translator CAN read gen_ai.input.messages / gen_ai.output.messages
+// from Attributes when they ARE present.  This is the shape Laminar's
+// LitellmInstrumentor (lmnr/opentelemetry_lib/opentelemetry/instrumentation/litellm/
+// wrappers/completions/__init__.py:86) writes via set_span_attribute.
+//
+// Root cause: when Laminar uses the OTel callback path (is_litellm_instrumented==true),
+// content goes to gen_ai.input.messages / gen_ai.output.messages Attributes.
+// When it uses the OpenAI instrumentor path, content may go to Span Events instead.
+// Omneval only reads Attributes — so the fix depends on which path produces the
+// problem observed in live production.
+func TestTranslate_LitellmInputMessagesFromAttributes_DiagnosticIssue279(t *testing.T) {
+	rss := []ResourceSpans{{
+		Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+		Spans: []*Span{{
+			SpanID:    "0123456789abcdef",
+			TraceID:   "0123456789abcdef0123456789abcdef",
+			Name:      "litellm.completion",
+			StartTime: time.Now(),
+			EndTime:   time.Now(),
+			Attributes: map[string]any{
+				// gen_ai.input.messages — Laminar's shape for prompt content in Attributes
+				"gen_ai.input.messages":  `[{"role":"user","content":"What is the weather?"}]`,
+				// gen_ai.output.messages — Laminar's shape for completion content in Attributes
+				"gen_ai.output.messages": `[{"role":"assistant","content":"The weather is sunny."}]`,
+				"gen_ai.request.model":   "gpt-4o",
+				"gen_ai.system":          "openai",
+			},
+		}},
+	}}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	// gen_ai.input.messages IS read when present in Attributes:
+	if !strings.Contains(spans[0].Input, `"role":"user"`) || !strings.Contains(spans[0].Input, `"content":"What is the weather?"`) {
+		t.Errorf("input: got %q (expected to contain user message from gen_ai.input.messages)", spans[0].Input)
+	}
+	if !strings.Contains(spans[0].Output, `"role":"assistant"`) || !strings.Contains(spans[0].Output, `"content":"The weather is sunny."`) {
+		t.Errorf("output: got %q (expected to contain assistant message from gen_ai.output.messages)", spans[0].Output)
+	}
+
+	// gen_ai.input.messages / gen_ai.output.messages should be removed from overflow:
+	if _, ok := spans[0].Attributes["gen_ai.input.messages"]; ok {
+		t.Error("gen_ai.input.messages should not be in overflow attributes")
+	}
+	if _, ok := spans[0].Attributes["gen_ai.output.messages"]; ok {
+		t.Error("gen_ai.output.messages should not be in overflow attributes")
 	}
 }
