@@ -453,3 +453,115 @@ describe("project setting persistence across page refresh", () => {
     expect(stored).toBeNull();
   });
 });
+
+// ── Direct-link trace detail URL routing ─────────────────────────
+
+describe("direct-link /traces/{traceId} routing", () => {
+  const mockProject = [
+    { project_id: "proj-1", name: "Test Project" },
+  ];
+
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const urlStr = String(url);
+      if (urlStr === "/api/v1/me") {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              user_id: "user-1",
+              email: "alice@example.com",
+              projects: mockProject,
+            }),
+        } as Response;
+      }
+      // Mock /api/v1/traces/{traceId} for direct-link trace detail rendering
+      if (urlStr.startsWith("/api/v1/traces/") && !urlStr.includes("/spans")) {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              trace_id: "test-trace",
+              project_id: "proj-1",
+              root_span: {
+                span_id: "root-1",
+                trace_id: "test-trace",
+                parent_id: null,
+                name: "root-span",
+                kind: "llm",
+                start_time: new Date().toISOString(),
+                end_time: new Date().toISOString(),
+                attributes: {},
+                events: [],
+                status: { code: 0 },
+                resource: {},
+                severity_text: "",
+                severity_number: 0,
+                duration_ms: 100,
+              },
+              total_input_tokens: 0,
+              total_output_tokens: 0,
+              total_cost_usd: 0,
+            }),
+        } as Response;
+      }
+      // Mock spans list for waterfall/tree rendering
+      if (urlStr.startsWith("/api/v1/spans")) {
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              spans: [
+                {
+                  span_id: "root-1",
+                  trace_id: "test-trace",
+                  parent_id: null,
+                  name: "root-span",
+                  kind: "llm",
+                  start_time: new Date().toISOString(),
+                  end_time: new Date().toISOString(),
+                  cost_usd: 0.11,
+                  attributes: {},
+                  events: [],
+                  status: { code: 0 },
+                  resource: {},
+                  severity_text: "",
+                  severity_number: 0,
+                  duration_ms: 100,
+                },
+              ],
+              trace: null,
+            }),
+        } as Response;
+      }
+      return {
+        ok: false,
+        json: () => Promise.resolve({}),
+      } as Response;
+    });
+    window.history.replaceState({}, "", "/");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("hard-loading /traces/{traceId} renders Traces list with trace detail overlay", async () => {
+    window.history.replaceState({}, "", "/traces/abc123xyz");
+
+    render(<App />);
+
+    // Wait for the /api/v1/me call
+    await waitFor(
+      () => {
+        expect(screen.getByText("Test Project")).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+
+    // Direct navigation to /traces/{traceId} renders the Traces list
+    // AND opens the SlideInTraceDetail overlay.
+    expect(screen.queryAllByRole("button", { name: "Close trace detail" }).length).toBeGreaterThan(0);
+});
+});

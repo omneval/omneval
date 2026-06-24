@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { useState } from "react";
 import type { ComponentProps } from "react";
 import TracesPage from "./Traces";
+import { ToastProvider } from "@/components/Toast";
+import { SlideInTraceDetail } from "./TraceDetail";
 
 // ── Helper data ──────────────────────────────────────────────────
 
@@ -69,13 +72,13 @@ const mockSpans = [
 // ── Render helper ────────────────────────────────────────────────
 
 function renderTracesPage(
-  props: Partial<ComponentProps<typeof TracesPage>> = {}
+  props: Partial<Omit<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">> &
+    Partial<Pick<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">> = {}
 ) {
   return render(
     <TracesPage
       activeProject="test-project"
-      onNavigateToTrace={() => {}}
-      onNavigateToTraceDetail={() => {}}
+      onOpenTraceOverlay={vi.fn()}
       {...props}
     />
   );
@@ -967,11 +970,7 @@ describe("fetch correctness", () => {
     });
 
     view.rerender(
-      <TracesPage
-        activeProject="other-project"
-        onNavigateToTrace={() => {}}
-        onNavigateToTraceDetail={() => {}}
-      />
+      <TracesPage activeProject="other-project" onOpenTraceOverlay={vi.fn()} />
     );
 
     await waitFor(() => {
@@ -1867,6 +1866,167 @@ describe("filter panel styling (#142)", () => {
   });
 });
 
+// ── Trace detail overlay tests (#281) ──────────────────────────────────
+
+
+/**
+ * Component that mirrors App.tsx's overlay pattern: TracesPage +
+ * SlideInTraceDetail mounted conditionally on local state.  This lets the
+ * tests verify that the Traces list stays mounted behind the overlay.
+ */
+function TracesOverlayWrapper({
+  children,
+}: {
+  children?: Partial<
+    Omit<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">
+  > &
+    Partial<Pick<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">>;
+}) {
+  const [traceOverlay, setTraceOverlay] = useState<string | null>(null);
+  return (
+    <ToastProvider>
+      <TracesPage
+        activeProject="test-project"
+        onOpenTraceOverlay={(traceId: string) => setTraceOverlay(traceId)}
+        {...children}
+      />
+      {traceOverlay && (
+        <SlideInTraceDetail
+          traceId={traceOverlay}
+          activeProject="test-project"
+          onClose={() => setTraceOverlay(null)}
+        />
+      )}
+    </ToastProvider>
+  );
+}
+
+function renderTracesPageWithOverlay(
+  props: Partial<Omit<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">> &
+    Partial<Pick<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">> = {}
+) {
+  return {
+    ...render(<TracesOverlayWrapper children={props} />),
+    setTraceOverlay: null as unknown as (id: string | null) => void,
+  };
+}
+
+// Shared mock for the trace-detail API.  The overlay fetches a single
+// trace by trace_id via GET /api/v1/traces/{id} — return the response
+// shape the SlideInTraceDetail component expects.
+const mockTraceDetail: unknown = {
+  trace_id: "trace-a",
+  project_id: "test-project",
+  root_span: mockSpans[0],
+  total_input_tokens: 210,
+  total_output_tokens: 405,
+  total_cost_usd: 0.11,
+};
+
+describe("trace detail opens as overlay (#281)", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((_input: RequestInfo | URL, _init?: RequestInit) => {
+      // Route trace-detail fetch to our mock; everything else returns the list payload.
+      const url = _input.toString();
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          url.includes("/api/v1/traces/")
+            ? Promise.resolve(mockTraceDetail)
+            : Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response);
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Helper: get the first trace row's name cell (the .font-medium div in the table body).
+  function getTraceNameCell() {
+    const firstRow = document.querySelector("tbody tr");
+    return firstRow?.querySelector(".font-medium") as HTMLElement | null;
+  }
+
+  it("opens trace detail as an overlay when the trace name is clicked", async () => {
+    renderTracesPageWithOverlay();
+
+    // Wait for the table to render, then click the first trace row's name cell.
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    const traceNameCell = getTraceNameCell();
+    expect(traceNameCell).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(traceNameCell!);
+    });
+
+    // The overlay should now show trace detail content — verify the Waterfall tab is present.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Switch to waterfall view" })).toBeInTheDocument();
+    });
+
+    // The Traces list should still be visible in the DOM (mounted behind overlay).
+    expect(document.querySelector(".font-medium")).toBeInTheDocument();
+  });
+
+  it("closes the overlay and returns to the Traces list", async () => {
+    renderTracesPageWithOverlay();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    // Open the overlay by clicking the first trace row.
+    const tableBody = document.querySelector("tbody");
+    const firstRow = tableBody?.querySelector("tr");
+    const traceNameCell = firstRow?.querySelector(".font-medium") as HTMLElement;
+    await act(async () => {
+      fireEvent.click(traceNameCell);
+    });
+
+    // Wait for the SlideInTraceDetail's waterfall tab to confirm the overlay has rendered.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Switch to waterfall view" })).toBeInTheDocument();
+    });
+
+    // Close via the overlay close button (the X button, the second "Close trace detail" button).
+    const closeButtons = await screen.findAllByRole("button", { name: /close trace detail/i });
+    const xButton = closeButtons[1]; // second one is the X icon button
+    await act(async () => {
+      fireEvent.click(xButton);
+    });
+
+    // The overlay should be gone, and the Traces list should still be there.
+    expect(
+      screen.queryByRole("button", { name: /close trace detail/i })
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("table")).toBeInTheDocument();
+  });
+
+  it("keeps the Traces list scrollable behind the overlay", async () => {
+    renderTracesPageWithOverlay();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    // Open the overlay by clicking the first trace row.
+    const tableBody = document.querySelector("tbody");
+    const firstRow = tableBody?.querySelector("tr");
+    const traceNameCell = firstRow?.querySelector(".font-medium") as HTMLElement;
+    await act(async () => {
+      fireEvent.click(traceNameCell);
+    });
+
+    // All three trace names should be in the document (list + overlay title).
+    const traceNames = screen.queryAllByText(/main-trace|simple-trace|leaf-span/);
+    expect(traceNames.length).toBeGreaterThan(3); // at least list rows + overlay
+  });
+});
+
 // ── Span Kind icon tests (issue #277) ───────────────────────────
 
 describe("Span Kind icons in Traces list (issue #277)", () => {
@@ -1965,4 +2125,3 @@ describe("Span Kind icons in Traces list (issue #277)", () => {
     expect(mainStyle).not.toBe(leafStyle);
   });
 });
-

@@ -17,10 +17,10 @@ import BulkAddToDatasetModal from "@/components/BulkAddToDatasetModal";
 
 interface TracesPageProps {
   activeProject: string;
-  onNavigateToTrace: (traceId: string) => void;
-  onNavigateToTraceDetail: () => void;
   /** Time-range preset from the Header (e.g. "1h", "1d", "7d"). */
   timeRange?: string;
+  /** Callback fired when a trace row is clicked to open the Trace Detail overlay. */
+  onOpenTraceOverlay: (traceId: string) => void;
 }
 
 interface Span {
@@ -602,8 +602,7 @@ interface TableCellRendererProps {
   span: Span;
   bookmarks: Set<string>;
   onToggleBookmark: (traceId: string) => void;
-  onNavigateToTrace: (traceId: string) => void;
-  onNavigateToTraceDetail: () => void;
+  onOpenTraceOverlay: (traceId: string) => void;
 }
 
 function TableCellRenderer({
@@ -611,8 +610,7 @@ function TableCellRenderer({
   span,
   bookmarks,
   onToggleBookmark,
-  onNavigateToTrace,
-  onNavigateToTraceDetail,
+  onOpenTraceOverlay,
 }: TableCellRendererProps) {
   switch (col.key) {
     case "bookmark":
@@ -633,12 +631,9 @@ function TableCellRenderer({
       return (
         <button
           key={col.key}
-          onClick={() => {
-            onNavigateToTrace(span.trace_id);
-            onNavigateToTraceDetail();
-          }}
+          onClick={() => onOpenTraceOverlay(span.trace_id)}
           className="text-left block w-full leading-tight"
-          title="View trace waterfall"
+          title="View trace"
         >
           <div className="flex items-center gap-2">
             <span
@@ -778,9 +773,8 @@ function PaginationControls({
 
 export default function TracesPage({
   activeProject,
-  onNavigateToTrace,
-  onNavigateToTraceDetail,
   timeRange,
+  onOpenTraceOverlay,
 }: TracesPageProps) {
   const [spans, setSpans] = useState<Span[]>([]);
   const [nextCursor, setNextCursor] = useState("");
@@ -1284,8 +1278,7 @@ export default function TracesPage({
                             span={span}
                             bookmarks={bookmarks}
                             onToggleBookmark={toggleBookmark}
-                            onNavigateToTrace={onNavigateToTrace}
-                            onNavigateToTraceDetail={onNavigateToTraceDetail}
+                            onOpenTraceOverlay={onOpenTraceOverlay}
                           />
                         </td>
                       );
