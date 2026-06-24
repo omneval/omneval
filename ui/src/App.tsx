@@ -85,10 +85,11 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProject, setActiveProject] = useState<string>("");
   const [activeTraceId, setActiveTraceId] = useState<string>("");
+  const [traceDetailOpen, setTraceDetailOpen] = useState(false);
   const [activeDatasetId, setActiveDatasetId] = useState<string>("");
   const [activeConversationId, setActiveConversationId] = useState<string>("");
   // Where TraceDetail's back button leads (issue #67).
-  const [traceDetailReturnTo, setTraceDetailReturnTo] = useState<Page>("traces");
+  const [_traceDetailReturnTo, setTraceDetailReturnTo] = useState<Page>("traces");
 
   // Which page the user came from before reaching ConversationDetail, so the back button returns to the correct source page.
   const [conversationDetailReturnTo, setConversationDetailReturnTo] = useState<Page>("conversations");
@@ -288,22 +289,39 @@ export default function App() {
               <DashboardPage activeProject={activeProject} timeRange={timeRange} />
             )}
             {page === "traces" && (
-              <TracesPage
-                activeProject={activeProject}
-                timeRange={timeRange}
-                onNavigateToTrace={setActiveTraceId}
-                onNavigateToTraceDetail={() => {
-                  setTraceDetailReturnTo("traces");
-                  setPage("trace-detail");
-                }}
-              />
-            )}
-            {page === "trace-detail" && (
-              <TraceDetailPage
-                traceId={activeTraceId}
-                activeProject={activeProject}
-                onBack={() => setPage(traceDetailReturnTo)}
-              />
+              <>
+                <TracesPage
+                  activeProject={activeProject}
+                  timeRange={timeRange}
+                  onNavigateToTrace={setActiveTraceId}
+                  onNavigateToTraceDetail={() => {
+                    setTraceDetailReturnTo("traces");
+                    setTraceDetailOpen(true);
+                  }}
+                  traceDetailOpen={traceDetailOpen}
+                  activeTraceId={activeTraceId}
+                  onNavigateNextTrace={() => {}}
+                  onNavigatePrevTrace={() => {}}
+                  onTraceDetailClose={() => setTraceDetailOpen(false)}
+                />
+                {traceDetailOpen && (
+                  <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true">
+                    <div
+                      className="fixed inset-0 bg-black/50"
+                      onClick={() => setTraceDetailOpen(false)}
+                    />
+                    <div className="relative h-full w-full max-w-[90vw] bg-omneval-background-caveWall shadow-2xl">
+                      <TraceDetailPage
+                        traceId={activeTraceId}
+                        activeProject={activeProject}
+                        onClose={() => setTraceDetailOpen(false)}
+                        onNavigateNext={() => {}}
+                        onNavigatePrev={() => {}}
+                      />
+                    </div>
+                  </div>
+                )}
+              </>
             )}
             {page === "conversations" && (
               <ConversationsPage

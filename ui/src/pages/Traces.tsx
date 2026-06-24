@@ -20,6 +20,18 @@ interface TracesPageProps {
   onNavigateToTraceDetail: () => void;
   /** Time-range preset from the Header (e.g. "1h", "1d", "7d"). */
   timeRange?: string;
+  /** Whether the TraceDetail overlay is open. */
+  traceDetailOpen?: boolean;
+  /** Currently active trace ID (for keyboard navigation). */
+  activeTraceId?: string;
+  /** Setter for the active trace ID in the overlay. */
+  setActiveTraceId?: (id: string) => void;
+  /** Navigate to the next trace in the list. */
+  onNavigateNextTrace?: () => void;
+  /** Navigate to the previous trace in the list. */
+  onNavigatePrevTrace?: () => void;
+  /** Close the TraceDetail overlay. */
+  onTraceDetailClose?: () => void;
 }
 
 interface Span {
@@ -772,8 +784,15 @@ export default function TracesPage({
   onNavigateToTrace,
   onNavigateToTraceDetail,
   timeRange,
+  traceDetailOpen,
+  activeTraceId,
+  setActiveTraceId,
+  onNavigateNextTrace,
+  onNavigatePrevTrace,
 }: TracesPageProps) {
   const [spans, setSpans] = useState<Span[]>([]);
+  // Index of the trace currently shown in the overlay (when open).
+  const [selectedIndex, setSelectedIndex] = useState<number>(-1);
   const [nextCursor, setNextCursor] = useState("");
   const [loading, setLoading] = useState(false);
   const [pageSize, setPageSize] = useState(25);
@@ -1002,6 +1021,60 @@ export default function TracesPage({
       [field]: val,
     }));
   };
+
+  // ── Trace overlay keyboard navigation ──────────────────────────
+  // When the overlay is open, ArrowDown / ArrowUp move between traces.
+  // Only one trace at a time can have focus, so we use { once: true }
+  // and re-register after each navigation.
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (!traceDetailOpen) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedIndex((prev) => {
+          // Boundary: don't move past the last trace.
+          if (prev >= spans.length - 1) return prev;
+          const next = prev + 1;
+          const traceId = spans[next]?.trace_id;
+          if (traceId && setActiveTraceId && onNavigateNextTrace) {
+            setActiveTraceId(traceId);
+            onNavigateNextTrace();
+          }
+          return next;
+        });
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedIndex((prev) => {
+          // Boundary: don't move before the first trace.
+          if (prev <= 0) return prev;
+          const prevIdx = prev - 1;
+          const traceId = spans[prevIdx]?.trace_id;
+          if (traceId && setActiveTraceId && onNavigatePrevTrace) {
+            setActiveTraceId(traceId);
+            onNavigatePrevTrace();
+          }
+          return prevIdx;
+        });
+      }
+    },
+    [traceDetailOpen, spans, setActiveTraceId, onNavigateNextTrace, onNavigatePrevTrace],
+  );
+
+  useEffect(() => {
+    if (!traceDetailOpen || spans.length === 0) return;
+    // Ensure we start with the overlay showing the trace that was clicked.
+    if (selectedIndex === -1) {
+      const activeIdx = spans.findIndex((s) => s.trace_id === activeTraceId);
+      if (activeIdx >= 0) {
+        setSelectedIndex(activeIdx);
+      }
+    }
+  }, [traceDetailOpen, spans, activeTraceId, selectedIndex]);
+
+  useEffect(() => {
+    if (!traceDetailOpen) return;
+    window.addEventListener("keydown", handleKeyDown, { once: true });
+  }, [handleKeyDown, traceDetailOpen]);
 
   const visibleColumns = columns.filter((c) => c.visible);
 
@@ -1235,19 +1308,29 @@ export default function TracesPage({
                 </tr>
               </thead>
               <tbody>
-                {spans.map((span) => (
+                {spans.map((span, idx) => (
                   <tr
                     key={span.span_id}
-                    className="cursor-pointer transition-colors duration-150"
+                    className={`cursor-pointer transition-colors duration-150 ${idx === selectedIndex && traceDetailOpen ? "bg-violet-600/10" : ""}`}
                     style={{
                       borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
                     }}
+                    onClick={() => {
+                      setSelectedIndex(idx);
+                      if (traceDetailOpen && setActiveTraceId) {
+                        setActiveTraceId(span.trace_id);
+                      }
+                    }}
                     onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLElement).style.background =
-                        "rgba(124, 58, 237, 0.12)";
+                      if (idx !== selectedIndex || !traceDetailOpen) {
+                        (e.currentTarget as HTMLElement).style.background =
+                          "rgba(124, 58, 237, 0.12)";
+                      }
                     }}
                     onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLElement).style.background = "transparent";
+                      if (idx !== selectedIndex || !traceDetailOpen) {
+                        (e.currentTarget as HTMLElement).style.background = "transparent";
+                      }
                     }}
                   >
                     {visibleColumns.map((col) => {

@@ -34,7 +34,13 @@ const KIND_COLOR_MAP: Record<string, string> = {
 interface TraceDetailPageProps {
   traceId: string;
   activeProject: string;
-  onBack: () => void;
+  onBack?: () => void;
+  /** Close the overlay (only used in overlay mode). */
+  onClose?: () => void;
+  /** Navigate to the next trace (only used in overlay mode). */
+  onNavigateNext?: () => void;
+  /** Navigate to the previous trace (only used in overlay mode). */
+  onNavigatePrev?: () => void;
 }
 
 interface Span {
