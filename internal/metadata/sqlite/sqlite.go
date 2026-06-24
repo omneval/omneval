@@ -19,6 +19,17 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// PromptStore is the domain interface for prompt registry operations:
+// CRUD for prompt versions and label management.
+type PromptStore interface {
+	CreatePromptVersion(ctx context.Context, pv *domain.PromptVersion) error
+	GetPromptVersion(ctx context.Context, projectID, name string, version int64) (*domain.PromptVersion, error)
+	GetPromptByLabel(ctx context.Context, projectID, name, label string) (*domain.PromptVersion, error)
+	ListPromptNames(ctx context.Context, projectID string) ([]string, error)
+	ListPromptVersions(ctx context.Context, projectID, name string) ([]*domain.PromptVersion, error)
+	SetPromptLabel(ctx context.Context, label *domain.PromptLabel) error
+}
+
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
@@ -770,6 +781,14 @@ func (s *Store) SetPromptLabel(ctx context.Context, label *domain.PromptLabel) e
 		return fmt.Errorf("sqlite: set prompt label: %w", err)
 	}
 	return nil
+}
+
+// PromptStore returns a focused PromptStore interface for callers that only
+// need prompt operations. The Store itself already implements PromptStore,
+// so this simply returns the receiver to expose the narrower type at the
+// package boundary.
+func (s *Store) PromptStore() PromptStore {
+	return s
 }
 
 // ---- Eval Rules ----

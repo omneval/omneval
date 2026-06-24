@@ -161,10 +161,11 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	// Prompt registry handler. A CachingValidator is wired in so that SDK
 	// callers can authenticate GET prompt endpoints using X-API-Key in
 	// addition to session cookies.
-	deps.PromptCache = handler.NewPromptCache(store)
+	promptStore := store.PromptStore()
+	deps.PromptCache = handler.NewPromptCache(promptStore)
 	deps.APIKeyValidator = internalauth.NewCachingValidator(store)
 	deps.Prompt = &handler.PromptHandler{
-		PromptStore:     store,
+		PromptStore:     promptStore,
 		Cache:           deps.PromptCache,
 		SessionStore:    h,
 		ProjectResolver: h,
@@ -173,7 +174,7 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 
 	deps.EvalRule = &handler.EvalRuleHandler{
 		EvalRuleStore:   store,
-		PromptStore:     store,
+		PromptStore:     promptStore,
 		SessionStore:    h,
 		ProjectResolver: h,
 		// DefaultJudgeModel is set below.

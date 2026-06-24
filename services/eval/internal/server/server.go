@@ -85,15 +85,16 @@ func Run() error {
 	evalQ := redisqueue.NewEvalQueue(rdb)
 
 	// Open the metadata store so the judge can resolve prompt templates
-	// from the Prompt Registry.
+	// from the Prompt Registry. We only need the focused PromptStore.
 	store, err := openMetadataStore(cfg)
 	if err != nil {
 		return fmt.Errorf("eval: open metadata store: %w", err)
 	}
 	defer store.Close()
+	promptStore := store.PromptStore()
 
 	// Initialize judge with the Prompt Registry resolver.
-	judgeLLM := judge.New(cfg, prompts.NewCachingResolver(store.PromptStore()))
+	judgeLLM := judge.New(cfg, prompts.NewCachingResolver(promptStore))
 
 	// Create worker.
 	w := worker.New(evalQ, judgeLLM, cfg)
