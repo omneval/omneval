@@ -6,7 +6,7 @@ import (
 )
 
 // PostgresEvalRuleStore wraps *postgres.Store so that callers can depend on
-// the narrower metadata.Store interface instead of the full god Store.
+// the narrower metadata.EvalRuleStore interface instead of the full god Store.
 // Embedding the concrete store promotes all domain methods; the EvalRuleStore()
 // method returns the embedded type as the focused interface.
 type PostgresEvalRuleStore struct {
@@ -19,7 +19,7 @@ func (s *PostgresEvalRuleStore) EvalRuleStore() EvalRuleStore {
 }
 
 // SQLiteEvalRuleStore wraps *sqlite.Store so that callers can depend on the
-// narrower metadata.Store interface instead of the full god Store.
+// narrower metadata.EvalRuleStore interface instead of the full god Store.
 type SQLiteEvalRuleStore struct {
 	*sqlite.Store
 }
@@ -28,10 +28,3 @@ type SQLiteEvalRuleStore struct {
 func (s *SQLiteEvalRuleStore) EvalRuleStore() EvalRuleStore {
 	return s.Store
 }
-
-// --- Compile-time interface compliance checks ---
-
-var (
-	_ Store = (*PostgresEvalRuleStore)(nil)
-	_ Store = (*SQLiteEvalRuleStore)(nil)
-)
