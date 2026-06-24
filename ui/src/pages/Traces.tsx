@@ -3,6 +3,7 @@ import { colors } from "@/theme";
 import { OnboardingEmptyState } from "@/components/OnboardingEmptyState";
 import { Skeleton } from "@/components/Skeleton";
 import { EmptyState } from "@/components/EmptyState";
+import { SpanKindIcon } from "@/components/spanKind";
 import {
   formatTimeWithYear,
   formatDuration,
@@ -639,7 +640,10 @@ function TableCellRenderer({
           className="text-left block w-full leading-tight"
           title="View trace waterfall"
         >
-          <div className="text-omneval-text-pure font-medium">{span.name}</div>
+          <div className="flex items-center gap-2">
+            <SpanKindIcon kind={span.kind} />
+            <span className="text-omneval-text-pure font-medium">{span.name}</span>
+          </div>
           <div className="text-omneval-text-muted text-[11px] font-mono truncate max-w-[120px]">
             {span.trace_id.slice(0, 12)}…
           </div>

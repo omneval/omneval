@@ -10,6 +10,7 @@ import {
   Cell,
 } from "recharts";
 import { colors } from "@/theme";
+import { KIND_COLOR_MAP } from "@/components/spanKind";
 import Breadcrumb from "@/components/Breadcrumb";
 import JsonCodeBlock from "@/components/JsonCodeBlock";
 import { Skeleton } from "@/components/Skeleton";
@@ -18,16 +19,6 @@ import { formatTime, formatDuration, formatMs, totalTokens, parseChatTurns, getT
 import { useToast } from "@/components/Toast";
 import SaveToDatasetModal from "@/components/SaveToDatasetModal";
 import { extractSpanMessages } from "@/utils/spanMessages";
-
-// ── Constants ──────────────────────────────────────────────────────
-
-const KIND_COLOR_MAP: Record<string, string> = {
-  llm: colors.accents.emberFlare,
-  tool: colors.accents.softGlow,
-  agent: colors.accents.flicker,
-  chain: "#60a5fa",
-  internal: colors.typography.ashGrey,
-};
 
 // ── Types ──────────────────────────────────────────────────────────
 

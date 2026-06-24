@@ -1867,3 +1867,113 @@ describe("filter panel styling (#142)", () => {
   });
 });
 
+// ── Span Kind icon tests (issue #277) ───────────────────────────
+
+describe("Span Kind icons in Traces list (issue #277)", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: mockSpans,
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Helper: find the kind-dot style by navigating from the name text to the
+  // SpanKindIcon wrapper (which carries a `title` matching the kind) then its dot.
+  function findKindDotStyle(name: string, kind: string): string | null {
+    const nameSpan = screen.getByText(name);
+    expect(nameSpan).toBeInTheDocument();
+    const button = nameSpan.closest("button")!;
+    expect(button).toBeInTheDocument();
+    // SpanKindIcon renders:
+    //   <span title={kind}>
+    //     <span style={{ backgroundColor: color }} aria-hidden="true" />
+    //   </span>
+    // Query the button for the icon wrapper by its title attribute.
+    const iconSpansList = button.querySelectorAll("[title]");
+    expect(iconSpansList.length).toBeGreaterThan(0);
+    // Find the one that matches the kind.
+    let iconSpan: HTMLElement | null = null;
+    for (let i = 0; i < iconSpansList.length; i++) {
+      const el = iconSpansList[i] as HTMLElement;
+      if (el.getAttribute("title") === kind) {
+        iconSpan = el;
+        break;
+      }
+    }
+    expect(iconSpan).not.toBeNull();
+    expect(iconSpan).toBeInTheDocument();
+    // The inner dot has aria-hidden="true" and a style with backgroundColor.
+    const dotEl = iconSpan!.querySelector("span[aria-hidden='true']") as
+      | HTMLElement
+      | null;
+    expect(dotEl).toBeInTheDocument();
+    return dotEl?.getAttribute("style") ?? null;
+  }
+
+  it("renders a SpanKindIcon dot next to each trace name", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // Verify each trace name has a kind dot.
+    findKindDotStyle("main-trace", "chain");
+    findKindDotStyle("simple-trace", "chain");
+    findKindDotStyle("leaf-span", "llm");
+  });
+
+  it("renders the correct color for an LLM root span", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("leaf-span")).toBeInTheDocument();
+    });
+
+    // trace-c is kind: "llm" — the icon should be emberFlare (#7C3AED).
+    const style = findKindDotStyle("leaf-span", "llm");
+    expect(style).toContain("background");
+    // emberFlare is #7C3AED → RGB(124, 58, 237)
+    expect(style).toContain("rgb(124, 58, 237)");
+  });
+
+  it("renders the correct color for a chain root span", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // trace-a is kind: "chain" — the icon should be #60a5fa → RGB(96, 165, 250).
+    const style = findKindDotStyle("main-trace", "chain");
+    expect(style).toContain("background");
+    // chain color is #60a5fa → RGB(96, 165, 250)
+    expect(style).toContain("rgb(96, 165, 250)");
+  });
+
+  it("renders a different color for different span kinds in the same view", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+      expect(screen.getByText("leaf-span")).toBeInTheDocument();
+    });
+
+    // main-trace is chain (blue), leaf-span is llm (red) — they must differ.
+    const mainStyle = findKindDotStyle("main-trace", "chain");
+    const leafStyle = findKindDotStyle("leaf-span", "llm");
+
+    // The backgrounds must be different colors.
+    expect(mainStyle).not.toBe(leafStyle);
+  });
+});
+

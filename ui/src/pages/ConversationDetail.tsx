@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { colors } from "@/theme";
+import { KIND_COLOR_MAP } from "@/components/spanKind";
 import Breadcrumb from "@/components/Breadcrumb";
 import { CopyButton } from "@/components/CopyButton";
 import { Skeleton } from "@/components/Skeleton";
@@ -9,18 +10,6 @@ import {
   formatDuration,
   parseChatTurns,
 } from "@/utils/formatters";
-
-// ── Constants ──────────────────────────────────────────────────────
-
-// Mirrors KIND_COLOR_MAP in TraceDetail.tsx so kind pills look identical
-// across the two pages.
-const KIND_COLOR_MAP: Record<string, string> = {
-  llm: colors.accents.emberFlare,
-  tool: colors.accents.softGlow,
-  agent: colors.accents.flicker,
-  chain: "#60a5fa",
-  internal: colors.typography.ashGrey,
-};
 
 /** localStorage key persisting the "Show full message history" toggle. */
 const SHOW_FULL_HISTORY_KEY = "omneval_conv_show_full_history";
