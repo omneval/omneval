@@ -3,7 +3,7 @@ import { colors } from "@/theme";
 import { OnboardingEmptyState } from "@/components/OnboardingEmptyState";
 import { Skeleton } from "@/components/Skeleton";
 import { EmptyState } from "@/components/EmptyState";
-import { SpanKindIcon } from "@/components/spanKind";
+import { SpanKindIcon, getSpanKindColor, SpanKind } from "@/modules/spanKindVisuals";
 import {
   formatTimeWithYear,
   formatDuration,
@@ -641,7 +641,12 @@ function TableCellRenderer({
           title="View trace waterfall"
         >
           <div className="flex items-center gap-2">
-            <SpanKindIcon kind={span.kind} />
+            <span
+              title={span.kind}
+              style={{ color: getSpanKindColor(span.kind as SpanKind), display: "inline-flex" }}
+            >
+              <SpanKindIcon kind={span.kind as SpanKind} />
+            </span>
             <span className="text-omneval-text-pure font-medium">{span.name}</span>
           </div>
           <div className="text-omneval-text-muted text-[11px] font-mono truncate max-w-[120px]">

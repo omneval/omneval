@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { colors } from "@/theme";
-import { KIND_COLOR_MAP } from "@/components/spanKind";
 import Breadcrumb from "@/components/Breadcrumb";
 import { CopyButton } from "@/components/CopyButton";
 import { Skeleton } from "@/components/Skeleton";
@@ -10,6 +9,19 @@ import {
   formatDuration,
   parseChatTurns,
 } from "@/utils/formatters";
+import { getSpanKindColor } from "@/modules/spanKindVisuals";
+
+// ── Constants ──────────────────────────────────────────────────────
+
+/** Color map sourced from the shared spanKindVisuals module so kind pills
+ *  look identical across all pages. */
+const KIND_COLOR_MAP: Record<string, string> = {
+  llm: getSpanKindColor("llm"),
+  tool: getSpanKindColor("tool"),
+  agent: getSpanKindColor("agent"),
+  chain: getSpanKindColor("chain"),
+  internal: getSpanKindColor("internal"),
+};
 
 /** localStorage key persisting the "Show full message history" toggle. */
 const SHOW_FULL_HISTORY_KEY = "omneval_conv_show_full_history";
