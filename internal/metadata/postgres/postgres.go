@@ -236,7 +236,7 @@ func (s *Store) GetProject(ctx context.Context, projectID string) (*domain.Proje
 
 func (s *Store) ListProjects(ctx context.Context, orgID string) ([]*domain.Project, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT project_id, org_id, name, created_at FROM projects WHERE org_id = $1 ORDER BY project_id`, orgID,
+		`SELECT project_id, org_id, name, created_at FROM projects WHERE org_id = $1 OR $1 = '' ORDER BY project_id`, orgID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list projects: %w", err)
