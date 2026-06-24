@@ -29,6 +29,29 @@ type BookmarkStore interface {
 	RemoveBookmarksForProject(ctx context.Context, projectID string) error
 }
 
+// ProjectStore is the focused interface for project CRUD and organization
+// lookups. It is implemented by *Store but also exposed via its own receiver
+// type so callers can depend on the narrow interface rather than the full god
+// Store type.
+type ProjectStore struct {
+	*Store
+}
+
+// CreateProject inserts a new project record.
+func (ps *ProjectStore) CreateProject(ctx context.Context, project *domain.Project) error {
+	return ps.Store.CreateProject(ctx, project)
+}
+
+// GetProject retrieves a project by its ID.
+func (ps *ProjectStore) GetProject(ctx context.Context, projectID string) (*domain.Project, error) {
+	return ps.Store.GetProject(ctx, projectID)
+}
+
+// ListProjects lists all projects for an organization (empty orgID returns all).
+func (ps *ProjectStore) ListProjects(ctx context.Context, orgID string) ([]*domain.Project, error) {
+	return ps.Store.ListProjects(ctx, orgID)
+}
+
 // PromptStore is the domain interface for prompt registry operations:
 // CRUD for prompt versions and label management.
 type PromptStore interface {
@@ -799,6 +822,14 @@ func (s *Store) SetPromptLabel(ctx context.Context, label *domain.PromptLabel) e
 // package boundary.
 func (s *Store) BookmarkStore() BookmarkStore {
 	return s
+}
+
+// ProjectStore returns a focused ProjectStore receiver for callers that only
+// need project operations. The Store itself already implements the focused
+// methods, so this wraps the receiver to expose the narrower type at the
+// package boundary.
+func (s *Store) ProjectStore() *ProjectStore {
+	return &ProjectStore{Store: s}
 }
 
 // PromptStore returns a focused PromptStore interface for callers that only

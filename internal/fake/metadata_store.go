@@ -718,6 +718,10 @@ func (f *FakeMetadataStore) ListDatasetRunItems(ctx context.Context, runID strin
 // need bookmark operations.
 func (f *FakeMetadataStore) BookmarkStore() metadata.BookmarkStore { return f }
 
+// ProjectStore returns a focused ProjectStore interface for callers that only
+// need project operations.
+func (f *FakeMetadataStore) ProjectStore() metadata.ProjectStore { return f }
+
 // PromptStore returns a focused PromptStore interface for callers that only
 // need prompt operations.
 func (f *FakeMetadataStore) PromptStore() metadata.PromptStore { return f }
