@@ -219,8 +219,14 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		SessionStore: h,
 	}
 
-	// Load pricing table for the models endpoint.
-	deps.Pricing = pricing.GetDefaultBundled()
+	// Load pricing table for the models endpoint (live fetch, bundled fallback).
+	pricing.InitBundledPricing()
+	pricingTable, err := pricing.Fetch(nil)
+	if err != nil {
+		slog.Warn("query: pricing unavailable, models endpoint will return empty list", "error", err)
+	} else {
+		deps.Pricing = pricingTable
+	}
 
 	// Health and readiness probes.
 	p := probe.New()
