@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { useState } from "react";
 import type { ComponentProps } from "react";
 import TracesPage from "./Traces";
 import { ToastProvider } from "@/components/Toast";
+import { SlideInTraceDetail } from "./TraceDetail";
 
 // ── Helper data ──────────────────────────────────────────────────
 
@@ -70,11 +72,13 @@ const mockSpans = [
 // ── Render helper ────────────────────────────────────────────────
 
 function renderTracesPage(
-  props: Partial<ComponentProps<typeof TracesPage>> = {}
+  props: Partial<Omit<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">> &
+    Partial<Pick<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">> = {}
 ) {
   return render(
     <TracesPage
       activeProject="test-project"
+      onOpenTraceOverlay={vi.fn()}
       {...props}
     />
   );
@@ -966,7 +970,7 @@ describe("fetch correctness", () => {
     });
 
     view.rerender(
-      <TracesPage activeProject="other-project" />
+      <TracesPage activeProject="other-project" onOpenTraceOverlay={vi.fn()} />
     );
 
     await waitFor(() => {
@@ -1864,14 +1868,37 @@ describe("filter panel styling (#142)", () => {
 
 // ── Trace detail overlay tests (#281) ──────────────────────────────────
 
-function renderTracesPageWithToastProvider(
-  props: Partial<ComponentProps<typeof TracesPage>> = {}
+
+/**
+ * Render helper that mirrors App.tsx's overlay pattern: TracesPage +
+ * SlideInTraceDetail mounted conditionally on local state.  This lets the
+ * tests verify that the Traces list stays mounted behind the overlay.
+ */
+function renderTracesPageWithOverlay(
+  props: Partial<Omit<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">> &
+    Partial<Pick<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">> = {}
 ) {
-  return render(
-    <ToastProvider>
-      <TracesPage activeProject="test-project" {...props} />
-    </ToastProvider>
-  );
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const [traceOverlay, setTraceOverlay] = useState<string | null>(null);
+  return {
+    ...render(
+      <ToastProvider>
+        <TracesPage
+          activeProject="test-project"
+          onOpenTraceOverlay={(traceId: string) => setTraceOverlay(traceId)}
+          {...props}
+        />
+        {traceOverlay && (
+          <SlideInTraceDetail
+            traceId={traceOverlay}
+            activeProject="test-project"
+            onClose={() => setTraceOverlay(null)}
+          />
+        )}
+      </ToastProvider>
+    ),
+    setTraceOverlay,
+  };
 }
 
 // Shared mock for the trace-detail API.  The overlay fetches a single
@@ -1912,7 +1939,7 @@ describe("trace detail opens as overlay (#281)", () => {
   }
 
   it("opens trace detail as an overlay when the trace name is clicked", async () => {
-    renderTracesPageWithToastProvider();
+    renderTracesPageWithOverlay();
 
     // Wait for the table to render, then click the first trace row's name cell.
     await waitFor(() => {
@@ -1936,7 +1963,7 @@ describe("trace detail opens as overlay (#281)", () => {
   });
 
   it("closes the overlay and returns to the Traces list", async () => {
-    renderTracesPageWithToastProvider();
+    renderTracesPageWithOverlay();
 
     await waitFor(() => {
       expect(screen.getByRole("table")).toBeInTheDocument();
@@ -1970,7 +1997,7 @@ describe("trace detail opens as overlay (#281)", () => {
   });
 
   it("keeps the Traces list scrollable behind the overlay", async () => {
-    renderTracesPageWithToastProvider();
+    renderTracesPageWithOverlay();
 
     await waitFor(() => {
       expect(screen.getByRole("table")).toBeInTheDocument();

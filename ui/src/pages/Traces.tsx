@@ -11,7 +11,6 @@ import {
 } from "@/utils/formatters";
 import { presetToFromTo } from "@/utils/timeRange";
 import BulkAddToDatasetModal from "@/components/BulkAddToDatasetModal";
-import { SlideInTraceDetail } from "./TraceDetail";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -19,6 +18,8 @@ interface TracesPageProps {
   activeProject: string;
   /** Time-range preset from the Header (e.g. "1h", "1d", "7d"). */
   timeRange?: string;
+  /** Callback fired when a trace row is clicked to open the Trace Detail overlay. */
+  onOpenTraceOverlay: (traceId: string) => void;
 }
 
 interface Span {
@@ -764,6 +765,7 @@ function PaginationControls({
 export default function TracesPage({
   activeProject,
   timeRange,
+  onOpenTraceOverlay,
 }: TracesPageProps) {
   const [spans, setSpans] = useState<Span[]>([]);
   const [nextCursor, setNextCursor] = useState("");
@@ -805,9 +807,6 @@ export default function TracesPage({
   const [filterState, setFilterState] = useState<FilterState>(DEFAULT_FILTERS);
   const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
-
-  // ── Trace Detail Overlay ────────────────────────────────────────
-  const [traceOverlay, setTraceOverlay] = useState<{ traceId: string } | null>(null);
 
   // ── Row Selection ────────────────────────────────────────────────
   const [selectedSpanIds, setSelectedSpanIds] = useState<Set<string>>(new Set());
@@ -1270,7 +1269,7 @@ export default function TracesPage({
                             span={span}
                             bookmarks={bookmarks}
                             onToggleBookmark={toggleBookmark}
-                            onOpenTraceOverlay={(traceId) => setTraceOverlay({ traceId })}
+                            onOpenTraceOverlay={onOpenTraceOverlay}
                           />
                         </td>
                       );
@@ -1299,15 +1298,6 @@ export default function TracesPage({
             spanIds={Array.from(selectedSpanIds)}
             onClose={() => setIsBulkModalOpen(false)}
             onSuccess={handleBulkAddSuccess}
-          />
-        )}
-
-        {/* Trace Detail Overlay */}
-        {traceOverlay && (
-          <SlideInTraceDetail
-            traceId={traceOverlay.traceId}
-            activeProject={activeProject}
-            onClose={() => setTraceOverlay(null)}
           />
         )}
         </div>

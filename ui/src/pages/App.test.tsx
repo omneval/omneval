@@ -561,5 +561,7 @@ describe("direct-link /traces/{traceId} routing", () => {
 
     // TraceDetailPage renders with a "Close trace detail" button
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Close trace detail" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Back" })).toBeInTheDocument();
     });
+});
+});

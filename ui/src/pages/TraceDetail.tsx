@@ -839,7 +839,7 @@ function SlideInDetailPanel({
               <span>{formatDuration(span.start_time, span.end_time)}</span>
               <span>{totalTokens(span).toLocaleString()} tokens</span>
               {span.cost_usd > 0 && (
-                <span style={{ color: colors.accents.emberFlare }}>${span.cost_usd.toFixed(4)}</span>
+                <span style={{ color: colors.accents.emberFlare }}>${(span.cost_usd ?? 0).toFixed(4)}</span>
               )}
             </div>
           </div>
