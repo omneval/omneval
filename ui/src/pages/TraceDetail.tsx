@@ -37,10 +37,6 @@ interface TraceDetailPageProps {
   onBack?: () => void;
   /** Close the overlay (only used in overlay mode). */
   onClose?: () => void;
-  /** Navigate to the next trace (only used in overlay mode). */
-  onNavigateNext?: () => void;
-  /** Navigate to the previous trace (only used in overlay mode). */
-  onNavigatePrev?: () => void;
 }
 
 interface Span {
@@ -122,8 +118,6 @@ export default function TraceDetailPage({
   activeProject,
   onBack,
   onClose,
-  onNavigateNext,
-  onNavigatePrev,
 }: TraceDetailPageProps) {
   // In overlay mode `onBack` is absent; fall back to `onClose`.
   const handleBack = onBack ?? onClose;
@@ -328,30 +322,6 @@ export default function TraceDetailPage({
             Back
           </button>
           <div className="flex-1" />
-          {onNavigateNext && onNavigatePrev && (
-            <div className="flex items-center gap-1">
-              <button
-                onClick={onNavigatePrev}
-                className="px-2 py-1 text-xs rounded transition-colors"
-                style={{ color: colors.typography.ashGrey }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = colors.typography.pureLight)}
-                onMouseLeave={(e) => (e.currentTarget.style.color = colors.typography.ashGrey)}
-                title="Previous trace"
-              >
-                ▲
-              </button>
-              <button
-                onClick={onNavigateNext}
-                className="px-2 py-1 text-xs rounded transition-colors"
-                style={{ color: colors.typography.ashGrey }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = colors.typography.pureLight)}
-                onMouseLeave={(e) => (e.currentTarget.style.color = colors.typography.ashGrey)}
-                title="Next trace"
-              >
-                ▼
-              </button>
-            </div>
-          )}
           {liveStatus !== null && (
             <div
               className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs"

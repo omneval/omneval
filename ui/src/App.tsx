@@ -314,8 +314,6 @@ export default function App() {
                         traceId={activeTraceId}
                         activeProject={activeProject}
                         onClose={() => setTraceDetailOpen(false)}
-                        onNavigateNext={() => {}}
-                        onNavigatePrev={() => {}}
                       />
                     </div>
                   </div>
