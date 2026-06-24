@@ -157,6 +157,67 @@ describe("DashboardPage", () => {
     });
   });
 
+  // ── Issue #233: Unpriced indicator ─────────────────────────────────
+
+  it("#233: shows 'Unpriced' for models with tokens but $0 cost", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url === "/api/v1/analytics/spans") {
+        return resolveAnalyticsResponse({
+          rows: [
+            {
+              model: "unknown-model",
+              input_tokens: 1000,
+              output_tokens: 500,
+              total_cost: 0,
+            },
+          ],
+        });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      // Model with tokens but zero cost should show "Unpriced" not "$0.0000"
+      expect(screen.getByText("Unpriced")).toBeInTheDocument();
+    });
+  });
+
+  // ── Issue #233: Exclude non-LLM spans from model charts ─────────
+
+  it("#233: model queries include kind='llm' filter", async () => {
+    const modelQueries: AnalyticsRequest[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (url === "/api/v1/analytics/spans" && options?.body) {
+        const body = JSON.parse(options.body as string) as AnalyticsRequest;
+        // Detect model-based queries: group_by includes model field
+        if (body.group_by?.some((g: { field: string }) => g.field === "model")) {
+          modelQueries.push(body);
+          return resolveAnalyticsResponse({ rows: [] });
+        }
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    });
+
+    // Every model-based query must include kind='llm' filter
+    expect(modelQueries.length).toBeGreaterThan(0);
+    for (const q of modelQueries) {
+      const llmFilter = q.filters?.find(
+        (f: { field: string; op: string; value: unknown }) => f.field === "kind" && f.op === "eq" && f.value === "llm"
+      );
+      expect(llmFilter).toBeDefined();
+    }
+  });
+
   it("displays traces over time when data is returned", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       if (url === "/api/v1/analytics/spans") {

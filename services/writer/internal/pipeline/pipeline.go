@@ -201,11 +201,32 @@ func (p *Pipeline) commitLake(ctx context.Context, spans []*domain.Span) error {
 	return nil
 }
 
-// computeCosts fills in span.CostUSD and defaults missing start/end times,
-// in place, before the batch is committed to the Lake.
+// computeCosts fills in span.CostUSD, normalizes model names, and defaults
+// missing start/end times, in place, before the batch is committed to the Lake.
+//
+// Model names are normalized (provider prefixes stripped, case folded) so that
+// the pricing table is consulted with the canonical model name (e.g.
+// "openai/gpt-4o" → "gpt-4o").  The original value is preserved in
+// span.Attributes["omneval/raw_model"] for auditability.  Non-LLM spans are
+// skipped — they may legitimately have no model name.
 func (p *Pipeline) computeCosts(spans []*domain.Span) {
 	now := time.Now()
 	for _, span := range spans {
+		// Only normalize and price LLM spans.  Non-LLM spans may have no model
+		// or an unrelated name (tool names, service names, etc.).
+		if span.Kind == domain.SpanKindLLM && span.Model != "" {
+			rawModel := span.Model
+			normalized := pricing.NormalizeModel(rawModel)
+			if normalized != "" && normalized != rawModel {
+				// Preserve the original name so consumers can still inspect it.
+				if span.Attributes == nil {
+					span.Attributes = make(map[string]any)
+				}
+				span.Attributes["omneval/raw_model"] = rawModel
+				span.Model = normalized
+			}
+		}
+
 		var cost float64
 		if p.pricing != nil {
 			cost = p.pricing.Cost(span.Model, span.InputTokens, span.OutputTokens)
