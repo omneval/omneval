@@ -1289,3 +1289,383 @@ function SpanRow({
   );
 }
 
+// ── Slide-In Trace Detail Overlay ──────────────────────────────────
+
+interface SlideInTraceDetailProps {
+  traceId: string;
+  activeProject: string;
+  onClose: () => void;
+}
+
+export function SlideInTraceDetail({
+  traceId,
+  activeProject,
+  onClose,
+}: SlideInTraceDetailProps) {
+  const { addToast } = useToast();
+  const [trace, setTrace] = useState<Span | null>(null);
+  const [traceRollup, setTraceRollup] = useState<{
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [saveSpan, setSaveSpan] = useState<{
+    span: Span;
+    input: string;
+    output?: string;
+  } | null>(null);
+  const [liveStatus, setLiveStatus] = useState<"live" | "stalled" | null>(null);
+  const liveStartRef = useRef<number | null>(null);
+  const [viewMode, setViewMode] = useState<"waterfall" | "tree">("waterfall");
+  const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
+  const [expandedSpanId, setExpandedSpanId] = useState<string | null>(null);
+
+  // Fetch trace detail and start live polling while the root span is absent.
+  useEffect(() => {
+    const controller = new AbortController();
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const loadTrace = () =>
+      fetch(
+        `/api/v1/traces/${traceId}?project_id=${encodeURIComponent(activeProject)}`,
+        { signal: controller.signal },
+      ).then((res) => {
+        if (!res.ok) {
+          if (res.status === 404) throw new Error("Trace not found");
+          throw new Error(`Failed to load trace (${res.status})`);
+        }
+        return res.json() as Promise<TraceResponse>;
+      });
+
+    const applyData = (data: TraceResponse) => {
+      setTrace(data.root_span);
+      setTraceRollup({
+        inputTokens: data.total_input_tokens ?? 0,
+        outputTokens: data.total_output_tokens ?? 0,
+        costUsd: data.total_cost_usd ?? 0,
+      });
+    };
+
+    setLoading(true);
+    setError(null);
+    setLiveStatus(null);
+    liveStartRef.current = null;
+
+    loadTrace()
+      .then((data) => {
+        applyData(data);
+        setLoading(false);
+        const rootArrived = !data.root_span?.parent_id;
+        if (!rootArrived) {
+          setLiveStatus("live");
+          liveStartRef.current = Date.now();
+          intervalId = setInterval(() => {
+            if (
+              liveStartRef.current !== null &&
+              Date.now() - liveStartRef.current > LIVE_TIMEOUT_MS
+            ) {
+              setLiveStatus("stalled");
+              if (intervalId !== null) clearInterval(intervalId);
+              return;
+            }
+            loadTrace()
+              .then((pollData) => {
+                applyData(pollData);
+                if (pollData.root_span?.parent_id) return;
+                setLiveStatus(null);
+                if (intervalId !== null) clearInterval(intervalId);
+              })
+              .catch(() => {});
+          }, LIVE_POLL_INTERVAL_MS);
+        }
+      })
+      .catch((err) => {
+        if (err.name !== "AbortError") {
+          setError(err.message);
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      controller.abort();
+      if (intervalId !== null) clearInterval(intervalId);
+    };
+  }, [traceId, activeProject]);
+
+  const handleSaveSuccess = useCallback(() => {
+    setSaveSpan(null);
+    addToast("success", "Span saved to dataset");
+  }, [addToast]);
+
+  // Flatten the span tree for the waterfall chart
+  const allSpans = useMemo(() => {
+    if (!trace) return [];
+    const result: Span[] = [trace];
+    const collect = (spans: Span[]) => {
+      for (const span of spans) {
+        result.push(span);
+        if (span.children) collect(span.children);
+      }
+    };
+    if (trace.children) collect(trace.children);
+    return result;
+  }, [trace]);
+
+  // Waterfall chart data
+  const waterfallData = useMemo(() => {
+    if (!trace) return [];
+    const baseTime = new Date(trace.start_time).getTime();
+    return allSpans.map((span) => {
+      const start = new Date(span.start_time).getTime() - baseTime;
+      const end = new Date(span.end_time).getTime() - baseTime;
+      const duration = end - start;
+      const color = KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall;
+      return {
+        name: span.name,
+        spanId: span.span_id,
+        start,
+        duration,
+        color,
+        kind: span.kind,
+        model: span.model,
+      } satisfies WaterfallEntry;
+    });
+  }, [allSpans, trace]);
+
+  const selectedSpan = allSpans.find((s) => s.span_id === selectedSpanId);
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-40 bg-black/40"
+        onClick={onClose}
+        aria-hidden
+      />
+      {/* Panel */}
+      <aside
+        className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-5xl border-l overflow-hidden flex flex-col"
+        style={{
+          backgroundColor: colors.backgrounds.abyssBlack,
+          borderColor: colors.backgrounds.caveWall,
+          boxShadow: "-8px 0 24px rgba(0,0,0,0.5)",
+        }}
+        aria-label="Trace detail"
+      >
+        {/* Header with breadcrumb */}
+        <div className="flex flex-col gap-2 px-4 py-3 border-b flex-shrink-0"
+          style={{ borderColor: colors.backgrounds.caveWall }}
+        >
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onClose}
+              className="flex items-center gap-1.5 text-sm px-2 py-1 rounded transition-colors"
+              style={{ color: colors.typography.ashGrey }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = colors.typography.pureLight)}
+              onMouseLeave={(e) => (e.currentTarget.style.color = colors.typography.ashGrey)}
+              aria-label="Close trace detail"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M10 3l-5 5 5 5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Back
+            </button>
+            <div className="flex-1 min-w-0">
+              <span className="text-xs text-omneval-text-muted font-mono truncate block">
+                {traceId}
+              </span>
+            </div>
+            {liveStatus !== null && (
+              <div
+                className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs flex-shrink-0"
+                style={{
+                  background:
+                    liveStatus === "live"
+                      ? "rgba(139, 92, 246, 0.15)"
+                      : "rgba(107, 114, 128, 0.15)",
+                  color:
+                    liveStatus === "live"
+                      ? colors.accents.flicker
+                      : colors.typography.ashGrey,
+                }}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${liveStatus === "live" ? "animate-pulse" : ""}`}
+                  style={{
+                    background:
+                      liveStatus === "live"
+                        ? colors.accents.flicker
+                        : colors.typography.ashGrey,
+                  }}
+                />
+                {liveStatus === "live" ? "Live" : "Stalled"}
+              </div>
+            )}
+            <button
+              onClick={onClose}
+              className="flex-shrink-0 p-1.5 rounded-md transition-colors"
+              style={{ color: colors.typography.ashGrey }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.backgrounds.slightIllumination)}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+              aria-label="Close trace detail"
+            >
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* View mode tabs */}
+        <div className="flex items-center gap-1 px-4 py-2 border-b flex-shrink-0" style={{ borderColor: colors.backgrounds.caveWall }}>
+          {(["waterfall", "tree"] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors capitalize ${
+                mode === viewMode
+                  ? "text-omneval-violet-pale"
+                  : "text-omneval-text-muted hover:text-omneval-text-pure"
+              }`}
+              style={
+                mode === viewMode
+                  ? {
+                      background: colors.backgrounds.charcoalDepth,
+                      borderBottom: `2px solid ${colors.accents.emberFlare}`,
+                    }
+                  : {}
+              }
+              aria-label={`Switch to ${mode} view`}
+            >
+              {mode === "waterfall" ? "Waterfall" : "Tree"}
+            </button>
+          ))}
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Main content */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {loading ? (
+              <div className="flex flex-col flex-1 p-4">
+                <div className="px-4 py-3 border-b mb-4" style={{ borderColor: colors.backgrounds.caveWall }}>
+                  <Skeleton className="h-5 w-48 rounded" />
+                </div>
+                <div className="flex-1 overflow-auto p-4">
+                  <Skeleton className="h-16 w-full rounded-lg mb-4" />
+                  <LoadingState rows={5} rowHeight="2rem" />
+                </div>
+              </div>
+            ) : error || !trace ? (
+              <div className="flex-1 overflow-auto p-4">
+                <EmptyState
+                  variant="error"
+                  title={error ?? "Trace not found"}
+                  description="The requested trace could not be loaded"
+                  actionLabel="Close"
+                  onAction={onClose}
+                />
+              </div>
+            ) : (
+              <>
+                {/* Root span info bar */}
+                <div className="mx-4 mt-4 mb-4 px-4 py-3 rounded-lg border flex-shrink-0"
+                  style={{
+                    background: colors.backgrounds.charcoalDepth,
+                    borderColor: KIND_COLOR_MAP[trace.kind] ? `${KIND_COLOR_MAP[trace.kind]}44` : colors.backgrounds.caveWall,
+                    borderLeft: `3px solid ${KIND_COLOR_MAP[trace.kind] || colors.backgrounds.caveWall}`,
+                  }}
+                >
+                  <div className="flex items-center gap-3 mb-1">
+                    <span className="text-sm font-semibold text-omneval-text-pure">{trace.name}</span>
+                    {trace.kind && (
+                      <span
+                        className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0"
+                        style={{
+                          background: `${KIND_COLOR_MAP[trace.kind] || colors.backgrounds.caveWall}22`,
+                          color: KIND_COLOR_MAP[trace.kind] || colors.typography.ashGrey,
+                        }}
+                      >
+                        {trace.kind}
+                      </span>
+                    )}
+                    {trace.model && (
+                      <span className="text-xs font-mono text-omneval-text-muted flex-shrink-0">{trace.model}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-4 text-xs text-omneval-text-muted">
+                    <span>{formatTime(trace.start_time)}</span>
+                    <span>{formatDuration(trace.start_time, trace.end_time)}</span>
+                    <span>
+                      {(
+                        (traceRollup?.inputTokens ?? 0) + (traceRollup?.outputTokens ?? 0)
+                      ).toLocaleString()}{" "}
+                      tokens
+                    </span>
+                    {(traceRollup?.costUsd ?? 0) > 0 && (
+                      <span style={{ color: colors.accents.emberFlare }}>
+                        ${(traceRollup?.costUsd ?? 0).toFixed(4)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* View content */}
+                <div className="flex-1 overflow-auto px-4 pb-4">
+                  <div className="max-w-4xl mx-auto">
+                    {viewMode === "waterfall" ? (
+                      <GanttWaterfall
+                        data={waterfallData}
+                        selectedSpanId={selectedSpanId}
+                        onSelect={(spanId) => setSelectedSpanId(selectedSpanId === spanId ? null : spanId)}
+                      />
+                    ) : (
+                      <TraceTree
+                        trace={trace}
+                        expandedSpanId={expandedSpanId}
+                        onToggleExpand={(id) => setExpandedSpanId(expandedSpanId === id ? null : id)}
+                        onShowSaveModal={(span) => setSaveSpan({ span, input: span.input ?? "", output: span.output })}
+                        selectedSpanId={selectedSpanId}
+                        onSelect={(spanId) => setSelectedSpanId(selectedSpanId === spanId ? null : spanId)}
+                      />
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Slide-in detail panel for selected span (nested on top of trace overlay) */}
+          {selectedSpan && (
+            <SlideInDetailPanel
+              span={selectedSpan}
+              onClose={() => setSelectedSpanId(null)}
+              onSave={() => setSaveSpan({ span: selectedSpan, input: selectedSpan.input ?? "", output: selectedSpan.output })}
+            />
+          )}
+        </div>
+
+        {/* Save to dataset modal */}
+        {saveSpan && (
+          <SaveToDatasetModal
+            spanId={saveSpan.span.span_id}
+            traceId={traceId}
+            input={saveSpan.input}
+            expectedOutput={saveSpan.output}
+            onClose={() => setSaveSpan(null)}
+            onSuccess={handleSaveSuccess}
+          />
+        )}
+      </aside>
+    </>
+  );
+}
+

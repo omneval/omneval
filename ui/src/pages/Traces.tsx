@@ -11,13 +11,12 @@ import {
 } from "@/utils/formatters";
 import { presetToFromTo } from "@/utils/timeRange";
 import BulkAddToDatasetModal from "@/components/BulkAddToDatasetModal";
+import { SlideInTraceDetail } from "./TraceDetail";
 
 // ── Types ──────────────────────────────────────────────────────────
 
 interface TracesPageProps {
   activeProject: string;
-  onNavigateToTrace: (traceId: string) => void;
-  onNavigateToTraceDetail: () => void;
   /** Time-range preset from the Header (e.g. "1h", "1d", "7d"). */
   timeRange?: string;
 }
@@ -601,8 +600,7 @@ interface TableCellRendererProps {
   span: Span;
   bookmarks: Set<string>;
   onToggleBookmark: (traceId: string) => void;
-  onNavigateToTrace: (traceId: string) => void;
-  onNavigateToTraceDetail: () => void;
+  onOpenTraceOverlay: (traceId: string) => void;
 }
 
 function TableCellRenderer({
@@ -610,8 +608,7 @@ function TableCellRenderer({
   span,
   bookmarks,
   onToggleBookmark,
-  onNavigateToTrace,
-  onNavigateToTraceDetail,
+  onOpenTraceOverlay,
 }: TableCellRendererProps) {
   switch (col.key) {
     case "bookmark":
@@ -632,12 +629,9 @@ function TableCellRenderer({
       return (
         <button
           key={col.key}
-          onClick={() => {
-            onNavigateToTrace(span.trace_id);
-            onNavigateToTraceDetail();
-          }}
+          onClick={() => onOpenTraceOverlay(span.trace_id)}
           className="text-left block w-full leading-tight"
-          title="View trace waterfall"
+          title="View trace watermark overlay"
         >
           <div className="text-omneval-text-pure font-medium">{span.name}</div>
           <div className="text-omneval-text-muted text-[11px] font-mono truncate max-w-[120px]">
@@ -769,8 +763,6 @@ function PaginationControls({
 
 export default function TracesPage({
   activeProject,
-  onNavigateToTrace,
-  onNavigateToTraceDetail,
   timeRange,
 }: TracesPageProps) {
   const [spans, setSpans] = useState<Span[]>([]);
@@ -813,6 +805,9 @@ export default function TracesPage({
   const [filterState, setFilterState] = useState<FilterState>(DEFAULT_FILTERS);
   const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
+
+  // ── Trace Detail Overlay ────────────────────────────────────────
+  const [traceOverlay, setTraceOverlay] = useState<{ traceId: string } | null>(null);
 
   // ── Row Selection ────────────────────────────────────────────────
   const [selectedSpanIds, setSelectedSpanIds] = useState<Set<string>>(new Set());
@@ -1275,8 +1270,7 @@ export default function TracesPage({
                             span={span}
                             bookmarks={bookmarks}
                             onToggleBookmark={toggleBookmark}
-                            onNavigateToTrace={onNavigateToTrace}
-                            onNavigateToTraceDetail={onNavigateToTraceDetail}
+                            onOpenTraceOverlay={(traceId) => setTraceOverlay({ traceId })}
                           />
                         </td>
                       );
@@ -1305,6 +1299,15 @@ export default function TracesPage({
             spanIds={Array.from(selectedSpanIds)}
             onClose={() => setIsBulkModalOpen(false)}
             onSuccess={handleBulkAddSuccess}
+          />
+        )}
+
+        {/* Trace Detail Overlay */}
+        {traceOverlay && (
+          <SlideInTraceDetail
+            traceId={traceOverlay.traceId}
+            activeProject={activeProject}
+            onClose={() => setTraceOverlay(null)}
           />
         )}
         </div>

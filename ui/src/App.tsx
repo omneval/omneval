@@ -291,11 +291,6 @@ export default function App() {
               <TracesPage
                 activeProject={activeProject}
                 timeRange={timeRange}
-                onNavigateToTrace={setActiveTraceId}
-                onNavigateToTraceDetail={() => {
-                  setTraceDetailReturnTo("traces");
-                  setPage("trace-detail");
-                }}
               />
             )}
             {page === "trace-detail" && (
