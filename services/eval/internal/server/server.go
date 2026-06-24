@@ -11,8 +11,6 @@ import (
 
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/metadata"
-	metadatapg "github.com/omneval/omneval/internal/metadata/postgres"
-	metadatasqlite "github.com/omneval/omneval/internal/metadata/sqlite"
 	redisqueue "github.com/omneval/omneval/internal/queue/redis"
 	"github.com/omneval/omneval/services/eval/internal/judge"
 	"github.com/omneval/omneval/services/eval/internal/metrics"
@@ -32,28 +30,12 @@ func openMetadataStore(cfg *config.Config) (metadata.Store, error) {
 		if dsn == "" {
 			dsn = "omneval.db"
 		}
-		store, err := metadatasqlite.New(dsn)
-		if err != nil {
-			return nil, fmt.Errorf("eval: open sqlite metadata store: %w", err)
-		}
-		if err := store.Migrate(context.Background()); err != nil {
-			store.Close()
-			return nil, fmt.Errorf("eval: migrate: %w", err)
-		}
-		return store, nil
+		return metadata.Open("sqlite", dsn)
 	case "postgres":
 		if dsn == "" {
 			return nil, fmt.Errorf("eval: postgres driver requires database.dsn")
 		}
-		store, err := metadatapg.New(dsn)
-		if err != nil {
-			return nil, fmt.Errorf("eval: postgres metadata store: %w", err)
-		}
-		if err := store.Migrate(context.Background()); err != nil {
-			store.Close()
-			return nil, fmt.Errorf("eval: migrate: %w", err)
-		}
-		return store, nil
+		return metadata.Open("postgres", dsn)
 	default:
 		return nil, fmt.Errorf("eval: unknown database driver: %s", driver)
 	}
@@ -111,7 +93,7 @@ func Run() error {
 	defer store.Close()
 
 	// Initialize judge with the Prompt Registry resolver.
-	judgeLLM := judge.New(cfg, prompts.NewCachingResolver(store))
+	judgeLLM := judge.New(cfg, prompts.NewCachingResolver(store.PromptStore()))
 
 	// Create worker.
 	w := worker.New(evalQ, judgeLLM, cfg)

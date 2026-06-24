@@ -11,7 +11,7 @@ import (
 
 // fakeStore implements just the Prompt Registry reads used by the resolver.
 type fakeStore struct {
-	metadata.Store // panics if any other method is called
+	metadata.PromptStore // embeds PromptStore so only PromptStore methods are exposed
 
 	versionCalls int
 	labelCalls   int

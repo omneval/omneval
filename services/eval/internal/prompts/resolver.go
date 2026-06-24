@@ -29,14 +29,14 @@ type cacheEntry struct {
 // CachingResolver resolves prompt templates from the metadata store with a
 // short TTL cache. It implements judge.PromptResolver.
 type CachingResolver struct {
-	store metadata.Store
+	store metadata.PromptStore
 
 	mu    sync.RWMutex
 	cache map[string]cacheEntry
 }
 
-// NewCachingResolver creates a CachingResolver backed by the given store.
-func NewCachingResolver(store metadata.Store) *CachingResolver {
+// NewCachingResolver creates a CachingResolver backed by the given PromptStore.
+func NewCachingResolver(store metadata.PromptStore) *CachingResolver {
 	return &CachingResolver{
 		store: store,
 		cache: make(map[string]cacheEntry),
