@@ -3,6 +3,7 @@ import { colors } from "@/theme";
 import { OnboardingEmptyState } from "@/components/OnboardingEmptyState";
 import { Skeleton } from "@/components/Skeleton";
 import { EmptyState } from "@/components/EmptyState";
+import { SpanKindIcon, getSpanKindColor, SpanKind } from "@/modules/spanKindVisuals";
 import {
   formatTimeWithYear,
   formatDuration,
@@ -16,22 +17,14 @@ import BulkAddToDatasetModal from "@/components/BulkAddToDatasetModal";
 
 interface TracesPageProps {
   activeProject: string;
-  onNavigateToTrace: (traceId: string) => void;
-  onNavigateToTraceDetail: () => void;
   /** Time-range preset from the Header (e.g. "1h", "1d", "7d"). */
   timeRange?: string;
-  /** Whether the TraceDetail overlay is open. */
-  traceDetailOpen?: boolean;
-  /** Currently active trace ID (for keyboard navigation). */
-  activeTraceId?: string;
-  /** Setter for the active trace ID in the overlay. */
-  setActiveTraceId?: (id: string) => void;
-  /** Navigate to the next trace in the list. */
-  onNavigateNextTrace?: () => void;
-  /** Navigate to the previous trace in the list. */
-  onNavigatePrevTrace?: () => void;
-  /** Close the TraceDetail overlay. */
-  onTraceDetailClose?: () => void;
+  /** Callback fired when a trace row is clicked to open the Trace Detail overlay,
+   *  or when keyboard navigation moves to a different trace while it's open. */
+  onOpenTraceOverlay: (traceId: string) => void;
+  /** Trace ID currently shown in the overlay, or undefined/null when closed.
+   *  Drives ArrowUp/ArrowDown keyboard navigation between traces. */
+  activeOverlayTraceId?: string | null;
 }
 
 interface Span {
@@ -613,8 +606,7 @@ interface TableCellRendererProps {
   span: Span;
   bookmarks: Set<string>;
   onToggleBookmark: (traceId: string) => void;
-  onNavigateToTrace: (traceId: string) => void;
-  onNavigateToTraceDetail: () => void;
+  onOpenTraceOverlay: (traceId: string) => void;
 }
 
 function TableCellRenderer({
@@ -622,8 +614,7 @@ function TableCellRenderer({
   span,
   bookmarks,
   onToggleBookmark,
-  onNavigateToTrace,
-  onNavigateToTraceDetail,
+  onOpenTraceOverlay,
 }: TableCellRendererProps) {
   switch (col.key) {
     case "bookmark":
@@ -644,14 +635,19 @@ function TableCellRenderer({
       return (
         <button
           key={col.key}
-          onClick={() => {
-            onNavigateToTrace(span.trace_id);
-            onNavigateToTraceDetail();
-          }}
+          onClick={() => onOpenTraceOverlay(span.trace_id)}
           className="text-left block w-full leading-tight"
-          title="View trace waterfall"
+          title="View trace"
         >
-          <div className="text-omneval-text-pure font-medium">{span.name}</div>
+          <div className="flex items-center gap-2">
+            <span
+              title={span.kind}
+              style={{ color: getSpanKindColor(span.kind as SpanKind), display: "inline-flex" }}
+            >
+              <SpanKindIcon kind={span.kind as SpanKind} />
+            </span>
+            <span className="text-omneval-text-pure font-medium">{span.name}</span>
+          </div>
           <div className="text-omneval-text-muted text-[11px] font-mono truncate max-w-[120px]">
             {span.trace_id.slice(0, 12)}…
           </div>
@@ -781,16 +777,11 @@ function PaginationControls({
 
 export default function TracesPage({
   activeProject,
-  onNavigateToTrace,
-  onNavigateToTraceDetail,
   timeRange,
-  traceDetailOpen,
-  activeTraceId,
-  setActiveTraceId,
+  onOpenTraceOverlay,
+  activeOverlayTraceId,
 }: TracesPageProps) {
   const [spans, setSpans] = useState<Span[]>([]);
-  // Index of the trace currently shown in the overlay (when open).
-  const [selectedIndex, setSelectedIndex] = useState<number>(-1);
   const [nextCursor, setNextCursor] = useState("");
   const [loading, setLoading] = useState(false);
   const [pageSize, setPageSize] = useState(25);
@@ -1021,40 +1012,24 @@ export default function TracesPage({
   };
 
   // ── Trace overlay keyboard navigation ──────────────────────────
-  // When the overlay is open, ArrowDown / ArrowUp move between traces.
-  // We keep the listener active ({ once: false }) and use a ref to track
-  // the latest handler so rapid key-presses always route through the
-  // current closure without stale-closure bugs.
+  // When the overlay is open, ArrowDown / ArrowUp move to the next/previous
+  // trace in the current filtered/sorted list without closing the overlay.
+  // The current position is derived from activeOverlayTraceId (the trace
+  // ID App is showing) rather than a separately tracked index, so it can
+  // never drift out of sync with what's actually displayed.
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (!traceDetailOpen) return;
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setSelectedIndex((prev) => {
-          // Boundary: don't move past the last trace.
-          if (prev >= spans.length - 1) return prev;
-          const next = prev + 1;
-          const traceId = spans[next]?.trace_id;
-          if (traceId && setActiveTraceId) {
-            setActiveTraceId(traceId);
-          }
-          return next;
-        });
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setSelectedIndex((prev) => {
-          // Boundary: don't move before the first trace.
-          if (prev <= 0) return prev;
-          const prevIdx = prev - 1;
-          const traceId = spans[prevIdx]?.trace_id;
-          if (traceId && setActiveTraceId) {
-            setActiveTraceId(traceId);
-          }
-          return prevIdx;
-        });
-      }
+      if (!activeOverlayTraceId) return;
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const currentIdx = spans.findIndex((s) => s.trace_id === activeOverlayTraceId);
+      if (currentIdx === -1) return;
+      e.preventDefault();
+      const nextIdx = e.key === "ArrowDown" ? currentIdx + 1 : currentIdx - 1;
+      // Boundary: no-op past the last trace or before the first trace.
+      if (nextIdx < 0 || nextIdx >= spans.length) return;
+      onOpenTraceOverlay(spans[nextIdx].trace_id);
     },
-    [traceDetailOpen, spans, setActiveTraceId],
+    [activeOverlayTraceId, spans, onOpenTraceOverlay],
   );
 
   // Ref to always point at the latest handler so the listener never
@@ -1065,22 +1040,11 @@ export default function TracesPage({
   }, [handleKeyDown]);
 
   useEffect(() => {
-    if (!traceDetailOpen || spans.length === 0) return;
-    // Ensure we start with the overlay showing the trace that was clicked.
-    if (selectedIndex === -1) {
-      const activeIdx = spans.findIndex((s) => s.trace_id === activeTraceId);
-      if (activeIdx >= 0) {
-        setSelectedIndex(activeIdx);
-      }
-    }
-  }, [traceDetailOpen, spans, activeTraceId, selectedIndex]);
-
-  useEffect(() => {
-    if (!traceDetailOpen) return;
+    if (!activeOverlayTraceId) return;
     const listener = (e: KeyboardEvent) => handlerRef.current(e);
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
-  }, [traceDetailOpen]);
+  }, [activeOverlayTraceId]);
 
   const visibleColumns = columns.filter((c) => c.visible);
 
@@ -1314,27 +1278,23 @@ export default function TracesPage({
                 </tr>
               </thead>
               <tbody>
-                {spans.map((span, idx) => (
+                {spans.map((span) => {
+                  const isActiveInOverlay = !!activeOverlayTraceId && span.trace_id === activeOverlayTraceId;
+                  return (
                   <tr
                     key={span.span_id}
-                    className={`cursor-pointer transition-colors duration-150 ${idx === selectedIndex && traceDetailOpen ? "bg-violet-600/10" : ""}`}
+                    className={`cursor-pointer transition-colors duration-150 ${isActiveInOverlay ? "bg-violet-600/10" : ""}`}
                     style={{
                       borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
                     }}
-                    onClick={() => {
-                      setSelectedIndex(idx);
-                      if (traceDetailOpen && setActiveTraceId) {
-                        setActiveTraceId(span.trace_id);
-                      }
-                    }}
                     onMouseEnter={(e) => {
-                      if (idx !== selectedIndex || !traceDetailOpen) {
+                      if (!isActiveInOverlay) {
                         (e.currentTarget as HTMLElement).style.background =
                           "rgba(124, 58, 237, 0.12)";
                       }
                     }}
                     onMouseLeave={(e) => {
-                      if (idx !== selectedIndex || !traceDetailOpen) {
+                      if (!isActiveInOverlay) {
                         (e.currentTarget as HTMLElement).style.background = "transparent";
                       }
                     }}
@@ -1364,14 +1324,14 @@ export default function TracesPage({
                             span={span}
                             bookmarks={bookmarks}
                             onToggleBookmark={toggleBookmark}
-                            onNavigateToTrace={onNavigateToTrace}
-                            onNavigateToTraceDetail={onNavigateToTraceDetail}
+                            onOpenTraceOverlay={onOpenTraceOverlay}
                           />
                         </td>
                       );
                     })}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
