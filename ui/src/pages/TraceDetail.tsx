@@ -18,16 +18,9 @@ import { formatTime, formatDuration, formatMs, totalTokens, parseChatTurns, getT
 import { useToast } from "@/components/Toast";
 import SaveToDatasetModal from "@/components/SaveToDatasetModal";
 import { extractSpanMessages } from "@/utils/spanMessages";
+import { annotateSpanTree, type AnnotatedSpan, type Span } from "@/utils/spanRollup";
+import { getSpanKindColor, getSpanKindIcon, SpanKind } from "@/modules/spanKindVisuals";
 
-// ── Constants ──────────────────────────────────────────────────────
-
-const KIND_COLOR_MAP: Record<string, string> = {
-  llm: colors.accents.emberFlare,
-  tool: colors.accents.softGlow,
-  agent: colors.accents.flicker,
-  chain: "#60a5fa",
-  internal: colors.typography.ashGrey,
-};
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -35,27 +28,6 @@ interface TraceDetailPageProps {
   traceId: string;
   activeProject: string;
   onBack: () => void;
-}
-
-interface Span {
-  span_id: string;
-  trace_id: string;
-  parent_id: string;
-  project_id: string;
-  name: string;
-  kind: string;
-  model?: string;
-  start_time: string;
-  end_time: string;
-  cost_usd: number;
-  input_tokens: number;
-  output_tokens: number;
-  children?: Span[];
-  input?: string;
-  output?: string;
-  status_code?: string;
-  scores?: { eval_name: string; value: number }[];
-  attributes?: Record<string, unknown>;
 }
 
 // hasRealContent returns true when a span's input/output field contains at
@@ -238,19 +210,25 @@ export default function TraceDetailPage({
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
   const [expandedSpanId, setExpandedSpanId] = useState<string | null>(null);
 
-  // Flatten the span tree for the waterfall chart
+  // Annotate the trace tree with cumulative rollup values
+  const annotatedTrace = useMemo((): AnnotatedSpan | null => {
+    if (!trace) return null;
+    return annotateSpanTree(trace);
+  }, [trace]);
+
+  // Flatten the annotated span tree for the waterfall chart
   const allSpans = useMemo(() => {
-    if (!trace) return [];
-    const result: Span[] = [trace];
-    const collect = (spans: Span[]) => {
+    if (!annotatedTrace) return [];
+    const result: AnnotatedSpan[] = [annotatedTrace];
+    const collect = (spans: AnnotatedSpan[]) => {
       for (const span of spans) {
         result.push(span);
-        if (span.children) collect(span.children);
+        if (span.children) collect(span.children as AnnotatedSpan[]);
       }
     };
-    if (trace.children) collect(trace.children);
+    if (annotatedTrace.children) collect(annotatedTrace.children as AnnotatedSpan[]);
     return result;
-  }, [trace]);
+  }, [annotatedTrace]);
 
   // Waterfall chart data: bars representing each span
   const waterfallData = useMemo(() => {
@@ -260,7 +238,7 @@ export default function TraceDetailPage({
       const start = new Date(span.start_time).getTime() - baseTime;
       const end = new Date(span.end_time).getTime() - baseTime;
       const duration = end - start;
-      const color = KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall;
+      const color = getSpanKindColor(span.kind as SpanKind);
       return {
         name: span.name,
         spanId: span.span_id,
@@ -399,23 +377,28 @@ export default function TraceDetailPage({
             className="mx-4 mt-4 mb-4 px-4 py-3 rounded-lg border"
             style={{
               background: colors.backgrounds.charcoalDepth,
-              borderColor: KIND_COLOR_MAP[trace.kind] ? `${KIND_COLOR_MAP[trace.kind]}44` : colors.backgrounds.caveWall,
-              borderLeft: `3px solid ${KIND_COLOR_MAP[trace.kind] || colors.backgrounds.caveWall}`,
+              borderColor: trace.kind ? `${getSpanKindColor(trace.kind as SpanKind)}44` : colors.backgrounds.caveWall,
+              borderLeft: `3px solid ${trace.kind ? getSpanKindColor(trace.kind as SpanKind) : colors.backgrounds.caveWall}`,
             }}
           >
             <div className="flex items-center gap-3 mb-1">
               <span className="text-sm font-semibold text-omneval-text-pure">{trace.name}</span>
-              {trace.kind && (
+              {trace.kind && (() => {
+              const K = trace.kind as SpanKind;
+              const KindIcon = getSpanKindIcon(K);
+              return (
                 <span
-                  className="text-xs px-2 py-0.5 rounded-full font-medium"
+                  className="text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1"
                   style={{
-                    background: `${KIND_COLOR_MAP[trace.kind] || colors.backgrounds.caveWall}22`,
-                    color: KIND_COLOR_MAP[trace.kind] || colors.typography.ashGrey,
+                    background: `${getSpanKindColor(K)}22`,
+                    color: getSpanKindColor(K),
                   }}
                 >
+                  <span style={{ display: "inline-flex" }}><KindIcon /></span>
                   {trace.kind}
                 </span>
-              )}
+              );
+            })()}
               {trace.model && (
                 <span className="text-xs font-mono text-omneval-text-muted">{trace.model}</span>
               )}
@@ -448,7 +431,7 @@ export default function TraceDetailPage({
                 />
               ) : (
                 <TraceTree
-                  trace={trace}
+                  trace={annotatedTrace!}
                   expandedSpanId={expandedSpanId}
                   onToggleExpand={(id) => setExpandedSpanId(expandedSpanId === id ? null : id)}
                   onShowSaveModal={(span) => setSaveSpan({ span, input: span.input ?? "", output: span.output })}
@@ -840,24 +823,27 @@ function SlideInDetailPanel({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold text-omneval-text-pure truncate">{span.name}</span>
-              {span.kind && (
+              {span.kind && (() => {
+              const K = span.kind as SpanKind;
+              const KindIcon = getSpanKindIcon(K);
+              return (
                 <span
-                  className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0"
+                  className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 flex items-center gap-1"
                   style={{
-                    background: `${KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall}22`,
-                    color: KIND_COLOR_MAP[span.kind] || colors.typography.ashGrey,
+                    background: `${getSpanKindColor(K)}22`,
+                    color: getSpanKindColor(K),
                   }}
                 >
+                  <span style={{ display: "inline-flex" }}><KindIcon /></span>
                   {span.kind}
                 </span>
-              )}
+              );
+            })()}
             </div>
             <div className="flex items-center gap-3 text-xs text-omneval-text-muted mt-1">
               <span>{formatDuration(span.start_time, span.end_time)}</span>
               <span>{totalTokens(span).toLocaleString()} tokens</span>
-              {span.cost_usd > 0 && (
-                <span style={{ color: colors.accents.emberFlare }}>${span.cost_usd.toFixed(4)}</span>
-              )}
+              <span style={{ color: colors.accents.emberFlare }}>${span.cost_usd.toFixed(4)}</span>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -1039,10 +1025,10 @@ function TraceTree({
   selectedSpanId,
   onSelect,
 }: {
-  trace: Span;
+  trace: AnnotatedSpan;
   expandedSpanId: string | null;
   onToggleExpand: (id: string) => void;
-  onShowSaveModal: (span: Span) => void;
+  onShowSaveModal: (span: AnnotatedSpan) => void;
   selectedSpanId: string | null;
   onSelect: (spanId: string) => void;
 }) {
@@ -1072,9 +1058,9 @@ function SpanRow({
   selectedSpanId,
   onSelect,
 }: {
-  span: Span;
+  span: AnnotatedSpan;
   depth: number;
-  onShowSaveModal: (span: Span) => void;
+  onShowSaveModal: (span: AnnotatedSpan) => void;
   expandedSpanId: string | null;
   onToggleExpand: (id: string) => void;
   selectedSpanId: string | null;
@@ -1112,7 +1098,7 @@ function SpanRow({
       >
         <div
           className="w-2 h-2 rounded-full flex-shrink-0"
-          style={{ background: KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall }}
+          style={{ background: getSpanKindColor(span.kind as SpanKind) }}
         />
         {/* Expand/collapse toggle */}
         {hasChildren ? (
@@ -1195,9 +1181,15 @@ function SpanRow({
           {formatDuration(span.start_time, span.end_time)}
         </span>
 
-        {/* Token count */}
-        <span className="text-xs text-omneval-text-muted flex-shrink-0 hidden sm:block">
-          {totalTokens(span).toLocaleString()}t
+        {/* Rollup token count */}
+        <span className="text-xs text-omneval-text-muted flex-shrink-0 hidden md:block">
+          {(span.rollup_input_tokens ?? 0) + (span.rollup_output_tokens ?? 0)}{" "}
+          t
+        </span>
+
+        {/* Rollup cost */}
+        <span className="text-xs flex-shrink-0 hidden sm:block" style={{ color: colors.accents.emberFlare }}>
+          ${(span.rollup_cost_usd ?? 0).toFixed(4)}
         </span>
 
         {/* Save to dataset button */}
@@ -1291,7 +1283,7 @@ function SpanRow({
           {span.children!.map((child) => (
             <SpanRow
               key={child.span_id}
-              span={child}
+              span={child as AnnotatedSpan}
               depth={depth + 1}
               onShowSaveModal={onShowSaveModal}
               expandedSpanId={expandedSpanId}
