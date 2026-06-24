@@ -15,8 +15,11 @@ type PostgresPromptStore struct {
 
 // PromptStore returns the focused PromptStore interface.
 func (s *PostgresPromptStore) PromptStore() PromptStore {
-	return s.Store
+	return s
 }
+
+// Compile-time check: PostgresPromptStore satisfies metadata.PromptStore.
+var _ PromptStore = (*PostgresPromptStore)(nil)
 
 // SQLitePromptStore wraps *sqlite.Store so that callers can depend on the
 // narrower metadata.Store interface instead of the full god Store.
@@ -26,10 +29,13 @@ type SQLitePromptStore struct {
 
 // PromptStore returns the focused PromptStore interface.
 func (s *SQLitePromptStore) PromptStore() PromptStore {
-	return s.Store
+	return s
 }
 
-// --- Compile-time interface compliance checks ---
+// Compile-time check: SQLitePromptStore satisfies metadata.PromptStore.
+var _ PromptStore = (*SQLitePromptStore)(nil)
+
+// --- Compile-time interface compliance checks for Store ---
 
 var (
 	_ Store = (*PostgresPromptStore)(nil)
