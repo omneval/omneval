@@ -121,7 +121,12 @@ export default function TraceDetailPage({
   traceId,
   activeProject,
   onBack,
+  onClose,
+  onNavigateNext,
+  onNavigatePrev,
 }: TraceDetailPageProps) {
+  // In overlay mode `onBack` is absent; fall back to `onClose`.
+  const handleBack = onBack ?? onClose;
   const { addToast } = useToast();
   const [trace, setTrace] = useState<Span | null>(null);
   const [traceRollup, setTraceRollup] = useState<{
@@ -285,7 +290,7 @@ export default function TraceDetailPage({
           title={error ?? "Trace not found"}
           description="The requested trace could not be loaded"
           actionLabel="Back to Traces"
-          onAction={onBack}
+          onAction={handleBack}
         />
       </div>
     );
@@ -300,12 +305,12 @@ export default function TraceDetailPage({
         style={{ borderColor: colors.backgrounds.caveWall }}
       >
         <Breadcrumb items={[
-          { label: "Traces", onClick: onBack },
+          { label: "Traces", onClick: handleBack },
           { label: `Trace: ${traceId.slice(0, 8)}…` },
         ]} />
         <div className="flex items-center gap-3">
           <button
-            onClick={onBack}
+            onClick={handleBack}
             className="flex items-center gap-1.5 text-sm px-2 py-1 rounded transition-colors"
             style={{ color: colors.typography.ashGrey }}
             onMouseEnter={(e) => (e.currentTarget.style.color = colors.typography.pureLight)}
@@ -323,6 +328,30 @@ export default function TraceDetailPage({
             Back
           </button>
           <div className="flex-1" />
+          {onNavigateNext && onNavigatePrev && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={onNavigatePrev}
+                className="px-2 py-1 text-xs rounded transition-colors"
+                style={{ color: colors.typography.ashGrey }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = colors.typography.pureLight)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = colors.typography.ashGrey)}
+                title="Previous trace"
+              >
+                ▲
+              </button>
+              <button
+                onClick={onNavigateNext}
+                className="px-2 py-1 text-xs rounded transition-colors"
+                style={{ color: colors.typography.ashGrey }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = colors.typography.pureLight)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = colors.typography.ashGrey)}
+                title="Next trace"
+              >
+                ▼
+              </button>
+            </div>
+          )}
           {liveStatus !== null && (
             <div
               className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs"

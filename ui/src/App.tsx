@@ -300,8 +300,7 @@ export default function App() {
                   }}
                   traceDetailOpen={traceDetailOpen}
                   activeTraceId={activeTraceId}
-                  onNavigateNextTrace={() => {}}
-                  onNavigatePrevTrace={() => {}}
+                  setActiveTraceId={setActiveTraceId}
                   onTraceDetailClose={() => setTraceDetailOpen(false)}
                 />
                 {traceDetailOpen && (

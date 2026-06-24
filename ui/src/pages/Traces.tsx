@@ -787,8 +787,6 @@ export default function TracesPage({
   traceDetailOpen,
   activeTraceId,
   setActiveTraceId,
-  onNavigateNextTrace,
-  onNavigatePrevTrace,
 }: TracesPageProps) {
   const [spans, setSpans] = useState<Span[]>([]);
   // Index of the trace currently shown in the overlay (when open).
@@ -1024,8 +1022,9 @@ export default function TracesPage({
 
   // ── Trace overlay keyboard navigation ──────────────────────────
   // When the overlay is open, ArrowDown / ArrowUp move between traces.
-  // Only one trace at a time can have focus, so we use { once: true }
-  // and re-register after each navigation.
+  // We keep the listener active ({ once: false }) and use a ref to track
+  // the latest handler so rapid key-presses always route through the
+  // current closure without stale-closure bugs.
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (!traceDetailOpen) return;
@@ -1036,9 +1035,8 @@ export default function TracesPage({
           if (prev >= spans.length - 1) return prev;
           const next = prev + 1;
           const traceId = spans[next]?.trace_id;
-          if (traceId && setActiveTraceId && onNavigateNextTrace) {
+          if (traceId && setActiveTraceId) {
             setActiveTraceId(traceId);
-            onNavigateNextTrace();
           }
           return next;
         });
@@ -1049,16 +1047,22 @@ export default function TracesPage({
           if (prev <= 0) return prev;
           const prevIdx = prev - 1;
           const traceId = spans[prevIdx]?.trace_id;
-          if (traceId && setActiveTraceId && onNavigatePrevTrace) {
+          if (traceId && setActiveTraceId) {
             setActiveTraceId(traceId);
-            onNavigatePrevTrace();
           }
           return prevIdx;
         });
       }
     },
-    [traceDetailOpen, spans, setActiveTraceId, onNavigateNextTrace, onNavigatePrevTrace],
+    [traceDetailOpen, spans, setActiveTraceId],
   );
+
+  // Ref to always point at the latest handler so the listener never
+  // captures a stale closure.
+  const handlerRef = useRef(handleKeyDown);
+  useEffect(() => {
+    handlerRef.current = handleKeyDown;
+  }, [handleKeyDown]);
 
   useEffect(() => {
     if (!traceDetailOpen || spans.length === 0) return;
@@ -1073,8 +1077,10 @@ export default function TracesPage({
 
   useEffect(() => {
     if (!traceDetailOpen) return;
-    window.addEventListener("keydown", handleKeyDown, { once: true });
-  }, [handleKeyDown, traceDetailOpen]);
+    const listener = (e: KeyboardEvent) => handlerRef.current(e);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, [traceDetailOpen]);
 
   const visibleColumns = columns.filter((c) => c.visible);
 

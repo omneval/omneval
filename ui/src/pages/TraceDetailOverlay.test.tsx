@@ -85,8 +85,6 @@ describe("trace overlay keyboard navigation", () => {
           onNavigateToTraceDetail={() => {}}
           traceDetailOpen={false}
           activeTraceId=""
-          onNavigateNextTrace={() => {}}
-          onNavigatePrevTrace={() => {}}
         />
       );
     }).not.toThrow();
@@ -101,8 +99,6 @@ describe("trace overlay keyboard navigation", () => {
         traceDetailOpen={false}
         activeTraceId=""
         setActiveTraceId={vi.fn()}
-        onNavigateNextTrace={() => {}}
-        onNavigatePrevTrace={() => {}}
       />
     );
 
@@ -114,9 +110,8 @@ describe("trace overlay keyboard navigation", () => {
     expect(traceButtons.length).toBeGreaterThan(0);
   });
 
-  it("navigates to next trace when ArrowDown is pressed and overlay is open", async () => {
-    const navigateNextTrace = vi.fn();
-    const navigatePrevTrace = vi.fn();
+  it("calls setActiveTraceId when ArrowDown is pressed and overlay is open", async () => {
+    const setActiveTraceId = vi.fn();
 
     render(
       <TracesPage
@@ -125,9 +120,7 @@ describe("trace overlay keyboard navigation", () => {
         onNavigateToTraceDetail={vi.fn()}
         traceDetailOpen={true}
         activeTraceId="trace-a"
-        setActiveTraceId={vi.fn()}
-        onNavigateNextTrace={navigateNextTrace}
-        onNavigatePrevTrace={navigatePrevTrace}
+        setActiveTraceId={setActiveTraceId}
       />
     );
 
@@ -135,18 +128,16 @@ describe("trace overlay keyboard navigation", () => {
       expect(screen.getByText("main-trace")).toBeInTheDocument();
     });
 
-    // Fire ArrowDown key
+    // After mount, the useEffect syncs selectedIndex to match activeTraceId ("trace-a" is index 0).
+    // ArrowDown from index 0 goes to index 1 (trace-b).
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     });
-
-    // Verify navigation callback was invoked
-    expect(navigateNextTrace).toHaveBeenCalled();
+    expect(setActiveTraceId).toHaveBeenCalledWith("trace-b");
   });
 
-  it("navigates to previous trace when ArrowUp is pressed and overlay is open", async () => {
-    const navigateNextTrace = vi.fn();
-    const navigatePrevTrace = vi.fn();
+  it("calls setActiveTraceId when ArrowUp is pressed and overlay is open", async () => {
+    const setActiveTraceId = vi.fn();
 
     render(
       <TracesPage
@@ -155,9 +146,7 @@ describe("trace overlay keyboard navigation", () => {
         onNavigateToTraceDetail={vi.fn()}
         traceDetailOpen={true}
         activeTraceId="trace-c"
-        setActiveTraceId={vi.fn()}
-        onNavigateNextTrace={navigateNextTrace}
-        onNavigatePrevTrace={navigatePrevTrace}
+        setActiveTraceId={setActiveTraceId}
       />
     );
 
@@ -165,18 +154,23 @@ describe("trace overlay keyboard navigation", () => {
       expect(screen.getByText("main-trace")).toBeInTheDocument();
     });
 
-    // Fire ArrowUp key
+    // After mount, selectedIndex is synced to "trace-c" (index 2).
+    // ArrowUp from index 2 goes to index 1 (trace-b).
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
     });
+    expect(setActiveTraceId).toHaveBeenCalledWith("trace-b");
 
-    // Verify previous navigation callback was invoked
-    expect(navigatePrevTrace).toHaveBeenCalled();
+    // ArrowUp from index 1 goes to index 0 (trace-a).
+    setActiveTraceId.mockClear();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    });
+    expect(setActiveTraceId).toHaveBeenCalledWith("trace-a");
   });
 
-  it("does not call onNavigatePrevTrace when ArrowUp is pressed at start", async () => {
-    const navigateNextTrace = vi.fn();
-    const navigatePrevTrace = vi.fn();
+  it("does not change trace when ArrowUp is pressed at start", async () => {
+    const setActiveTraceId = vi.fn();
 
     render(
       <TracesPage
@@ -185,9 +179,7 @@ describe("trace overlay keyboard navigation", () => {
         onNavigateToTraceDetail={vi.fn()}
         traceDetailOpen={true}
         activeTraceId="trace-a"
-        setActiveTraceId={vi.fn()}
-        onNavigateNextTrace={navigateNextTrace}
-        onNavigatePrevTrace={navigatePrevTrace}
+        setActiveTraceId={setActiveTraceId}
       />
     );
 
@@ -195,18 +187,19 @@ describe("trace overlay keyboard navigation", () => {
       expect(screen.getByText("main-trace")).toBeInTheDocument();
     });
 
-    // Fire ArrowUp key at start — should not call the callback
+    // Flush effects so the selectedIndex ← activeTraceId sync runs.
+    await act(async () => {});
+
+    // Fire ArrowUp key at start — should not call setActiveTraceId
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
     });
 
-    // ArrowUp at start is a no-op — no callback should fire
-    expect(navigatePrevTrace).not.toHaveBeenCalled();
+    expect(setActiveTraceId).not.toHaveBeenCalled();
   });
 
-  it("does not call onNavigateNextTrace when ArrowDown is pressed at end", async () => {
-    const navigateNextTrace = vi.fn();
-    const navigatePrevTrace = vi.fn();
+  it("does not change trace when ArrowDown is pressed at end", async () => {
+    const setActiveTraceId = vi.fn();
 
     render(
       <TracesPage
@@ -215,9 +208,7 @@ describe("trace overlay keyboard navigation", () => {
         onNavigateToTraceDetail={vi.fn()}
         traceDetailOpen={true}
         activeTraceId="trace-c"
-        setActiveTraceId={vi.fn()}
-        onNavigateNextTrace={navigateNextTrace}
-        onNavigatePrevTrace={navigatePrevTrace}
+        setActiveTraceId={setActiveTraceId}
       />
     );
 
@@ -225,17 +216,19 @@ describe("trace overlay keyboard navigation", () => {
       expect(screen.getByText("main-trace")).toBeInTheDocument();
     });
 
-    // Fire ArrowDown at end — should not call the callback
+    // Flush effects so the selectedIndex ← activeTraceId sync runs.
+    await act(async () => {});
+
+    // Fire ArrowDown at end — should not call setActiveTraceId
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     });
 
-    expect(navigateNextTrace).not.toHaveBeenCalled();
+    expect(setActiveTraceId).not.toHaveBeenCalled();
   });
 
   it("ignores keyboard events when traceDetailOpen is false", async () => {
-    const navigateNextTrace = vi.fn();
-    const navigatePrevTrace = vi.fn();
+    const setActiveTraceId = vi.fn();
 
     render(
       <TracesPage
@@ -244,9 +237,7 @@ describe("trace overlay keyboard navigation", () => {
         onNavigateToTraceDetail={vi.fn()}
         traceDetailOpen={false}
         activeTraceId=""
-        setActiveTraceId={vi.fn()}
-        onNavigateNextTrace={navigateNextTrace}
-        onNavigatePrevTrace={navigatePrevTrace}
+        setActiveTraceId={setActiveTraceId}
       />
     );
 
@@ -259,7 +250,6 @@ describe("trace overlay keyboard navigation", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     });
 
-    expect(navigateNextTrace).not.toHaveBeenCalled();
-    expect(navigatePrevTrace).not.toHaveBeenCalled();
+    expect(setActiveTraceId).not.toHaveBeenCalled();
   });
 });
