@@ -10,7 +10,6 @@ import {
   Cell,
 } from "recharts";
 import { colors } from "@/theme";
-import Breadcrumb from "@/components/Breadcrumb";
 import JsonCodeBlock from "@/components/JsonCodeBlock";
 import { Skeleton } from "@/components/Skeleton";
 import { EmptyState, LoadingState } from "@/components/EmptyState";
@@ -18,45 +17,11 @@ import { formatTime, formatDuration, formatMs, totalTokens, parseChatTurns, getT
 import { useToast } from "@/components/Toast";
 import SaveToDatasetModal from "@/components/SaveToDatasetModal";
 import { extractSpanMessages } from "@/utils/spanMessages";
+import { annotateSpanTree, type AnnotatedSpan, type Span } from "@/utils/spanRollup";
+import { getSpanKindColor, getSpanKindIcon, SpanKind } from "@/modules/spanKindVisuals";
 
-// ── Constants ──────────────────────────────────────────────────────
-
-const KIND_COLOR_MAP: Record<string, string> = {
-  llm: colors.accents.emberFlare,
-  tool: colors.accents.softGlow,
-  agent: colors.accents.flicker,
-  chain: "#60a5fa",
-  internal: colors.typography.ashGrey,
-};
 
 // ── Types ──────────────────────────────────────────────────────────
-
-interface TraceDetailPageProps {
-  traceId: string;
-  activeProject: string;
-  onBack: () => void;
-}
-
-interface Span {
-  span_id: string;
-  trace_id: string;
-  parent_id: string;
-  project_id: string;
-  name: string;
-  kind: string;
-  model?: string;
-  start_time: string;
-  end_time: string;
-  cost_usd: number;
-  input_tokens: number;
-  output_tokens: number;
-  children?: Span[];
-  input?: string;
-  output?: string;
-  status_code?: string;
-  scores?: { eval_name: string; value: number }[];
-  attributes?: Record<string, unknown>;
-}
 
 // hasRealContent returns true when a span's input/output field contains at
 // least one message with non-empty text content. Filters out the normalizer's
@@ -101,6 +66,22 @@ export interface WaterfallEntry {
   model?: string;
 }
 
+/**
+ * Compute the X-axis domain for the waterfall chart.
+ *
+ * The domain is always `[0, maxEnd]` where `maxEnd = max(start + duration)`
+ * across all WaterfallEntry rows.  This ensures the axis labels and tick
+ * marks cover the full temporal extent of the Trace's Spans, preventing the
+ * misleading behaviour where Recharts' default domain (computed from `start`
+ * values only) can compress the visible range to a tiny slice — e.g.
+ * `0ms`–`4ms` for a span that actually ran 26.3 s.
+ */
+export function computeWaterfallAxisDomain(entries: WaterfallEntry[]): [number, number] {
+  if (entries.length === 0) return [0, 0];
+  const maxEnd = Math.max(...entries.map((e) => e.start + e.duration));
+  return [0, maxEnd];
+}
+
 // ── Trace Detail Page ──────────────────────────────────────────────
 
 const LIVE_POLL_INTERVAL_MS = 5_000;
@@ -110,364 +91,6 @@ const LIVE_TIMEOUT_MS = (() => {
   const parsed = Number(raw);
   return (Number.isFinite(parsed) && parsed > 0 ? parsed : 20) * 60 * 1000;
 })();
-
-export default function TraceDetailPage({
-  traceId,
-  activeProject,
-  onBack,
-}: TraceDetailPageProps) {
-  const { addToast } = useToast();
-  const [trace, setTrace] = useState<Span | null>(null);
-  const [traceRollup, setTraceRollup] = useState<{
-    inputTokens: number;
-    outputTokens: number;
-    costUsd: number;
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [saveSpan, setSaveSpan] = useState<{
-    span: Span;
-    input: string;
-    output?: string;
-  } | null>(null);
-  const [liveStatus, setLiveStatus] = useState<"live" | "stalled" | null>(null);
-  const liveStartRef = useRef<number | null>(null);
-
-  // Fetch trace detail and start live polling while the root span is absent.
-  // The root span (parent_id = "") is only committed when the agent session
-  // ends; until then the server returns a child span as a fallback root and
-  // we poll at the Commit Cadence to pick up new spans as they arrive.
-  useEffect(() => {
-    const controller = new AbortController();
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-
-    const loadTrace = () =>
-      fetch(
-        `/api/v1/traces/${traceId}?project_id=${encodeURIComponent(activeProject)}`,
-        { signal: controller.signal },
-      ).then((res) => {
-        if (!res.ok) {
-          if (res.status === 404) throw new Error("Trace not found");
-          throw new Error(`Failed to load trace (${res.status})`);
-        }
-        return res.json() as Promise<TraceResponse>;
-      });
-
-    const applyData = (data: TraceResponse) => {
-      setTrace(data.root_span);
-      setTraceRollup({
-        inputTokens: data.total_input_tokens ?? 0,
-        outputTokens: data.total_output_tokens ?? 0,
-        costUsd: data.total_cost_usd ?? 0,
-      });
-    };
-
-    setLoading(true);
-    setError(null);
-    setLiveStatus(null);
-    liveStartRef.current = null;
-
-    loadTrace()
-      .then((data) => {
-        applyData(data);
-        setLoading(false);
-        // Session is in progress when the real root span (parent_id = "") has
-        // not been committed yet — the server falls back to a child span as root.
-        const rootArrived = !data.root_span?.parent_id;
-        if (!rootArrived) {
-          setLiveStatus("live");
-          liveStartRef.current = Date.now();
-          intervalId = setInterval(() => {
-            if (
-              liveStartRef.current !== null &&
-              Date.now() - liveStartRef.current > LIVE_TIMEOUT_MS
-            ) {
-              setLiveStatus("stalled");
-              if (intervalId !== null) clearInterval(intervalId);
-              return;
-            }
-            loadTrace()
-              .then((pollData) => {
-                applyData(pollData);
-                if (pollData.root_span?.parent_id) return; // still in progress
-                setLiveStatus(null);
-                if (intervalId !== null) clearInterval(intervalId);
-              })
-              .catch(() => {
-                // Non-fatal: retry next tick
-              });
-          }, LIVE_POLL_INTERVAL_MS);
-        }
-      })
-      .catch((err) => {
-        if (err.name !== "AbortError") {
-          setError(err.message);
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      controller.abort();
-      if (intervalId !== null) clearInterval(intervalId);
-    };
-  }, [traceId, activeProject]);
-
-  const handleSaveSuccess = useCallback(() => {
-    setSaveSpan(null);
-    addToast("success", "Span saved to dataset");
-  }, [addToast]);
-
-  // View mode and selection state — must be declared before any early returns
-  const [viewMode, setViewMode] = useState<"waterfall" | "tree">("waterfall");
-  const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
-  const [expandedSpanId, setExpandedSpanId] = useState<string | null>(null);
-
-  // Flatten the span tree for the waterfall chart
-  const allSpans = useMemo(() => {
-    if (!trace) return [];
-    const result: Span[] = [trace];
-    const collect = (spans: Span[]) => {
-      for (const span of spans) {
-        result.push(span);
-        if (span.children) collect(span.children);
-      }
-    };
-    if (trace.children) collect(trace.children);
-    return result;
-  }, [trace]);
-
-  // Waterfall chart data: bars representing each span
-  const waterfallData = useMemo(() => {
-    if (!trace) return [];
-    const baseTime = new Date(trace.start_time).getTime();
-    return allSpans.map((span) => {
-      const start = new Date(span.start_time).getTime() - baseTime;
-      const end = new Date(span.end_time).getTime() - baseTime;
-      const duration = end - start;
-      const color = KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall;
-      return {
-        name: span.name,
-        spanId: span.span_id,
-        start,
-        duration,
-        color,
-        kind: span.kind,
-        model: span.model,
-      } satisfies WaterfallEntry;
-    });
-  }, [allSpans, trace]);
-
-  if (loading) {
-    return (
-      <div className="flex flex-col h-full" style={{ background: colors.backgrounds.abyssBlack }}>
-        <div className="px-4 py-3 border-b" style={{ borderColor: colors.backgrounds.caveWall }}>
-          <Skeleton className="h-5 w-48 rounded" />
-        </div>
-        <div className="flex-1 overflow-auto p-4">
-          <Skeleton className="h-16 w-full rounded-lg mb-4" />
-          <LoadingState rows={5} rowHeight="2rem" />
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !trace) {
-    return (
-      <div className="flex flex-col h-full">
-        <EmptyState
-          variant="error"
-          title={error ?? "Trace not found"}
-          description="The requested trace could not be loaded"
-          actionLabel="Back to Traces"
-          onAction={onBack}
-        />
-      </div>
-    );
-  }
-
-  const selectedSpan = allSpans.find((s) => s.span_id === selectedSpanId);
-
-  return (
-    <div className="flex flex-col h-full" style={{ background: colors.backgrounds.abyssBlack }}>
-      {/* Header with breadcrumb */}
-      <div className="flex flex-col gap-2 px-4 py-3 border-b"
-        style={{ borderColor: colors.backgrounds.caveWall }}
-      >
-        <Breadcrumb items={[
-          { label: "Traces", onClick: onBack },
-          { label: `Trace: ${traceId.slice(0, 8)}…` },
-        ]} />
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onBack}
-            className="flex items-center gap-1.5 text-sm px-2 py-1 rounded transition-colors"
-            style={{ color: colors.typography.ashGrey }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = colors.typography.pureLight)}
-            onMouseLeave={(e) => (e.currentTarget.style.color = colors.typography.ashGrey)}
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-              <path
-                d="M10 3l-5 5 5 5"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            Back
-          </button>
-          <div className="flex-1" />
-          {liveStatus !== null && (
-            <div
-              className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs"
-              style={{
-                background:
-                  liveStatus === "live"
-                    ? "rgba(139, 92, 246, 0.15)"
-                    : "rgba(107, 114, 128, 0.15)",
-                color:
-                  liveStatus === "live"
-                    ? colors.accents.flicker
-                    : colors.typography.ashGrey,
-              }}
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${liveStatus === "live" ? "animate-pulse" : ""}`}
-                style={{
-                  background:
-                    liveStatus === "live"
-                      ? colors.accents.flicker
-                      : colors.typography.ashGrey,
-                }}
-              />
-              {liveStatus === "live" ? "Live" : "Stalled"}
-            </div>
-          )}
-          <span className="text-xs text-omneval-text-muted">
-            <span className="font-mono text-omneval-text-pure">{traceId}</span>
-          </span>
-        </div>
-      </div>
-
-      {/* View mode tabs */}
-      <div className="flex items-center gap-1 px-4 py-2 border-b" style={{ borderColor: colors.backgrounds.caveWall }}>
-        {(["waterfall", "tree"] as const).map((mode) => (
-          <button
-            key={mode}
-            onClick={() => setViewMode(mode)}
-            className={`px-3 py-1.5 text-sm rounded-md transition-colors capitalize ${
-              mode === viewMode
-                ? "text-omneval-violet-pale"
-                : "text-omneval-text-muted hover:text-omneval-text-pure"
-            }`}
-            style={
-              mode === viewMode
-                ? {
-                    background: colors.backgrounds.charcoalDepth,
-                    borderBottom: `2px solid ${colors.accents.emberFlare}`,
-                  }
-                : {}
-            }
-            aria-label={`Switch to ${mode} view`}
-          >
-            {mode === "waterfall" ? "Waterfall" : "Tree"}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex-1 flex overflow-hidden">
-        {/* Main content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Root span info bar */}
-          <div
-            className="mx-4 mt-4 mb-4 px-4 py-3 rounded-lg border"
-            style={{
-              background: colors.backgrounds.charcoalDepth,
-              borderColor: KIND_COLOR_MAP[trace.kind] ? `${KIND_COLOR_MAP[trace.kind]}44` : colors.backgrounds.caveWall,
-              borderLeft: `3px solid ${KIND_COLOR_MAP[trace.kind] || colors.backgrounds.caveWall}`,
-            }}
-          >
-            <div className="flex items-center gap-3 mb-1">
-              <span className="text-sm font-semibold text-omneval-text-pure">{trace.name}</span>
-              {trace.kind && (
-                <span
-                  className="text-xs px-2 py-0.5 rounded-full font-medium"
-                  style={{
-                    background: `${KIND_COLOR_MAP[trace.kind] || colors.backgrounds.caveWall}22`,
-                    color: KIND_COLOR_MAP[trace.kind] || colors.typography.ashGrey,
-                  }}
-                >
-                  {trace.kind}
-                </span>
-              )}
-              {trace.model && (
-                <span className="text-xs font-mono text-omneval-text-muted">{trace.model}</span>
-              )}
-            </div>
-            <div className="flex items-center gap-4 text-xs text-omneval-text-muted">
-              <span>{formatTime(trace.start_time)}</span>
-              <span>{formatDuration(trace.start_time, trace.end_time)}</span>
-              <span>
-                {(
-                  (traceRollup?.inputTokens ?? 0) + (traceRollup?.outputTokens ?? 0)
-                ).toLocaleString()}{" "}
-                tokens
-              </span>
-              {(traceRollup?.costUsd ?? 0) > 0 && (
-                <span style={{ color: colors.accents.emberFlare }}>
-                  ${(traceRollup?.costUsd ?? 0).toFixed(4)}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* View content */}
-          <div className="flex-1 overflow-auto px-4 pb-4">
-            <div className="max-w-4xl mx-auto">
-              {viewMode === "waterfall" ? (
-                <GanttWaterfall
-                  data={waterfallData}
-                  selectedSpanId={selectedSpanId}
-                  onSelect={(spanId) => setSelectedSpanId(selectedSpanId === spanId ? null : spanId)}
-                />
-              ) : (
-                <TraceTree
-                  trace={trace}
-                  expandedSpanId={expandedSpanId}
-                  onToggleExpand={(id) => setExpandedSpanId(expandedSpanId === id ? null : id)}
-                  onShowSaveModal={(span) => setSaveSpan({ span, input: span.input ?? "", output: span.output })}
-                  selectedSpanId={selectedSpanId}
-                  onSelect={(spanId) => setSelectedSpanId(selectedSpanId === spanId ? null : spanId)}
-                />
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Slide-in detail panel for selected span */}
-        {selectedSpan && (
-          <SlideInDetailPanel
-            span={selectedSpan}
-            onClose={() => setSelectedSpanId(null)}
-            onSave={() => setSaveSpan({ span: selectedSpan, input: selectedSpan.input ?? "", output: selectedSpan.output })}
-          />
-        )}
-      </div>
-
-      {/* Save to dataset modal */}
-      {saveSpan && (
-        <SaveToDatasetModal
-          spanId={saveSpan.span.span_id}
-          traceId={traceId}
-          input={saveSpan.input}
-          expectedOutput={saveSpan.output}
-          onClose={() => setSaveSpan(null)}
-          onSuccess={handleSaveSuccess}
-        />
-      )}
-    </div>
-  );
-}
 
 // ── Chat Turns Renderer ────────────────────────────────────────────
 
@@ -676,6 +299,7 @@ function GanttWaterfall({
               <XAxis
                 type="number"
                 dataKey="start"
+                domain={computeWaterfallAxisDomain(data)}
                 tick={{ fill: colors.typography.ashGrey, fontSize: 11 }}
                 axisLine={{ stroke: colors.backgrounds.caveWall }}
                 tickFormatter={formatMs}
@@ -823,24 +447,27 @@ function SlideInDetailPanel({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold text-omneval-text-pure truncate">{span.name}</span>
-              {span.kind && (
+              {span.kind && (() => {
+              const K = span.kind as SpanKind;
+              const KindIcon = getSpanKindIcon(K);
+              return (
                 <span
-                  className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0"
+                  className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 flex items-center gap-1"
                   style={{
-                    background: `${KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall}22`,
-                    color: KIND_COLOR_MAP[span.kind] || colors.typography.ashGrey,
+                    background: `${getSpanKindColor(K)}22`,
+                    color: getSpanKindColor(K),
                   }}
                 >
+                  <span style={{ display: "inline-flex" }}><KindIcon /></span>
                   {span.kind}
                 </span>
-              )}
+              );
+            })()}
             </div>
             <div className="flex items-center gap-3 text-xs text-omneval-text-muted mt-1">
               <span>{formatDuration(span.start_time, span.end_time)}</span>
               <span>{totalTokens(span).toLocaleString()} tokens</span>
-              {span.cost_usd > 0 && (
-                <span style={{ color: colors.accents.emberFlare }}>${(span.cost_usd ?? 0).toFixed(4)}</span>
-              )}
+              <span style={{ color: colors.accents.emberFlare }}>${span.cost_usd.toFixed(4)}</span>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -1022,10 +649,10 @@ function TraceTree({
   selectedSpanId,
   onSelect,
 }: {
-  trace: Span;
+  trace: AnnotatedSpan;
   expandedSpanId: string | null;
   onToggleExpand: (id: string) => void;
-  onShowSaveModal: (span: Span) => void;
+  onShowSaveModal: (span: AnnotatedSpan) => void;
   selectedSpanId: string | null;
   onSelect: (spanId: string) => void;
 }) {
@@ -1055,9 +682,9 @@ function SpanRow({
   selectedSpanId,
   onSelect,
 }: {
-  span: Span;
+  span: AnnotatedSpan;
   depth: number;
-  onShowSaveModal: (span: Span) => void;
+  onShowSaveModal: (span: AnnotatedSpan) => void;
   expandedSpanId: string | null;
   onToggleExpand: (id: string) => void;
   selectedSpanId: string | null;
@@ -1095,7 +722,7 @@ function SpanRow({
       >
         <div
           className="w-2 h-2 rounded-full flex-shrink-0"
-          style={{ background: KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall }}
+          style={{ background: getSpanKindColor(span.kind as SpanKind) }}
         />
         {/* Expand/collapse toggle */}
         {hasChildren ? (
@@ -1178,9 +805,15 @@ function SpanRow({
           {formatDuration(span.start_time, span.end_time)}
         </span>
 
-        {/* Token count */}
-        <span className="text-xs text-omneval-text-muted flex-shrink-0 hidden sm:block">
-          {totalTokens(span).toLocaleString()}t
+        {/* Rollup token count */}
+        <span className="text-xs text-omneval-text-muted flex-shrink-0 hidden md:block">
+          {(span.rollup_input_tokens ?? 0) + (span.rollup_output_tokens ?? 0)}{" "}
+          t
+        </span>
+
+        {/* Rollup cost */}
+        <span className="text-xs flex-shrink-0 hidden sm:block" style={{ color: colors.accents.emberFlare }}>
+          ${(span.rollup_cost_usd ?? 0).toFixed(4)}
         </span>
 
         {/* Save to dataset button */}
@@ -1274,7 +907,7 @@ function SpanRow({
           {span.children!.map((child) => (
             <SpanRow
               key={child.span_id}
-              span={child}
+              span={child as AnnotatedSpan}
               depth={depth + 1}
               onShowSaveModal={onShowSaveModal}
               expandedSpanId={expandedSpanId}
@@ -1399,19 +1032,25 @@ export function SlideInTraceDetail({
     addToast("success", "Span saved to dataset");
   }, [addToast]);
 
-  // Flatten the span tree for the waterfall chart
+  // Annotate the trace tree with cumulative rollup values
+  const annotatedTrace = useMemo((): AnnotatedSpan | null => {
+    if (!trace) return null;
+    return annotateSpanTree(trace);
+  }, [trace]);
+
+  // Flatten the annotated span tree for the waterfall chart
   const allSpans = useMemo(() => {
-    if (!trace) return [];
-    const result: Span[] = [trace];
-    const collect = (spans: Span[]) => {
+    if (!annotatedTrace) return [];
+    const result: AnnotatedSpan[] = [annotatedTrace];
+    const collect = (spans: AnnotatedSpan[]) => {
       for (const span of spans) {
         result.push(span);
-        if (span.children) collect(span.children);
+        if (span.children) collect(span.children as AnnotatedSpan[]);
       }
     };
-    if (trace.children) collect(trace.children);
+    if (annotatedTrace.children) collect(annotatedTrace.children as AnnotatedSpan[]);
     return result;
-  }, [trace]);
+  }, [annotatedTrace]);
 
   // Waterfall chart data
   const waterfallData = useMemo(() => {
@@ -1421,7 +1060,7 @@ export function SlideInTraceDetail({
       const start = new Date(span.start_time).getTime() - baseTime;
       const end = new Date(span.end_time).getTime() - baseTime;
       const duration = end - start;
-      const color = KIND_COLOR_MAP[span.kind] || colors.backgrounds.caveWall;
+      const color = getSpanKindColor(span.kind as SpanKind);
       return {
         name: span.name,
         spanId: span.span_id,
@@ -1580,23 +1219,28 @@ export function SlideInTraceDetail({
                 <div className="mx-4 mt-4 mb-4 px-4 py-3 rounded-lg border flex-shrink-0"
                   style={{
                     background: colors.backgrounds.charcoalDepth,
-                    borderColor: KIND_COLOR_MAP[trace.kind] ? `${KIND_COLOR_MAP[trace.kind]}44` : colors.backgrounds.caveWall,
-                    borderLeft: `3px solid ${KIND_COLOR_MAP[trace.kind] || colors.backgrounds.caveWall}`,
+                    borderColor: trace.kind ? `${getSpanKindColor(trace.kind as SpanKind)}44` : colors.backgrounds.caveWall,
+                    borderLeft: `3px solid ${trace.kind ? getSpanKindColor(trace.kind as SpanKind) : colors.backgrounds.caveWall}`,
                   }}
                 >
                   <div className="flex items-center gap-3 mb-1">
                     <span className="text-sm font-semibold text-omneval-text-pure">{trace.name}</span>
-                    {trace.kind && (
-                      <span
-                        className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0"
-                        style={{
-                          background: `${KIND_COLOR_MAP[trace.kind] || colors.backgrounds.caveWall}22`,
-                          color: KIND_COLOR_MAP[trace.kind] || colors.typography.ashGrey,
-                        }}
-                      >
-                        {trace.kind}
-                      </span>
-                    )}
+                    {trace.kind && (() => {
+                      const K = trace.kind as SpanKind;
+                      const KindIcon = getSpanKindIcon(K);
+                      return (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1 flex-shrink-0"
+                          style={{
+                            background: `${getSpanKindColor(K)}22`,
+                            color: getSpanKindColor(K),
+                          }}
+                        >
+                          <span style={{ display: "inline-flex" }}><KindIcon /></span>
+                          {trace.kind}
+                        </span>
+                      );
+                    })()}
                     {trace.model && (
                       <span className="text-xs font-mono text-omneval-text-muted flex-shrink-0">{trace.model}</span>
                     )}
@@ -1629,7 +1273,7 @@ export function SlideInTraceDetail({
                       />
                     ) : (
                       <TraceTree
-                        trace={trace}
+                        trace={annotatedTrace!}
                         expandedSpanId={expandedSpanId}
                         onToggleExpand={(id) => setExpandedSpanId(expandedSpanId === id ? null : id)}
                         onShowSaveModal={(span) => setSaveSpan({ span, input: span.input ?? "", output: span.output })}

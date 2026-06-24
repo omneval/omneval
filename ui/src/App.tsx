@@ -93,12 +93,6 @@ interface MeResponse {
   projects: Array<{ project_id: string; name: string }>;
 }
 
-interface TraceOverlay {
-  traceId: string;
-  // Where the user came from before opening the trace overlay (for back navigation).
-  returnTo: "traces" | "conversation-detail";
-}
-
 export default function App() {
   const [page, setPage] = useState<Page>("login");
   const [projects, setProjects] = useState<Project[]>([]);
@@ -113,7 +107,7 @@ export default function App() {
   const [showNewProject, setShowNewProject] = useState(false);
   // Trace detail overlay state — lifts the overlay out of TracesPage so the
   // Traces list stays mounted behind the overlay when a trace is opened.
-  const [traceOverlay, setTraceOverlay] = useState<TraceOverlay | null>(null);
+  const [traceOverlay, setTraceOverlay] = useState<string | null>(null);
 
   // Persist active project to localStorage whenever it changes
   const persistActiveProject = useCallback((projectId: string) => {
@@ -185,7 +179,7 @@ export default function App() {
         const traceId = extractTraceIdFromPathname(window.location.pathname);
         if (traceId) {
           setPage("traces");
-          setTraceOverlay({ traceId, returnTo: "traces" });
+          setTraceOverlay(traceId);
         } else {
           setPage(pageFromPathname(window.location.pathname));
         }
@@ -204,7 +198,7 @@ export default function App() {
       if (traceId) {
         // /traces/{traceId} direct link: render Traces list with Trace Detail overlay
         setPage("traces");
-        setTraceOverlay({ traceId, returnTo: "traces" });
+        setTraceOverlay(traceId);
       } else {
         setPage((current) =>
           current === "login" ? current : pageFromPathname(window.location.pathname)
@@ -326,15 +320,13 @@ export default function App() {
               <TracesPage
                 activeProject={activeProject}
                 timeRange={timeRange}
-                onOpenTraceOverlay={(traceId) =>
-                  setTraceOverlay({ traceId, returnTo: "traces" })
-                }
+                onOpenTraceOverlay={(traceId) => setTraceOverlay(traceId)}
               />
             )}
             {/* Trace Detail overlay — sits on top of the Traces list. */}
             {traceOverlay && (
               <SlideInTraceDetail
-                traceId={traceOverlay.traceId}
+                traceId={traceOverlay}
                 activeProject={activeProject}
                 onClose={() => setTraceOverlay(null)}
               />
@@ -354,12 +346,8 @@ export default function App() {
                 conversationId={activeConversationId}
                 activeProject={activeProject}
                 onBack={() => setPage(conversationDetailReturnTo)}
-                onNavigateToTrace={(traceId) =>
-                  setTraceOverlay({ traceId, returnTo: "traces" })
-                }
-                onNavigateToTraceDetail={(traceId) =>
-                  setTraceOverlay({ traceId, returnTo: "conversation-detail" })
-                }
+                onNavigateToTrace={(traceId) => setTraceOverlay(traceId)}
+                onNavigateToTraceDetail={(traceId) => setTraceOverlay(traceId)}
               />
             )}
             {page === "prompts" && (

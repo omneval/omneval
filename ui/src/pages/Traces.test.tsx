@@ -1906,7 +1906,7 @@ function renderTracesPageWithOverlay(
     Partial<Pick<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">> = {}
 ) {
   return {
-    ...render(<TracesOverlayWrapper {...props} />),
+    ...render(<TracesOverlayWrapper children={props} />),
     setTraceOverlay: null as unknown as (id: string | null) => void,
   };
 }
@@ -2024,5 +2024,104 @@ describe("trace detail opens as overlay (#281)", () => {
     // All three trace names should be in the document (list + overlay title).
     const traceNames = screen.queryAllByText(/main-trace|simple-trace|leaf-span/);
     expect(traceNames.length).toBeGreaterThan(3); // at least list rows + overlay
+  });
+});
+
+// ── Span Kind icon tests (issue #277) ───────────────────────────
+
+describe("Span Kind icons in Traces list (issue #277)", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: mockSpans,
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Helper: find the kind-icon wrapper style by navigating from the name text
+  // to the SpanKindIcon wrapper, which carries a `title` matching the kind
+  // and a `color` style tinting the inline SVG icon (shared spanKindVisuals
+  // module — see ui/src/modules/spanKindVisuals.tsx, issue #276).
+  function findKindIconStyle(name: string, kind: string): string | null {
+    const nameSpan = screen.getByText(name);
+    expect(nameSpan).toBeInTheDocument();
+    const button = nameSpan.closest("button")!;
+    expect(button).toBeInTheDocument();
+    const iconSpansList = button.querySelectorAll("[title]");
+    expect(iconSpansList.length).toBeGreaterThan(0);
+    let iconSpan: HTMLElement | null = null;
+    for (let i = 0; i < iconSpansList.length; i++) {
+      const el = iconSpansList[i] as HTMLElement;
+      if (el.getAttribute("title") === kind) {
+        iconSpan = el;
+        break;
+      }
+    }
+    expect(iconSpan).not.toBeNull();
+    expect(iconSpan).toBeInTheDocument();
+    expect(iconSpan!.querySelector("svg")).toBeInTheDocument();
+    return iconSpan?.getAttribute("style") ?? null;
+  }
+
+  it("renders a SpanKindIcon next to each trace name", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // Verify each trace name has a kind icon.
+    findKindIconStyle("main-trace", "chain");
+    findKindIconStyle("simple-trace", "chain");
+    findKindIconStyle("leaf-span", "llm");
+  });
+
+  it("renders the correct color for an LLM root span", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("leaf-span")).toBeInTheDocument();
+    });
+
+    // trace-c is kind: "llm" — spanKindVisuals llm color is #7C3AED.
+    const style = findKindIconStyle("leaf-span", "llm");
+    expect(style).toContain("color");
+    expect(style).toContain("rgb(124, 58, 237)");
+  });
+
+  it("renders the correct color for a chain root span", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // trace-a is kind: "chain" — spanKindVisuals chain color is #22D3EE.
+    const style = findKindIconStyle("main-trace", "chain");
+    expect(style).toContain("color");
+    expect(style).toContain("rgb(34, 211, 238)");
+  });
+
+  it("renders a different color for different span kinds in the same view", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+      expect(screen.getByText("leaf-span")).toBeInTheDocument();
+    });
+
+    // main-trace is chain, leaf-span is llm — they must differ.
+    const mainStyle = findKindIconStyle("main-trace", "chain");
+    const leafStyle = findKindIconStyle("leaf-span", "llm");
+
+    expect(mainStyle).not.toBe(leafStyle);
   });
 });

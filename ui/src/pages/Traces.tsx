@@ -3,6 +3,7 @@ import { colors } from "@/theme";
 import { OnboardingEmptyState } from "@/components/OnboardingEmptyState";
 import { Skeleton } from "@/components/Skeleton";
 import { EmptyState } from "@/components/EmptyState";
+import { SpanKindIcon, getSpanKindColor, SpanKind } from "@/modules/spanKindVisuals";
 import {
   formatTimeWithYear,
   formatDuration,
@@ -632,9 +633,17 @@ function TableCellRenderer({
           key={col.key}
           onClick={() => onOpenTraceOverlay(span.trace_id)}
           className="text-left block w-full leading-tight"
-          title="View trace watermark overlay"
+          title="View trace"
         >
-          <div className="text-omneval-text-pure font-medium">{span.name}</div>
+          <div className="flex items-center gap-2">
+            <span
+              title={span.kind}
+              style={{ color: getSpanKindColor(span.kind as SpanKind), display: "inline-flex" }}
+            >
+              <SpanKindIcon kind={span.kind as SpanKind} />
+            </span>
+            <span className="text-omneval-text-pure font-medium">{span.name}</span>
+          </div>
           <div className="text-omneval-text-muted text-[11px] font-mono truncate max-w-[120px]">
             {span.trace_id.slice(0, 12)}…
           </div>
