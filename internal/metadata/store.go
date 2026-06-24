@@ -42,6 +42,11 @@ type Store interface {
 	// narrower type rather than the god interface.
 	SessionStore() SessionStore
 
+	// BookmarkStore returns a focused BookmarkStore interface that exposes
+	// only the bookmark operations, enabling callers to depend on the
+	// narrower type rather than the god interface.
+	BookmarkStore() BookmarkStore
+
 	// PromptStore returns a focused PromptStore interface that exposes
 	// only the prompt registry methods, enabling callers to depend on the
 	// narrower type rather than the god interface.

@@ -49,6 +49,11 @@ func (s *SQLiteFocusedStore) SessionStore() SessionStore {
 	return s.Store
 }
 
+// BookmarkStore returns the focused BookmarkStore interface.
+func (s *SQLiteFocusedStore) BookmarkStore() BookmarkStore {
+	return s.Store
+}
+
 // PromptStore returns the focused PromptStore interface.
 func (s *SQLiteFocusedStore) PromptStore() PromptStore {
 	return s.Store

@@ -213,3 +213,6 @@ func (f *fakeMetaStore) IsBookmarked(ctx context.Context, projectID, traceID str
 func (f *fakeMetaStore) ListBookmarkedTraceIDs(ctx context.Context, projectID string) ([]string, error) {
 	return nil, nil
 }
+
+// BookmarkStore returns the focused BookmarkStore interface.
+func (f *fakeMetaStore) BookmarkStore() metadata.BookmarkStore { return f }
