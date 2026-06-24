@@ -8,11 +8,16 @@ import (
 // PostgresFocusedStore wraps *postgres.Store so that callers can depend on
 // the narrower focused interfaces (PromptStore, EvalRuleStore, ...) instead
 // of the full god Store. Embedding the concrete store promotes all domain
-// methods; the PromptStore()/EvalRuleStore() methods below override the
-// embedded store's package-local methods so they return this package's
-// focused interface types instead.
+// methods; the focused Store methods below override the embedded store's
+// package-local methods so they return this package's focused interface types
+// instead.
 type PostgresFocusedStore struct {
 	*postgres.Store
+}
+
+// SessionStore returns the focused SessionStore interface.
+func (s *PostgresFocusedStore) SessionStore() SessionStore {
+	return s.Store
 }
 
 // PromptStore returns the focused PromptStore interface.
@@ -32,6 +37,11 @@ var _ Store = (*PostgresFocusedStore)(nil)
 // narrower focused interfaces instead of the full god Store.
 type SQLiteFocusedStore struct {
 	*sqlite.Store
+}
+
+// SessionStore returns the focused SessionStore interface.
+func (s *SQLiteFocusedStore) SessionStore() SessionStore {
+	return s.Store
 }
 
 // PromptStore returns the focused PromptStore interface.

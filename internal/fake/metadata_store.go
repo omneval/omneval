@@ -723,5 +723,8 @@ func (f *FakeMetadataStore) CheckPassword(hashed, plaintext string) error {
 	return bcrypt.CompareHashAndPassword([]byte(hashed), []byte(plaintext))
 }
 
+// SessionStore returns the focused SessionStore interface.
+func (f *FakeMetadataStore) SessionStore() metadata.SessionStore { return f }
+
 // EvalRuleStore returns the focused EvalRuleStore interface.
 func (f *FakeMetadataStore) EvalRuleStore() metadata.EvalRuleStore { return f }

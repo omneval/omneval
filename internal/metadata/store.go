@@ -37,6 +37,11 @@ type Store interface {
 	Migrate(ctx context.Context) error
 	Close() error
 
+	// SessionStore returns a focused SessionStore interface that exposes
+	// only the session management methods, enabling callers to depend on the
+	// narrower type rather than the god interface.
+	SessionStore() SessionStore
+
 	// PromptStore returns a focused PromptStore interface that exposes
 	// only the prompt registry methods, enabling callers to depend on the
 	// narrower type rather than the god interface.
