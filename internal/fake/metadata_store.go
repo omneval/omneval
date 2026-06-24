@@ -718,3 +718,6 @@ func (f *FakeMetadataStore) ListDatasetRunItems(ctx context.Context, runID strin
 func (f *FakeMetadataStore) CheckPassword(hashed, plaintext string) error {
 	return bcrypt.CompareHashAndPassword([]byte(hashed), []byte(plaintext))
 }
+
+// EvalRuleStore returns the focused EvalRuleStore interface.
+func (f *FakeMetadataStore) EvalRuleStore() metadata.EvalRuleStore { return f }
