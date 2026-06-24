@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import { useState } from "react";
 import type { ComponentProps } from "react";
 import TracesPage from "./Traces";
@@ -1888,6 +1888,7 @@ function TracesOverlayWrapper({
       <TracesPage
         activeProject="test-project"
         onOpenTraceOverlay={(traceId: string) => setTraceOverlay(traceId)}
+        activeOverlayTraceId={traceOverlay}
         {...children}
       />
       {traceOverlay && (
@@ -2024,6 +2025,170 @@ describe("trace detail opens as overlay (#281)", () => {
     // All three trace names should be in the document (list + overlay title).
     const traceNames = screen.queryAllByText(/main-trace|simple-trace|leaf-span/);
     expect(traceNames.length).toBeGreaterThan(3); // at least list rows + overlay
+  });
+});
+
+// ── Trace overlay keyboard navigation tests (#282) ──────────────────────
+
+describe("trace overlay keyboard navigation (#282)", () => {
+  // One trace-detail response per mock span, keyed by trace_id, so the
+  // overlay's displayed title proves which trace is actually showing.
+  const traceDetailById: Record<string, unknown> = Object.fromEntries(
+    mockSpans.map((span) => [
+      span.trace_id,
+      {
+        trace_id: span.trace_id,
+        project_id: "test-project",
+        root_span: span,
+        total_input_tokens: span.input_tokens,
+        total_output_tokens: span.output_tokens,
+        total_cost_usd: span.cost_usd,
+      },
+    ]),
+  );
+
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((_input: RequestInfo | URL) => {
+      const url = _input.toString();
+      const match = url.match(/\/api\/v1\/traces\/([^?]+)/);
+      if (match) {
+        const detail = traceDetailById[match[1]];
+        return Promise.resolve({
+          ok: !!detail,
+          json: () => Promise.resolve(detail ?? {}),
+        } as Response);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response);
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function getOverlay() {
+    return screen.getByLabelText("Trace detail");
+  }
+
+  function getTraceNameCell() {
+    const firstRow = document.querySelector("tbody tr");
+    return firstRow?.querySelector(".font-medium") as HTMLElement | null;
+  }
+
+  it("ArrowDown moves the overlay to the next trace without closing it", async () => {
+    renderTracesPageWithOverlay();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(getTraceNameCell()!);
+    });
+
+    await waitFor(() => {
+      expect(within(getOverlay()).getAllByText("main-trace")[0]).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowDown" });
+    });
+
+    await waitFor(() => {
+      expect(within(getOverlay()).getAllByText("simple-trace")[0]).toBeInTheDocument();
+    });
+    // The Traces list stays mounted behind the overlay throughout.
+    expect(screen.getByRole("table")).toBeInTheDocument();
+  });
+
+  it("ArrowUp moves the overlay to the previous trace without closing it", async () => {
+    renderTracesPageWithOverlay();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    const rows = document.querySelectorAll("tbody tr");
+    const lastRowNameCell = rows[rows.length - 1].querySelector(".font-medium") as HTMLElement;
+    await act(async () => {
+      fireEvent.click(lastRowNameCell);
+    });
+
+    await waitFor(() => {
+      expect(within(getOverlay()).getAllByText("leaf-span")[0]).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowUp" });
+    });
+
+    await waitFor(() => {
+      expect(within(getOverlay()).getAllByText("simple-trace")[0]).toBeInTheDocument();
+    });
+  });
+
+  it("is a no-op at the end of the list (ArrowDown on the last trace)", async () => {
+    renderTracesPageWithOverlay();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    const rows = document.querySelectorAll("tbody tr");
+    const lastRowNameCell = rows[rows.length - 1].querySelector(".font-medium") as HTMLElement;
+    await act(async () => {
+      fireEvent.click(lastRowNameCell);
+    });
+
+    await waitFor(() => {
+      expect(within(getOverlay()).getAllByText("leaf-span")[0]).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowDown" });
+    });
+
+    // Still on the last trace — no error, no close.
+    expect(within(getOverlay()).getAllByText("leaf-span")[0]).toBeInTheDocument();
+  });
+
+  it("is a no-op at the start of the list (ArrowUp on the first trace)", async () => {
+    renderTracesPageWithOverlay();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(getTraceNameCell()!);
+    });
+
+    await waitFor(() => {
+      expect(within(getOverlay()).getAllByText("main-trace")[0]).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowUp" });
+    });
+
+    expect(within(getOverlay()).getAllByText("main-trace")[0]).toBeInTheDocument();
+  });
+
+  it("ignores ArrowDown/ArrowUp when no overlay is open", async () => {
+    renderTracesPageWithOverlay();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowDown" });
+    });
+
+    expect(screen.queryByLabelText("Trace detail")).not.toBeInTheDocument();
   });
 });
 

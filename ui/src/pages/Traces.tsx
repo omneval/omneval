@@ -19,8 +19,12 @@ interface TracesPageProps {
   activeProject: string;
   /** Time-range preset from the Header (e.g. "1h", "1d", "7d"). */
   timeRange?: string;
-  /** Callback fired when a trace row is clicked to open the Trace Detail overlay. */
+  /** Callback fired when a trace row is clicked to open the Trace Detail overlay,
+   *  or when keyboard navigation moves to a different trace while it's open. */
   onOpenTraceOverlay: (traceId: string) => void;
+  /** Trace ID currently shown in the overlay, or undefined/null when closed.
+   *  Drives ArrowUp/ArrowDown keyboard navigation between traces. */
+  activeOverlayTraceId?: string | null;
 }
 
 interface Span {
@@ -775,6 +779,7 @@ export default function TracesPage({
   activeProject,
   timeRange,
   onOpenTraceOverlay,
+  activeOverlayTraceId,
 }: TracesPageProps) {
   const [spans, setSpans] = useState<Span[]>([]);
   const [nextCursor, setNextCursor] = useState("");
@@ -1005,6 +1010,41 @@ export default function TracesPage({
       [field]: val,
     }));
   };
+
+  // ── Trace overlay keyboard navigation ──────────────────────────
+  // When the overlay is open, ArrowDown / ArrowUp move to the next/previous
+  // trace in the current filtered/sorted list without closing the overlay.
+  // The current position is derived from activeOverlayTraceId (the trace
+  // ID App is showing) rather than a separately tracked index, so it can
+  // never drift out of sync with what's actually displayed.
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (!activeOverlayTraceId) return;
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const currentIdx = spans.findIndex((s) => s.trace_id === activeOverlayTraceId);
+      if (currentIdx === -1) return;
+      e.preventDefault();
+      const nextIdx = e.key === "ArrowDown" ? currentIdx + 1 : currentIdx - 1;
+      // Boundary: no-op past the last trace or before the first trace.
+      if (nextIdx < 0 || nextIdx >= spans.length) return;
+      onOpenTraceOverlay(spans[nextIdx].trace_id);
+    },
+    [activeOverlayTraceId, spans, onOpenTraceOverlay],
+  );
+
+  // Ref to always point at the latest handler so the listener never
+  // captures a stale closure.
+  const handlerRef = useRef(handleKeyDown);
+  useEffect(() => {
+    handlerRef.current = handleKeyDown;
+  }, [handleKeyDown]);
+
+  useEffect(() => {
+    if (!activeOverlayTraceId) return;
+    const listener = (e: KeyboardEvent) => handlerRef.current(e);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, [activeOverlayTraceId]);
 
   const visibleColumns = columns.filter((c) => c.visible);
 
@@ -1238,19 +1278,25 @@ export default function TracesPage({
                 </tr>
               </thead>
               <tbody>
-                {spans.map((span) => (
+                {spans.map((span) => {
+                  const isActiveInOverlay = !!activeOverlayTraceId && span.trace_id === activeOverlayTraceId;
+                  return (
                   <tr
                     key={span.span_id}
-                    className="cursor-pointer transition-colors duration-150"
+                    className={`cursor-pointer transition-colors duration-150 ${isActiveInOverlay ? "bg-violet-600/10" : ""}`}
                     style={{
                       borderBottom: `1px solid ${colors.backgrounds.caveWall}`,
                     }}
                     onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLElement).style.background =
-                        "rgba(124, 58, 237, 0.12)";
+                      if (!isActiveInOverlay) {
+                        (e.currentTarget as HTMLElement).style.background =
+                          "rgba(124, 58, 237, 0.12)";
+                      }
                     }}
                     onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLElement).style.background = "transparent";
+                      if (!isActiveInOverlay) {
+                        (e.currentTarget as HTMLElement).style.background = "transparent";
+                      }
                     }}
                   >
                     {visibleColumns.map((col) => {
@@ -1284,7 +1330,8 @@ export default function TracesPage({
                       );
                     })}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}

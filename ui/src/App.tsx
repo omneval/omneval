@@ -321,6 +321,7 @@ export default function App() {
                 activeProject={activeProject}
                 timeRange={timeRange}
                 onOpenTraceOverlay={(traceId) => setTraceOverlay(traceId)}
+                activeOverlayTraceId={traceOverlay}
               />
             )}
             {/* Trace Detail overlay — sits on top of the Traces list. */}
