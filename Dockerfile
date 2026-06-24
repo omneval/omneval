@@ -59,6 +59,7 @@ RUN go build -o /build/writer ./services/writer/cmd/writer/
 RUN go build -o /build/query ./services/query/cmd/query/
 RUN go build -o /build/eval ./services/eval/cmd/eval/
 RUN go build -o /build/quack ./services/quack/cmd/quack/
+RUN go build -o /build/compact ./services/quack/cmd/compact/
 
 # ---- Stage 3: Runtime image ----
 # DuckDB's precompiled static library requires glibc >= 2.38; Ubuntu 24.04 ships 2.39.
@@ -77,6 +78,7 @@ COPY --from=go-builder /build/writer /usr/local/bin/omneval-writer
 COPY --from=go-builder /build/query /usr/local/bin/omneval-query
 COPY --from=go-builder /build/eval /usr/local/bin/omneval-eval
 COPY --from=go-builder /build/quack /usr/local/bin/omneval-quack
+COPY --from=go-builder /build/compact /usr/local/bin/omneval-quack-compact
 
 WORKDIR /app
 

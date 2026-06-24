@@ -1,7 +1,8 @@
 // Package server wires and runs the Quack Server (ADR-0005): the sole
-// process holding a direct DuckLake Catalog connection, serving it to
-// every other service via quack_serve(), and running the Table Maintenance
-// scheduler.
+// process holding a direct DuckLake Catalog connection, serving it to every
+// other service via quack_serve(). Table Maintenance runs as a separate
+// scheduled job (services/quack/cmd/compact), not in this process — see
+// Run's doc comment for why.
 package server
 
 import (
@@ -14,12 +15,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/omneval/omneval/internal/config"
-	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/lake/lakeserver"
 	"github.com/omneval/omneval/internal/probe"
 	"github.com/omneval/omneval/services/quack/internal/metrics"
@@ -40,8 +39,8 @@ func levelFromString(s string) slog.Level {
 }
 
 // Run starts the Quack Server: attaches the configured DuckLake Catalog,
-// serves it over quack_serve(), starts the Table Maintenance scheduler, and
-// serves /healthz and /readyz. Blocks until SIGTERM/SIGINT.
+// serves it over quack_serve(), and serves /healthz and /readyz. Blocks
+// until SIGTERM/SIGINT.
 func Run() error {
 	cfgPath := ""
 	if p := os.Getenv("OMNEVAL_CONFIG"); p != "" {
@@ -101,54 +100,21 @@ func Run() error {
 		}
 	}
 
-	// Attach a loopback Quack client to our own catalog for Table
-	// Maintenance: the Quack Server is itself a valid Quack client of the
-	// catalog it serves (same pattern as Writer/Query API), so it reuses
-	// internal/lake's client-attach path rather than duplicating
-	// ducklake:quack: ATTACH logic.
-	dataPath := cfg.Quack.Server.DataPath
-	if dataPath == "" {
-		if cfg.Storage.Bucket != "" {
-			dataPath = "s3://" + cfg.Storage.Bucket + "/lake"
-		} else {
-			dataPath = "lake/data"
-		}
-	}
-	loopbackAddr := loopbackAddr(scfg.ListenAddr)
-	maintLake, err := lake.Open(ctx, lake.Config{
-		QuackAddr:  loopbackAddr,
-		QuackToken: srv.Token(),
-		DataPath:   dataPath,
-		Storage:    storageIfS3(dataPath, cfg),
-	})
-	if err != nil {
-		return fmt.Errorf("quack: open maintenance lake client: %w", err)
-	}
-	defer maintLake.Close()
-
-	interval, err := time.ParseDuration(cfg.Quack.Server.MaintenanceInterval)
-	if err != nil || interval <= 0 {
-		interval = lakeserver.DefaultMaintenanceInterval
-	}
-
-	retention := lakeserver.RetentionConfig{
-		Enabled:    cfg.Quack.Server.Retention.Enabled,
-		MaxAgeDays: cfg.Quack.Server.Retention.MaxAgeDays,
-	}
-
-	maintDone := make(chan error, 1)
-	go func() {
-		maintDone <- lakeserver.RunMaintenanceLoop(ctx, maintLake.DB(), lakeserver.MaintenanceTables, interval, retention, func(result lakeserver.MaintenanceResult) {
-			metrics.RecordMaintenanceResult(result, retention.Enabled)
-			if retention.Enabled {
-				slog.Info("quack: maintenance retention metrics",
-					"spans_deleted", result.Retention.SpansDeleted,
-					"scores_deleted", result.Retention.ScoresDeleted,
-					"retention_duration", result.Retention.Duration,
-				)
-			}
-		})
-	}()
+	// Table Maintenance no longer runs as an in-process loop here — a
+	// production incident (an unbounded ducklake_merge_adjacent_files call
+	// against a heavily fragmented table ran 45+ minutes, holding this sole
+	// Catalog connection, ADR-0005, hostage for every client the whole time)
+	// showed that a stuck/slow pass and the serving process's own
+	// liveness/health were too entangled when they shared one goroutine
+	// inside this binary. Maintenance is now a separate scheduled job
+	// (services/quack/cmd/compact, run via a Kubernetes CronJob — Helm:
+	// quack.compact.schedule) that attaches as an ordinary Quack client, the
+	// same way Writer/Query/Eval do, and runs one pass per invocation. This
+	// does not change DuckLake's concurrency model — a pass still runs
+	// synchronously against this same process while it executes — but it
+	// decouples a stuck/crashing pass from this process's own health, and
+	// lets the schedule be tuned (e.g. off-peak hours) without redeploying
+	// the Quack Server.
 
 	// Health/readiness/metrics HTTP server.
 	p := probe.New()
@@ -168,44 +134,10 @@ func Run() error {
 	<-ctx.Done()
 	slog.Info("quack: shutting down")
 
-	// Tell the loopback maintenance Lake client first: any reconnect() it has
-	// in flight aborts immediately instead of running its own ~10s budget
-	// (see Lake.Shutdown's doc).
-	maintLake.Shutdown()
-
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	httpSrv.Shutdown(shutdownCtx)
 
-	if err := <-maintDone; err != nil && err != context.Canceled {
-		slog.Warn("quack: maintenance loop error", "err", err)
-	}
-
-	return nil
-}
-
-// loopbackAddr derives the host:port a process should use to reach its own
-// quack_serve() listener. Per the spike, only "localhost" was confirmed to
-// work (not "127.0.0.1"); a bare ":PORT" ListenAddr becomes
-// "localhost:PORT".
-func loopbackAddr(listenAddr string) string {
-	if strings.HasPrefix(listenAddr, ":") {
-		return "localhost" + listenAddr
-	}
-	host, port, ok := strings.Cut(listenAddr, ":")
-	if !ok {
-		return "localhost:" + listenAddr
-	}
-	if host == "" || host == "0.0.0.0" {
-		return "localhost:" + port
-	}
-	return listenAddr
-}
-
-func storageIfS3(dataPath string, cfg *config.Config) *config.StorageConfig {
-	if strings.HasPrefix(dataPath, "s3://") {
-		return &cfg.Storage
-	}
 	return nil
 }
 

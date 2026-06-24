@@ -114,12 +114,36 @@ services:
       OMNEVAL_QUACK_SERVER_TOKEN: ${QUACK_TOKEN:-quack_dev_token}
       OMNEVAL_QUACK_SERVER_CATALOG_DRIVER: postgres
       OMNEVAL_QUACK_SERVER_DATA_PATH: s3://omneval/lake
-      OMNEVAL_QUACK_SERVER_MAINTENANCE_INTERVAL: 5m
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9090/healthz"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Table Maintenance: runs as a separate periodic job, not inside
+  # omneval-quack itself (see services/quack/internal/server's doc comment
+  # on why — a stuck/slow pass must not entangle with the serving process's
+  # own health). In Kubernetes this is a CronJob (Helm: quack.compact.*);
+  # here it's a simple sleep-loop sidecar using the same image/binary.
+  omneval-compact:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: omneval-compact
+    entrypoint: ["sh", "-c", "while true; do omneval-quack-compact; sleep 300; done"]
+    restart: unless-stopped
+    depends_on:
+      omneval-quack:
+        condition: service_healthy
+    environment:
+      OMNEVAL_QUACK_CLIENT_URL: omneval-quack:9494
+      OMNEVAL_QUACK_CLIENT_TOKEN: ${QUACK_TOKEN:-quack_dev_token}
+      OMNEVAL_QUACK_CLIENT_DATA_PATH: s3://omneval/lake
+      OMNEVAL_STORAGE_ENDPOINT: http://minio:9000
+      OMNEVAL_STORAGE_BUCKET: omneval
+      OMNEVAL_STORAGE_REGION: us-east-1
+      OMNEVAL_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_s3_access_key}
+      OMNEVAL_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_s3_secret_key}
 
   omneval-ingest:
     build:

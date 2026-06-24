@@ -1,0 +1,112 @@
+{{- /*
+Quack Compact CronJob — runs one Table Maintenance pass per invocation
+(services/quack/cmd/compact) instead of an in-process loop inside
+quack-server. See quack.compact's values.yaml comment for why this is a
+separate scheduled job rather than part of the quack-server StatefulSet.
+
+Attaches to the Quack Server as an ordinary client (same quack.client.*
+config as Writer/Query/Eval) — never holds a direct Catalog connection
+itself.
+*/ -}}
+{{- if .Values.quack.compact.enabled }}
+{{- $name := .Release.Name -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}-quack-compact
+  labels:
+    app.kubernetes.io/name: omneval
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: quack-compact
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  schedule: {{ .Values.quack.compact.schedule | quote }}
+  suspend: {{ .Values.quack.compact.suspend }}
+  concurrencyPolicy: {{ .Values.quack.compact.concurrencyPolicy }}
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: {{ .Values.quack.compact.activeDeadlineSeconds }}
+      backoffLimit: {{ .Values.quack.compact.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: omneval
+            app.kubernetes.io/instance: {{ $name }}
+            app.kubernetes.io/component: quack-compact
+            {{- with .Values.commonLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with .Values.quack.compact.labels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            checksum/config: {{ toYaml .Values | sha256sum }}
+            {{- with .Values.quack.compact.annotations }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        spec:
+          restartPolicy: Never
+          {{- with .Values.quack.compact.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.quack.compact.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.quack.compact.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: quack-compact
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["omneval-quack-compact"]
+              env:
+                - name: OMNEVAL_CONFIG
+                  value: "/etc/omneval/omneval.yaml"
+                {{- with .Values.storage.endpoint }}
+                - name: OMNEVAL_STORAGE_ENDPOINT
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- with .Values.storage.bucket }}
+                - name: OMNEVAL_STORAGE_BUCKET
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- with .Values.storage.region }}
+                - name: OMNEVAL_STORAGE_REGION
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- if or (include "omneval.storageAccessKey" .) .Values.storage.existingSecret }}
+                - name: OMNEVAL_STORAGE_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "omneval.storageSecret" . }}
+                      key: {{ include "omneval.storageAccessKeySecretKey" . }}
+                      optional: true
+                - name: OMNEVAL_STORAGE_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "omneval.storageSecret" . }}
+                      key: {{ include "omneval.storageSecretKeySecretKey" . }}
+                      optional: true
+                {{- end }}
+                - name: OMNEVAL_QUACK_CLIENT_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "omneval.quackSecret" . }}
+                      key: {{ include "omneval.quackSecretKey" . }}
+              volumeMounts:
+                - name: config
+                  mountPath: /etc/omneval
+                  readOnly: true
+              resources:
+                {{- toYaml .Values.quack.compact.resources | nindent 16 }}
+          volumes:
+            - name: config
+              configMap:
+                name: {{ $name }}-config
+{{- end }}

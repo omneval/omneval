@@ -1,0 +1,83 @@
+---
+suite: quack-compact
+templates:
+  - quack-compact-cronjob.yaml
+tests:
+  - it: should create a CronJob with the configured schedule
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: CronJob
+      - matchRegex:
+          path: metadata.name
+          pattern: 'RELEASE-NAME-quack-compact'
+      - equal:
+          path: spec.schedule
+          value: "*/15 * * * *"
+
+  - it: should run the compact binary, never restart in-place, and forbid overlap
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].command
+          value: ["omneval-quack-compact"]
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.restartPolicy
+          value: Never
+      - equal:
+          path: spec.concurrencyPolicy
+          value: Forbid
+
+  - it: should honor a custom schedule
+    set:
+      quack.compact.schedule: "0 3 * * *"
+    asserts:
+      - equal:
+          path: spec.schedule
+          value: "0 3 * * *"
+
+  - it: should be suspendable without touching quack-server
+    set:
+      quack.compact.suspend: true
+    asserts:
+      - equal:
+          path: spec.suspend
+          value: true
+
+  - it: should not render when disabled
+    set:
+      quack.compact.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should read the quack token from the shared secret by default
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: OMNEVAL_QUACK_CLIENT_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-secret
+                key: quack-token
+
+  - it: should mount the shared config
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].volumeMounts
+          content:
+            name: config
+            mountPath: /etc/omneval
+            readOnly: true
+
+  - it: should have resource limits
+    asserts:
+      - isNotEmpty:
+          path: spec.jobTemplate.spec.template.spec.containers[0].resources
+
+  - it: should set checksum/config annotation to trigger restarts on config changes
+    asserts:
+      - matchRegex:
+          path: spec.jobTemplate.spec.template.metadata.annotations["checksum/config"]
+          pattern: '^[a-f0-9]{64}$'

@@ -67,10 +67,6 @@ type QuackServerConfig struct {
 	// DataPath is where the Lake's Parquet files live: an s3://bucket/prefix
 	// URL or a local directory.
 	DataPath string `mapstructure:"data_path"`
-	// MaintenanceInterval is how often the Table Maintenance scheduler runs
-	// (ducklake_flush_inlined_data, ducklake_merge_adjacent_files,
-	// ducklake_expire_snapshots, orphan/old-file cleanup). Default "5m".
-	MaintenanceInterval string `mapstructure:"maintenance_interval"`
 	// MemoryLimit bounds DuckDB's buffer manager (e.g. "3GB"), applied via
 	// `SET memory_limit`. Without this, DuckDB sizes its buffer pool against
 	// the host's total RAM rather than the container's cgroup limit, so it
@@ -372,7 +368,6 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("quack.server.catalog_driver", "")
 	v.SetDefault("quack.server.catalog_dsn", "")
 	v.SetDefault("quack.server.data_path", "")
-	v.SetDefault("quack.server.maintenance_interval", "5m")
 	v.SetDefault("quack.server.retention.enabled", false)
 	v.SetDefault("quack.server.retention.max_age_days", 0)
 	// quack client (Writer, Query API, backfill tool, demo profile)
@@ -443,7 +438,6 @@ func Load(path string) (*Config, error) {
 	envString(&cfg.Quack.Server.CatalogDriver, "OMNEVAL_QUACK_SERVER_CATALOG_DRIVER")
 	envString(&cfg.Quack.Server.CatalogDSN, "OMNEVAL_QUACK_SERVER_CATALOG_DSN")
 	envString(&cfg.Quack.Server.DataPath, "OMNEVAL_QUACK_SERVER_DATA_PATH")
-	envString(&cfg.Quack.Server.MaintenanceInterval, "OMNEVAL_QUACK_SERVER_MAINTENANCE_INTERVAL")
 	envString(&cfg.Quack.Server.MemoryLimit, "OMNEVAL_QUACK_SERVER_MEMORY_LIMIT")
 	envInt(&cfg.Quack.Server.Threads, "OMNEVAL_QUACK_SERVER_THREADS")
 	envString(&cfg.Quack.Client.URL, "OMNEVAL_QUACK_CLIENT_URL")

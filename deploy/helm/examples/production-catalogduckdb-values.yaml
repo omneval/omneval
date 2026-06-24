@@ -28,9 +28,6 @@ quack:
     # Only set this if the Lake Parquet files are at a non-standard S3 prefix
     dataPath: ""
 
-    # Table Maintenance interval
-    maintenanceInterval: "15m"
-
     # Bounds DuckDB's buffer manager (`SET memory_limit`) so it backs off
     # under memory pressure instead of being OOM-killed by the kernel. Set
     # to ~75% of whatever memory limit you configure below (or the chart
