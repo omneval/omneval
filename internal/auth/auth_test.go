@@ -187,6 +187,9 @@ func (f *FakeMetadataStore) IsBatchCommitted(ctx context.Context, batchID string
 func (f *FakeMetadataStore) Close() error                           { return nil }
 func (f *FakeMetadataStore) CheckPassword(_ string, _ string) error { return nil }
 
+// EvalRuleStore returns the focused EvalRuleStore interface.
+func (f *FakeMetadataStore) EvalRuleStore() metadata.EvalRuleStore { return f }
+
 // ---- Tests ----
 
 func TestGenerate(t *testing.T) {

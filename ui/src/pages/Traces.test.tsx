@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
+import { useState } from "react";
 import type { ComponentProps } from "react";
 import TracesPage from "./Traces";
+import { ToastProvider } from "@/components/Toast";
+import { SlideInTraceDetail } from "./TraceDetail";
 
 // ── Helper data ──────────────────────────────────────────────────
 
@@ -69,13 +72,13 @@ const mockSpans = [
 // ── Render helper ────────────────────────────────────────────────
 
 function renderTracesPage(
-  props: Partial<ComponentProps<typeof TracesPage>> = {}
+  props: Partial<Omit<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">> &
+    Partial<Pick<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">> = {}
 ) {
   return render(
     <TracesPage
       activeProject="test-project"
-      onNavigateToTrace={() => {}}
-      onNavigateToTraceDetail={() => {}}
+      onOpenTraceOverlay={vi.fn()}
       {...props}
     />
   );
@@ -967,11 +970,7 @@ describe("fetch correctness", () => {
     });
 
     view.rerender(
-      <TracesPage
-        activeProject="other-project"
-        onNavigateToTrace={() => {}}
-        onNavigateToTraceDetail={() => {}}
-      />
+      <TracesPage activeProject="other-project" onOpenTraceOverlay={vi.fn()} />
     );
 
     await waitFor(() => {
@@ -1867,3 +1866,427 @@ describe("filter panel styling (#142)", () => {
   });
 });
 
+// ── Trace detail overlay tests (#281) ──────────────────────────────────
+
+
+/**
+ * Component that mirrors App.tsx's overlay pattern: TracesPage +
+ * SlideInTraceDetail mounted conditionally on local state.  This lets the
+ * tests verify that the Traces list stays mounted behind the overlay.
+ */
+function TracesOverlayWrapper({
+  children,
+}: {
+  children?: Partial<
+    Omit<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">
+  > &
+    Partial<Pick<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">>;
+}) {
+  const [traceOverlay, setTraceOverlay] = useState<string | null>(null);
+  return (
+    <ToastProvider>
+      <TracesPage
+        activeProject="test-project"
+        onOpenTraceOverlay={(traceId: string) => setTraceOverlay(traceId)}
+        activeOverlayTraceId={traceOverlay}
+        {...children}
+      />
+      {traceOverlay && (
+        <SlideInTraceDetail
+          traceId={traceOverlay}
+          activeProject="test-project"
+          onClose={() => setTraceOverlay(null)}
+        />
+      )}
+    </ToastProvider>
+  );
+}
+
+function renderTracesPageWithOverlay(
+  props: Partial<Omit<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">> &
+    Partial<Pick<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">> = {}
+) {
+  return {
+    ...render(<TracesOverlayWrapper children={props} />),
+    setTraceOverlay: null as unknown as (id: string | null) => void,
+  };
+}
+
+// Shared mock for the trace-detail API.  The overlay fetches a single
+// trace by trace_id via GET /api/v1/traces/{id} — return the response
+// shape the SlideInTraceDetail component expects.
+const mockTraceDetail: unknown = {
+  trace_id: "trace-a",
+  project_id: "test-project",
+  root_span: mockSpans[0],
+  total_input_tokens: 210,
+  total_output_tokens: 405,
+  total_cost_usd: 0.11,
+};
+
+describe("trace detail opens as overlay (#281)", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((_input: RequestInfo | URL, _init?: RequestInit) => {
+      // Route trace-detail fetch to our mock; everything else returns the list payload.
+      const url = _input.toString();
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          url.includes("/api/v1/traces/")
+            ? Promise.resolve(mockTraceDetail)
+            : Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response);
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Helper: get the first trace row's name cell (the .font-medium div in the table body).
+  function getTraceNameCell() {
+    const firstRow = document.querySelector("tbody tr");
+    return firstRow?.querySelector(".font-medium") as HTMLElement | null;
+  }
+
+  it("opens trace detail as an overlay when the trace name is clicked", async () => {
+    renderTracesPageWithOverlay();
+
+    // Wait for the table to render, then click the first trace row's name cell.
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    const traceNameCell = getTraceNameCell();
+    expect(traceNameCell).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(traceNameCell!);
+    });
+
+    // The overlay should now show trace detail content — verify the Waterfall tab is present.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Switch to waterfall view" })).toBeInTheDocument();
+    });
+
+    // The Traces list should still be visible in the DOM (mounted behind overlay).
+    expect(document.querySelector(".font-medium")).toBeInTheDocument();
+  });
+
+  it("closes the overlay and returns to the Traces list", async () => {
+    renderTracesPageWithOverlay();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    // Open the overlay by clicking the first trace row.
+    const tableBody = document.querySelector("tbody");
+    const firstRow = tableBody?.querySelector("tr");
+    const traceNameCell = firstRow?.querySelector(".font-medium") as HTMLElement;
+    await act(async () => {
+      fireEvent.click(traceNameCell);
+    });
+
+    // Wait for the SlideInTraceDetail's waterfall tab to confirm the overlay has rendered.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Switch to waterfall view" })).toBeInTheDocument();
+    });
+
+    // Close via the overlay close button (the X button, the second "Close trace detail" button).
+    const closeButtons = await screen.findAllByRole("button", { name: /close trace detail/i });
+    const xButton = closeButtons[1]; // second one is the X icon button
+    await act(async () => {
+      fireEvent.click(xButton);
+    });
+
+    // The overlay should be gone, and the Traces list should still be there.
+    expect(
+      screen.queryByRole("button", { name: /close trace detail/i })
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("table")).toBeInTheDocument();
+  });
+
+  it("keeps the Traces list scrollable behind the overlay", async () => {
+    renderTracesPageWithOverlay();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    // Open the overlay by clicking the first trace row.
+    const tableBody = document.querySelector("tbody");
+    const firstRow = tableBody?.querySelector("tr");
+    const traceNameCell = firstRow?.querySelector(".font-medium") as HTMLElement;
+    await act(async () => {
+      fireEvent.click(traceNameCell);
+    });
+
+    // All three trace names should be in the document (list + overlay title).
+    const traceNames = screen.queryAllByText(/main-trace|simple-trace|leaf-span/);
+    expect(traceNames.length).toBeGreaterThan(3); // at least list rows + overlay
+  });
+});
+
+// ── Trace overlay keyboard navigation tests (#282) ──────────────────────
+
+describe("trace overlay keyboard navigation (#282)", () => {
+  // One trace-detail response per mock span, keyed by trace_id, so the
+  // overlay's displayed title proves which trace is actually showing.
+  const traceDetailById: Record<string, unknown> = Object.fromEntries(
+    mockSpans.map((span) => [
+      span.trace_id,
+      {
+        trace_id: span.trace_id,
+        project_id: "test-project",
+        root_span: span,
+        total_input_tokens: span.input_tokens,
+        total_output_tokens: span.output_tokens,
+        total_cost_usd: span.cost_usd,
+      },
+    ]),
+  );
+
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((_input: RequestInfo | URL) => {
+      const url = _input.toString();
+      const match = url.match(/\/api\/v1\/traces\/([^?]+)/);
+      if (match) {
+        const detail = traceDetailById[match[1]];
+        return Promise.resolve({
+          ok: !!detail,
+          json: () => Promise.resolve(detail ?? {}),
+        } as Response);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response);
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function getOverlay() {
+    return screen.getByLabelText("Trace detail");
+  }
+
+  function getTraceNameCell() {
+    const firstRow = document.querySelector("tbody tr");
+    return firstRow?.querySelector(".font-medium") as HTMLElement | null;
+  }
+
+  it("ArrowDown moves the overlay to the next trace without closing it", async () => {
+    renderTracesPageWithOverlay();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(getTraceNameCell()!);
+    });
+
+    await waitFor(() => {
+      expect(within(getOverlay()).getAllByText("main-trace")[0]).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowDown" });
+    });
+
+    await waitFor(() => {
+      expect(within(getOverlay()).getAllByText("simple-trace")[0]).toBeInTheDocument();
+    });
+    // The Traces list stays mounted behind the overlay throughout.
+    expect(screen.getByRole("table")).toBeInTheDocument();
+  });
+
+  it("ArrowUp moves the overlay to the previous trace without closing it", async () => {
+    renderTracesPageWithOverlay();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    const rows = document.querySelectorAll("tbody tr");
+    const lastRowNameCell = rows[rows.length - 1].querySelector(".font-medium") as HTMLElement;
+    await act(async () => {
+      fireEvent.click(lastRowNameCell);
+    });
+
+    await waitFor(() => {
+      expect(within(getOverlay()).getAllByText("leaf-span")[0]).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowUp" });
+    });
+
+    await waitFor(() => {
+      expect(within(getOverlay()).getAllByText("simple-trace")[0]).toBeInTheDocument();
+    });
+  });
+
+  it("is a no-op at the end of the list (ArrowDown on the last trace)", async () => {
+    renderTracesPageWithOverlay();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    const rows = document.querySelectorAll("tbody tr");
+    const lastRowNameCell = rows[rows.length - 1].querySelector(".font-medium") as HTMLElement;
+    await act(async () => {
+      fireEvent.click(lastRowNameCell);
+    });
+
+    await waitFor(() => {
+      expect(within(getOverlay()).getAllByText("leaf-span")[0]).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowDown" });
+    });
+
+    // Still on the last trace — no error, no close.
+    expect(within(getOverlay()).getAllByText("leaf-span")[0]).toBeInTheDocument();
+  });
+
+  it("is a no-op at the start of the list (ArrowUp on the first trace)", async () => {
+    renderTracesPageWithOverlay();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(getTraceNameCell()!);
+    });
+
+    await waitFor(() => {
+      expect(within(getOverlay()).getAllByText("main-trace")[0]).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowUp" });
+    });
+
+    expect(within(getOverlay()).getAllByText("main-trace")[0]).toBeInTheDocument();
+  });
+
+  it("ignores ArrowDown/ArrowUp when no overlay is open", async () => {
+    renderTracesPageWithOverlay();
+
+    await waitFor(() => {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowDown" });
+    });
+
+    expect(screen.queryByLabelText("Trace detail")).not.toBeInTheDocument();
+  });
+});
+
+// ── Span Kind icon tests (issue #277) ───────────────────────────
+
+describe("Span Kind icons in Traces list (issue #277)", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          spans: mockSpans,
+          next: "",
+          limit: 25,
+        }),
+    } as Response);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Helper: find the kind-icon wrapper style by navigating from the name text
+  // to the SpanKindIcon wrapper, which carries a `title` matching the kind
+  // and a `color` style tinting the inline SVG icon (shared spanKindVisuals
+  // module — see ui/src/modules/spanKindVisuals.tsx, issue #276).
+  function findKindIconStyle(name: string, kind: string): string | null {
+    const nameSpan = screen.getByText(name);
+    expect(nameSpan).toBeInTheDocument();
+    const button = nameSpan.closest("button")!;
+    expect(button).toBeInTheDocument();
+    const iconSpansList = button.querySelectorAll("[title]");
+    expect(iconSpansList.length).toBeGreaterThan(0);
+    let iconSpan: HTMLElement | null = null;
+    for (let i = 0; i < iconSpansList.length; i++) {
+      const el = iconSpansList[i] as HTMLElement;
+      if (el.getAttribute("title") === kind) {
+        iconSpan = el;
+        break;
+      }
+    }
+    expect(iconSpan).not.toBeNull();
+    expect(iconSpan).toBeInTheDocument();
+    expect(iconSpan!.querySelector("svg")).toBeInTheDocument();
+    return iconSpan?.getAttribute("style") ?? null;
+  }
+
+  it("renders a SpanKindIcon next to each trace name", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // Verify each trace name has a kind icon.
+    findKindIconStyle("main-trace", "chain");
+    findKindIconStyle("simple-trace", "chain");
+    findKindIconStyle("leaf-span", "llm");
+  });
+
+  it("renders the correct color for an LLM root span", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("leaf-span")).toBeInTheDocument();
+    });
+
+    // trace-c is kind: "llm" — spanKindVisuals llm color is #7C3AED.
+    const style = findKindIconStyle("leaf-span", "llm");
+    expect(style).toContain("color");
+    expect(style).toContain("rgb(124, 58, 237)");
+  });
+
+  it("renders the correct color for a chain root span", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+
+    // trace-a is kind: "chain" — spanKindVisuals chain color is #22D3EE.
+    const style = findKindIconStyle("main-trace", "chain");
+    expect(style).toContain("color");
+    expect(style).toContain("rgb(34, 211, 238)");
+  });
+
+  it("renders a different color for different span kinds in the same view", async () => {
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+      expect(screen.getByText("leaf-span")).toBeInTheDocument();
+    });
+
+    // main-trace is chain, leaf-span is llm — they must differ.
+    const mainStyle = findKindIconStyle("main-trace", "chain");
+    const leafStyle = findKindIconStyle("leaf-span", "llm");
+
+    expect(mainStyle).not.toBe(leafStyle);
+  });
+});

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import LoginPage from "./pages/Login";
 import TracesPage from "./pages/Traces";
-import TraceDetailPage from "./pages/TraceDetail";
+import { SlideInTraceDetail } from "./pages/TraceDetail";
 import ConversationDetailPage from "./pages/ConversationDetail";
 import ConversationsPage from "./pages/Conversations";
 import DashboardPage from "./pages/Dashboard";
@@ -23,7 +23,6 @@ const ACTIVE_PROJECT_KEY = "omneval_active_project";
 type Page =
   | "login"
   | "traces"
-  | "trace-detail"
   | "conversation-detail"
   | "conversations"
   | "dashboard"
@@ -51,7 +50,6 @@ const PAGE_TO_PATH: Record<Page, string> = {
   login: "",
   dashboard: "",
   traces: "traces",
-  "trace-detail": "traces",
   "conversation-detail": "traces",
   conversations: "conversations",
   prompts: "prompts",
@@ -66,6 +64,21 @@ const PAGE_TO_PATH: Record<Page, string> = {
 function pageFromPathname(pathname: string): Page {
   const segment = pathname.replace(/^\//, "").split("/")[0];
   return NAV_MAP[segment] ?? "dashboard";
+}
+
+/**
+ * Extract a trace ID from URLs like `/traces/{traceId}`.
+ * Returns the trace ID if the pathname matches the pattern, `null` otherwise.
+ */
+function extractTraceIdFromPathname(pathname: string): string | null {
+  const parts = pathname.replace(/^\//, "").split("/");
+  if (parts.length >= 2 && parts[0] === "traces") {
+    const tracePart = parts[1];
+    if (tracePart && tracePart !== "") {
+      return tracePart;
+    }
+  }
+  return null;
 }
 
 interface Project {
@@ -84,17 +97,17 @@ export default function App() {
   const [page, setPage] = useState<Page>("login");
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProject, setActiveProject] = useState<string>("");
-  const [activeTraceId, setActiveTraceId] = useState<string>("");
   const [activeDatasetId, setActiveDatasetId] = useState<string>("");
   const [activeConversationId, setActiveConversationId] = useState<string>("");
-  // Where TraceDetail's back button leads (issue #67).
-  const [traceDetailReturnTo, setTraceDetailReturnTo] = useState<Page>("traces");
 
   // Which page the user came from before reaching ConversationDetail, so the back button returns to the correct source page.
   const [conversationDetailReturnTo, setConversationDetailReturnTo] = useState<Page>("conversations");
 
   const [timeRange, setTimeRange] = useState("1d");
   const [showNewProject, setShowNewProject] = useState(false);
+  // Trace detail overlay state — lifts the overlay out of TracesPage so the
+  // Traces list stays mounted behind the overlay when a trace is opened.
+  const [traceOverlay, setTraceOverlay] = useState<string | null>(null);
 
   // Persist active project to localStorage whenever it changes
   const persistActiveProject = useCallback((projectId: string) => {
@@ -161,7 +174,15 @@ export default function App() {
         }
         // Navigate to the page that matches the current URL path on hard load,
         // so that refreshing or deep-linking to /traces, /prompts, etc. works.
-        setPage(pageFromPathname(window.location.pathname));
+        // Direct links to /traces/{traceId} open Trace Detail as an overlay
+        // on top of the Traces list.
+        const traceId = extractTraceIdFromPathname(window.location.pathname);
+        if (traceId) {
+          setPage("traces");
+          setTraceOverlay(traceId);
+        } else {
+          setPage(pageFromPathname(window.location.pathname));
+        }
       })
       .catch(() => {
         // No valid session — the page stays on login.
@@ -173,9 +194,16 @@ export default function App() {
   // the back button change the URL but not the rendered page.
   useEffect(() => {
     const onPopState = () => {
-      setPage((current) =>
-        current === "login" ? current : pageFromPathname(window.location.pathname)
-      );
+      const traceId = extractTraceIdFromPathname(window.location.pathname);
+      if (traceId) {
+        // /traces/{traceId} direct link: render Traces list with Trace Detail overlay
+        setPage("traces");
+        setTraceOverlay(traceId);
+      } else {
+        setPage((current) =>
+          current === "login" ? current : pageFromPathname(window.location.pathname)
+        );
+      }
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -269,9 +297,7 @@ export default function App() {
       {/* Main Content */}
       <Layout
         activeNav={
-          page === "trace-detail" || page === "conversation-detail"
-            ? "traces"
-            : page
+          page === "conversation-detail" ? "traces" : page
         }
         onNavigate={handleNavigate}
         onLogout={handleLogout}
@@ -287,22 +313,23 @@ export default function App() {
             {page === "dashboard" && (
               <DashboardPage activeProject={activeProject} timeRange={timeRange} />
             )}
+            {/* Traces list — always mounted on the "traces" page, with an optional
+                Trace Detail overlay on top (overlay state is lifted to App so the
+                list stays behind the overlay, preserving scroll & filters). */}
             {page === "traces" && (
               <TracesPage
                 activeProject={activeProject}
                 timeRange={timeRange}
-                onNavigateToTrace={setActiveTraceId}
-                onNavigateToTraceDetail={() => {
-                  setTraceDetailReturnTo("traces");
-                  setPage("trace-detail");
-                }}
+                onOpenTraceOverlay={(traceId) => setTraceOverlay(traceId)}
+                activeOverlayTraceId={traceOverlay}
               />
             )}
-            {page === "trace-detail" && (
-              <TraceDetailPage
-                traceId={activeTraceId}
+            {/* Trace Detail overlay — sits on top of the Traces list. */}
+            {traceOverlay && (
+              <SlideInTraceDetail
+                traceId={traceOverlay}
                 activeProject={activeProject}
-                onBack={() => setPage(traceDetailReturnTo)}
+                onClose={() => setTraceOverlay(null)}
               />
             )}
             {page === "conversations" && (
@@ -320,11 +347,8 @@ export default function App() {
                 conversationId={activeConversationId}
                 activeProject={activeProject}
                 onBack={() => setPage(conversationDetailReturnTo)}
-                onNavigateToTrace={setActiveTraceId}
-                onNavigateToTraceDetail={() => {
-                  setTraceDetailReturnTo("conversation-detail");
-                  setPage("trace-detail");
-                }}
+                onNavigateToTrace={(traceId) => setTraceOverlay(traceId)}
+                onNavigateToTraceDetail={(traceId) => setTraceOverlay(traceId)}
               />
             )}
             {page === "prompts" && (

@@ -5,39 +5,44 @@ import (
 	"github.com/omneval/omneval/internal/metadata/sqlite"
 )
 
-// PostgresPromptStore wraps *postgres.Store so that callers can depend on
-// the narrower metadata.Store interface instead of the full god Store.
-// Embedding the concrete store promotes all domain methods; the PromptStore()
-// method returns the embedded type as the focused interface.
-type PostgresPromptStore struct {
+// PostgresFocusedStore wraps *postgres.Store so that callers can depend on
+// the narrower focused interfaces (PromptStore, EvalRuleStore, ...) instead
+// of the full god Store. Embedding the concrete store promotes all domain
+// methods; the PromptStore()/EvalRuleStore() methods below override the
+// embedded store's package-local methods so they return this package's
+// focused interface types instead.
+type PostgresFocusedStore struct {
 	*postgres.Store
 }
 
 // PromptStore returns the focused PromptStore interface.
-func (s *PostgresPromptStore) PromptStore() PromptStore {
-	return s
+func (s *PostgresFocusedStore) PromptStore() PromptStore {
+	return s.Store
 }
 
-// Compile-time check: PostgresPromptStore satisfies metadata.PromptStore.
-var _ PromptStore = (*PostgresPromptStore)(nil)
+// EvalRuleStore returns the focused EvalRuleStore interface.
+func (s *PostgresFocusedStore) EvalRuleStore() EvalRuleStore {
+	return s.Store
+}
 
-// SQLitePromptStore wraps *sqlite.Store so that callers can depend on the
-// narrower metadata.Store interface instead of the full god Store.
-type SQLitePromptStore struct {
+// Compile-time check: PostgresFocusedStore satisfies metadata.Store.
+var _ Store = (*PostgresFocusedStore)(nil)
+
+// SQLiteFocusedStore wraps *sqlite.Store so that callers can depend on the
+// narrower focused interfaces instead of the full god Store.
+type SQLiteFocusedStore struct {
 	*sqlite.Store
 }
 
 // PromptStore returns the focused PromptStore interface.
-func (s *SQLitePromptStore) PromptStore() PromptStore {
-	return s
+func (s *SQLiteFocusedStore) PromptStore() PromptStore {
+	return s.Store
 }
 
-// Compile-time check: SQLitePromptStore satisfies metadata.PromptStore.
-var _ PromptStore = (*SQLitePromptStore)(nil)
+// EvalRuleStore returns the focused EvalRuleStore interface.
+func (s *SQLiteFocusedStore) EvalRuleStore() EvalRuleStore {
+	return s.Store
+}
 
-// --- Compile-time interface compliance checks for Store ---
-
-var (
-	_ Store = (*PostgresPromptStore)(nil)
-	_ Store = (*SQLitePromptStore)(nil)
-)
+// Compile-time check: SQLiteFocusedStore satisfies metadata.Store.
+var _ Store = (*SQLiteFocusedStore)(nil)

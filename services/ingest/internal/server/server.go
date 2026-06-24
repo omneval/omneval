@@ -64,7 +64,7 @@ func Run() error {
 
 	metricsHelper := metrics.NewIngestMetrics(cfg)
 
-	// Initialize metadata store
+	// Initialize metadata store.
 	store, err := metadata.Open(cfg.Database.Driver, cfg.Database.DSN)
 	if err != nil {
 		return fmt.Errorf("opening metadata store: %w", err)

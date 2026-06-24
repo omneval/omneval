@@ -33,7 +33,7 @@ interface ConversationDetailPageProps {
   activeProject: string;
   onBack: () => void;
   onNavigateToTrace: (traceId: string) => void;
-  onNavigateToTraceDetail: () => void;
+  onNavigateToTraceDetail: (traceId: string) => void;
 }
 
 interface ConversationTraceItem {
@@ -264,7 +264,7 @@ export default function ConversationDetailPage({
               showFullHistory={showFullHistory}
               onClick={() => {
                 onNavigateToTrace(t.trace_id);
-                onNavigateToTraceDetail();
+                onNavigateToTraceDetail(t.trace_id);
               }}
             />
           ))}
