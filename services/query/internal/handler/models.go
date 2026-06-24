@@ -20,7 +20,10 @@ func (h *ModelsHandler) HandleModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	models := h.Pricing.Models()
+	var models []string
+	if h.Pricing != nil {
+		models = h.Pricing.Models()
+	}
 	if models == nil {
 		models = []string{}
 	}
