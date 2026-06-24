@@ -1870,34 +1870,44 @@ describe("filter panel styling (#142)", () => {
 
 
 /**
- * Render helper that mirrors App.tsx's overlay pattern: TracesPage +
+ * Component that mirrors App.tsx's overlay pattern: TracesPage +
  * SlideInTraceDetail mounted conditionally on local state.  This lets the
  * tests verify that the Traces list stays mounted behind the overlay.
  */
+function TracesOverlayWrapper({
+  children,
+}: {
+  children?: Partial<
+    Omit<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">
+  > &
+    Partial<Pick<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">>;
+}) {
+  const [traceOverlay, setTraceOverlay] = useState<string | null>(null);
+  return (
+    <ToastProvider>
+      <TracesPage
+        activeProject="test-project"
+        onOpenTraceOverlay={(traceId: string) => setTraceOverlay(traceId)}
+        {...children}
+      />
+      {traceOverlay && (
+        <SlideInTraceDetail
+          traceId={traceOverlay}
+          activeProject="test-project"
+          onClose={() => setTraceOverlay(null)}
+        />
+      )}
+    </ToastProvider>
+  );
+}
+
 function renderTracesPageWithOverlay(
   props: Partial<Omit<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">> &
     Partial<Pick<ComponentProps<typeof TracesPage>, "onOpenTraceOverlay">> = {}
 ) {
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  const [traceOverlay, setTraceOverlay] = useState<string | null>(null);
   return {
-    ...render(
-      <ToastProvider>
-        <TracesPage
-          activeProject="test-project"
-          onOpenTraceOverlay={(traceId: string) => setTraceOverlay(traceId)}
-          {...props}
-        />
-        {traceOverlay && (
-          <SlideInTraceDetail
-            traceId={traceOverlay}
-            activeProject="test-project"
-            onClose={() => setTraceOverlay(null)}
-          />
-        )}
-      </ToastProvider>
-    ),
-    setTraceOverlay,
+    ...render(<TracesOverlayWrapper {...props} />),
+    setTraceOverlay: null as unknown as (id: string | null) => void,
   };
 }
 

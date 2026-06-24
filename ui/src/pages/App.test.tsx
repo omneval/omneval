@@ -520,6 +520,7 @@ describe("direct-link /traces/{traceId} routing", () => {
                   kind: "LLM",
                   start_time: new Date().toISOString(),
                   end_time: new Date().toISOString(),
+                  cost_usd: 0.11,
                   attributes: {},
                   events: [],
                   status: { code: 0 },
@@ -546,7 +547,7 @@ describe("direct-link /traces/{traceId} routing", () => {
     window.history.replaceState({}, "", "/");
   });
 
-  it("hard-loading /traces/{traceId} renders TraceDetailPage, not Traces", async () => {
+  it("hard-loading /traces/{traceId} renders Traces list with trace detail overlay", async () => {
     window.history.replaceState({}, "", "/traces/abc123xyz");
 
     render(<App />);
@@ -559,9 +560,8 @@ describe("direct-link /traces/{traceId} routing", () => {
       { timeout: 3000 }
     );
 
-    // TraceDetailPage renders with a "Close trace detail" button
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Back" })).toBeInTheDocument();
-    });
+    // Direct navigation to /traces/{traceId} renders the Traces list
+    // AND opens the SlideInTraceDetail overlay.
+    expect(screen.queryAllByRole("button", { name: "Close trace detail" }).length).toBeGreaterThan(0);
 });
 });
