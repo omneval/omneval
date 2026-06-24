@@ -71,9 +71,11 @@ func KindFromRaw(rawKey string) (domain.APIKeyKind, bool) {
 }
 
 // CachingValidator validates raw API keys against the metadata store with a
-// 60-second in-memory TTL.
+// 60-second in-memory TTL. It depends on the focused APIKeyStore interface so
+// callers can pass any backend (postgres, sqlite, in-memory) through the
+// narrowest possible contract.
 type CachingValidator struct {
-	store   metadata.Store
+	store   metadata.APIKeyStore
 	cache   map[string]*cacheEntry
 	cacheMu sync.RWMutex
 }
@@ -83,7 +85,7 @@ type cacheEntry struct {
 	expiresAt time.Time
 }
 
-func NewCachingValidator(store metadata.Store) *CachingValidator {
+func NewCachingValidator(store metadata.APIKeyStore) *CachingValidator {
 	return &CachingValidator{
 		store: store,
 		cache: make(map[string]*cacheEntry),

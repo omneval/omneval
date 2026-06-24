@@ -736,3 +736,6 @@ func (f *FakeMetadataStore) SessionStore() metadata.SessionStore { return f }
 
 // EvalRuleStore returns the focused EvalRuleStore interface.
 func (f *FakeMetadataStore) EvalRuleStore() metadata.EvalRuleStore { return f }
+
+// APIKeyStore returns the focused APIKeyStore interface.
+func (f *FakeMetadataStore) APIKeyStore() metadata.APIKeyStore { return f }

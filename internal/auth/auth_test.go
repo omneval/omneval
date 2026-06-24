@@ -201,6 +201,9 @@ func (f *FakeMetadataStore) EvalRuleStore() metadata.EvalRuleStore { return f }
 // SessionStore returns the focused SessionStore interface.
 func (f *FakeMetadataStore) SessionStore() metadata.SessionStore { return f }
 
+// APIKeyStore returns the focused APIKeyStore interface.
+func (f *FakeMetadataStore) APIKeyStore() metadata.APIKeyStore { return f }
+
 // ---- Tests ----
 
 func TestGenerate(t *testing.T) {

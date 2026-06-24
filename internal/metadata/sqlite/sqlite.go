@@ -840,6 +840,24 @@ func (s *Store) PromptStore() PromptStore {
 	return s
 }
 
+// APIKeyStore is the domain interface for API key management, defined locally
+// to avoid circular imports (sqlite package cannot import the metadata
+// package). It is structurally identical to metadata.APIKeyStore.
+type APIKeyStore interface {
+	CreateAPIKey(ctx context.Context, key *domain.APIKey) error
+	GetAPIKeyByHash(ctx context.Context, hashedKey string) (*domain.APIKey, error)
+	ListAPIKeys(ctx context.Context, projectID string) ([]*domain.APIKey, error)
+	RevokeAPIKey(ctx context.Context, keyID string) error
+}
+
+// APIKeyStore returns a focused APIKeyStore interface that exposes only the
+// API key methods, enabling callers to depend on the narrower type. Since
+// *Store already implements all APIKeyStore methods, this simply returns the
+// receiver to expose the narrower type at the package boundary.
+func (s *Store) APIKeyStore() APIKeyStore {
+	return s
+}
+
 // ---- Eval Rules ----
 
 func (s *Store) CreateEvalRule(ctx context.Context, rule *domain.EvalRule) error {
