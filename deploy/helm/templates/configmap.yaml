@@ -78,7 +78,6 @@ data:
         catalog_driver: {{ .Values.quack.server.catalogDriver | quote }}
         catalog_dsn: {{ $quackCatalogDSN | quote }}
         data_path: {{ $quackDataPath | quote }}
-        maintenance_interval: {{ .Values.quack.server.maintenanceInterval | quote }}
         memory_limit: {{ .Values.quack.server.memoryLimit | quote }}
         threads: {{ .Values.quack.server.threads }}
         retention:

@@ -265,11 +265,6 @@ quack:
     # Where Lake Parquet files live. When empty, derived from storage.bucket
     # (s3://<bucket>/lake) or a local path on the PVC for the demo profile.
     dataPath: ""
-    # Table Maintenance scheduler interval (compaction, snapshot expiry,
-    # retention GC). 15m rather than a shorter cadence: each pass's
-    # rewrite/merge writes a new merge-lineage Parquet generation, so a
-    # shorter interval creates more of these than light workloads need.
-    maintenanceInterval: "15m"
     # Bounds DuckDB's buffer manager (`SET memory_limit`). Without this,
     # DuckDB sizes its buffer pool against the host's total RAM rather than
     # this container's memory limit below, so it never backs off under
@@ -312,6 +307,55 @@ quack:
     size: 10Gi
     storageClass: ""
     accessMode: ReadWriteOnce
+  # Table Maintenance (compaction, snapshot expiry, retention GC) runs as a
+  # CronJob, not inside the long-running quack-server pod — a stuck/slow
+  # pass must not entangle with the serving process's own health (production
+  # incident: an unbounded merge held the sole Catalog connection, ADR-0005,
+  # hostage for 45+ minutes, and shared a process with quack-server's own
+  # liveness checks). The job attaches as an ordinary Quack client (same
+  # quack.client.* config as Writer/Query/Eval) and runs one pass per
+  # invocation; the schedule below is the cadence, replacing the old
+  # in-process interval.
+  #
+  # Externalizing the schedule does not change DuckLake's concurrency model:
+  # a pass still runs synchronously against the same shared Quack Server
+  # process while it executes, so query/write traffic can still see brief
+  # slowdowns during a run, same as before. What this buys is independent
+  # scheduling (e.g. off-peak hours), the ability to suspend maintenance
+  # without redeploying quack-server, and a crashing/stuck pass no longer
+  # affecting quack-server's own restart behavior.
+  compact:
+    enabled: true
+    # Cron schedule. Every 15m by default, mirroring the old in-process
+    # interval.
+    schedule: "*/15 * * * *"
+    suspend: false
+    # Each invocation has its own deadline/retry policy, independent of the
+    # CronJob's own schedule interval — a pass that runs long doesn't delay
+    # the *next* scheduled invocation (Kubernetes CronJob starts each
+    # occurrence on schedule regardless; concurrencyPolicy below controls
+    # what happens if a previous run is still in flight when the next one
+    # would start).
+    activeDeadlineSeconds: 1800
+    backoffLimit: 1
+    concurrencyPolicy: Forbid
+    # Lake-native retention (#92) is configured once, under quack.server —
+    # both the compact job and (historically) quack-server itself read the
+    # same cfg.Quack.Server.Retention. The job's own embedded DuckDB
+    # buffer manager/threads come from quack.client.memoryLimit/threads,
+    # the same shared client config Writer/Query/Eval use.
+    resources:
+      limits:
+        cpu: "1"
+        memory: 1Gi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    nodeSelector: {}
+    affinity: {}
+    tolerations: []
+    annotations: {}
+    labels: {}
   # Client configuration shared by Writer, Query API, and Eval — every
   # service that attaches to the Lake as a Quack client.
   client:
