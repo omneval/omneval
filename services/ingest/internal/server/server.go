@@ -15,8 +15,6 @@ import (
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/handlers"
 	"github.com/omneval/omneval/internal/metadata"
-	"github.com/omneval/omneval/internal/metadata/postgres"
-	"github.com/omneval/omneval/internal/metadata/sqlite"
 	"github.com/omneval/omneval/internal/probe"
 	redisqueue "github.com/omneval/omneval/internal/queue/redis"
 	s3pkg "github.com/omneval/omneval/internal/storage/s3"
@@ -66,21 +64,10 @@ func Run() error {
 
 	metricsHelper := metrics.NewIngestMetrics(cfg)
 
-	// Initialize metadata store
-	var store metadata.Store
-	if cfg.Database.Driver == "postgres" {
-		store, err = postgres.New(cfg.Database.DSN)
-		if err != nil {
-			return fmt.Errorf("connecting to postgres: %w", err)
-		}
-	} else {
-		store, err = sqlite.New("") // in-memory SQLite
-		if err != nil {
-			return fmt.Errorf("opening sqlite store: %w", err)
-		}
-		if err := store.Migrate(context.Background()); err != nil {
-			return fmt.Errorf("running migrations: %w", err)
-		}
+	// Initialize metadata store.
+	store, err := metadata.Open(cfg.Database.Driver, cfg.Database.DSN)
+	if err != nil {
+		return fmt.Errorf("opening metadata store: %w", err)
 	}
 	defer store.Close()
 
