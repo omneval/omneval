@@ -243,6 +243,80 @@ func TestRunMaintenanceFlushOrderingPreserved(t *testing.T) {
 	}
 }
 
+// countActiveSpansFiles returns the number of data files DuckLake's catalog
+// considers part of the current "spans" snapshot.
+func countActiveSpansFiles(t *testing.T, ctx context.Context, db *sql.DB) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM ducklake_list_files('lake', 'spans')").Scan(&n); err != nil {
+		t.Fatalf("count active spans files: %v", err)
+	}
+	return n
+}
+
+// TestRunMaintenanceMergeWithCapStillConvergesCorrectly proves the
+// max_compacted_files cap (lakeserver.MaxCompactedFilesPerMerge) added to
+// the ducklake_merge_adjacent_files call doesn't change correctness: rows
+// survive, and the table still ends up fully merged to one active file.
+//
+// max_compacted_files bounds how many source files get combined into any
+// one merge *group* — confirmed empirically (this test included) that it
+// does not make ducklake_merge_adjacent_files stop early and return after
+// processing only that many files total; at small scale a single capped
+// call still merges the whole table down to one file, same as uncapped.
+// The fix's value is in the production incident's actual failure mode: with
+// no cap, the call tried to combine an entire ~25k-file backlog into one
+// merge group (effectively one gigantic rewrite) and ran for 45+ minutes
+// without completing. Capping the group size keeps every individual merge
+// operation's cost bounded regardless of total backlog size, which is what
+// let the equivalent call finish at all once deployed.
+func TestRunMaintenanceMergeWithCapStillConvergesCorrectly(t *testing.T) {
+	ctx := context.Background()
+	cfg, _ := lakeservertest.NewLocal(t)
+
+	l, err := lake.Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open lake: %v", err)
+	}
+	defer l.Close()
+
+	// Each InsertSpans call commits its own snapshot/data file — mirrors the
+	// production fragmentation pattern (many small Commit Cadence flushes).
+	const fileCount = 6
+	for i := 0; i < fileCount; i++ {
+		span := testSpan("proj-a", fmt.Sprintf("s%d", i), time.Now())
+		if err := l.InsertSpans(ctx, []*domain.Span{span}); err != nil {
+			t.Fatalf("insert span %d: %v", i, err)
+		}
+	}
+
+	before := countActiveSpansFiles(t, ctx, l.DB())
+	if before < fileCount {
+		t.Fatalf("expected at least %d active spans files before any merge, got %d", fileCount, before)
+	}
+
+	old := lakeserver.MaxCompactedFilesPerMerge
+	lakeserver.MaxCompactedFilesPerMerge = 2
+	defer func() { lakeserver.MaxCompactedFilesPerMerge = old }()
+
+	if _, err := lakeserver.RunMaintenance(ctx, l.DB(), []string{"spans"}, lakeserver.RetentionConfig{}); err != nil {
+		t.Fatalf("run maintenance: %v", err)
+	}
+
+	final := countActiveSpansFiles(t, ctx, l.DB())
+	if final != 1 {
+		t.Errorf("active spans files after capped merge: got %d, want 1 (fully converged)", final)
+	}
+
+	var n int
+	if err := l.DB().QueryRowContext(ctx, "SELECT count(*) FROM lake.spans").Scan(&n); err != nil {
+		t.Fatalf("count spans after merge: %v", err)
+	}
+	if n != fileCount {
+		t.Errorf("spans row count after merge: got %d, want %d (merge must not lose rows)", n, fileCount)
+	}
+}
+
 // TestDefaultMaintenanceIntervalIs15Minutes pins the documented fallback
 // interval. 5m was too aggressive for light workloads: with skip-when-idle
 // (RunMaintenanceLoop) doing most of the work to avoid wasted passes, a

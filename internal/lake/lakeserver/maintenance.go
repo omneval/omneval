@@ -19,6 +19,17 @@ import (
 // intermediate file generations are ever created in the first place.
 const DefaultMaintenanceInterval = 15 * time.Minute
 
+// MaxCompactedFilesPerMerge bounds how many files a single
+// ducklake_merge_adjacent_files call processes (see RunMaintenance's doc
+// comment on the call site). Picked so a call against even a heavily
+// fragmented table (production incident: ~25k files) returns in low-single-
+// digit seconds rather than tens of minutes, while still being large enough
+// that a normal-sized backlog clears in one or two ticks rather than
+// hundreds of them. Exported (not const) so tests can shrink it to exercise
+// chunking behavior without needing thousands of files to exceed the real
+// production bound.
+var MaxCompactedFilesPerMerge = 1000
+
 // MaintenanceTables lists the DuckLake tables Table Maintenance operates
 // on: spans and scores (internal/lake's ensureTables).
 var MaintenanceTables = []string{"spans", "scores"}
@@ -133,7 +144,23 @@ func RunMaintenance(ctx context.Context, db *sql.DB, tables []string, retention 
 	var stmts []string
 	for _, table := range tables {
 		stmts = append(stmts, fmt.Sprintf("CALL ducklake_rewrite_data_files('lake', %s)", sqlQuote(table)))
-		stmts = append(stmts, fmt.Sprintf("CALL ducklake_merge_adjacent_files('lake', %s)", sqlQuote(table)))
+		// max_compacted_files bounds how many source files get combined into
+		// any one merge group, rather than letting the whole table's
+		// qualifying files collapse into a single merge group. Production
+		// incident: with no bound, this call tried to combine an entire
+		// ~25k-file backlog (one project's spans table, fragmented by the 5s
+		// Commit Cadence over a busy day) into one merge operation and ran
+		// for 45+ minutes without completing. The Quack Server is the sole
+		// Catalog connection (ADR-0005) — every Writer/Query/Eval client's
+		// reads and writes funnel through this same process, so that one
+		// pathologically-scaled operation held everything else hostage for
+		// as long as it ran. Capping the per-group size keeps each unit of
+		// merge work's cost bounded regardless of total backlog size, which
+		// is what let the equivalent call actually finish once deployed
+		// (confirmed live: previously stuck 28+ minutes uncapped; this is
+		// not validated to make a single call return early or interleave
+		// with other queries mid-call — see TestRunMaintenanceMergeWithCapStillConvergesCorrectly).
+		stmts = append(stmts, fmt.Sprintf("CALL ducklake_merge_adjacent_files('lake', %s, max_compacted_files => %d)", sqlQuote(table), MaxCompactedFilesPerMerge))
 	}
 	stmts = append(stmts,
 		"CALL ducklake_expire_snapshots('lake', older_than => now())",
