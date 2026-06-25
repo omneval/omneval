@@ -5,7 +5,6 @@ package spansegment
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,45 +17,23 @@ import (
 	"github.com/omneval/omneval/services/query/internal/metrics"
 	"github.com/omneval/omneval/services/query/internal/query"
 	"github.com/omneval/omneval/services/query/internal/querybuild"
+	"github.com/omneval/omneval/services/query/internal/routes"
 )
 
-// AuthPolicy defines the authentication requirement for a route.
-type AuthPolicy int
+// Re-export shared route types so consumers referencing spansegment.* continue to work.
+type (
+	AuthPolicy    = routes.AuthPolicy
+	AuthRoute     = routes.AuthRoute
+	DBHandle      = routes.DBHandle
+	SessionStore  = routes.SessionStore
+)
 
 const (
-	// AuthPolicyPublic routes bypass authentication entirely.
-	AuthPolicyPublic AuthPolicy = iota
-	// AuthPolicySession routes require a valid session cookie.
-	AuthPolicySession
-	// AuthPolicyAPIKeyOrSession routes accept a valid session cookie or X-API-Key header.
-	AuthPolicyAPIKeyOrSession
-	// AuthPolicyAdmin routes require a valid session cookie AND an admin user.
-	AuthPolicyAdmin
+	AuthPolicyPublic     = routes.AuthPolicyPublic
+	AuthPolicySession    = routes.AuthPolicySession
+	AuthPolicyAPIKeyOrSession = routes.AuthPolicyAPIKeyOrSession
+	AuthPolicyAdmin      = routes.AuthPolicyAdmin
 )
-
-// String returns the canonical string representation of the auth policy.
-func (a AuthPolicy) String() string {
-	switch a {
-	case AuthPolicyPublic:
-		return "public"
-	case AuthPolicySession:
-		return "session"
-	case AuthPolicyAPIKeyOrSession:
-		return "session_or_api_key"
-	case AuthPolicyAdmin:
-		return "admin"
-	default:
-		return "unknown"
-	}
-}
-
-// AuthRoute pairs an HTTP method/path pattern with its handler and auth policy.
-type AuthRoute struct {
-	Method  string
-	Path    string
-	Handler func(http.ResponseWriter, *http.Request)
-	Policy  AuthPolicy
-}
 
 // Segment is the interface for a domain-specific HTTP segment.
 // Each segment owns its handler types and returns the routes it
@@ -64,22 +41,6 @@ type AuthRoute struct {
 // routes without importing domain-specific handler types.
 type Segment interface {
 	Routes() []AuthRoute
-}
-
-// --- Interfaces ---
-
-// DBHandle is the subset of database/sql.DB used by handlers.
-type DBHandle interface {
-	Query(query string, args ...any) (*sql.Rows, error)
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-	QueryRow(query string, args ...any) *sql.Row
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}
-
-// SessionStore abstracts session lookup for project ID extraction.
-type SessionStore interface {
-	ProjectID(r *http.Request) (string, bool)
-	ListProjects(r *http.Request) ([]*domain.Project, error)
 }
 
 // --- SpanHandler ---

@@ -10,14 +10,13 @@ import (
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/idgen"
 	"github.com/omneval/omneval/internal/lakeclient"
+	"github.com/omneval/omneval/services/query/internal/routes"
 )
 
-// SessionStore abstracts session lookup for project ID extraction.
-// Deprecated: moved to spansegment.SessionStore. Kept for ScoreHandler compatibility.
-type SessionStore interface {
-	ProjectID(r *http.Request) (string, bool)
-	ListProjects(r *http.Request) ([]*domain.Project, error)
-}
+// Re-export shared types for backward compatibility.
+type (
+	SessionStore = routes.SessionStore
+)
 
 // DBHandle is the subset of database/sql.DB used by handlers.
 // Deprecated: moved to spansegment.DBHandle. Kept for ScoreHandler compatibility.

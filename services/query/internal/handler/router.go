@@ -10,47 +10,23 @@ import (
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/services/query/internal/auth"
 	"github.com/omneval/omneval/services/query/internal/public"
+	"github.com/omneval/omneval/services/query/internal/routes"
 	"github.com/omneval/omneval/services/query/internal/spansegment"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// AuthPolicy defines the authentication requirement for a route.
-type AuthPolicy int
-
-const (
-	// AuthPolicyPublic routes bypass authentication entirely.
-	AuthPolicyPublic AuthPolicy = iota
-	// AuthPolicySession routes require a valid session cookie.
-	AuthPolicySession
-	// AuthPolicyAPIKeyOrSession routes accept a valid session cookie or X-API-Key header.
-	AuthPolicyAPIKeyOrSession
-	// AuthPolicyAdmin routes require a valid session cookie AND an admin user.
-	AuthPolicyAdmin
+// Re-export shared route types for backward compatibility.
+type (
+	AuthPolicy = routes.AuthPolicy
+	AuthRoute  = routes.AuthRoute
 )
 
-// String returns the canonical string representation of the auth policy.
-func (a AuthPolicy) String() string {
-	switch a {
-	case AuthPolicyPublic:
-		return "public"
-	case AuthPolicySession:
-		return "session"
-	case AuthPolicyAPIKeyOrSession:
-		return "session_or_api_key"
-	case AuthPolicyAdmin:
-		return "admin"
-	default:
-		return "unknown"
-	}
-}
-
-// AuthRoute pairs an HTTP method/path pattern with its handler and auth policy.
-type AuthRoute struct {
-	Method  string
-	Path    string
-	Handler func(http.ResponseWriter, *http.Request)
-	Policy  AuthPolicy
-}
+const (
+	AuthPolicyPublic     = routes.AuthPolicyPublic
+	AuthPolicySession    = routes.AuthPolicySession
+	AuthPolicyAPIKeyOrSession = routes.AuthPolicyAPIKeyOrSession
+	AuthPolicyAdmin      = routes.AuthPolicyAdmin
+)
 
 // playgroundHandler is the interface for the playground endpoint.
 // Defined here to avoid importing the playground package (which imports handler).
@@ -187,14 +163,7 @@ func (rt *Router) RegisterRoutes(mux *http.ServeMux) http.Handler {
 	routes = append(routes, rt.admin.AdminRoutes()...)
 
 	// --- Span / project routes ---
-	for _, r := range rt.span.Routes() {
-		routes = append(routes, AuthRoute{
-			Method:  r.Method,
-			Path:    r.Path,
-			Handler: r.Handler,
-			Policy:  AuthPolicy(r.Policy),
-		})
-	}
+	routes = append(routes, rt.span.Routes()...)
 
 	// --- Bookmark routes ---
 	routes = append(routes, rt.bookmark.Routes()...)
