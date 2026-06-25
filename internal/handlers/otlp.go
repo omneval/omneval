@@ -187,6 +187,7 @@ func convertToResourceSpans(req *coltracev1.ExportTraceServiceRequest) []otlp.Re
 					StatusCode: statusToCode(s.GetStatus()),
 					StatusMsg:  statusToMessage(s.GetStatus()),
 					Attributes: spanAttrs(s.GetAttributes()),
+					Events:     spanEvents(s.GetEvents()),
 				})
 			}
 		}
@@ -240,6 +241,47 @@ func resourceAttrs(res *resourcev1.Resource) map[string]any {
 		return nil
 	}
 	return kvListToMap(res.GetAttributes())
+}
+
+func spanEvents(events []*tracev1.Span_Event) []otlp.SpanEvent {
+	if len(events) == 0 {
+		return nil
+	}
+	result := make([]otlp.SpanEvent, 0, len(events))
+	for _, e := range events {
+		result = append(result, otlp.SpanEvent{
+			TimeUnixNano: e.GetTimeUnixNano(),
+			Name:         e.GetName(),
+			Attributes:   eventAttrs(e.GetAttributes()),
+		})
+	}
+	return result
+}
+
+func eventAttrs(attrs []*commonv1.KeyValue) map[string]string {
+	result := make(map[string]string, len(attrs))
+	for _, kv := range attrs {
+		result[kv.GetKey()] = anyValueString(kv.GetValue())
+	}
+	return result
+}
+
+func anyValueString(v *commonv1.AnyValue) string {
+	if v == nil {
+		return ""
+	}
+	switch val := v.Value.(type) {
+	case *commonv1.AnyValue_StringValue:
+		return val.StringValue
+	case *commonv1.AnyValue_BoolValue:
+		return fmt.Sprintf("%t", val.BoolValue)
+	case *commonv1.AnyValue_IntValue:
+		return fmt.Sprintf("%d", val.IntValue)
+	case *commonv1.AnyValue_DoubleValue:
+		return fmt.Sprintf("%f", val.DoubleValue)
+	default:
+		return ""
+	}
 }
 
 func spanAttrs(attrs []*commonv1.KeyValue) map[string]any {
