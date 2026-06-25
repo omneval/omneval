@@ -917,6 +917,274 @@ func TestTranslate_LitellmCompletionSpan_DiagnosticIssue279(t *testing.T) {
 // When it uses the OpenAI instrumentor path, content may go to Span Events instead.
 // Omneval only reads Attributes — so the fix depends on which path produces the
 // problem observed in live production.
+// TestTranslate_SpanEventsCaptured_PromptMessage verifies that a span whose
+// prompt content lives in Span Events (not Attributes) produces correctly
+// populated Input in the domain model.
+func TestTranslate_SpanEventsCaptured_PromptMessage(t *testing.T) {
+	rss := []ResourceSpans{{
+		Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+		Spans: []*Span{{
+			SpanID:    "0123456789abcdef",
+			TraceID:   "0123456789abcdef0123456789abcdef",
+			Name:      "litellm.completion",
+			StartTime: time.Now(),
+			EndTime:   time.Now(),
+			Attributes: map[string]any{
+				"gen_ai.request.model": "gpt-4o",
+			},
+			// Prompt content is ONLY in Span Events.
+			Events: []SpanEvent{{
+				Name: "gen_ai.prompt.message",
+				Attributes: map[string]string{
+					"gen_ai.prompt.message.role":    "user",
+					"gen_ai.prompt.message.content": "Hello, world!",
+				},
+			}},
+		}},
+	}}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	if spans[0].Input == "" {
+		t.Fatal("input is empty, expected prompt message from Span Events")
+	}
+	if !strings.Contains(spans[0].Input, `"role":"user"`) || !strings.Contains(spans[0].Input, `"content":"Hello, world!"`) {
+		t.Errorf("input: got %q (expected user message from Span Events)", spans[0].Input)
+	}
+}
+
+// TestTranslate_SpanEventsCaptured_CompletionMessage verifies that a span whose
+// completion content lives in Span Events produces correctly populated Output.
+func TestTranslate_SpanEventsCaptured_CompletionMessage(t *testing.T) {
+	rss := []ResourceSpans{{
+		Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+		Spans: []*Span{{
+			SpanID:    "0123456789abcdef",
+			TraceID:   "0123456789abcdef0123456789abcdef",
+			Name:      "litellm.completion",
+			StartTime: time.Now(),
+			EndTime:   time.Now(),
+			Attributes: map[string]any{
+				"gen_ai.request.model": "gpt-4o",
+			},
+			// Completion content is ONLY in Span Events.
+			Events: []SpanEvent{{
+				Name: "gen_ai.completion.message",
+				Attributes: map[string]string{
+					"gen_ai.completion.message.role":    "assistant",
+					"gen_ai.completion.message.content": "Hi there! How can I help?",
+				},
+			}},
+		}},
+	}}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	if spans[0].Output == "" {
+		t.Fatal("output is empty, expected completion message from Span Events")
+	}
+	if !strings.Contains(spans[0].Output, `"role":"assistant"`) || !strings.Contains(spans[0].Output, `"content":"Hi there! How can I help?"`) {
+		t.Errorf("output: got %q (expected assistant message from Span Events)", spans[0].Output)
+	}
+}
+
+// TestTranslate_SpanEventsCaptured_BothPromptAndCompletion verifies that
+// prompt and completion content from Span Events both populate Input and Output.
+func TestTranslate_SpanEventsCaptured_BothPromptAndCompletion(t *testing.T) {
+	rss := []ResourceSpans{{
+		Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+		Spans: []*Span{{
+			SpanID:    "0123456789abcdef",
+			TraceID:   "0123456789abcdef0123456789abcdef",
+			Name:      "litellm.completion",
+			StartTime: time.Now(),
+			EndTime:   time.Now(),
+			Attributes: map[string]any{
+				"gen_ai.request.model": "gpt-4o",
+			},
+			Events: []SpanEvent{
+				{
+					Name: "gen_ai.prompt.message",
+					Attributes: map[string]string{
+						"gen_ai.prompt.message.role":    "user",
+						"gen_ai.prompt.message.content": "What is the weather?",
+					},
+				},
+				{
+					Name: "gen_ai.completion.message",
+					Attributes: map[string]string{
+						"gen_ai.completion.message.role":    "assistant",
+						"gen_ai.completion.message.content": "The weather is sunny.",
+					},
+				},
+			},
+		}},
+	}}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	if !strings.Contains(spans[0].Input, `"role":"user"`) || !strings.Contains(spans[0].Input, `"content":"What is the weather?"`) {
+		t.Errorf("input: got %q (expected user message from Span Events)", spans[0].Input)
+	}
+	if !strings.Contains(spans[0].Output, `"role":"assistant"`) || !strings.Contains(spans[0].Output, `"content":"The weather is sunny."`) {
+		t.Errorf("output: got %q (expected assistant message from Span Events)", spans[0].Output)
+	}
+}
+
+// TestTranslate_SpanEventsCaptured_MultipleMessages verifies that multiple
+// messages within a single event type are all captured in order.
+func TestTranslate_SpanEventsCaptured_MultipleMessages(t *testing.T) {
+	rss := []ResourceSpans{{
+		Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+		Spans: []*Span{{
+			SpanID:    "0123456789abcdef",
+			TraceID:   "0123456789abcdef0123456789abcdef",
+			Name:      "litellm.completion",
+			StartTime: time.Now(),
+			EndTime:   time.Now(),
+			Attributes: map[string]any{
+				"gen_ai.request.model": "gpt-4o",
+			},
+			Events: []SpanEvent{
+				{
+					Name: "gen_ai.prompt.message",
+					Attributes: map[string]string{
+						"gen_ai.prompt.message.role":    "system",
+						"gen_ai.prompt.message.content": "Be helpful.",
+					},
+				},
+				{
+					Name: "gen_ai.prompt.message",
+					Attributes: map[string]string{
+						"gen_ai.prompt.message.role":    "user",
+						"gen_ai.prompt.message.content": "Tell me about AI.",
+					},
+				},
+				{
+					Name: "gen_ai.completion.message",
+					Attributes: map[string]string{
+						"gen_ai.completion.message.role":    "assistant",
+						"gen_ai.completion.message.content": "AI is a field of CS.",
+					},
+				},
+			},
+		}},
+	}}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	// Input should contain both system and user messages.
+	var inputMessages []map[string]any
+	if err := json.Unmarshal([]byte(spans[0].Input), &inputMessages); err != nil {
+		t.Fatalf("input is not valid JSON: %v", err)
+	}
+	if len(inputMessages) != 2 {
+		t.Fatalf("input messages: got %d, want 2", len(inputMessages))
+	}
+	if inputMessages[0]["role"] != "system" {
+		t.Errorf("input message 0 role: got %q, want %q", inputMessages[0]["role"], "system")
+	}
+	if inputMessages[1]["role"] != "user" {
+		t.Errorf("input message 1 role: got %q, want %q", inputMessages[1]["role"], "user")
+	}
+
+	// Output should contain the assistant message.
+	var outputMessages []map[string]any
+	if err := json.Unmarshal([]byte(spans[0].Output), &outputMessages); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	if len(outputMessages) != 1 {
+		t.Fatalf("output messages: got %d, want 1", len(outputMessages))
+	}
+	if outputMessages[0]["role"] != "assistant" {
+		t.Errorf("output message 0 role: got %q, want %q", outputMessages[0]["role"], "assistant")
+	}
+}
+
+// TestTranslate_SpanEventsNoRegression_AttributeExtraction verifies that
+// attribute-based extraction still works when Events are present.
+func TestTranslate_SpanEventsNoRegression_AttributeExtraction(t *testing.T) {
+	rss := []ResourceSpans{{
+		Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+		Spans: []*Span{{
+			SpanID:    "0123456789abcdef",
+			TraceID:   "0123456789abcdef0123456789abcdef",
+			Name:      "litellm.completion",
+			StartTime: time.Now(),
+			EndTime:   time.Now(),
+			Attributes: map[string]any{
+				"gen_ai.request.model":   "gpt-4o",
+				"gen_ai.input.messages":  `[{"role":"user","content":"from-attr"}]`,
+				"gen_ai.output.messages": `[{"role":"assistant","content":"from-attr-resp"}]`,
+			},
+			// Also has events — attributes should take precedence.
+			Events: []SpanEvent{{
+				Name: "gen_ai.prompt.message",
+				Attributes: map[string]string{
+					"gen_ai.prompt.message.role":    "user",
+					"gen_ai.prompt.message.content": "from-event",
+				},
+			}},
+		}},
+	}}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	// Attributes should take precedence over events.
+	if !strings.Contains(spans[0].Input, `"content":"from-attr"`) {
+		t.Errorf("input: got %q (expected attribute-based content, not event content)", spans[0].Input)
+	}
+	if !strings.Contains(spans[0].Output, `"content":"from-attr-resp"`) {
+		t.Errorf("output: got %q (expected attribute-based content, not event content)", spans[0].Output)
+	}
+}
+
+// TestTranslate_SpanEventsNoEventsSpan verifies that spans without Events
+// still work correctly (no regression).
+func TestTranslate_SpanEventsNoEventsSpan(t *testing.T) {
+	rss := []ResourceSpans{{
+		Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},
+		Spans: []*Span{{
+			SpanID:    "0123456789abcdef",
+			TraceID:   "0123456789abcdef0123456789abcdef",
+			Name:      "litellm.completion",
+			StartTime: time.Now(),
+			EndTime:   time.Now(),
+			Attributes: map[string]any{
+				"gen_ai.request.model": "gpt-4o",
+				// No gen_ai.input.messages / gen_ai.output.messages either.
+			},
+			Events: nil, // explicitly no events
+		}},
+	}}
+
+	spans := translateTest(t, "proj-1", rss, Options{})
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	// Without events or message attributes, Input and Output should be
+	// normalized to empty placeholder messages (the existing behavior).
+	if !strings.Contains(spans[0].Input, `"role":"user"`) || !strings.Contains(spans[0].Input, `"content":""`) {
+		t.Errorf("input: got %q (expected normalized empty message for span with no content source)", spans[0].Input)
+	}
+}
+
 func TestTranslate_LitellmInputMessagesFromAttributes_DiagnosticIssue279(t *testing.T) {
 	rss := []ResourceSpans{{
 		Resource: Resource{Attributes: map[string]any{"service.name": "svc"}},

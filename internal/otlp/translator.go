@@ -15,6 +15,13 @@ type Resource struct {
 	Attributes map[string]any
 }
 
+// SpanEvent mirrors the OTLP proto message SpanEvent on the wire.
+type SpanEvent struct {
+	TimeUnixNano uint64            // nanoseconds since Unix epoch
+	Name         string            // e.g., "gen_ai.prompt.message"
+	Attributes   map[string]string // event attributes
+}
+
 // Span represents a normalized OTLP span before translation to domain.Span.
 type Span struct {
 	SpanID     string
@@ -26,6 +33,7 @@ type Span struct {
 	StatusCode string
 	StatusMsg  string
 	Attributes map[string]any
+	Events     []SpanEvent // Span events from OTLP wire (e.g. gen_ai.prompt.message)
 }
 
 // ResourceSpans groups a Resource with the spans it produced.
@@ -105,6 +113,10 @@ func toRawMap(projectID string, resource Resource, span Span, opts Options) map[
 	if input == "" {
 		input = extractAttributeString(span.Attributes, "omneval.input")
 	}
+	if input == "" {
+		input = buildMessagesFromEvents(span.Events, "gen_ai.prompt.message",
+			"gen_ai.prompt.message.role", "gen_ai.prompt.message.content")
+	}
 
 	// Build Output from gen_ai.completion.N., with the same fallback chain.
 	output := buildMessageArray(span.Attributes, "gen_ai.completion")
@@ -119,6 +131,10 @@ func toRawMap(projectID string, resource Resource, span Span, opts Options) map[
 	}
 	if output == "" {
 		output = extractAttributeString(span.Attributes, "omneval.output")
+	}
+	if output == "" {
+		output = buildMessagesFromEvents(span.Events, "gen_ai.completion.message",
+			"gen_ai.completion.message.role", "gen_ai.completion.message.content")
 	}
 
 	// Derive Kind: explicit omneval.kind wins, then heuristic.
@@ -325,6 +341,35 @@ func extractMessagesJSON(attrs map[string]any, key string) string {
 	default:
 		return ""
 	}
+}
+
+// buildMessagesFromEvents scans span.Events for events matching the given name
+// and collects their role/content attributes into a JSON-serialized message
+// array. Events are appended in the order they appear in the span.
+func buildMessagesFromEvents(events []SpanEvent, eventPattern, roleKey, contentKey string) string {
+	var messages []map[string]any
+	for _, evt := range events {
+		if evt.Name != eventPattern {
+			continue
+		}
+		role := evt.Attributes[roleKey]
+		content := evt.Attributes[contentKey]
+		if role == "" && content == "" {
+			continue
+		}
+		messages = append(messages, map[string]any{
+			"role":    role,
+			"content": content,
+		})
+	}
+	if len(messages) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(messages)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // extractNumberedIndex checks if a key matches pattern "prefix.N.suffix"

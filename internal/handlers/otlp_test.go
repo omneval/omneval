@@ -815,6 +815,82 @@ func TestSpanEventsNotRead_DiagnosticIssue279(t *testing.T) {
 	}
 }
 
+// TestSpanEventsCaptured_Ingestion tests that the OTLP handler correctly parses
+// Span Events and populates Input/Output in the domain model.  This covers
+// the Laminar/LiteLLM instrumentation path where content arrives as Span
+// Events rather than Span Attributes.
+func TestSpanEventsCaptured_Ingestion(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewOTLPHandler(q, v)
+
+	req := &coltracev1.ExportTraceServiceRequest{
+		ResourceSpans: []*tracev1.ResourceSpans{
+			{
+				ScopeSpans: []*tracev1.ScopeSpans{
+					{
+						Spans: []*tracev1.Span{
+							{
+								TraceId:   []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+								SpanId:    []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+								Name:      "litellm.completion",
+								StartTimeUnixNano: uint64(time.Now().UnixNano()),
+								EndTimeUnixNano:   uint64(time.Now().UnixNano()),
+								Attributes: []*commonv1.KeyValue{
+									{Key: "gen_ai.response.id", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "chatcmpl-abc123"}}},
+									{Key: "gen_ai.request.model", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "gpt-4o"}}},
+									{Key: "gen_ai.system", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "openai"}}},
+								},
+								Events: []*tracev1.Span_Event{
+									{
+										Name:         "gen_ai.prompt.message",
+										TimeUnixNano: uint64(time.Now().UnixNano()),
+										Attributes: []*commonv1.KeyValue{
+											{Key: "gen_ai.prompt.message.role", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "user"}}},
+											{Key: "gen_ai.prompt.message.content", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "Hello, world!"}}},
+										},
+									},
+									{
+										Name:         "gen_ai.completion.message",
+										TimeUnixNano: uint64(time.Now().UnixNano()),
+										Attributes: []*commonv1.KeyValue{
+											{Key: "gen_ai.completion.message.role", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "assistant"}}},
+											{Key: "gen_ai.completion.message.content", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "Hi there! How can I help?"}}},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	spans := postOTLPRequest(t, h, q, req, "application/x-protobuf")
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+
+	s := spans[0]
+
+	// Input should contain the user message from Span Events.
+	if !strings.Contains(s.Input, "user") {
+		t.Errorf("input should contain 'user', got: %q", s.Input)
+	}
+	if !strings.Contains(s.Input, "Hello, world!") {
+		t.Errorf("input should contain 'Hello, world!', got: %q", s.Input)
+	}
+
+	// Output should contain the assistant message from Span Events.
+	if !strings.Contains(s.Output, "assistant") {
+		t.Errorf("output should contain 'assistant', got: %q", s.Output)
+	}
+	if !strings.Contains(s.Output, "Hi there! How can I help?") {
+		t.Errorf("output should contain 'Hi there! How can I help?', got: %q", s.Output)
+	}
+}
+
 // TestSpanEventsCapture_DiagnosticIssue279 proves that Omneval's pipeline does
 // NOT read Span Events from incoming OTLP spans.  The test constructs an OTLP
 // request with prompt content embedded in Span Events (the exact shape that
@@ -891,14 +967,13 @@ func TestSpanEventsCapture_DiagnosticIssue279(t *testing.T) {
 		t.Fatalf("expected 1 span, got %d", len(spans))
 	}
 
-	// KEY FINDING FOR ISSUE #279: Even though the OTLP wire payload contains
-	// Span Events with prompt/completion content, Omneval's pipeline produces
-	// empty Input/Output.  The handler's convertToResourceSpans reads only
-	// s.GetAttributes() and never s.GetEvents().
-	if !strings.Contains(spans[0].Input, `"role":"user"`) || !strings.Contains(spans[0].Input, `"content":""`) {
-		t.Errorf("input: got %q (expected empty normalized message — content is only in Span Events which the pipeline does not read)", spans[0].Input)
+	// ISSUE #279 FIXED: Span Events with prompt/completion content are now
+	// parsed by convertToResourceSpans and routed into Input/Output via
+	// buildMessagesFromEvents in toRawMap.
+	if !strings.Contains(spans[0].Input, `"role":"user"`) || !strings.Contains(spans[0].Input, `"content":"Hello, world!"`) {
+		t.Errorf("input: got %q (expected user message captured from Span Events)", spans[0].Input)
 	}
-	if !strings.Contains(spans[0].Output, `"role":"assistant"`) || !strings.Contains(spans[0].Output, `"content":""`) {
-		t.Errorf("output: got %q (expected empty normalized message — content is only in Span Events which the pipeline does not read)", spans[0].Output)
+	if !strings.Contains(spans[0].Output, `"role":"assistant"`) || !strings.Contains(spans[0].Output, `"content":"Hi there! How can I help?"`) {
+		t.Errorf("output: got %q (expected assistant message captured from Span Events)", spans[0].Output)
 	}
 }
