@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -512,5 +513,152 @@ func TestPruneEmptyInlinedTablesRemovesOrphanedRegistryRows(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("orphaned registry row still present, want removed")
+	}
+}
+
+// startRawTestServerWithClient is startRawTestServer plus a client
+// lake.Config attached to the same server, for tests (like
+// TestRepairMissingDataFiles) that need both: a normal client to insert
+// data and a raw server connection to mutate catalog tables directly.
+func startRawTestServerWithClient(t *testing.T) (*lakeserver.Server, lake.Config, string) {
+	t.Helper()
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("find free port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	srv, err := lakeserver.Serve(ctx, lakeserver.Config{
+		ListenAddr:    fmt.Sprintf(":%d", port),
+		CatalogDriver: lakeserver.CatalogDriverLocal,
+		CatalogDSN:    filepath.Join(dir, "catalog", "lake.ducklake"),
+	})
+	if err != nil {
+		t.Fatalf("start quack server: %v", err)
+	}
+	t.Cleanup(func() { srv.Close() })
+
+	clientCfg := lake.Config{
+		QuackAddr:  fmt.Sprintf("localhost:%d", port),
+		QuackToken: srv.Token(),
+		DataPath:   filepath.Join(dir, "data"),
+	}
+	return srv, clientCfg, dir
+}
+
+// TestRepairMissingDataFiles proves RepairMissingDataFiles finds a data
+// file the catalog still references but whose physical Parquet file is
+// gone from storage, and marks it removed (end_snapshot = begin_snapshot)
+// so it stops breaking queries — without touching any other, still-good
+// file's rows.
+//
+// Reproduces the 2026-06-25 production incident's end state directly
+// (physically deleting a committed file out from under the catalog)
+// rather than the concurrent-jobs race that caused it — the race is hard
+// to reproduce deterministically, but its end state (catalog row present,
+// physical file gone) is exactly what RepairMissingDataFiles must detect
+// and fix.
+func TestRepairMissingDataFiles(t *testing.T) {
+	ctx := context.Background()
+	srv, clientCfg, _ := startRawTestServerWithClient(t)
+
+	l, err := lake.Open(ctx, clientCfg)
+	if err != nil {
+		t.Fatalf("open lake: %v", err)
+	}
+	defer l.Close()
+
+	// Two separate commits -> two separate data files, so deleting one
+	// physically can be proven not to affect the other's rows.
+	if err := l.InsertSpans(ctx, []*domain.Span{testSpan("proj-a", "keep-me", time.Now())}); err != nil {
+		t.Fatalf("insert keep-me span: %v", err)
+	}
+	if err := l.InsertSpans(ctx, []*domain.Span{testSpan("proj-a", "lose-me", time.Now())}); err != nil {
+		t.Fatalf("insert lose-me span: %v", err)
+	}
+
+	// Find the specific file containing "lose-me" (not just "the first
+	// file alphabetically" — InsertSpans' UUIDv7-based filenames are
+	// time-ordered, so that would deterministically pick keep-me's file
+	// instead, since it was inserted first). read_parquet doesn't accept a
+	// table-function lateral-join column as its path argument, so this
+	// has to loop in Go rather than correlate in one query.
+	pathRows, err := l.DB().QueryContext(ctx, "SELECT data_file FROM ducklake_list_files('lake', 'spans')")
+	if err != nil {
+		t.Fatalf("list spans files: %v", err)
+	}
+	var allPaths []string
+	for pathRows.Next() {
+		var p string
+		if err := pathRows.Scan(&p); err != nil {
+			t.Fatalf("scan path: %v", err)
+		}
+		allPaths = append(allPaths, p)
+	}
+	pathRows.Close()
+
+	var pathToDelete string
+	for _, p := range allPaths {
+		var matches int
+		if err := l.DB().QueryRowContext(ctx,
+			"SELECT count(*) FROM read_parquet(?) WHERE span_id = 'lose-me'", p,
+		).Scan(&matches); err != nil {
+			t.Fatalf("probe %s for lose-me: %v", p, err)
+		}
+		if matches > 0 {
+			pathToDelete = p
+			break
+		}
+	}
+	if pathToDelete == "" {
+		t.Fatalf("could not find lose-me's file among %v", allPaths)
+	}
+	if err := os.Remove(pathToDelete); err != nil {
+		t.Fatalf("delete file %s from storage: %v", pathToDelete, err)
+	}
+
+	result, err := lakeserver.RepairMissingDataFiles(ctx, l.DB(), srv.DB(), lakeserver.MaintenanceTables)
+	if err != nil {
+		t.Fatalf("RepairMissingDataFiles: %v", err)
+	}
+	if len(result.RepairedPaths) != 1 {
+		t.Fatalf("RepairedPaths: got %d (%v), want 1", len(result.RepairedPaths), result.RepairedPaths)
+	}
+	if result.RepairedPaths[0] != pathToDelete {
+		t.Errorf("RepairedPaths[0]: got %s, want %s", result.RepairedPaths[0], pathToDelete)
+	}
+	if result.FilesChecked < 2 {
+		t.Errorf("FilesChecked: got %d, want at least 2", result.FilesChecked)
+	}
+
+	// The table is queryable again (no 404 on the deleted file), and only
+	// the surviving span's row remains.
+	var n int
+	if err := l.DB().QueryRowContext(ctx, "SELECT count(*) FROM lake.spans").Scan(&n); err != nil {
+		t.Fatalf("count spans after repair: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("spans row count after repair: got %d, want 1", n)
+	}
+	if err := l.DB().QueryRowContext(ctx, "SELECT count(*) FROM lake.spans WHERE span_id = 'keep-me'").Scan(&n); err != nil {
+		t.Fatalf("count keep-me: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("keep-me after repair: got %d, want 1 (must survive)", n)
+	}
+
+	// Running it again is a no-op: the file is already marked removed
+	// (end_snapshot IS NOT NULL), so it's no longer in
+	// ducklake_list_files's active set and won't be re-checked.
+	result2, err := lakeserver.RepairMissingDataFiles(ctx, l.DB(), srv.DB(), lakeserver.MaintenanceTables)
+	if err != nil {
+		t.Fatalf("RepairMissingDataFiles (second run): %v", err)
+	}
+	if len(result2.RepairedPaths) != 0 {
+		t.Errorf("RepairedPaths on second run: got %v, want none", result2.RepairedPaths)
 	}
 }

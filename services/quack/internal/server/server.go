@@ -15,10 +15,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/lake/lakeserver"
 	"github.com/omneval/omneval/internal/probe"
 	"github.com/omneval/omneval/services/quack/internal/metrics"
@@ -98,6 +100,45 @@ func Run() error {
 		} else {
 			slog.Info("quack: pruned empty inlined tables", "tables_dropped", pruneResult.TablesDropped, "orphaned_rows_removed", pruneResult.OrphanedRowsRemoved)
 		}
+
+		// One-time repair for the 2026-06-25 concurrent-compact-jobs
+		// incident (see RepairMissingDataFiles's doc comment): marks any
+		// data file the catalog still references but storage no longer has
+		// as removed, so queries against the rest of the table stop
+		// 404ing. Remove this call (not the function — it stays useful as
+		// a general self-heal) once a production run has been confirmed to
+		// have found and repaired the known 10 files.
+		//
+		// Needs a "ducklake:quack:" client attach (not srv.DB()) to list
+		// active files via ducklake_list_files — that table function
+		// resolves each file's full storage path for us, which is not
+		// worth reimplementing by hand from the raw catalog's
+		// path/path_is_relative chase across ducklake_data_file /
+		// ducklake_table / ducklake_schema. The repair UPDATE itself still
+		// runs against srv.DB(), the only connection that can write to it.
+		repairClientCfg := lake.ConfigFromApp(cfg)
+		// Loopback to our own quack_serve() listener directly rather than
+		// through cfg.Quack.Client.URL's Kubernetes Service DNS: per a
+		// prior spike (see the now-removed RunMaintenanceLoop loopback this
+		// mirrors), only "localhost" was confirmed to work for a process
+		// reaching its own listener this early in startup, and
+		// cfg.Quack.Client.Token is unset on the Quack Server's own pod
+		// (only its Helm-distinct OMNEVAL_QUACK_SERVER_TOKEN env var is) —
+		// use the token this same process is actually serving under.
+		repairClientCfg.QuackAddr = loopbackAddr(scfg.ListenAddr)
+		repairClientCfg.QuackToken = srv.Token()
+		repairClient, err := lake.Open(ctx, repairClientCfg)
+		if err != nil {
+			slog.Error("quack: repair missing data files: open client failed", "err", err)
+		} else {
+			repairResult, err := lakeserver.RepairMissingDataFiles(ctx, repairClient.DB(), srv.DB(), lakeserver.MaintenanceTables)
+			if err != nil {
+				slog.Error("quack: repair missing data files failed", "err", err)
+			} else {
+				slog.Info("quack: repaired missing data files", "files_checked", repairResult.FilesChecked, "files_repaired", len(repairResult.RepairedPaths), "paths", repairResult.RepairedPaths)
+			}
+			repairClient.Close()
+		}
 	}
 
 	// Table Maintenance no longer runs as an in-process loop here — a
@@ -147,4 +188,22 @@ func randomToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// loopbackAddr derives the host:port a process should use to reach its own
+// quack_serve() listener. Per a prior spike, only "localhost" was
+// confirmed to work (not "127.0.0.1"); a bare ":PORT" ListenAddr becomes
+// "localhost:PORT".
+func loopbackAddr(listenAddr string) string {
+	if strings.HasPrefix(listenAddr, ":") {
+		return "localhost" + listenAddr
+	}
+	host, port, ok := strings.Cut(listenAddr, ":")
+	if !ok {
+		return "localhost:" + listenAddr
+	}
+	if host == "" || host == "0.0.0.0" {
+		return "localhost:" + port
+	}
+	return listenAddr
 }
