@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/omneval/omneval/internal/auth"
@@ -16,9 +17,12 @@ import (
 // Both the standalone ingest service and other consumers converge on
 // this single implementation in internal/handlers.
 type IngestAdapter interface {
-	// Translate converts a NativeSpan (with validated key) into a
-	// domain.Span via the normalizer seam.
-	Translate(ctx context.Context, span *NativeSpan, vk *auth.ValidatedKey) (*domain.Span, error)
+	// Translate processes an incoming HTTP request: extracts and validates the
+	// API key, parses the request body, validates the batch, and normalises
+	// every span through the normalizer seam.
+	// The caller does not need to know about keys, requests, or validation —
+	// Translate absorbs the entire ingress pipeline.
+	Translate(ctx context.Context, r *http.Request) ([]*domain.Span, error)
 	// Route returns the HTTP handler that serves POST /api/v1/spans.
 	Route() http.Handler
 }
@@ -83,11 +87,41 @@ func NewNativeHandlerWithMetrics(queue SpanQueue, validator Validator, corsOrigi
 	return &NativeHandler{queue: queue, validator: validator, corsOrigins: corsOrigins, normalizer: normalizer.New(), metrics: m, logger: logger}
 }
 
-// Translate converts a NativeSpan into a domain.Span via the normalizer seam,
-// injecting project_id and service_name from the validated key.
-func (h *NativeHandler) Translate(ctx context.Context, span *NativeSpan, vk *auth.ValidatedKey) (*domain.Span, error) {
-	raw := toRawMap(span, vk)
-	return h.normalizer.Normalize(ctx, raw)
+// Translate processes an incoming HTTP request: extracts and validates the API
+// key, parses the request body, validates the batch, and normalises every span.
+// Callers do not need to know about keys, requests, or validation — Translate
+// absorbs the entire ingress pipeline and returns the normalised domain spans.
+func (h *NativeHandler) Translate(ctx context.Context, r *http.Request) ([]*domain.Span, error) {
+	rawKey := ExtractAPIKey(r)
+	if rawKey == "" {
+		return nil, fmt.Errorf("missing API key")
+	}
+
+	vk, err := h.validator.Validate(ctx, rawKey)
+	if err != nil {
+		return nil, fmt.Errorf("invalid API key: %w", err)
+	}
+
+	var req IngestRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return nil, fmt.Errorf("invalid request body: %w", err)
+	}
+
+	if len(req.Spans) == 0 {
+		return nil, fmt.Errorf("spans array must not be empty")
+	}
+
+	domainSpans := make([]*domain.Span, 0, len(req.Spans))
+	for _, ns := range req.Spans {
+		raw := toRawMap(ns, vk)
+		span, err := h.normalizer.Normalize(ctx, raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid span: %w", err)
+		}
+		domainSpans = append(domainSpans, span)
+	}
+
+	return domainSpans, nil
 }
 
 // Router returns the HTTP handler that serves POST /api/v1/spans.
@@ -112,47 +146,26 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rawKey := ExtractAPIKey(r)
-	if rawKey == "" {
-		http.Error(w, "missing API key", http.StatusUnauthorized)
-		return
-	}
-
-	vk, err := h.validator.Validate(r.Context(), rawKey)
+	domainSpans, err := h.Translate(r.Context(), r)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("invalid API key: %v", err), http.StatusUnauthorized)
-		return
-	}
-
-	var req IngestRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	// Reject empty batches
-	if len(req.Spans) == 0 {
-		http.Error(w, "spans array must not be empty", http.StatusBadRequest)
+		if strings.Contains(err.Error(), "API key") {
+			http.Error(w, fmt.Sprintf("unauthorized: %v", err), http.StatusUnauthorized)
+		} else {
+			if h.logger != nil {
+				h.logger.LogValidationError("", err)
+			}
+			http.Error(w, fmt.Sprintf("bad request: %v", err), http.StatusBadRequest)
+		}
 		return
 	}
 
 	now := time.Now()
-	domainSpans := make([]*domain.Span, 0, len(req.Spans))
-	for _, ns := range req.Spans {
-		span, err := h.Translate(r.Context(), ns, vk)
-		if err != nil {
-			if h.logger != nil {
-				h.logger.LogValidationError(ns.SpanID, err)
-			}
-			http.Error(w, fmt.Sprintf("invalid span: %v", err), http.StatusBadRequest)
-			return
-		}
+	for _, span := range domainSpans {
 		// Native spans don't carry client-supplied timestamps, so use
 		// ingestion time for both StartTime and EndTime, overriding
 		// whatever the normalizer derived from the (empty) raw map.
 		span.StartTime = now
 		span.EndTime = now
-		domainSpans = append(domainSpans, span)
 	}
 
 	if err := h.queue.Enqueue(r.Context(), domainSpans); err != nil {
@@ -167,11 +180,16 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.metrics != nil {
-		h.metrics.RecordSpan(vk.ProjectID, len(domainSpans))
+		// Extract project ID from the first span.
+		if len(domainSpans) > 0 {
+			h.metrics.RecordSpan(domainSpans[0].ProjectID, len(domainSpans))
+		}
 	}
 
 	if h.logger != nil {
-		h.logger.LogAccepted(vk.ProjectID, len(domainSpans), r.RemoteAddr)
+		if len(domainSpans) > 0 {
+			h.logger.LogAccepted(domainSpans[0].ProjectID, len(domainSpans), r.RemoteAddr)
+		}
 	}
 
 	w.WriteHeader(http.StatusAccepted)

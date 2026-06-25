@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/omneval/omneval/internal/auth"
@@ -287,36 +288,192 @@ func TestNativeHandler_ValidatesSpanFields(t *testing.T) {
 }
 
 // TestIngestAdapter_Translate_proves that the unified IngestAdapter interface
-// translates a NativeSpan into a normalized domain.Span.  This is the deep
-// seam the adapter exposes: Translate(ctx, *NativeSpan, *ValidatedKey)
-// (*domain.Span, error).
+// Translate method accepts a *http.Request, extracts and validates the API
+// key, parses the body, and returns normalised domain.Spans.
 func TestIngestAdapter_Translate(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
 	h := handlers.NewNativeHandler(q, v, nil)
 
-	vk := &auth.ValidatedKey{
-		ProjectID:   "proj-test",
-		ServiceName: "test-service",
+	body := map[string]any{
+		"spans": []map[string]any{
+			{
+				"span_id":  "0102030405060708",
+				"trace_id": "0102030405060708090a0b0c0d0e0f10",
+				"name":     "my-span",
+				"model":    "gpt-4",
+				"input":    "hello",
+				"output":   "hi back",
+			},
+		},
 	}
+	jsonBody, _ := json.Marshal(body)
 
-	span, err := h.Translate(nil, &handlers.NativeSpan{
-		SpanID:  "0102030405060708",
-		TraceID: "0102030405060708090a0b0c0d0e0f10",
-		Name:    "my-span",
-		Model:   "gpt-4",
-		Input:   "hello",
-		Output:  "hi back",
-	}, vk)
+	req, _ := http.NewRequest("POST", "/api/v1/spans", bytes.NewReader(jsonBody))
+	req.Header.Set("X-API-Key", "valid_project_key")
+
+	spans, err := h.Translate(req.Context(), req)
 	if err != nil {
 		t.Fatalf("Translate failed: %v", err)
 	}
 
-	if span.Name != "my-span" {
-		t.Errorf("span name: got %q, want %q", span.Name, "my-span")
+	if len(spans) != 1 {
+		t.Fatalf("spans: got %d, want 1", len(spans))
 	}
-	if span.ProjectID != "proj-test" {
-		t.Errorf("project_id: got %q, want %q", span.ProjectID, "proj-test")
+	if spans[0].Name != "my-span" {
+		t.Errorf("span name: got %q, want %q", spans[0].Name, "my-span")
+	}
+	if spans[0].ProjectID != "proj-1" {
+		t.Errorf("project_id: got %q, want %q", spans[0].ProjectID, "proj-1")
+	}
+}
+
+// TestIngestAdapter_Translate_HTTPRequest proves Translate accepts a full
+// *http.Request, extracts and validates the API key, parses the body, and
+// returns a batch of normalised domain.Spans.
+func TestIngestAdapter_Translate_HTTPRequest(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewNativeHandler(q, v, nil)
+
+	body := map[string]any{
+		"spans": []map[string]any{
+			{
+				"span_id":  "0102030405060708",
+				"trace_id": "0102030405060708090a0b0c0d0e0f10",
+				"name":     "translate-span",
+				"model":    "gpt-4",
+			},
+		},
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	req, err := http.NewRequest("POST", "/api/v1/spans", bytes.NewReader(jsonBody))
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+	req.Header.Set("X-API-Key", "valid_project_key")
+	req.Header.Set("Content-Type", "application/json")
+
+	spans, err := h.Translate(req.Context(), req)
+	if err != nil {
+		t.Fatalf("Translate failed: %v", err)
+	}
+
+	if len(spans) != 1 {
+		t.Fatalf("spans returned: got %d, want 1", len(spans))
+	}
+	if spans[0].Name != "translate-span" {
+		t.Errorf("span name: got %q, want %q", spans[0].Name, "translate-span")
+	}
+	if spans[0].ProjectID != "proj-1" {
+		t.Errorf("project_id: got %q, want %q", spans[0].ProjectID, "proj-1")
+	}
+}
+
+// TestIngestAdapter_Translate_HTTPRequest_AuthError proves Translate returns
+// an error when the API key is missing or invalid.
+func TestIngestAdapter_Translate_HTTPRequest_AuthError(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewNativeHandler(q, v, nil)
+
+	body := map[string]any{
+		"spans": []map[string]any{
+			{
+				"span_id":  "0102030405060708",
+				"trace_id": "0102030405060708090a0b0c0d0e0f10",
+				"name":     "auth-span",
+			},
+		},
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	// Missing key
+	req, _ := http.NewRequest("POST", "/api/v1/spans", bytes.NewReader(jsonBody))
+	_, err := h.Translate(req.Context(), req)
+	if err == nil {
+		t.Fatal("expected error for missing API key, got nil")
+	}
+
+	// Invalid key
+	req2, _ := http.NewRequest("POST", "/api/v1/spans", bytes.NewReader(jsonBody))
+	req2.Header.Set("X-API-Key", "bad_key")
+	_, err = h.Translate(req2.Context(), req2)
+	if err == nil {
+		t.Fatal("expected error for invalid API key, got nil")
+	}
+}
+
+// TestIngestAdapter_Translate_HTTPRequest_EmptyBatch proves Translate returns
+// an error when the spans array is empty.
+func TestIngestAdapter_Translate_HTTPRequest_EmptyBatch(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewNativeHandler(q, v, nil)
+
+	body := map[string]any{
+		"spans": []map[string]any{},
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	req, _ := http.NewRequest("POST", "/api/v1/spans", bytes.NewReader(jsonBody))
+	req.Header.Set("X-API-Key", "valid_project_key")
+
+	_, err := h.Translate(req.Context(), req)
+	if err == nil {
+		t.Fatal("expected error for empty spans array, got nil")
+	}
+}
+
+// TestIngestAdapter_Translate_HTTPRequest_BadRequest proves Translate returns
+// an error when the request body is malformed JSON.
+func TestIngestAdapter_Translate_HTTPRequest_BadRequest(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewNativeHandler(q, v, nil)
+
+	req, _ := http.NewRequest("POST", "/api/v1/spans", strings.NewReader("{bad json"))
+	req.Header.Set("X-API-Key", "valid_project_key")
+	req.Header.Set("Content-Type", "application/json")
+
+	_, err := h.Translate(req.Context(), req)
+	if err == nil {
+		t.Fatal("expected error for malformed JSON, got nil")
+	}
+}
+
+// TestIngestAdapter_Translate_HTTPRequest_MultipleSpans proves Translate
+// handles a batch of multiple spans and validates normalisation across all.
+func TestIngestAdapter_Translate_HTTPRequest_MultipleSpans(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewNativeHandler(q, v, nil)
+
+	body := map[string]any{
+		"spans": []map[string]any{
+			{"span_id": "0102030405060708", "trace_id": "0102030405060708090a0b0c0d0e0f10", "name": "span-a", "model": "gpt-4"},
+			{"span_id": "0203040506070809", "trace_id": "0102030405060708090a0b0c0d0e0f10", "name": "span-b", "model": "gpt-3.5"},
+		},
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	req, _ := http.NewRequest("POST", "/api/v1/spans", bytes.NewReader(jsonBody))
+	req.Header.Set("X-API-Key", "valid_project_key")
+
+	spans, err := h.Translate(req.Context(), req)
+	if err != nil {
+		t.Fatalf("Translate failed: %v", err)
+	}
+
+	if len(spans) != 2 {
+		t.Fatalf("spans returned: got %d, want 2", len(spans))
+	}
+	if spans[0].Name != "span-a" {
+		t.Errorf("first span name: got %q, want %q", spans[0].Name, "span-a")
+	}
+	if spans[1].Name != "span-b" {
+		t.Errorf("second span name: got %q, want %q", spans[1].Name, "span-b")
 	}
 }
 

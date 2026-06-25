@@ -76,8 +76,8 @@ func (h *NativeHandler) Router() http.Handler {
 }
 
 // Translate delegates to the canonical implementation.
-func (h *NativeHandler) Translate(ctx context.Context, span *handlers.NativeSpan, vk *auth.ValidatedKey) (*domain.Span, error) {
-	return h.base.Translate(ctx, span, vk)
+func (h *NativeHandler) Translate(ctx context.Context, r *http.Request) ([]*domain.Span, error) {
+	return h.base.Translate(ctx, r)
 }
 
 // Route satisfies the IngestAdapter interface by delegating to the base handler.
