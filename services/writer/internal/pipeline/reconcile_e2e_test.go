@@ -12,7 +12,7 @@ import (
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/lake"
-	"github.com/omneval/omneval/internal/lake/lakeservertest"
+	"github.com/omneval/omneval/internal/laketest"
 	"github.com/omneval/omneval/internal/queue"
 	s3pkg "github.com/omneval/omneval/internal/storage/s3"
 	"github.com/omneval/omneval/services/writer/internal/reconcile"
@@ -93,14 +93,8 @@ func (f *fakeObjectStore) DeleteObjectsBatch(_ context.Context, _ string, keys [
 // then processed end-to-end into the Lake.
 func reconcileTestPipeline(t *testing.T) (*Pipeline, *lake.Lake, *fakeReliableQueue, *fakeObjectStore, *fakeLedger, *reconcile.Worker) {
 	t.Helper()
-	ctx := context.Background()
 
-	lakeCfg, _ := lakeservertest.NewLocal(t)
-	lk, err := lake.Open(ctx, lakeCfg)
-	if err != nil {
-		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
-	}
-	t.Cleanup(func() { lk.Close() })
+	lk := laketest.NewLocal(t)
 
 	store := newFakeObjectStore()
 	rq := &fakeReliableQueue{}

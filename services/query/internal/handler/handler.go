@@ -12,6 +12,7 @@ import (
 	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/idgen"
+	"github.com/omneval/omneval/internal/lakeclient"
 	"github.com/omneval/omneval/services/query/internal/dsl"
 	"github.com/omneval/omneval/services/query/internal/metrics"
 	"github.com/omneval/omneval/services/query/internal/query"
@@ -610,12 +611,6 @@ func writeJSONError(w http.ResponseWriter, message string, status int) {
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
-// ScoreLakeWriter commits scores to the Lake (ADR-0004). Implemented by
-// *lake.Lake; an interface so tests can fake Lake failures.
-type ScoreLakeWriter interface {
-	InsertScores(ctx context.Context, scores []*domain.Score) error
-}
-
 // ScoreHandler handles POST /api/v1/scores — the public-facing endpoint
 // that allows manual score writes from the UI or API consumers. Scores are
 // committed directly to the Lake (lake.scores) through a writable Lake
@@ -623,7 +618,7 @@ type ScoreLakeWriter interface {
 type ScoreHandler struct {
 	// Lake is a writable Lake attachment (deps.AdminLake) used to commit
 	// scores via InsertScores.
-	Lake ScoreLakeWriter
+	Lake lakeclient.Client
 	// SpanDB is used to look up the annotated span's start_time so the score
 	// partitions alongside its span (ADR-0002). Falls back to CreatedAt if
 	// the lookup fails.
@@ -632,7 +627,7 @@ type ScoreHandler struct {
 
 // NewScoreHandler creates a new ScoreHandler backed by a writable Lake
 // attachment. spanDB is used to resolve span_start_time for partitioning.
-func NewScoreHandler(lakeWriter ScoreLakeWriter, spanDB DBHandle) http.Handler {
+func NewScoreHandler(lakeWriter lakeclient.Client, spanDB DBHandle) http.Handler {
 	h := &ScoreHandler{Lake: lakeWriter, SpanDB: spanDB}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/scores", h.HandleScores)

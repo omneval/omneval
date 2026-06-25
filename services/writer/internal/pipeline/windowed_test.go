@@ -12,7 +12,7 @@ import (
 	"github.com/omneval/omneval/internal/queue"
 )
 
-// recordingLake is an in-memory SpanLakeWriter that records each
+// recordingLake is an in-memory lakeclient.Client that records each
 // InsertSpans call, for asserting on batching behavior.
 type recordingLake struct {
 	mu        sync.Mutex
@@ -84,7 +84,7 @@ func (q *sequenceReliableQueue) Requeue(_ context.Context, e *queue.IngestEntry)
 	return nil
 }
 
-func windowedTestPipeline(rq *sequenceReliableQueue, lk SpanLakeWriter) *Pipeline {
+func windowedTestPipeline(rq *sequenceReliableQueue, lk lakeclient.Client) *Pipeline {
 	return New(nil, testPricing, nil, newFakeLedger(), nil, nil).
 		WithLake(lk).
 		WithBuffer(rq, &fakeFetcher{batches: make(map[string][]*domain.Span)}, newFakeLedger())

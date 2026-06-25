@@ -13,7 +13,7 @@ import (
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/lake"
-	"github.com/omneval/omneval/internal/lake/lakeservertest"
+	"github.com/omneval/omneval/internal/laketest"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -63,15 +63,10 @@ func TestLakeIntegration_PostgresCatalogMinIO(t *testing.T) {
 	}
 	makeBucket(t, ctx, minioEndpoint, storage.Bucket)
 
-	lakeCfg := lakeservertest.NewPostgres(t, catalogDSN)
-	lakeCfg.DataPath = "s3://" + storage.Bucket + "/lake"
-	lakeCfg.Storage = storage
-
-	lk, err := lake.Open(ctx, lakeCfg)
-	if err != nil {
-		t.Fatalf("open lake: %v", err)
-	}
-	defer lk.Close()
+	lk := laketest.NewPostgresWithConfig(t, catalogDSN, func(cfg *lake.Config) {
+		cfg.DataPath = "s3://" + storage.Bucket + "/lake"
+		cfg.Storage = storage
+	})
 
 	p := New(nil, testPricing, nil, nil, nil, nil).WithLake(lk)
 

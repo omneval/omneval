@@ -11,7 +11,7 @@ import (
 
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/lake"
-	"github.com/omneval/omneval/internal/lake/lakeservertest"
+	"github.com/omneval/omneval/internal/laketest"
 )
 
 const scoreBody = `{
@@ -38,13 +38,7 @@ func postScore(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
 // lake.spans (ADR-0002).
 func TestScoreWriteToLake(t *testing.T) {
 	ctx := context.Background()
-
-	cfg, _ := lakeservertest.NewLocal(t)
-	lk, err := lake.Open(ctx, cfg)
-	if err != nil {
-		t.Fatalf("open lake: %v", err)
-	}
-	defer lk.Close()
+	lk := laketest.NewLocal(t)
 
 	// The span the score annotates, already in the Lake.
 	spanStart := time.Date(2026, 6, 4, 11, 0, 0, 0, time.UTC)
@@ -85,13 +79,7 @@ func TestScoreWriteToLake(t *testing.T) {
 // cutover validation.
 func TestScoreWithoutScoreID_GeneratesOne(t *testing.T) {
 	ctx := context.Background()
-
-	cfg, _ := lakeservertest.NewLocal(t)
-	lk, err := lake.Open(ctx, cfg)
-	if err != nil {
-		t.Fatalf("open lake: %v", err)
-	}
-	defer lk.Close()
+	lk := laketest.NewLocal(t)
 
 	if err := lk.InsertSpans(ctx, []*domain.Span{{
 		SpanID: "s2", TraceID: "t2", ProjectID: "p1", StartTime: time.Now(),

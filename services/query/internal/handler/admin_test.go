@@ -12,7 +12,7 @@ import (
 
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/lake"
-	"github.com/omneval/omneval/internal/lake/lakeservertest"
+	"github.com/omneval/omneval/internal/laketest"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/services/query/internal/auth"
 	"github.com/redis/go-redis/v9"
@@ -108,12 +108,7 @@ func TestAdminHandler_ProjectsDelete(t *testing.T) {
 // one score per project for "proj-1" and "proj-2".
 func setupTestLake(t *testing.T) *lake.Lake {
 	t.Helper()
-	cfg, _ := lakeservertest.NewLocal(t)
-	lk, err := lake.Open(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("open lake: %v", err)
-	}
-	t.Cleanup(func() { lk.Close() })
+	lk := laketest.NewLocal(t)
 
 	start := time.Now().UTC()
 	for _, projectID := range []string{"proj-1", "proj-2"} {

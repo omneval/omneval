@@ -9,8 +9,7 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
-	"github.com/omneval/omneval/internal/lake"
-	"github.com/omneval/omneval/internal/lake/lakeservertest"
+	"github.com/omneval/omneval/internal/laketest"
 )
 
 func makeQuery(opts ...func(*Query)) Query {
@@ -1082,15 +1081,7 @@ func TestCompileLake_EmitsSingleTableQuery(t *testing.T) {
 }
 
 func TestCompileLake_PartitionPruningPreserved(t *testing.T) {
-	// Open a real DuckLake with partitioned spans table.
-	ctx := context.Background()
-	cfg, _ := localTestLake(t)
-
-	l, err := lake.Open(ctx, cfg)
-	if err != nil {
-		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
-	}
-	defer l.Close()
+	l := laketest.NewLocal(t)
 
 	// Seed partitions: proj-a on June 1, proj-b on June 2.
 	startA := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
@@ -1174,11 +1165,4 @@ func TestCompileLake_PartitionPruningPreserved(t *testing.T) {
 	if count < 1 {
 		t.Errorf("expected at least 1 row from proj-a partition, got count=%d", count)
 	}
-}
-
-// localTestLake creates a local DuckLake config (via a Quack Server,
-// ADR-0005) for integration tests.
-func localTestLake(t *testing.T) (lake.Config, string) {
-	t.Helper()
-	return lakeservertest.NewLocal(t)
 }

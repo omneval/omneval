@@ -10,6 +10,7 @@ import (
 	"github.com/omneval/omneval/internal/buffer"
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/lake"
+	"github.com/omneval/omneval/internal/lakeclient"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/pricing"
 	"github.com/omneval/omneval/internal/probe"
@@ -151,7 +152,7 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 
 	// Create score handler (handles POST /internal/v1/scores). The Lake is
 	// authoritative for score writes too.
-	var scoreLake handler.ScoreLakeWriter
+	var scoreLake lakeclient.Client
 	if deps.Lake != nil {
 		scoreLake = deps.Lake
 	}

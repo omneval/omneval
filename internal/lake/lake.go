@@ -29,6 +29,13 @@ import (
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/domain"
 	_ "github.com/omneval/omneval/internal/duckdbfix"
+	"github.com/omneval/omneval/internal/lakeclient"
+)
+
+// Verify compile-time: *lake.Lake implements lakeclient.Client and lakeclient.Querier.
+var (
+	_ lakeclient.Client = (*Lake)(nil)
+	_ lakeclient.Querier = (*Lake)(nil)
 )
 
 // Config describes how to attach the Lake as a Quack client.

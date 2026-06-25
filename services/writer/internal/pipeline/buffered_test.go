@@ -9,8 +9,7 @@ import (
 
 	"github.com/omneval/omneval/internal/buffer"
 	"github.com/omneval/omneval/internal/domain"
-	"github.com/omneval/omneval/internal/lake"
-	"github.com/omneval/omneval/internal/lake/lakeservertest"
+	"github.com/omneval/omneval/internal/laketest"
 	"github.com/omneval/omneval/internal/queue"
 )
 
@@ -30,12 +29,20 @@ func bufferedTestSpan(spanID string) *domain.Span {
 	}
 }
 
-// failingLake is a SpanLakeWriter that always fails, for testing the
+// failingLake is a lakeclient.Client that always fails, for testing the
 // requeue-on-lake-failure path.
 type failingLake struct{}
 
 func (failingLake) InsertSpans(context.Context, []*domain.Span) error {
 	return errors.New("lake unavailable")
+}
+
+func (failingLake) InsertScores(context.Context, []*domain.Score) error {
+	return errors.New("lake unavailable")
+}
+
+func (failingLake) SpanStartTime(context.Context, string, string) (time.Time, error) {
+	return time.Time{}, errors.New("lake unavailable")
 }
 
 // fakeReliableQueue records Ack/Requeue/EnqueueRef calls.
@@ -100,14 +107,8 @@ func (f *fakeLedger) IsBatchCommitted(_ context.Context, batchID string) (bool, 
 
 func bufferedTestPipeline(t *testing.T) (*Pipeline, *lake.Lake, *fakeReliableQueue, *fakeFetcher, *fakeLedger) {
 	t.Helper()
-	ctx := context.Background()
 
-	cfg, _ := lakeservertest.NewLocal(t)
-	lk, err := lake.Open(ctx, cfg)
-	if err != nil {
-		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
-	}
-	t.Cleanup(func() { lk.Close() })
+	lk := laketest.NewLocal(t)
 
 	rq := &fakeReliableQueue{}
 	fetcher := &fakeFetcher{batches: make(map[string][]*domain.Span)}
@@ -119,13 +120,7 @@ func bufferedTestPipeline(t *testing.T) (*Pipeline, *lake.Lake, *fakeReliableQue
 }
 
 func lakeSpanCount(t *testing.T, lk *lake.Lake) int {
-	t.Helper()
-	var n int
-	if err := lk.DB().QueryRowContext(context.Background(),
-		"SELECT count(*) FROM lake.spans").Scan(&n); err != nil {
-		t.Fatalf("count lake spans: %v", err)
-	}
-	return n
+	return laketest.SpanCount(t, lk, "")
 }
 
 // TestProcessEntry_RefCommitsLakeLedgerThenAcks proves the happy path

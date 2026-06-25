@@ -13,7 +13,7 @@ import (
 	"github.com/omneval/omneval/internal/domain"
 	_ "github.com/omneval/omneval/internal/duckdbfix"
 	"github.com/omneval/omneval/internal/lake"
-	"github.com/omneval/omneval/internal/lake/lakeservertest"
+	"github.com/omneval/omneval/internal/laketest"
 	"github.com/omneval/omneval/services/query/internal/dsl"
 	"github.com/omneval/omneval/services/query/internal/query"
 )
@@ -118,16 +118,10 @@ func testLakeDB(t *testing.T) *testDBHandle {
 	return &testDBHandle{DB: db}
 }
 
-// testLakeServer creates a Lake server from lakeservertest with a project.
+// testLakeServer creates a Lake server using laketest for integration tests.
 func testLakeServer(t *testing.T) *lake.Lake {
 	t.Helper()
-	cfg, _ := lakeservertest.NewLocal(t)
-	lk, err := lake.Open(context.Background(), cfg)
-	if err != nil {
-		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
-	}
-	t.Cleanup(func() { lk.Close() })
-	return lk
+	return laketest.NewLocal(t)
 }
 
 // fakeBookmarkStore returns bookmarked trace IDs for the "bookmarked" filter.
