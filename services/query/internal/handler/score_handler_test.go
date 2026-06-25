@@ -2,11 +2,9 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -138,105 +136,4 @@ func TestHandleScores_WritesToDB(t *testing.T) {
 	}
 }
 
-func TestWithScores_AttachesScoresToSpans(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "omneval-scores-test")
-	if err != nil {
-		t.Fatalf("create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-	tmpPath := tmpDir + "/test.duckdb"
-
-	db, err := sql.Open("duckdb", tmpPath)
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	defer db.Close()
-
-	// Create tables.
-	if _, err := db.ExecContext(context.Background(), `
-		CREATE TABLE IF NOT EXISTS spans (
-			span_id        VARCHAR NOT NULL,
-			trace_id       VARCHAR NOT NULL,
-			parent_id      VARCHAR,
-			project_id     VARCHAR NOT NULL,
-			service_name   VARCHAR,
-			name           VARCHAR,
-			kind           VARCHAR,
-			start_time     TIMESTAMPTZ NOT NULL,
-			end_time       TIMESTAMPTZ,
-			model          VARCHAR,
-			input          JSON,
-			output         JSON,
-			input_tokens   BIGINT,
-			output_tokens  BIGINT,
-			cost_usd       DOUBLE,
-			prompt_name    VARCHAR,
-			prompt_version BIGINT,
-			status_code    VARCHAR,
-			status_message VARCHAR,
-			attributes     JSON,
-			PRIMARY KEY (trace_id, span_id)
-		);
-		CREATE TABLE IF NOT EXISTS scores (
-			score_id       VARCHAR NOT NULL PRIMARY KEY,
-			span_id        VARCHAR NOT NULL,
-			trace_id       VARCHAR NOT NULL,
-			project_id     VARCHAR NOT NULL,
-			eval_name      VARCHAR,
-			value          DOUBLE,
-			reasoning      VARCHAR,
-			judge_model    VARCHAR,
-			prompt_name    VARCHAR,
-			prompt_version BIGINT,
-			created_at     TIMESTAMPTZ NOT NULL
-		);
-	`); err != nil {
-		t.Fatalf("create tables: %v", err)
-	}
-
-	// Insert spans and scores.
-	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
-	if _, err := db.ExecContext(context.Background(),
-		`INSERT INTO spans (span_id, trace_id, project_id, model, start_time, end_time) VALUES
-		 (?, ?, ?, ?, ?, ?),
-		 (?, ?, ?, ?, ?, ?)`,
-		"span-001", "trace-abc", "test-proj", "gpt-4",
-		baseTime, baseTime.Add(10*time.Second),
-		"span-002", "trace-abc", "test-proj", "gpt-4",
-		baseTime.Add(time.Second), baseTime.Add(20*time.Second)); err != nil {
-		t.Fatalf("insert spans: %v", err)
-	}
-
-	if _, err := db.ExecContext(context.Background(),
-		`INSERT INTO scores (score_id, span_id, trace_id, project_id, eval_name, value, reasoning, judge_model, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		"score-1", "span-001", "trace-abc", "test-proj", "helpfulness", 0.8, "Good", "claude-4",
-		baseTime); err != nil {
-		t.Fatalf("insert score: %v", err)
-	}
-
-	// Create spans without scores attached.
-	spans := []*domain.Span{
-		{SpanID: "span-001", TraceID: "trace-abc", ProjectID: "test-proj"},
-		{SpanID: "span-002", TraceID: "trace-abc", ProjectID: "test-proj"},
-	}
-
-	// Load scores.
-	loaded := withScores(db, spans, "trace-abc", "test-proj", "scores")
-
-	// span-001 should have scores, span-002 should not.
-	if len(loaded[0].Scores) != 1 {
-		t.Errorf("span-001: got %d scores, want 1", len(loaded[0].Scores))
-	} else {
-		if loaded[0].Scores[0].EvalName != "helpfulness" {
-			t.Errorf("span-001 score eval_name: got %q, want %q", loaded[0].Scores[0].EvalName, "helpfulness")
-		}
-		if loaded[0].Scores[0].Value != 0.8 {
-			t.Errorf("span-001 score value: got %f, want 0.8", loaded[0].Scores[0].Value)
-		}
-	}
-
-	if len(loaded[1].Scores) != 0 {
-		t.Errorf("span-002: got %d scores, want 0", len(loaded[1].Scores))
-	}
-}
+// Stub: withScores moved to spansegment package.

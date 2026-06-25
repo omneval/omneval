@@ -187,7 +187,14 @@ func (rt *Router) RegisterRoutes(mux *http.ServeMux) http.Handler {
 	routes = append(routes, rt.admin.AdminRoutes()...)
 
 	// --- Span / project routes ---
-	routes = append(routes, rt.span.Routes()...)
+	for _, r := range rt.span.Routes() {
+		routes = append(routes, AuthRoute{
+			Method:  r.Method,
+			Path:    r.Path,
+			Handler: r.Handler,
+			Policy:  AuthPolicy(r.Policy),
+		})
+	}
 
 	// --- Bookmark routes ---
 	routes = append(routes, rt.bookmark.Routes()...)

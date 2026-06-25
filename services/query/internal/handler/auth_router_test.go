@@ -12,6 +12,7 @@ import (
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/fake"
 	"github.com/omneval/omneval/services/query/internal/auth"
+	"github.com/omneval/omneval/services/query/internal/public"
 )
 
 func TestAuthPolicy_String(t *testing.T) {
@@ -76,8 +77,8 @@ func TestPublicPaths(t *testing.T) {
 	}
 
 	for _, path := range expectedPublic {
-		if !isPublicPath(path) {
-			t.Errorf("isPublicPath(%q) = false, want true", path)
+		if !public.IsPublicPath(path) {
+			t.Errorf("public.IsPublicPath(%q) = false, want true", path)
 		}
 	}
 }
@@ -86,11 +87,11 @@ func TestPublicPathPrefixMatch(t *testing.T) {
 	t.Parallel()
 
 	// Health check variants should also be public.
-	if !isPublicPath("/healthz/") {
-		t.Error("isPublicPath(/healthz/) = false, want true")
+	if !public.IsPublicPath("/healthz/") {
+		t.Error("public.IsPublicPath(/healthz/) = false, want true")
 	}
-	if !isPublicPath("/readyz/") {
-		t.Error("isPublicPath(/readyz/) = false, want true")
+	if !public.IsPublicPath("/readyz/") {
+		t.Error("public.IsPublicPath(/readyz/) = false, want true")
 	}
 }
 
@@ -197,8 +198,8 @@ func TestProtectedPathNotPublic(t *testing.T) {
 	}
 
 	for _, path := range protected {
-		if isPublicPath(path) {
-			t.Errorf("isPublicPath(%q) = true, want false", path)
+		if public.IsPublicPath(path) {
+			t.Errorf("public.IsPublicPath(%q) = true, want false", path)
 		}
 	}
 }
