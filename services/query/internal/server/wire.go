@@ -19,6 +19,7 @@ import (
 	"github.com/omneval/omneval/services/query/internal/metrics"
 	"github.com/omneval/omneval/services/query/internal/playground"
 	"github.com/omneval/omneval/services/query/internal/querybuild"
+	"github.com/omneval/omneval/services/query/internal/spansegment"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 )
@@ -58,7 +59,7 @@ type WiredDeps struct {
 	// Handlers.
 	Auth            *auth.Handler
 	APIKeyValidator internalauth.Validator
-	Span            *handler.SpanHandler
+	Span            *spansegment.SpanHandler
 	Bookmark        *handler.BookmarkHandler
 	Conversation    *handler.ConversationHandler
 	Prompt          *handler.PromptHandler
@@ -159,7 +160,7 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		Lake:          deps.Lake,
 		BookmarkStore: store.BookmarkStore(),
 	}
-	deps.Span = &handler.SpanHandler{
+	deps.Span = &spansegment.SpanHandler{
 		SessionStore:    h,
 		ProjectResolver: h,
 		Lake:            deps.Lake,

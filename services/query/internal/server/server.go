@@ -2,14 +2,11 @@ package server
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"log/slog"
-	"mime"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -18,53 +15,14 @@ import (
 	_ "github.com/omneval/omneval/internal/duckdbfix"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/services/query/internal/handler"
+	"github.com/omneval/omneval/services/query/internal/public"
 )
-
-//go:embed ui/dist
-var uiFS embed.FS
-
-// serveUI serves static files from the embedded UI dist directory.
-// It handles MIME type detection and falls back to index.html for SPA routing.
-func serveUI(w http.ResponseWriter, r *http.Request) {
-	// Clean the path to prevent directory traversal.
-	path := filepath.Clean(r.URL.Path)
-	if path == "/" {
-		path = "/index.html"
-	}
-
-	// Try to serve the exact file.
-	data, err := uiFS.ReadFile("ui/dist" + path)
-	if err == nil {
-		// Determine content type from file extension.
-		ct := mime.TypeByExtension(filepath.Ext(path))
-		if ct == "" {
-			// Fallback: sniff from content.
-			ct = http.DetectContentType(data)
-		}
-		w.Header().Set("Content-Type", ct)
-		if _, err := w.Write(data); err != nil {
-			slog.Warn("query: write ui file", "path", path, "err", err)
-		}
-		return
-	}
-
-	// Not found — serve index.html for SPA routing.
-	data, err = uiFS.ReadFile("ui/dist/index.html")
-	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if _, err := w.Write(data); err != nil {
-		slog.Warn("query: write index.html", "err", err)
-	}
-}
 
 // IsPublicAPIPath reports whether the given path is a public API route
 // that does not require authentication. Delegates to the canonical
-// handler.IsPublicPath so there is a single source of truth.
+// public.IsPublicPath so there is a single source of truth.
 func IsPublicAPIPath(path string) bool {
-	return handler.IsPublicPath(path)
+	return public.IsPublicPath(path)
 }
 
 // Run starts the Query API: opens the DuckDB snapshot from S3 and the
@@ -158,9 +116,6 @@ func RunWired(deps *WiredDeps) error {
 // buildRouter wires every route against the handlers in deps and wraps them
 // in the session/API-key auth middleware, using the unified Router module.
 func buildRouter(deps *WiredDeps) http.Handler {
-	// Wire the UI server function into the router so it can serve static files.
-	handler.InitServeUI(serveUI)
-
 	// Build the Router from wired deps and register all routes.
 	router := handler.NewRouter(&handler.RouterDeps{
 		Cfg:             deps.Cfg,

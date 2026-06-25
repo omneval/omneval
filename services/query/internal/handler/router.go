@@ -2,7 +2,6 @@ package handler
 
 import (
 	"net/http"
-	"strings"
 	"time"
 
 	internalauth "github.com/omneval/omneval/internal/auth"
@@ -10,6 +9,8 @@ import (
 	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/services/query/internal/auth"
+	"github.com/omneval/omneval/services/query/internal/public"
+	"github.com/omneval/omneval/services/query/internal/spansegment"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -64,7 +65,7 @@ type RouterDeps struct {
 	Cfg             *config.Config
 	Store           metadata.Store
 	Auth            *auth.Handler
-	Span            *SpanHandler
+	Span            spansegment.Segment
 	Bookmark        *BookmarkHandler
 	Conversation    *ConversationHandler
 	Prompt          *PromptHandler
@@ -106,10 +107,10 @@ func (l *authPolicyLookup) lookup(pattern string) AuthPolicy {
 
 // Router is the deep interface for the query service HTTP layer. It owns all
 // route registration, auth middleware application, project ID resolution, and
-// response serialization. The existing handler structs (SpanHandler,
-// ConversationHandler, DatasetHandler, EvalRuleHandler, PromptHandler, etc.)
-// become thin adapters at a clean seam — they contain only domain logic and SQL,
-// while the Router manages how they are composed and dispatched.
+// response serialization. Domain handlers (spansegment.Segment,
+// ConversationHandler, DatasetHandler, etc.) become thin adapters at a clean
+// seam — they contain only domain logic and SQL, while the Router manages how
+// they are composed and dispatched.
 //
 // Use [NewRouter] to construct one from router deps, then call
 // [Router.RegisterRoutes] to wire a [http.ServeMux] and obtain the fully
@@ -118,7 +119,7 @@ type Router struct {
 	cfg          *config.Config
 	store        metadata.Store
 	auth         *auth.Handler
-	span         *SpanHandler
+	span         spansegment.Segment
 	bookmark     *BookmarkHandler
 	conversation *ConversationHandler
 	prompt       *PromptHandler
@@ -251,8 +252,8 @@ func (rt *Router) RegisterRoutes(mux *http.ServeMux) http.Handler {
 		mux.HandleFunc(r.Method+" "+r.Path, r.Handler)
 	}
 
-	// SPA fallback.
-	mux.HandleFunc("/", serveUI)
+	// SPA fallback — delegates to the embedded UI handler from the public package.
+	mux.Handle("/", public.ServeHandler())
 
 	return rt.buildMiddleware(mux)
 }
@@ -276,7 +277,7 @@ func (rt *Router) buildMiddleware(mux *http.ServeMux) http.Handler {
 		path := req.URL.Path
 
 		// Public routes bypass authentication entirely.
-		if isPublicPath(path) {
+		if public.IsPublicPath(path) {
 			mux.ServeHTTP(w, req)
 			return
 		}
@@ -302,49 +303,4 @@ func (rt *Router) buildMiddleware(mux *http.ServeMux) http.Handler {
 			sessionMw(mux).ServeHTTP(w, req)
 		}
 	})
-}
-
-// publicPaths is the single canonical source of truth for public (unauthenticated)
-// API paths. It is referenced by both the router middleware dispatcher and the
-// server package's health-check probe logic.
-var publicPaths = map[string]struct{}{
-	"/login":         {},
-	"/logout":        {},
-	"/healthz":       {},
-	"/readyz":        {},
-	"/metrics":       {},
-	"/api/v1/scores": {},
-}
-
-// IsPublicPath reports whether the given path is a public API route
-// that does not require authentication.
-func IsPublicPath(path string) bool {
-	if _, ok := publicPaths[path]; ok {
-		return true
-	}
-	if strings.HasPrefix(path, "/healthz") || strings.HasPrefix(path, "/readyz") {
-		return true
-	}
-	return false
-}
-
-// isPublicPath reports whether the given path is a public API route
-// that does not require authentication. Mirrors the logic in server.go.
-func isPublicPath(path string) bool {
-	return IsPublicPath(path)
-}
-
-
-
-// serveUI is the embedded UI server, injected by the server package at init.
-// By default it returns 404 — the real handler is wired via InitServeUI.
-var serveUI func(http.ResponseWriter, *http.Request) = func(w http.ResponseWriter, req *http.Request) {
-	writeJSONError(w, "not found", http.StatusNotFound)
-}
-
-// InitServeUI injects the real UI server function that serves static files from
-// the embedded UI dist directory. Call this once during server startup to replace
-// the default no-op handler.
-func InitServeUI(fn func(http.ResponseWriter, *http.Request)) {
-	serveUI = fn
 }
