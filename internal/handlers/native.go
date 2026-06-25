@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,17 @@ import (
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/normalizer"
 )
+
+// IngestAdapter is the unified interface for native ingest handling.
+// Both the standalone ingest service and other consumers converge on
+// this single implementation in internal/handlers.
+type IngestAdapter interface {
+	// Translate converts a NativeSpan (with validated key) into a
+	// domain.Span via the normalizer seam.
+	Translate(ctx context.Context, span *NativeSpan, vk *auth.ValidatedKey) (*domain.Span, error)
+	// Route returns the HTTP handler that serves POST /api/v1/spans.
+	Route() http.Handler
+}
 
 // NativeSpan is the REST API request body for a single span.
 type NativeSpan struct {
@@ -34,12 +46,30 @@ type IngestRequest struct {
 	Spans []*NativeSpan `json:"spans"`
 }
 
+// IngestMetrics is an optional callback for recording ingest metrics.
+type IngestMetrics interface {
+	RecordSpan(projectID string, count int)
+	RecordEnqueueError()
+}
+
+// IngestLogger is an optional callback for emitting structured ingest logs.
+type IngestLogger interface {
+	// LogAccepted is called after a batch is successfully enqueued.
+	LogAccepted(projectID string, spanCount int, remoteAddr string)
+	// LogValidationError is called when a span fails validation.
+	LogValidationError(spanID string, err error)
+	// LogEnqueueError is called when the queue rejects a batch.
+	LogEnqueueError(err error)
+}
+
 // NativeHandler handles POST /api/v1/spans for the native Omneval REST format.
 type NativeHandler struct {
 	queue       SpanQueue
 	validator   Validator
 	corsOrigins []string
 	normalizer  domain.SpanNormalizer
+	metrics     IngestMetrics
+	logger      IngestLogger
 }
 
 // NewNativeHandler creates a NativeHandler with optional CORS origins.
@@ -47,6 +77,21 @@ func NewNativeHandler(queue SpanQueue, validator Validator, corsOrigins []string
 	return &NativeHandler{queue: queue, validator: validator, corsOrigins: corsOrigins, normalizer: normalizer.New()}
 }
 
+// NewNativeHandlerWithMetrics creates a NativeHandler with optional CORS origins,
+// metrics, and structured logging. Pass nil for metrics/logger to disable.
+func NewNativeHandlerWithMetrics(queue SpanQueue, validator Validator, corsOrigins []string, m IngestMetrics, logger IngestLogger) *NativeHandler {
+	return &NativeHandler{queue: queue, validator: validator, corsOrigins: corsOrigins, normalizer: normalizer.New(), metrics: m, logger: logger}
+}
+
+// Translate converts a NativeSpan into a domain.Span via the normalizer seam,
+// injecting project_id and service_name from the validated key.
+func (h *NativeHandler) Translate(ctx context.Context, span *NativeSpan, vk *auth.ValidatedKey) (*domain.Span, error) {
+	raw := toRawMap(span, vk)
+	return h.normalizer.Normalize(ctx, raw)
+}
+
+// Router returns the HTTP handler that serves POST /api/v1/spans.
+// Kept for backward compatibility; use Route() to satisfy IngestAdapter.
 func (h *NativeHandler) Router() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/spans", h.handleIngest)
@@ -54,6 +99,11 @@ func (h *NativeHandler) Router() http.Handler {
 		return newCORS(h.corsOrigins, mux)
 	}
 	return mux
+}
+
+// Route satisfies the IngestAdapter interface.
+func (h *NativeHandler) Route() http.Handler {
+	return h.Router()
 }
 
 func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
@@ -80,12 +130,20 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reject empty batches
+	if len(req.Spans) == 0 {
+		http.Error(w, "spans array must not be empty", http.StatusBadRequest)
+		return
+	}
+
 	now := time.Now()
 	domainSpans := make([]*domain.Span, 0, len(req.Spans))
 	for _, ns := range req.Spans {
-		raw := toRawMap(ns, vk)
-		span, err := h.normalizer.Normalize(r.Context(), raw)
+		span, err := h.Translate(r.Context(), ns, vk)
 		if err != nil {
+			if h.logger != nil {
+				h.logger.LogValidationError(ns.SpanID, err)
+			}
 			http.Error(w, fmt.Sprintf("invalid span: %v", err), http.StatusBadRequest)
 			return
 		}
@@ -98,8 +156,22 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.queue.Enqueue(r.Context(), domainSpans); err != nil {
+		if h.metrics != nil {
+			h.metrics.RecordEnqueueError()
+		}
+		if h.logger != nil {
+			h.logger.LogEnqueueError(err)
+		}
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 		return
+	}
+
+	if h.metrics != nil {
+		h.metrics.RecordSpan(vk.ProjectID, len(domainSpans))
+	}
+
+	if h.logger != nil {
+		h.logger.LogAccepted(vk.ProjectID, len(domainSpans), r.RemoteAddr)
 	}
 
 	w.WriteHeader(http.StatusAccepted)
