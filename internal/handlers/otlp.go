@@ -10,19 +10,14 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"time"
 
 	coltracev1 "go.opentelemetry.io/proto/otlp/collector/trace/v1"
-	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
-	resourcev1 "go.opentelemetry.io/proto/otlp/resource/v1"
-	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/normalizer"
-	"github.com/omneval/omneval/internal/otlp"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
 )
 
 // SpanQueue pushes span batches to the ingest queue.
@@ -110,15 +105,13 @@ func (h *OTLPHandler) handleOTLPTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rss := convertToResourceSpans(req)
-
-	opts := otlp.Options{
+	normOpts := normalizer.Options{
 		ServiceNameOverride: vk.ServiceName,
 	}
-	domainSpans, err := otlp.Translate(r.Context(), vk.ProjectID, rss, opts, h.normalizer)
+	domainSpans, err := normalizer.NormalizeOTLP(r.Context(), vk.ProjectID, req.ResourceSpans, normOpts, h.normalizer)
 	if err != nil {
-		slog.Error("ingest: translate failed", "error", err.Error())
-		http.Error(w, fmt.Sprintf("translate: %v", err), http.StatusInternalServerError)
+		slog.Error("ingest: normalize failed", "error", err.Error())
+		http.Error(w, fmt.Sprintf("normalize: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -166,167 +159,4 @@ func decompressIfNeeded(contentEncoding string, data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("read gzip body: %w", err)
 	}
 	return decompressed, nil
-}
-
-func convertToResourceSpans(req *coltracev1.ExportTraceServiceRequest) []otlp.ResourceSpans {
-	result := make([]otlp.ResourceSpans, 0, len(req.ResourceSpans))
-	for _, rs := range req.ResourceSpans {
-		resource := otlp.Resource{
-			Attributes: resourceAttrs(rs.GetResource()),
-		}
-		spans := make([]*otlp.Span, 0)
-		for _, ss := range rs.GetScopeSpans() {
-			for _, s := range ss.GetSpans() {
-				spans = append(spans, &otlp.Span{
-					SpanID:     fmt.Sprintf("%x", s.GetSpanId()),
-					TraceID:    fmt.Sprintf("%x", s.GetTraceId()),
-					ParentID:   fmt.Sprintf("%x", s.GetParentSpanId()),
-					Name:       s.GetName(),
-					StartTime:  unixNanoToTime(s.GetStartTimeUnixNano()),
-					EndTime:    unixNanoToTime(s.GetEndTimeUnixNano()),
-					StatusCode: statusToCode(s.GetStatus()),
-					StatusMsg:  statusToMessage(s.GetStatus()),
-					Attributes: spanAttrs(s.GetAttributes()),
-					Events:     spanEvents(s.GetEvents()),
-				})
-			}
-		}
-		result = append(result, otlp.ResourceSpans{
-			Resource: resource,
-			Spans:    spans,
-		})
-	}
-	return result
-}
-
-func unixNanoToTime(nano uint64) time.Time {
-	if nano == 0 {
-		return time.Time{}
-	}
-	sec := nano / 1_000_000_000
-	nsec := nano % 1_000_000_000
-	return time.Unix(int64(sec), int64(nsec)).UTC()
-}
-
-// statusToCode maps an OTLP proto Status to the stored status_code value.
-// Stored values are the uppercase OTel status names ("OK"/"ERROR"/"UNSET"),
-// matching the literals used by the Traces page status_code filter (#139).
-// A span with no Status field at all returns "" so the column remains
-// NULL — distinct from a span that explicitly sets STATUS_CODE_UNSET.
-func statusToCode(status *tracev1.Status) string {
-	if status == nil {
-		return ""
-	}
-	switch status.GetCode() {
-	case tracev1.Status_STATUS_CODE_UNSET:
-		return "UNSET"
-	case tracev1.Status_STATUS_CODE_OK:
-		return "OK"
-	case tracev1.Status_STATUS_CODE_ERROR:
-		return "ERROR"
-	default:
-		return fmt.Sprintf("%d", status.GetCode())
-	}
-}
-
-func statusToMessage(status *tracev1.Status) string {
-	if status == nil {
-		return ""
-	}
-	return status.GetMessage()
-}
-
-func resourceAttrs(res *resourcev1.Resource) map[string]any {
-	if res == nil {
-		return nil
-	}
-	return kvListToMap(res.GetAttributes())
-}
-
-func spanEvents(events []*tracev1.Span_Event) []otlp.SpanEvent {
-	if len(events) == 0 {
-		return nil
-	}
-	result := make([]otlp.SpanEvent, 0, len(events))
-	for _, e := range events {
-		result = append(result, otlp.SpanEvent{
-			TimeUnixNano: e.GetTimeUnixNano(),
-			Name:         e.GetName(),
-			Attributes:   eventAttrs(e.GetAttributes()),
-		})
-	}
-	return result
-}
-
-func eventAttrs(attrs []*commonv1.KeyValue) map[string]string {
-	result := make(map[string]string, len(attrs))
-	for _, kv := range attrs {
-		result[kv.GetKey()] = anyValueString(kv.GetValue())
-	}
-	return result
-}
-
-func anyValueString(v *commonv1.AnyValue) string {
-	if v == nil {
-		return ""
-	}
-	switch val := v.Value.(type) {
-	case *commonv1.AnyValue_StringValue:
-		return val.StringValue
-	case *commonv1.AnyValue_BoolValue:
-		return fmt.Sprintf("%t", val.BoolValue)
-	case *commonv1.AnyValue_IntValue:
-		return fmt.Sprintf("%d", val.IntValue)
-	case *commonv1.AnyValue_DoubleValue:
-		return fmt.Sprintf("%f", val.DoubleValue)
-	default:
-		return ""
-	}
-}
-
-func spanAttrs(attrs []*commonv1.KeyValue) map[string]any {
-	return kvListToMap(attrs)
-}
-
-func kvListToMap(attrs []*commonv1.KeyValue) map[string]any {
-	if len(attrs) == 0 {
-		return nil
-	}
-	result := make(map[string]any, len(attrs))
-	for _, kv := range attrs {
-		result[kv.GetKey()] = anyValue(kv.GetValue())
-	}
-	return result
-}
-
-func anyValue(v *commonv1.AnyValue) any {
-	if v == nil {
-		return nil
-	}
-	switch val := v.Value.(type) {
-	case *commonv1.AnyValue_StringValue:
-		return val.StringValue
-	case *commonv1.AnyValue_BoolValue:
-		return val.BoolValue
-	case *commonv1.AnyValue_IntValue:
-		return val.IntValue
-	case *commonv1.AnyValue_DoubleValue:
-		return val.DoubleValue
-	case *commonv1.AnyValue_BytesValue:
-		return val.BytesValue
-	case *commonv1.AnyValue_ArrayValue:
-		arr := make([]any, 0, len(val.ArrayValue.Values))
-		for _, item := range val.ArrayValue.Values {
-			arr = append(arr, anyValue(item))
-		}
-		return arr
-	case *commonv1.AnyValue_KvlistValue:
-		kv := make(map[string]any, len(val.KvlistValue.Values))
-		for _, item := range val.KvlistValue.Values {
-			kv[item.Key] = anyValue(item.Value)
-		}
-		return kv
-	default:
-		return nil
-	}
 }
