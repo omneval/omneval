@@ -28,31 +28,18 @@ const (
 	AuthPolicyAdmin      = routes.AuthPolicyAdmin
 )
 
-// playgroundHandler is the interface for the playground endpoint.
-// Defined here to avoid importing the playground package (which imports handler).
-type playgroundHandler interface {
-	HandleRun(http.ResponseWriter, *http.Request)
-}
-
 // RouteGroup is the interface that each handler type implements to expose its
-// routes, auth policies, and registration. The Router holds a []RouteGroup
-// slice and delegates route registration entirely to its groups.
+// routes. The Router holds a []RouteGroup slice and delegates route
+// registration entirely to its groups.
 //
 // Routes returns the route entries that the group owns. Each entry includes
 // the handler, HTTP method, path pattern, and auth policy.
-//
-// RegisterPolicyLookup registers the group's route/policy mappings into the
-// provided lookup so that the Router's middleware can resolve auth policies
-// for incoming requests.
 type RouteGroup interface {
 	Routes() []AuthRoute
-	RegisterPolicyLookup(lk *authPolicyLookup)
 }
 
 // routeGroupAdapter wraps a Routes() function so that any function returning
-// []AuthRoute can satisfy the RouteGroup interface. It also implements
-// RegisterPolicyLookup by populating the lookup table with the group's own
-// route/policy pairs.
+// []AuthRoute can satisfy the RouteGroup interface.
 type routeGroupAdapter struct {
 	routesFunc func() []AuthRoute
 }
@@ -62,12 +49,6 @@ func (g *routeGroupAdapter) Routes() []AuthRoute {
 		return g.routesFunc()
 	}
 	return nil
-}
-
-func (g *routeGroupAdapter) RegisterPolicyLookup(lk *authPolicyLookup) {
-	for _, r := range g.Routes() {
-		lk.policy[r.Method+" "+r.Path] = r.Policy
-	}
 }
 
 // RouterDeps collects the dependencies the Router needs. The server package
@@ -102,12 +83,6 @@ type PlaygroundRouterGroup struct {
 func (g *PlaygroundRouterGroup) Routes() []AuthRoute {
 	return []AuthRoute{
 		{Method: http.MethodPost, Path: "/api/v1/playground/run", Handler: http.HandlerFunc(g.HandleRun), Policy: AuthPolicySession},
-	}
-}
-
-func (g *PlaygroundRouterGroup) RegisterPolicyLookup(lk *authPolicyLookup) {
-	for _, r := range g.Routes() {
-		lk.policy[r.Method+" "+r.Path] = r.Policy
 	}
 }
 
@@ -351,12 +326,6 @@ func (g *authRouteGroup) Routes() []AuthRoute {
 	}
 }
 
-func (g *authRouteGroup) RegisterPolicyLookup(lk *authPolicyLookup) {
-	for _, r := range g.Routes() {
-		lk.policy[r.Method+" "+r.Path] = r.Policy
-	}
-}
-
 // datasetRunRouteGroup wraps the DatasetRunHandler with the conditional route
 // logic: the POST /api/v1/datasets/{id}/runs route is excluded when the
 // handler has no JudgeClient configured (the run endpoint needs a judge LLM).
@@ -372,12 +341,6 @@ func (g *datasetRunRouteGroup) Routes() []AuthRoute {
 		}
 	}
 	return routes
-}
-
-func (g *datasetRunRouteGroup) RegisterPolicyLookup(lk *authPolicyLookup) {
-	for _, r := range g.Routes() {
-		lk.policy[r.Method+" "+r.Path] = r.Policy
-	}
 }
 
 // scoreRouteGroup wraps a newly constructed ScoreHandler as a RouteGroup.
@@ -397,12 +360,6 @@ func (g *scoreRouteGroup) Routes() []AuthRoute {
 	}
 }
 
-func (g *scoreRouteGroup) RegisterPolicyLookup(lk *authPolicyLookup) {
-	for _, r := range g.Routes() {
-		lk.policy[r.Method+" "+r.Path] = r.Policy
-	}
-}
-
 // prometheusRouteGroup provides the /metrics endpoint backed by Prometheus.
 type prometheusRouteGroup struct{}
 
@@ -414,12 +371,6 @@ func (g *prometheusRouteGroup) Routes() []AuthRoute {
 	metricsHandler := promhttp.Handler()
 	return []AuthRoute{
 		{Method: http.MethodGet, Path: "/metrics", Handler: metricsHandler.ServeHTTP, Policy: AuthPolicyPublic},
-	}
-}
-
-func (g *prometheusRouteGroup) RegisterPolicyLookup(lk *authPolicyLookup) {
-	for _, r := range g.Routes() {
-		lk.policy[r.Method+" "+r.Path] = r.Policy
 	}
 }
 

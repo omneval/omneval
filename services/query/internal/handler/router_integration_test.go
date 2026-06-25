@@ -264,7 +264,7 @@ func groupRoutesNotExpectedEmpty(g RouteGroup) bool {
 	}
 	switch g.(type) {
 	case *authRouteGroup, *scoreRouteGroup, *prometheusRouteGroup,
-		*playgroundRouteGroup, *datasetRunRouteGroup:
+		*datasetRunRouteGroup:
 		return true
 	}
 	return false
