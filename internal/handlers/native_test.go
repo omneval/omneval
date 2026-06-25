@@ -289,7 +289,7 @@ func TestNativeHandler_ValidatesSpanFields(t *testing.T) {
 
 // TestIngestAdapter_Translate_proves that the unified IngestAdapter interface
 // Translate method accepts a *http.Request, extracts and validates the API
-// key, parses the body, and returns normalised domain.Spans.
+// key, parses the body, and returns a normalised domain.Span.
 func TestIngestAdapter_Translate(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
@@ -312,25 +312,25 @@ func TestIngestAdapter_Translate(t *testing.T) {
 	req, _ := http.NewRequest("POST", "/api/v1/spans", bytes.NewReader(jsonBody))
 	req.Header.Set("X-API-Key", "valid_project_key")
 
-	spans, err := h.Translate(req.Context(), req)
+	span, err := h.Translate(req.Context(), req)
 	if err != nil {
 		t.Fatalf("Translate failed: %v", err)
 	}
 
-	if len(spans) != 1 {
-		t.Fatalf("spans: got %d, want 1", len(spans))
+	if span == nil {
+		t.Fatal("span: got nil, want non-nil")
 	}
-	if spans[0].Name != "my-span" {
-		t.Errorf("span name: got %q, want %q", spans[0].Name, "my-span")
+	if span.Name != "my-span" {
+		t.Errorf("span name: got %q, want %q", span.Name, "my-span")
 	}
-	if spans[0].ProjectID != "proj-1" {
-		t.Errorf("project_id: got %q, want %q", spans[0].ProjectID, "proj-1")
+	if span.ProjectID != "proj-1" {
+		t.Errorf("project_id: got %q, want %q", span.ProjectID, "proj-1")
 	}
 }
 
 // TestIngestAdapter_Translate_HTTPRequest proves Translate accepts a full
 // *http.Request, extracts and validates the API key, parses the body, and
-// returns a batch of normalised domain.Spans.
+// returns a normalised domain.Span.
 func TestIngestAdapter_Translate_HTTPRequest(t *testing.T) {
 	q := &fakeIngestQueue{}
 	v := &fakeValidator{}
@@ -355,19 +355,19 @@ func TestIngestAdapter_Translate_HTTPRequest(t *testing.T) {
 	req.Header.Set("X-API-Key", "valid_project_key")
 	req.Header.Set("Content-Type", "application/json")
 
-	spans, err := h.Translate(req.Context(), req)
+	span, err := h.Translate(req.Context(), req)
 	if err != nil {
 		t.Fatalf("Translate failed: %v", err)
 	}
 
-	if len(spans) != 1 {
-		t.Fatalf("spans returned: got %d, want 1", len(spans))
+	if span == nil {
+		t.Fatal("span: got nil, want non-nil")
 	}
-	if spans[0].Name != "translate-span" {
-		t.Errorf("span name: got %q, want %q", spans[0].Name, "translate-span")
+	if span.Name != "translate-span" {
+		t.Errorf("span name: got %q, want %q", span.Name, "translate-span")
 	}
-	if spans[0].ProjectID != "proj-1" {
-		t.Errorf("project_id: got %q, want %q", spans[0].ProjectID, "proj-1")
+	if span.ProjectID != "proj-1" {
+		t.Errorf("project_id: got %q, want %q", span.ProjectID, "proj-1")
 	}
 }
 
@@ -402,6 +402,38 @@ func TestIngestAdapter_Translate_HTTPRequest_AuthError(t *testing.T) {
 	_, err = h.Translate(req2.Context(), req2)
 	if err == nil {
 		t.Fatal("expected error for invalid API key, got nil")
+	}
+}
+
+// TestIngestAdapter_Translate_HTTPRequest_MultipleSpans proves Translate
+// handles a batch and returns the first normalised span.
+func TestIngestAdapter_Translate_HTTPRequest_MultipleSpans(t *testing.T) {
+	q := &fakeIngestQueue{}
+	v := &fakeValidator{}
+	h := handlers.NewNativeHandler(q, v, nil)
+
+	body := map[string]any{
+		"spans": []map[string]any{
+			{"span_id": "0102030405060708", "trace_id": "0102030405060708090a0b0c0d0e0f10", "name": "span-a", "model": "gpt-4"},
+			{"span_id": "0203040506070809", "trace_id": "0102030405060708090a0b0c0d0e0f10", "name": "span-b", "model": "gpt-3.5"},
+		},
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	req, _ := http.NewRequest("POST", "/api/v1/spans", bytes.NewReader(jsonBody))
+	req.Header.Set("X-API-Key", "valid_project_key")
+
+	span, err := h.Translate(req.Context(), req)
+	if err != nil {
+		t.Fatalf("Translate failed: %v", err)
+	}
+
+	if span == nil {
+		t.Fatal("span: got nil, want non-nil")
+	}
+	// Translate returns the first span from the batch.
+	if span.Name != "span-a" {
+		t.Errorf("first span name: got %q, want %q", span.Name, "span-a")
 	}
 }
 
@@ -440,40 +472,6 @@ func TestIngestAdapter_Translate_HTTPRequest_BadRequest(t *testing.T) {
 	_, err := h.Translate(req.Context(), req)
 	if err == nil {
 		t.Fatal("expected error for malformed JSON, got nil")
-	}
-}
-
-// TestIngestAdapter_Translate_HTTPRequest_MultipleSpans proves Translate
-// handles a batch of multiple spans and validates normalisation across all.
-func TestIngestAdapter_Translate_HTTPRequest_MultipleSpans(t *testing.T) {
-	q := &fakeIngestQueue{}
-	v := &fakeValidator{}
-	h := handlers.NewNativeHandler(q, v, nil)
-
-	body := map[string]any{
-		"spans": []map[string]any{
-			{"span_id": "0102030405060708", "trace_id": "0102030405060708090a0b0c0d0e0f10", "name": "span-a", "model": "gpt-4"},
-			{"span_id": "0203040506070809", "trace_id": "0102030405060708090a0b0c0d0e0f10", "name": "span-b", "model": "gpt-3.5"},
-		},
-	}
-	jsonBody, _ := json.Marshal(body)
-
-	req, _ := http.NewRequest("POST", "/api/v1/spans", bytes.NewReader(jsonBody))
-	req.Header.Set("X-API-Key", "valid_project_key")
-
-	spans, err := h.Translate(req.Context(), req)
-	if err != nil {
-		t.Fatalf("Translate failed: %v", err)
-	}
-
-	if len(spans) != 2 {
-		t.Fatalf("spans returned: got %d, want 2", len(spans))
-	}
-	if spans[0].Name != "span-a" {
-		t.Errorf("first span name: got %q, want %q", spans[0].Name, "span-a")
-	}
-	if spans[1].Name != "span-b" {
-		t.Errorf("second span name: got %q, want %q", spans[1].Name, "span-b")
 	}
 }
 

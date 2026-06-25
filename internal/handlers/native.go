@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/omneval/omneval/internal/auth"
@@ -18,11 +18,11 @@ import (
 // this single implementation in internal/handlers.
 type IngestAdapter interface {
 	// Translate processes an incoming HTTP request: extracts and validates the
-	// API key, parses the request body, validates the batch, and normalises
-	// every span through the normalizer seam.
+	// API key, parses the request body, and normalises the span through the
+	// normalizer seam.
 	// The caller does not need to know about keys, requests, or validation —
 	// Translate absorbs the entire ingress pipeline.
-	Translate(ctx context.Context, r *http.Request) ([]*domain.Span, error)
+	Translate(ctx context.Context, r *http.Request) (*domain.Span, error)
 	// Route returns the HTTP handler that serves POST /api/v1/spans.
 	Route() http.Handler
 }
@@ -88,10 +88,10 @@ func NewNativeHandlerWithMetrics(queue SpanQueue, validator Validator, corsOrigi
 }
 
 // Translate processes an incoming HTTP request: extracts and validates the API
-// key, parses the request body, validates the batch, and normalises every span.
+// key, parses the request body, and normalises a single span.
 // Callers do not need to know about keys, requests, or validation — Translate
-// absorbs the entire ingress pipeline and returns the normalised domain spans.
-func (h *NativeHandler) Translate(ctx context.Context, r *http.Request) ([]*domain.Span, error) {
+// absorbs the entire ingress pipeline and returns the normalised domain span.
+func (h *NativeHandler) Translate(ctx context.Context, r *http.Request) (*domain.Span, error) {
 	rawKey := ExtractAPIKey(r)
 	if rawKey == "" {
 		return nil, fmt.Errorf("missing API key")
@@ -111,17 +111,13 @@ func (h *NativeHandler) Translate(ctx context.Context, r *http.Request) ([]*doma
 		return nil, fmt.Errorf("spans array must not be empty")
 	}
 
-	domainSpans := make([]*domain.Span, 0, len(req.Spans))
-	for _, ns := range req.Spans {
-		raw := toRawMap(ns, vk)
-		span, err := h.normalizer.Normalize(ctx, raw)
-		if err != nil {
-			return nil, fmt.Errorf("invalid span: %w", err)
-		}
-		domainSpans = append(domainSpans, span)
+	raw := toRawMap(req.Spans[0], vk)
+	span, err := h.normalizer.Normalize(ctx, raw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid span: %w", err)
 	}
 
-	return domainSpans, nil
+	return span, nil
 }
 
 // Router returns the HTTP handler that serves POST /api/v1/spans.
@@ -146,26 +142,52 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	domainSpans, err := h.Translate(r.Context(), r)
+	// Validate auth before anything else so auth errors surface as 401.
+	rawKey := ExtractAPIKey(r)
+	if rawKey == "" {
+		http.Error(w, "unauthorized: missing API key", http.StatusUnauthorized)
+		return
+	}
+
+	vk, err := h.validator.Validate(r.Context(), rawKey)
 	if err != nil {
-		if strings.Contains(err.Error(), "API key") {
-			http.Error(w, fmt.Sprintf("unauthorized: %v", err), http.StatusUnauthorized)
-		} else {
-			if h.logger != nil {
-				h.logger.LogValidationError("", err)
-			}
-			http.Error(w, fmt.Sprintf("bad request: %v", err), http.StatusBadRequest)
-		}
+		http.Error(w, fmt.Sprintf("unauthorized: invalid API key: %v", err), http.StatusUnauthorized)
+		return
+	}
+
+	// Read body once into memory.
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "bad request: unable to read body", http.StatusBadRequest)
+		return
+	}
+
+	var req IngestRequest
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
+		http.Error(w, "bad request: invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Spans) == 0 {
+		http.Error(w, "bad request: empty spans array", http.StatusBadRequest)
 		return
 	}
 
 	now := time.Now()
-	for _, span := range domainSpans {
-		// Native spans don't carry client-supplied timestamps, so use
-		// ingestion time for both StartTime and EndTime, overriding
-		// whatever the normalizer derived from the (empty) raw map.
+	domainSpans := make([]*domain.Span, 0, len(req.Spans))
+	for _, ns := range req.Spans {
+		raw := toRawMap(ns, vk)
+		span, err := h.normalizer.Normalize(r.Context(), raw)
+		if err != nil {
+			if h.logger != nil {
+				h.logger.LogValidationError(ns.SpanID, err)
+			}
+			http.Error(w, fmt.Sprintf("bad request: invalid span: %v", err), http.StatusBadRequest)
+			return
+		}
 		span.StartTime = now
 		span.EndTime = now
+		domainSpans = append(domainSpans, span)
 	}
 
 	if err := h.queue.Enqueue(r.Context(), domainSpans); err != nil {
@@ -180,7 +202,6 @@ func (h *NativeHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.metrics != nil {
-		// Extract project ID from the first span.
 		if len(domainSpans) > 0 {
 			h.metrics.RecordSpan(domainSpans[0].ProjectID, len(domainSpans))
 		}

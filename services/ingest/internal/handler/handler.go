@@ -76,7 +76,7 @@ func (h *NativeHandler) Router() http.Handler {
 }
 
 // Translate delegates to the canonical implementation.
-func (h *NativeHandler) Translate(ctx context.Context, r *http.Request) ([]*domain.Span, error) {
+func (h *NativeHandler) Translate(ctx context.Context, r *http.Request) (*domain.Span, error) {
 	return h.base.Translate(ctx, r)
 }
 
