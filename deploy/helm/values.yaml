@@ -344,13 +344,19 @@ quack:
     # same cfg.Quack.Server.Retention. The job's own embedded DuckDB
     # buffer manager/threads come from quack.client.memoryLimit/threads,
     # the same shared client config Writer/Query/Eval use.
+    # Merge/rewrite execution against a heavily fragmented table appears to
+    # run in this job's own embedded DuckDB (not solely server-side): a 1Gi
+    # limit OOMKilled mid-merge against a 25k+ file backlog, even though the
+    # same merge ran fine (if slowly) when it executed in-process inside
+    # quack-server, which has an 8Gi limit. Matching that figure here until
+    # we have real peak-usage data for a steady-state (non-backlog) pass.
     resources:
       limits:
         cpu: "1"
-        memory: 1Gi
+        memory: 8Gi
       requests:
         cpu: 100m
-        memory: 256Mi
+        memory: 512Mi
     nodeSelector: {}
     affinity: {}
     tolerations: []
