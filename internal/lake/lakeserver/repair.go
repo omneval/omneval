@@ -82,15 +82,22 @@ func RepairMissingDataFiles(ctx context.Context, clientDB *sql.DB, rawDB *sql.DB
 		for _, path := range paths {
 			result.FilesChecked++
 
-			var found int
-			if err := clientDB.QueryRowContext(ctx, "SELECT count(*) FROM glob(?)", path).Scan(&found); err != nil {
-				return result, fmt.Errorf("lakeserver: repair missing files: probe %s: %w", path, err)
-			}
-			if found > 0 {
+			// glob() does NOT verify existence for a literal (no-wildcard)
+			// path against an S3-backed filesystem — confirmed empirically
+			// against a known-gone production file: it echoes the input
+			// path back as a single "match" without ever issuing a
+			// HEAD/LIST call. read_parquet() actually reads the file
+			// (GET), so its error (or lack of one) is the real signal.
+			var n int
+			err := clientDB.QueryRowContext(ctx, "SELECT count(*) FROM read_parquet(?)", path).Scan(&n)
+			if err == nil {
 				continue
 			}
+			if !looksLikeMissingFile(err) {
+				return result, fmt.Errorf("lakeserver: repair missing files: probe %s: %w", path, err)
+			}
 
-			slog.WarnContext(ctx, "lakeserver: repair missing files: marking unreadable file removed", "table", table, "path", path)
+			slog.WarnContext(ctx, "lakeserver: repair missing files: marking unreadable file removed", "table", table, "path", path, "probe_error", err)
 			// ducklake_data_file.path is stored relative to the table's own
 			// path (path_is_relative) and always forward-slashed, even when
 			// ducklake_list_files's resolved full path comes back with
@@ -107,15 +114,31 @@ func RepairMissingDataFiles(ctx context.Context, clientDB *sql.DB, rawDB *sql.DB
 			if err != nil {
 				return result, fmt.Errorf("lakeserver: repair missing files: mark removed %s: %w", path, err)
 			}
-			n, err := res.RowsAffected()
+			affected, err := res.RowsAffected()
 			if err != nil {
 				return result, fmt.Errorf("lakeserver: repair missing files: rows affected %s: %w", path, err)
 			}
-			if n != 1 {
-				return result, fmt.Errorf("lakeserver: repair missing files: marking %s removed affected %d rows, want exactly 1", path, n)
+			if affected != 1 {
+				return result, fmt.Errorf("lakeserver: repair missing files: marking %s removed affected %d rows, want exactly 1", path, affected)
 			}
 			result.RepairedPaths = append(result.RepairedPaths, path)
 		}
 	}
 	return result, nil
+}
+
+// looksLikeMissingFile reports whether err is read_parquet's documented
+// error shape for "this file does not exist", on either backend this
+// process attaches to: S3-compatible storage ("HTTP 404 Not Found" /
+// "NoSuchKey") or a local filesystem ("No files found that match the
+// pattern", DuckDB's IO Error for a missing path passed to a Parquet
+// reader). Deliberately conservative: any other error (auth failure,
+// throttling, network blip, corrupt-but-present file) is NOT treated as
+// "missing" — RepairMissingDataFiles aborts on those rather than risking
+// marking a recoverable file removed.
+func looksLikeMissingFile(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "NoSuchKey") ||
+		strings.Contains(msg, "HTTP 404") ||
+		strings.Contains(msg, "No files found that match the pattern")
 }
