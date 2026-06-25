@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/lakeclient"
 	"github.com/omneval/omneval/internal/queue"
 )
 
@@ -46,6 +47,26 @@ func (l *recordingLake) totalSpans() int {
 		n += len(c)
 	}
 	return n
+}
+
+func (l *recordingLake) InsertScores(context.Context, []*domain.Score) error {
+	return nil
+}
+
+func (l *recordingLake) SpanStartTime(context.Context, string, string) (time.Time, error) {
+	return time.Time{}, nil
+}
+
+func (l *recordingLake) Ping(context.Context) error {
+	return nil
+}
+
+func (l *recordingLake) DeleteProject(context.Context, string) error {
+	return nil
+}
+
+func (l *recordingLake) FlushInlinedData(context.Context) error {
+	return nil
 }
 
 // sequenceReliableQueue serves a fixed sequence of entries from

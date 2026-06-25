@@ -2454,6 +2454,7 @@ func TestHandleTraceDetail_DedupeOnLake(t *testing.T) {
 // LIMIT so a trace with > limit spans only returns limit rows from the
 // executed query (not just the SQL string).
 func TestHandleTraceDetail_LimitedSpans(t *testing.T) {
+	ctx := context.Background()
 	lk := laketest.NewLocal(t)
 
 	baseTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
@@ -2518,6 +2519,7 @@ func TestHandleTraceDetail_LimitedSpans(t *testing.T) {
 // the handler endpoint with real data — i.e. it exercises the full query path
 // end-to-end against an in-process Lake, not just the SQL string.
 func TestLakeSQL_Integration(t *testing.T) {
+	ctx := context.Background()
 	lk := laketest.NewLocal(t)
 
 	// Insert two traces with known span counts and costs.

@@ -1081,6 +1081,7 @@ func TestCompileLake_EmitsSingleTableQuery(t *testing.T) {
 }
 
 func TestCompileLake_PartitionPruningPreserved(t *testing.T) {
+	ctx := context.Background()
 	l := laketest.NewLocal(t)
 
 	// Seed partitions: proj-a on June 1, proj-b on June 2.

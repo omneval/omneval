@@ -1119,6 +1119,7 @@ func execLakeSQL(ctx context.Context, db *sql.DB, q *SpanQuery) ([]*domain.Span,
 // against a real local Lake and verifies keyset pagination behaves like the
 // legacy path: every span appears exactly once, newest first.
 func TestLakeSQL_CursorPagination_Integration(t *testing.T) {
+	ctx := context.Background()
 	lk := laketest.NewLocal(t)
 
 	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
@@ -1179,6 +1180,7 @@ func TestLakeSQL_CursorPagination_Integration(t *testing.T) {
 // with no parent_id) annotated with trace-level rollups — rather than a flat
 // row per span (issue #136).
 func TestLakeSQL_OneRowPerTrace(t *testing.T) {
+	ctx := context.Background()
 	lk := laketest.NewLocal(t)
 
 	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
@@ -1376,6 +1378,7 @@ func TestMainSQL_RollupScopedToLimit(t *testing.T) {
 // end-to-end: the rollup subqueries are correctly scoped and return correct
 // results.
 func TestLakeSQL_RollupExecution(t *testing.T) {
+	ctx := context.Background()
 	lk := laketest.NewLocal(t)
 
 	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)

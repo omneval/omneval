@@ -9,6 +9,7 @@ import (
 
 	"github.com/omneval/omneval/internal/buffer"
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/lake"
 	"github.com/omneval/omneval/internal/laketest"
 	"github.com/omneval/omneval/internal/queue"
 )
@@ -43,6 +44,18 @@ func (failingLake) InsertScores(context.Context, []*domain.Score) error {
 
 func (failingLake) SpanStartTime(context.Context, string, string) (time.Time, error) {
 	return time.Time{}, errors.New("lake unavailable")
+}
+
+func (failingLake) Ping(context.Context) error {
+	return errors.New("lake unavailable")
+}
+
+func (failingLake) DeleteProject(context.Context, string) error {
+	return errors.New("lake unavailable")
+}
+
+func (failingLake) FlushInlinedData(context.Context) error {
+	return errors.New("lake unavailable")
 }
 
 // fakeReliableQueue records Ack/Requeue/EnqueueRef calls.
