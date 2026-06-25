@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/spf13/viper"
 )
 
 // TestAllSectionLoadersHaveLoaders verifies that all sections in the Config
@@ -471,6 +474,433 @@ func TestLoad_FailsOnBadYAML(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "reading config") {
 		t.Errorf("error should contain 'reading config': got %q", err.Error())
+	}
+}
+
+// --- Unit tests for individual SectionLoaders ---
+
+// TestDatabaseLoaderUnit verifies NewDatabaseLoader.SetDefaults and
+// ApplyEnvOverrides independently.
+func TestDatabaseLoaderUnit(t *testing.T) {
+	l := NewDatabaseLoader()
+	v := viper.New()
+	l.SetDefaults(v)
+
+	if v.GetString("database.driver") != "" {
+		t.Errorf("database.driver default: got %q, want empty", v.GetString("database.driver"))
+	}
+	if v.GetString("database.dsn") != "" {
+		t.Errorf("database.dsn default: got %q, want empty", v.GetString("database.dsn"))
+	}
+
+	t.Setenv("OMNEVAL_DATABASE_DRIVER", "sqlite")
+	t.Setenv("OMNEVAL_DATABASE_DSN", "file:testdb")
+
+	cfg := &Config{}
+	l.ApplyEnvOverrides(cfg)
+	if cfg.Database.Driver != "sqlite" {
+		t.Errorf("Database.Driver: got %q, want %q", cfg.Database.Driver, "sqlite")
+	}
+	if cfg.Database.DSN != "file:testdb" {
+		t.Errorf("Database.DSN: got %q, want %q", cfg.Database.DSN, "file:testdb")
+	}
+}
+
+// TestLogLevelLoaderUnit verifies NewLogLevelLoader.SetDefaults and
+// ApplyEnvOverrides independently.
+func TestLogLevelLoaderUnit(t *testing.T) {
+	l := NewLogLevelLoader()
+	v := viper.New()
+	l.SetDefaults(v)
+
+	if got := v.GetString("log_level"); got != "info" {
+		t.Errorf("log_level default: got %q, want %q", got, "info")
+	}
+
+	t.Setenv("OMNEVAL_LOG_LEVEL", "debug")
+
+	cfg := &Config{}
+	l.ApplyEnvOverrides(cfg)
+	if cfg.LogLevel != "debug" {
+		t.Errorf("LogLevel: got %q, want %q", cfg.LogLevel, "debug")
+	}
+}
+
+// TestRedisLoaderUnit verifies NewRedisLoader.SetDefaults and
+// ApplyEnvOverrides independently.
+func TestRedisLoaderUnit(t *testing.T) {
+	l := NewRedisLoader()
+	v := viper.New()
+	l.SetDefaults(v)
+
+	if got := v.GetString("redis.addr"); got != "localhost:6379" {
+		t.Errorf("redis.addr default: got %q, want %q", got, "localhost:6379")
+	}
+	if got := v.GetInt("redis.db"); got != 0 {
+		t.Errorf("redis.db default: got %d, want 0", got)
+	}
+
+	t.Setenv("OMNEVAL_REDIS_ADDR", "redis-env:6380")
+	t.Setenv("OMNEVAL_REDIS_PASSWORD", "pass")
+	t.Setenv("OMNEVAL_REDIS_DB", "5")
+
+	cfg := &Config{}
+	l.ApplyEnvOverrides(cfg)
+	if cfg.Redis.Addr != "redis-env:6380" {
+		t.Errorf("Redis.Addr: got %q, want %q", cfg.Redis.Addr, "redis-env:6380")
+	}
+	if cfg.Redis.Password != "pass" {
+		t.Errorf("Redis.Password: got %q, want %q", cfg.Redis.Password, "pass")
+	}
+	if cfg.Redis.DB != 5 {
+		t.Errorf("Redis.DB: got %d, want %d", cfg.Redis.DB, 5)
+	}
+}
+
+// TestAuthLoaderUnit verifies NewAuthLoader.SetDefaults and
+// ApplyEnvOverrides independently.
+func TestAuthLoaderUnit(t *testing.T) {
+	l := NewAuthLoader()
+	v := viper.New()
+	l.SetDefaults(v)
+
+	if got := v.GetString("auth.session_ttl"); got != "168h" {
+		t.Errorf("auth.session_ttl default: got %q, want %q", got, "168h")
+	}
+	if got := v.GetBool("auth.secure_cookie"); got != false {
+		t.Errorf("auth.secure_cookie default: got %v, want false", got)
+	}
+
+	t.Setenv("OMNEVAL_AUTH_SESSION_TTL", "1h")
+	t.Setenv("OMNEVAL_AUTH_SECURE_COOKIE", "true")
+	t.Setenv("OMNEVAL_AUTH_ADMIN_EMAIL", "test@example.com")
+	t.Setenv("OMNEVAL_AUTH_ADMIN_PASSWORD", "secret")
+
+	cfg := &Config{}
+	l.ApplyEnvOverrides(cfg)
+	if cfg.Auth.SessionTTL != "1h" {
+		t.Errorf("Auth.SessionTTL: got %q, want %q", cfg.Auth.SessionTTL, "1h")
+	}
+	if !cfg.Auth.SecureCookie {
+		t.Error("Auth.SecureCookie: got false, want true")
+	}
+	if cfg.Auth.AdminEmail != "test@example.com" {
+		t.Errorf("Auth.AdminEmail: got %q, want %q", cfg.Auth.AdminEmail, "test@example.com")
+	}
+	if cfg.Auth.AdminPassword != "secret" {
+		t.Errorf("Auth.AdminPassword: got %q, want %q", cfg.Auth.AdminPassword, "secret")
+	}
+}
+
+// TestIngestLoaderUnit verifies NewIngestLoader.SetDefaults and
+// ApplyEnvOverrides independently.
+func TestIngestLoaderUnit(t *testing.T) {
+	l := NewIngestLoader()
+	v := viper.New()
+	l.SetDefaults(v)
+
+	if got := v.GetString("ingest.addr"); got != ":8000" {
+		t.Errorf("ingest.addr default: got %q, want %q", got, ":8000")
+	}
+	if got := v.GetBool("ingest.log_system_prompt"); got != true {
+		t.Errorf("ingest.log_system_prompt default: got %v, want true", got)
+	}
+
+	t.Setenv("OMNEVAL_INGEST_ADDR", ":9000")
+	t.Setenv("OMNEVAL_INGEST_LOG_SYSTEM_PROMPT", "false")
+	t.Setenv("OMNEVAL_INGEST_CORS_ALLOWED_ORIGINS", "http://a.com,http://b.com")
+
+	cfg := &Config{}
+	l.ApplyEnvOverrides(cfg)
+	if cfg.Ingest.Addr != ":9000" {
+		t.Errorf("Ingest.Addr: got %q, want %q", cfg.Ingest.Addr, ":9000")
+	}
+	if cfg.Ingest.LogSystemPrompt != false {
+		t.Errorf("Ingest.LogSystemPrompt: got %v, want false", cfg.Ingest.LogSystemPrompt)
+	}
+	if len(cfg.Ingest.CORSAllowedOrigins) != 2 || cfg.Ingest.CORSAllowedOrigins[0] != "http://a.com" {
+		t.Errorf("Ingest.CORSAllowedOrigins: got %v, want [http://a.com http://b.com]", cfg.Ingest.CORSAllowedOrigins)
+	}
+}
+
+// TestWriterLoaderUnit verifies NewWriterLoader.SetDefaults and
+// ApplyEnvOverrides independently.
+func TestWriterLoaderUnit(t *testing.T) {
+	l := NewWriterLoader()
+	v := viper.New()
+	l.SetDefaults(v)
+
+	if got := v.GetString("writer.addr"); got != ":8001" {
+		t.Errorf("writer.addr default: got %q, want %q", got, ":8001")
+	}
+	if got := v.GetBool("writer.lake.enabled"); got != true {
+		t.Errorf("writer.lake.enabled default: got %v, want true", got)
+	}
+	if got := v.GetInt("writer.reconciliation.interval_minutes"); got != 5 {
+		t.Errorf("writer.reconciliation.interval_minutes default: got %d, want 5", got)
+	}
+
+	t.Setenv("OMNEVAL_WRITER_ADDR", ":8001-env")
+	t.Setenv("OMNEVAL_WRITER_LAKE_ENABLED", "false")
+	t.Setenv("OMNEVAL_WRITER_RECONCILIATION_ENABLED", "true")
+
+	cfg := &Config{}
+	l.ApplyEnvOverrides(cfg)
+	if cfg.Writer.Addr != ":8001-env" {
+		t.Errorf("Writer.Addr: got %q, want %q", cfg.Writer.Addr, ":8001-env")
+	}
+	if cfg.Writer.Lake.Enabled != false {
+		t.Errorf("Writer.Lake.Enabled: got %v, want false", cfg.Writer.Lake.Enabled)
+	}
+	if !cfg.Writer.Reconciliation.Enabled {
+		t.Error("Writer.Reconciliation.Enabled: got false, want true")
+	}
+}
+
+// TestQueryLoaderUnit verifies NewQueryLoader.SetDefaults and
+// ApplyEnvOverrides independently.
+func TestQueryLoaderUnit(t *testing.T) {
+	l := NewQueryLoader()
+	v := viper.New()
+	l.SetDefaults(v)
+
+	if got := v.GetString("query.addr"); got != ":8002" {
+		t.Errorf("query.addr default: got %q, want %q", got, ":8002")
+	}
+	if got := v.GetBool("query.lake.enabled"); got != true {
+		t.Errorf("query.lake.enabled default: got %v, want true", got)
+	}
+
+	t.Setenv("OMNEVAL_QUERY_ADDR", ":8002-env")
+	t.Setenv("OMNEVAL_QUERY_LAKE_ENABLED", "false")
+	t.Setenv("OMNEVAL_QUERY_PLAYGROUND_LLM_BASE_URL", "http://playground-llm/v1")
+	t.Setenv("OMNEVAL_QUERY_JUDGE_LLM_BASE_URL", "http://judge-llm/v1")
+
+	cfg := &Config{}
+	l.ApplyEnvOverrides(cfg)
+	if cfg.Query.Addr != ":8002-env" {
+		t.Errorf("Query.Addr: got %q, want %q", cfg.Query.Addr, ":8002-env")
+	}
+	if cfg.Query.Lake.Enabled != false {
+		t.Errorf("Query.Lake.Enabled: got %v, want false", cfg.Query.Lake.Enabled)
+	}
+	if cfg.Query.PlaygroundLLMBaseURL != "http://playground-llm/v1" {
+		t.Errorf("Query.PlaygroundLLMBaseURL: got %q, want %q", cfg.Query.PlaygroundLLMBaseURL, "http://playground-llm/v1")
+	}
+	if cfg.Query.JudgeLLMBaseURL != "http://judge-llm/v1" {
+		t.Errorf("Query.JudgeLLMBaseURL: got %q, want %q", cfg.Query.JudgeLLMBaseURL, "http://judge-llm/v1")
+	}
+}
+
+// TestEvalLoaderUnit verifies NewEvalLoader.SetDefaults and
+// ApplyEnvOverrides independently.
+func TestEvalLoaderUnit(t *testing.T) {
+	l := NewEvalLoader()
+	v := viper.New()
+	l.SetDefaults(v)
+
+	if got := v.GetString("eval.addr"); got != ":8003" {
+		t.Errorf("eval.addr default: got %q, want %q", got, ":8003")
+	}
+	if got := v.GetInt("eval.concurrency"); got != 4 {
+		t.Errorf("eval.concurrency default: got %d, want 4", got)
+	}
+	if got := v.GetString("eval.llm_model"); got != "gpt-4" {
+		t.Errorf("eval.llm_model default: got %q, want %q", got, "gpt-4")
+	}
+
+	t.Setenv("OMNEVAL_EVAL_ADDR", ":8003-env")
+	t.Setenv("OMNEVAL_EVAL_CONCURRENCY", "10")
+	t.Setenv("OMNEVAL_EVAL_LLM_BASE_URL", "http://env-llm:4000")
+	t.Setenv("OMNEVAL_EVAL_LLM_MODEL", "claude-4")
+	t.Setenv("OMNEVAL_EVAL_JUDGE_TIMEOUT", "30s")
+	t.Setenv("OMNEVAL_EVAL_RETRY_COUNT", "5")
+
+	cfg := &Config{}
+	l.ApplyEnvOverrides(cfg)
+	if cfg.Eval.Addr != ":8003-env" {
+		t.Errorf("Eval.Addr: got %q, want %q", cfg.Eval.Addr, ":8003-env")
+	}
+	if cfg.Eval.Concurrency != 10 {
+		t.Errorf("Eval.Concurrency: got %d, want %d", cfg.Eval.Concurrency, 10)
+	}
+	if cfg.Eval.LLMBaseURL != "http://env-llm:4000" {
+		t.Errorf("Eval.LLMBaseURL: got %q, want %q", cfg.Eval.LLMBaseURL, "http://env-llm:4000")
+	}
+	if cfg.Eval.LLMModel != "claude-4" {
+		t.Errorf("Eval.LLMModel: got %q, want %q", cfg.Eval.LLMModel, "claude-4")
+	}
+	if cfg.Eval.JudgeTimeout != 30*time.Second {
+		t.Errorf("Eval.JudgeTimeout: got %v, want %v", cfg.Eval.JudgeTimeout, 30*time.Second)
+	}
+	if cfg.Eval.RetryCount != 5 {
+		t.Errorf("Eval.RetryCount: got %d, want %d", cfg.Eval.RetryCount, 5)
+	}
+}
+
+// TestPricingLoaderUnit verifies NewPricingLoader.SetDefaults is a no-op
+// for env overrides (pricing is YAML-only).
+func TestPricingLoaderUnit(t *testing.T) {
+	l := NewPricingLoader()
+	v := viper.New()
+	l.SetDefaults(v)
+
+	// Default: model_overrides is an empty map (SetDefault creates an
+	// empty map, not nil, when using map[string]PricingModelOverride{}).
+	got := v.Get("pricing.model_overrides")
+	if m, ok := got.(map[string]PricingModelOverride); !ok || len(m) != 0 {
+		t.Errorf("pricing.model_overrides default: got %v, want empty map", got)
+	}
+
+	// ApplyEnvOverrides is intentionally a no-op for pricing —
+	// model overrides are only settable via YAML. Verify the env var
+	// does NOT override.
+	t.Setenv("OMNEVAL_PRICING_MODEL_OVERRIDES", "not-parsed")
+
+	cfg := &Config{}
+	l.ApplyEnvOverrides(cfg)
+	if len(cfg.Pricing.ModelOverrides) != 0 {
+		t.Errorf("Pricing.ModelOverrides after ApplyEnvOverrides: got %v, want empty", cfg.Pricing.ModelOverrides)
+	}
+}
+
+// TestMetricsLoaderUnit verifies NewMetricsLoader.SetDefaults and
+// ApplyEnvOverrides independently.
+func TestMetricsLoaderUnit(t *testing.T) {
+	l := NewMetricsLoader()
+	v := viper.New()
+	l.SetDefaults(v)
+
+	if got := v.GetString("metrics.addr"); got != ":9090" {
+		t.Errorf("metrics.addr default: got %q, want %q", got, ":9090")
+	}
+	if got := v.GetBool("metrics.disable_project_labels"); got != false {
+		t.Errorf("metrics.disable_project_labels default: got %v, want false", got)
+	}
+
+	t.Setenv("OMNEVAL_METRICS_ADDR", ":9091")
+	t.Setenv("OMNEVAL_METRICS_DISABLE_PROJECT_LABELS", "true")
+
+	cfg := &Config{}
+	l.ApplyEnvOverrides(cfg)
+	if cfg.Metrics.Addr != ":9091" {
+		t.Errorf("Metrics.Addr: got %q, want %q", cfg.Metrics.Addr, ":9091")
+	}
+	if !cfg.Metrics.DisableProjectLabels {
+		t.Error("Metrics.DisableProjectLabels: got false, want true")
+	}
+}
+
+// TestQuackServerLoaderUnit verifies NewQuackServerLoader.SetDefaults and
+// ApplyEnvOverrides independently.
+func TestQuackServerLoaderUnit(t *testing.T) {
+	l := NewQuackServerLoader()
+	v := viper.New()
+	l.SetDefaults(v)
+
+	if got := v.GetString("quack.server.listen_addr"); got != ":9494" {
+		t.Errorf("quack.server.listen_addr default: got %q, want %q", got, ":9494")
+	}
+	if got := v.GetBool("quack.server.retention.enabled"); got != false {
+		t.Errorf("quack.server.retention.enabled default: got %v, want false", got)
+	}
+	if got := v.GetInt("quack.server.threads"); got != 0 {
+		t.Errorf("quack.server.threads default: got %d, want 0", got)
+	}
+
+	t.Setenv("OMNEVAL_QUACK_SERVER_LISTEN_ADDR", ":9495")
+	t.Setenv("OMNEVAL_QUACK_SERVER_TOKEN", "new-token")
+	t.Setenv("OMNEVAL_QUACK_SERVER_THREADS", "4")
+	t.Setenv("OMNEVAL_QUACK_SERVER_RETENTION_ENABLED", "true")
+	t.Setenv("OMNEVAL_QUACK_SERVER_RETENTION_MAX_AGE_DAYS", "60")
+
+	cfg := &Config{}
+	l.ApplyEnvOverrides(cfg)
+	if cfg.Quack.Server.ListenAddr != ":9495" {
+		t.Errorf("Quack.Server.ListenAddr: got %q, want %q", cfg.Quack.Server.ListenAddr, ":9495")
+	}
+	if cfg.Quack.Server.Token != "new-token" {
+		t.Errorf("Quack.Server.Token: got %q, want %q", cfg.Quack.Server.Token, "new-token")
+	}
+	if cfg.Quack.Server.Threads != 4 {
+		t.Errorf("Quack.Server.Threads: got %d, want %d", cfg.Quack.Server.Threads, 4)
+	}
+	if !cfg.Quack.Server.Retention.Enabled {
+		t.Error("Quack.Server.Retention.Enabled: got false, want true")
+	}
+	if cfg.Quack.Server.Retention.MaxAgeDays != 60 {
+		t.Errorf("Quack.Server.Retention.MaxAgeDays: got %d, want %d", cfg.Quack.Server.Retention.MaxAgeDays, 60)
+	}
+}
+
+// TestQuackClientLoaderUnit verifies NewQuackClientLoader.SetDefaults and
+// ApplyEnvOverrides independently.
+func TestQuackClientLoaderUnit(t *testing.T) {
+	l := NewQuackClientLoader()
+	v := viper.New()
+	l.SetDefaults(v)
+
+	if got := v.GetString("quack.client.url"); got != "localhost:9494" {
+		t.Errorf("quack.client.url default: got %q, want %q", got, "localhost:9494")
+	}
+	if got := v.GetInt("quack.client.max_open_conns"); got != 0 {
+		t.Errorf("quack.client.max_open_conns default: got %d, want 0", got)
+	}
+
+	t.Setenv("OMNEVAL_QUACK_CLIENT_URL", "quack-env:9495")
+	t.Setenv("OMNEVAL_QUACK_CLIENT_TOKEN", "env-token")
+	t.Setenv("OMNEVAL_QUACK_CLIENT_MAX_OPEN_CONNS", "8")
+	t.Setenv("OMNEVAL_QUACK_CLIENT_THREADS", "2")
+
+	cfg := &Config{}
+	l.ApplyEnvOverrides(cfg)
+	if cfg.Quack.Client.URL != "quack-env:9495" {
+		t.Errorf("Quack.Client.URL: got %q, want %q", cfg.Quack.Client.URL, "quack-env:9495")
+	}
+	if cfg.Quack.Client.Token != "env-token" {
+		t.Errorf("Quack.Client.Token: got %q, want %q", cfg.Quack.Client.Token, "env-token")
+	}
+	if cfg.Quack.Client.MaxOpenConns != 8 {
+		t.Errorf("Quack.Client.MaxOpenConns: got %d, want %d", cfg.Quack.Client.MaxOpenConns, 8)
+	}
+	if cfg.Quack.Client.Threads != 2 {
+		t.Errorf("Quack.Client.Threads: got %d, want %d", cfg.Quack.Client.Threads, 2)
+	}
+}
+
+// TestStorageLoaderUnit verifies NewStorageLoader.SetDefaults and
+// ApplyEnvOverrides independently.
+func TestStorageLoaderUnit(t *testing.T) {
+	l := NewStorageLoader()
+	v := viper.New()
+	l.SetDefaults(v)
+
+	if got := v.GetString("storage.endpoint"); got != "" {
+		t.Errorf("storage.endpoint default: got %q, want empty", got)
+	}
+
+	t.Setenv("OMNEVAL_STORAGE_ENDPOINT", "s3.us-west-2.amazonaws.com")
+	t.Setenv("OMNEVAL_STORAGE_BUCKET", "my-bucket")
+	t.Setenv("OMNEVAL_STORAGE_REGION", "us-west-2")
+	t.Setenv("OMNEVAL_STORAGE_ACCESS_KEY", "AKIAIOSFODNN7EXAMPLE")
+	t.Setenv("OMNEVAL_STORAGE_SECRET_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+
+	cfg := &Config{}
+	l.ApplyEnvOverrides(cfg)
+	if cfg.Storage.Endpoint != "s3.us-west-2.amazonaws.com" {
+		t.Errorf("Storage.Endpoint: got %q, want %q", cfg.Storage.Endpoint, "s3.us-west-2.amazonaws.com")
+	}
+	if cfg.Storage.Bucket != "my-bucket" {
+		t.Errorf("Storage.Bucket: got %q, want %q", cfg.Storage.Bucket, "my-bucket")
+	}
+	if cfg.Storage.Region != "us-west-2" {
+		t.Errorf("Storage.Region: got %q, want %q", cfg.Storage.Region, "us-west-2")
+	}
+	if cfg.Storage.AccessKey != "AKIAIOSFODNN7EXAMPLE" {
+		t.Errorf("Storage.AccessKey: got %q, want %q", cfg.Storage.AccessKey, "AKIAIOSFODNN7EXAMPLE")
+	}
+	if cfg.Storage.SecretKey != "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" {
+		t.Errorf("Storage.SecretKey: got %q, want %q", cfg.Storage.SecretKey, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
 	}
 }
 
