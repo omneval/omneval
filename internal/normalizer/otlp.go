@@ -30,7 +30,7 @@ type Options struct {
 // field extraction, type coercion, and validation so that the OTLP handler
 // does not duplicate this logic.
 func NormalizeOTLP(ctx context.Context, projectID string, rss []*tracev1.ResourceSpans, opts Options, normalizer domain.SpanNormalizer) ([]*domain.Span, error) {
-	spans := make([]*domain.Span, 0)
+	spans := make([]*domain.Span, 0, totalSpanCount(rss))
 	for _, rs := range rss {
 		resourceAttrs := resourceAttrMap(rs.GetResource())
 		serviceName := extractResourceAttributeString(resourceAttrs, "service.name")
@@ -157,6 +157,18 @@ func otlpSpanToRawMap(projectID string, resourceAttrs map[string]any, serviceNam
 
 func hexEncode(b []byte) string {
 	return fmt.Sprintf("%x", b)
+}
+
+// totalSpanCount returns the total number of spans across all ResourceSpans.
+// Used to pre-allocate the result slice to avoid repeated reallocations.
+func totalSpanCount(rss []*tracev1.ResourceSpans) int {
+	count := 0
+	for _, rs := range rss {
+		for _, ss := range rs.GetScopeSpans() {
+			count += len(ss.GetSpans())
+		}
+	}
+	return count
 }
 
 func unixNanoToTime(nano uint64) time.Time {

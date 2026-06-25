@@ -425,14 +425,28 @@ func TestNormalizeOTLP_ServiceNameOverride(t *testing.T) {
 	}
 
 	n := normalizer.New()
-	spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
-	if err != nil {
-		t.Fatalf("NormalizeOTLP error: %v", err)
-	}
-	// Without override, resource-level service.name should be used
-	if spans[0].ServiceName != "resource-svc" {
-		t.Errorf("service_name: got %q, want %q", spans[0].ServiceName, "resource-svc")
-	}
+
+	// Without override, resource-level service.name should be used.
+	t.Run("no override", func(t *testing.T) {
+		spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
+		if err != nil {
+			t.Fatalf("NormalizeOTLP error: %v", err)
+		}
+		if spans[0].ServiceName != "resource-svc" {
+			t.Errorf("service_name: got %q, want %q", spans[0].ServiceName, "resource-svc")
+		}
+	})
+
+	// With ServiceNameOverride set, it must take precedence.
+	t.Run("with override", func(t *testing.T) {
+		spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{ServiceNameOverride: "api-service"}, n)
+		if err != nil {
+			t.Fatalf("NormalizeOTLP error: %v", err)
+		}
+		if spans[0].ServiceName != "api-service" {
+			t.Errorf("service_name: got %q, want %q (override should win)", spans[0].ServiceName, "api-service")
+		}
+	})
 }
 
 // TestNormalizeOTLP_ParentSpanID verifies that parent span IDs are propagated.
@@ -466,5 +480,508 @@ func TestNormalizeOTLP_ParentSpanID(t *testing.T) {
 	}
 	if spans[0].ParentID != "aabbccddeeff0011" {
 		t.Errorf("parent_id: got %q, want %q", spans[0].ParentID, "aabbccddeeff0011")
+	}
+}
+
+// --- Additional migrated test scenarios ---
+
+// TestNormalizeOTLP_LegacyTokenFallback verifies that legacy prompt_tokens and
+// completion_tokens attributes are used as fallbacks when the newer
+// gen_ai.usage.* attributes are absent.
+func TestNormalizeOTLP_LegacyTokenFallback(t *testing.T) {
+	rss := []*tracev1.ResourceSpans{
+		{
+			ScopeSpans: []*tracev1.ScopeSpans{
+				{
+					Spans: []*tracev1.Span{
+						{
+							TraceId:   []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+							SpanId:    []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+							Name:      "llm-call",
+							StartTimeUnixNano: uint64(time.Now().UnixNano()),
+							EndTimeUnixNano:   uint64(time.Now().UnixNano()),
+							Attributes: []*commonv1.KeyValue{
+								{Key: "prompt_tokens", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: 200}}},
+								{Key: "completion_tokens", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: 100}}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	n := normalizer.New()
+	spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
+	if err != nil {
+		t.Fatalf("NormalizeOTLP error: %v", err)
+	}
+	if spans[0].InputTokens != 200 {
+		t.Errorf("input_tokens: got %d, want 200 (legacy fallback)", spans[0].InputTokens)
+	}
+	if spans[0].OutputTokens != 100 {
+		t.Errorf("output_tokens: got %d, want 100 (legacy fallback)", spans[0].OutputTokens)
+	}
+}
+
+// TestNormalizeOTLP_AttributesOverflow verifies that unmapped span attributes
+// end up in the overflow attributes map, while extracted fields (model, tokens,
+// prompt, completion) are removed.
+func TestNormalizeOTLP_AttributesOverflow(t *testing.T) {
+	rss := []*tracev1.ResourceSpans{
+		{
+			ScopeSpans: []*tracev1.ScopeSpans{
+				{
+					Spans: []*tracev1.Span{
+						{
+							TraceId:   []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+							SpanId:    []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+							Name:      "test",
+							StartTimeUnixNano: uint64(time.Now().UnixNano()),
+							EndTimeUnixNano:   uint64(time.Now().UnixNano()),
+							Attributes: []*commonv1.KeyValue{
+								{Key: "gen_ai.request.model", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "gpt-4"}}},
+								{Key: "gen_ai.usage.input_tokens", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: 100}}},
+								{Key: "http.url", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "https://example.com"}}},
+								{Key: "custom.attr", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "value"}}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	n := normalizer.New()
+	spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
+	if err != nil {
+		t.Fatalf("NormalizeOTLP error: %v", err)
+	}
+
+	if spans[0].Attributes == nil {
+		t.Fatal("overflow attributes should not be nil")
+	}
+
+	// Extracted fields should NOT be in overflow.
+	if _, hasModel := spans[0].Attributes["gen_ai.request.model"]; hasModel {
+		t.Error("gen_ai.request.model should not be in overflow attributes")
+	}
+	if _, hasInputTokens := spans[0].Attributes["gen_ai.usage.input_tokens"]; hasInputTokens {
+		t.Error("gen_ai.usage.input_tokens should not be in overflow attributes")
+	}
+
+	// Unmapped fields should be in overflow.
+	if spans[0].Attributes["http.url"] != "https://example.com" {
+		t.Errorf("http.url: got %v, want %q", spans[0].Attributes["http.url"], "https://example.com")
+	}
+	if spans[0].Attributes["custom.attr"] != "value" {
+		t.Errorf("custom.attr: got %v, want %q", spans[0].Attributes["custom.attr"], "value")
+	}
+}
+
+// TestNormalizeOTLP_ExplicitOmnevalKind verifies that an explicit omneval.kind
+// attribute takes precedence over other kind derivation heuristics.
+func TestNormalizeOTLP_ExplicitOmnevalKind(t *testing.T) {
+	rss := []*tracev1.ResourceSpans{
+		{
+			ScopeSpans: []*tracev1.ScopeSpans{
+				{
+					Spans: []*tracev1.Span{
+						{
+							TraceId:   []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+							SpanId:    []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+							Name:      "internal-work",
+							StartTimeUnixNano: uint64(time.Now().UnixNano()),
+							EndTimeUnixNano:   uint64(time.Now().UnixNano()),
+							Attributes: []*commonv1.KeyValue{
+								{Key: "omneval.kind", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "internal"}}},
+								{Key: "gen_ai.request.model", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "gpt-4"}}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	n := normalizer.New()
+	spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
+	if err != nil {
+		t.Fatalf("NormalizeOTLP error: %v", err)
+	}
+	if spans[0].Kind != domain.SpanKindInternal {
+		t.Errorf("kind: got %q, want %q (explicit omneval.kind should win over gen_ai)", spans[0].Kind, domain.SpanKindInternal)
+	}
+}
+
+// TestNormalizeOTLP_KindDerivation_OpenInferenceChainAndRetriever verifies
+// that OpenInference span kinds CHAIN, RETRIEVER, EMBEDDING, RERANKER, and
+// GUARDRAIL all map to SpanKindChain.
+func TestNormalizeOTLP_KindDerivation_OpenInferenceChainAndRetriever(t *testing.T) {
+	tests := []struct {
+		oiKind string
+		want   domain.SpanKind
+	}{
+		{"CHAIN", domain.SpanKindChain},
+		{"RETRIEVER", domain.SpanKindChain},
+		{"EMBEDDING", domain.SpanKindChain},
+		{"RERANKER", domain.SpanKindChain},
+		{"GUARDRAIL", domain.SpanKindChain},
+		{"TOOL", domain.SpanKindTool},
+		{"LLM", domain.SpanKindLLM},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.oiKind, func(t *testing.T) {
+			rss := []*tracev1.ResourceSpans{
+				{
+					ScopeSpans: []*tracev1.ScopeSpans{
+						{
+							Spans: []*tracev1.Span{
+								{
+									TraceId:   []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+									SpanId:    []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+									Name:      "some-span",
+									StartTimeUnixNano: uint64(time.Now().UnixNano()),
+									EndTimeUnixNano:   uint64(time.Now().UnixNano()),
+									Attributes: []*commonv1.KeyValue{
+										{Key: "openinference.span.kind", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: tt.oiKind}}},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			n := normalizer.New()
+			spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
+			if err != nil {
+				t.Fatalf("NormalizeOTLP error: %v", err)
+			}
+			if spans[0].Kind != tt.want {
+				t.Errorf("openinference.span.kind=%q: kind got %q, want %q", tt.oiKind, spans[0].Kind, tt.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeOTLP_KindDerivation_GenAIOperationName verifies that the
+// gen_ai.operation.name attribute correctly derives span kinds for agent,
+// tool, and LLM operations.
+func TestNormalizeOTLP_KindDerivation_GenAIOperationName(t *testing.T) {
+	tests := []struct {
+		operation string
+		want      domain.SpanKind
+	}{
+		{"invoke_agent", domain.SpanKindAgent},
+		{"create_agent", domain.SpanKindAgent},
+		{"execute_tool", domain.SpanKindTool},
+		{"chat", domain.SpanKindLLM},
+		{"text_completion", domain.SpanKindLLM},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.operation, func(t *testing.T) {
+			rss := []*tracev1.ResourceSpans{
+				{
+					ScopeSpans: []*tracev1.ScopeSpans{
+						{
+							Spans: []*tracev1.Span{
+								{
+									TraceId:   []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+									SpanId:    []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+									Name:      "some-span",
+									StartTimeUnixNano: uint64(time.Now().UnixNano()),
+									EndTimeUnixNano:   uint64(time.Now().UnixNano()),
+									Attributes: []*commonv1.KeyValue{
+										{Key: "gen_ai.operation.name", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: tt.operation}}},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			n := normalizer.New()
+			spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
+			if err != nil {
+				t.Fatalf("NormalizeOTLP error: %v", err)
+			}
+			if spans[0].Kind != tt.want {
+				t.Errorf("gen_ai.operation.name=%q: kind got %q, want %q", tt.operation, spans[0].Kind, tt.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeOTLP_KindDerivation_NameHeuristics verifies that span names
+// are used as a fallback for kind derivation (e.g. ".step" → Agent,
+// "*Action" → Tool).
+func TestNormalizeOTLP_KindDerivation_NameHeuristics(t *testing.T) {
+	tests := []struct {
+		name string
+		want domain.SpanKind
+	}{
+		{"agent.step", domain.SpanKindAgent},
+		{"planner.agent.step", domain.SpanKindAgent},
+		{"TerminalAction", domain.SpanKindTool},
+		{"FileEditorAction", domain.SpanKindTool},
+		{"InvokeSkillAction", domain.SpanKindTool},
+		{"search_tool_call", domain.SpanKindTool},
+		{"ThinkAction", domain.SpanKindTool},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rss := []*tracev1.ResourceSpans{
+				{
+					ScopeSpans: []*tracev1.ScopeSpans{
+						{
+							Spans: []*tracev1.Span{
+								{
+									TraceId:   []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+									SpanId:    []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+									Name:      tt.name,
+									StartTimeUnixNano: uint64(time.Now().UnixNano()),
+									EndTimeUnixNano:   uint64(time.Now().UnixNano()),
+								},
+							},
+						},
+					},
+				},
+			}
+
+			n := normalizer.New()
+			spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
+			if err != nil {
+				t.Fatalf("NormalizeOTLP error: %v", err)
+			}
+			if spans[0].Kind != tt.want {
+				t.Errorf("name=%q: kind got %q, want %q", tt.name, spans[0].Kind, tt.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeOTLP_KindDerivation_DefaultInternal verifies that when no
+// attributes or name patterns match, the span kind defaults to Internal.
+func TestNormalizeOTLP_KindDerivation_DefaultInternal(t *testing.T) {
+	rss := []*tracev1.ResourceSpans{
+		{
+			ScopeSpans: []*tracev1.ScopeSpans{
+				{
+					Spans: []*tracev1.Span{
+						{
+							TraceId:   []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+							SpanId:    []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+							Name:      "some-operation",
+							StartTimeUnixNano: uint64(time.Now().UnixNano()),
+							EndTimeUnixNano:   uint64(time.Now().UnixNano()),
+							Attributes: []*commonv1.KeyValue{
+								{Key: "http.url", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "https://example.com"}}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	n := normalizer.New()
+	spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
+	if err != nil {
+		t.Fatalf("NormalizeOTLP error: %v", err)
+	}
+	if spans[0].Kind != domain.SpanKindInternal {
+		t.Errorf("kind: got %q, want %q (default should be internal)", spans[0].Kind, domain.SpanKindInternal)
+	}
+}
+
+// TestNormalizeOTLP_NoTokens verifies that spans without any token attributes
+// get zero for both input and output tokens.
+func TestNormalizeOTLP_NoTokens(t *testing.T) {
+	rss := []*tracev1.ResourceSpans{
+		{
+			ScopeSpans: []*tracev1.ScopeSpans{
+				{
+					Spans: []*tracev1.Span{
+						{
+							TraceId:   []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+							SpanId:    []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+							Name:      "no-token-span",
+							StartTimeUnixNano: uint64(time.Now().UnixNano()),
+							EndTimeUnixNano:   uint64(time.Now().UnixNano()),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	n := normalizer.New()
+	spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
+	if err != nil {
+		t.Fatalf("NormalizeOTLP error: %v", err)
+	}
+	if spans[0].InputTokens != 0 {
+		t.Errorf("input_tokens: got %d, want 0 (no token attributes)", spans[0].InputTokens)
+	}
+	if spans[0].OutputTokens != 0 {
+		t.Errorf("output_tokens: got %d, want 0 (no token attributes)", spans[0].OutputTokens)
+	}
+}
+
+// TestNormalizeOTLP_StartEndTimes verifies that explicit start and end times
+// from OTLP unix nanoseconds are preserved in the resulting span.
+func TestNormalizeOTLP_StartEndTimes(t *testing.T) {
+	startTime := uint64(time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC).UnixNano())
+	endTime := uint64(time.Date(2025, 6, 15, 14, 31, 30, 0, time.UTC).UnixNano())
+
+	rss := []*tracev1.ResourceSpans{
+		{
+			ScopeSpans: []*tracev1.ScopeSpans{
+				{
+					Spans: []*tracev1.Span{
+						{
+							TraceId:           []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+							SpanId:            []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+							Name:              "timed-span",
+							StartTimeUnixNano: startTime,
+							EndTimeUnixNano:   endTime,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	n := normalizer.New()
+	spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
+	if err != nil {
+		t.Fatalf("NormalizeOTLP error: %v", err)
+	}
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+	wantStart := time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC)
+	if spans[0].StartTime != wantStart {
+		t.Errorf("start_time: got %v, want %v", spans[0].StartTime, wantStart)
+	}
+	wantEnd := time.Date(2025, 6, 15, 14, 31, 30, 0, time.UTC)
+	if spans[0].EndTime != wantEnd {
+		t.Errorf("end_time: got %v, want %v", spans[0].EndTime, wantEnd)
+	}
+}
+
+// TestNormalizeOTLP_OmnevalInputOutput verifies that input and output values
+// from omneval.input and omneval.output attributes are extracted.
+func TestNormalizeOTLP_OmnevalInputOutput(t *testing.T) {
+	rss := []*tracev1.ResourceSpans{
+		{
+			ScopeSpans: []*tracev1.ScopeSpans{
+				{
+					Spans: []*tracev1.Span{
+						{
+							TraceId:   []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+							SpanId:    []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+							Name:      "omneval-span",
+							StartTimeUnixNano: uint64(time.Now().UnixNano()),
+							EndTimeUnixNano:   uint64(time.Now().UnixNano()),
+							Attributes: []*commonv1.KeyValue{
+								{Key: "omneval.input", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: `{"query":"hello"}`}}},
+								{Key: "omneval.output", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: `{"result":"hi"}`}}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	n := normalizer.New()
+	spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
+	if err != nil {
+		t.Fatalf("NormalizeOTLP error: %v", err)
+	}
+	if spans[0].Input != `{"query":"hello"}` {
+		t.Errorf("input: got %q, want %q", spans[0].Input, `{"query":"hello"}`)
+	}
+	if spans[0].Output != `{"result":"hi"}` {
+		t.Errorf("output: got %q, want %q", spans[0].Output, `{"result":"hi"}`)
+	}
+}
+
+// TestNormalizeOTLP_ConversationIDOmnevalFallback verifies that the
+// omneval.conversation.id attribute is used as fallback when
+// gen_ai.conversation.id is absent.
+func TestNormalizeOTLP_ConversationIDOmnevalFallback(t *testing.T) {
+	rss := []*tracev1.ResourceSpans{
+		{
+			ScopeSpans: []*tracev1.ScopeSpans{
+				{
+					Spans: []*tracev1.Span{
+						{
+							TraceId:   []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+							SpanId:    []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+							Name:      "conv-span",
+							StartTimeUnixNano: uint64(time.Now().UnixNano()),
+							EndTimeUnixNano:   uint64(time.Now().UnixNano()),
+							Attributes: []*commonv1.KeyValue{
+								{Key: "omneval.conversation.id", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "conv-omneval-123"}}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	n := normalizer.New()
+	spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
+	if err != nil {
+		t.Fatalf("NormalizeOTLP error: %v", err)
+	}
+	if spans[0].ConversationID != "conv-omneval-123" {
+		t.Errorf("conversation_id: got %q, want %q", spans[0].ConversationID, "conv-omneval-123")
+	}
+}
+
+// TestNormalizeOTLP_ZeroTimeSpan verifies that a span with zero start/end times
+// does not set start_time / end_time fields (time.Time{} should be absent).
+func TestNormalizeOTLP_ZeroTimeSpan(t *testing.T) {
+	rss := []*tracev1.ResourceSpans{
+		{
+			ScopeSpans: []*tracev1.ScopeSpans{
+				{
+					Spans: []*tracev1.Span{
+						{
+							TraceId:           []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+							SpanId:            []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+							Name:              "zero-time-span",
+							StartTimeUnixNano: 0,
+							EndTimeUnixNano:   0,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	n := normalizer.New()
+	spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
+	if err != nil {
+		t.Fatalf("NormalizeOTLP error: %v", err)
+	}
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+	// Zero times should result in zero-time span, which is the zero value of time.Time{}
+	if !spans[0].StartTime.IsZero() {
+		t.Errorf("start_time: got %v, want zero time", spans[0].StartTime)
+	}
+	if !spans[0].EndTime.IsZero() {
+		t.Errorf("end_time: got %v, want zero time", spans[0].EndTime)
 	}
 }
