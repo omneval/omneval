@@ -63,6 +63,11 @@ func (s *PostgresFocusedStore) AuthStore() AuthStore {
 	return s.Store
 }
 
+// DatasetStore returns the focused DatasetStore interface.
+func (s *PostgresFocusedStore) DatasetStore() DatasetStore {
+	return s.Store.DatasetStore()
+}
+
 // Compile-time check: PostgresFocusedStore satisfies metadata.Store.
 var _ Store = (*PostgresFocusedStore)(nil)
 
@@ -112,6 +117,11 @@ func (s *SQLiteFocusedStore) BatchLedgerStore() BatchLedgerStore {
 // AuthStore returns the focused AuthStore interface.
 func (s *SQLiteFocusedStore) AuthStore() AuthStore {
 	return s.Store
+}
+
+// DatasetStore returns the focused DatasetStore interface.
+func (s *SQLiteFocusedStore) DatasetStore() DatasetStore {
+	return s.Store.DatasetStore()
 }
 
 // Compile-time check: SQLiteFocusedStore satisfies metadata.Store.

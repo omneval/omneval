@@ -216,3 +216,6 @@ func (f *fakeMetaStore) ListBookmarkedTraceIDs(ctx context.Context, projectID st
 
 // BookmarkStore returns the focused BookmarkStore interface.
 func (f *fakeMetaStore) BookmarkStore() metadata.BookmarkStore { return f }
+
+// DatasetStore returns the focused DatasetStore interface.
+func (f *fakeMetaStore) DatasetStore() metadata.DatasetStore { return f }
