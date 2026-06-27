@@ -871,6 +871,28 @@ func (s *Store) BatchLedgerStore() BatchLedgerStore {
 	return s
 }
 
+// AuthStore is the domain interface for user and organization lookups.
+// Defined locally here because this package is a subpackage of metadata,
+// and Go does not allow importing a parent package (import cycle).
+type AuthStore interface {
+	GetUserByID(ctx context.Context, userID string) (*domain.User, error)
+	GetUserByEmail(ctx context.Context, email string) (*domain.User, error)
+	GetUserByResetToken(ctx context.Context, token string) (*domain.User, error)
+	CountUsers(ctx context.Context) (int, error)
+	CheckPassword(hashed, plaintext string) error
+	CreateUser(ctx context.Context, user *domain.User) error
+	UpdateUserPassword(ctx context.Context, userID, passwordHash string) error
+	UpdateUserResetToken(ctx context.Context, userID, token string, expiry time.Time) error
+	CreateOrganization(ctx context.Context, org *domain.Organization) error
+	GetOrganization(ctx context.Context, orgID string) (*domain.Organization, error)
+}
+
+// AuthStore returns a focused AuthStore interface for callers that only need
+// user and organization operations.
+func (s *Store) AuthStore() AuthStore {
+	return s
+}
+
 // ---- Eval Rules ----
 
 func (s *Store) CreateEvalRule(ctx context.Context, rule *domain.EvalRule) error {

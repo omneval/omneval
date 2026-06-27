@@ -71,4 +71,9 @@ type Store interface {
 	// exposes only the batch commit dedupe methods, enabling callers to
 	// depend on the narrower type rather than the god interface.
 	BatchLedgerStore() BatchLedgerStore
+
+	// AuthStore returns a focused AuthStore interface that exposes
+	// only the user and organization methods, enabling callers to depend on
+	// the narrower type rather than the god interface.
+	AuthStore() AuthStore
 }

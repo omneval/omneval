@@ -5,6 +5,13 @@ import (
 	"github.com/omneval/omneval/internal/metadata/sqlite"
 )
 
+// Compile-time assertions: the concrete sub-package stores must satisfy
+// the focused interfaces defined in this package.
+var (
+	_ AuthStore = (*postgres.Store)(nil)
+	_ AuthStore = (*sqlite.Store)(nil)
+)
+
 // PostgresFocusedStore wraps *postgres.Store so that callers can depend on
 // the narrower focused interfaces (ProjectStore, PromptStore, EvalRuleStore, ...)
 // instead of the full god Store. Embedding the concrete store promotes all domain
@@ -51,6 +58,11 @@ func (s *PostgresFocusedStore) BatchLedgerStore() BatchLedgerStore {
 	return s.Store
 }
 
+// AuthStore returns the focused AuthStore interface.
+func (s *PostgresFocusedStore) AuthStore() AuthStore {
+	return s.Store
+}
+
 // Compile-time check: PostgresFocusedStore satisfies metadata.Store.
 var _ Store = (*PostgresFocusedStore)(nil)
 
@@ -94,6 +106,11 @@ func (s *SQLiteFocusedStore) APIKeyStore() APIKeyStore {
 
 // BatchLedgerStore returns the focused BatchLedgerStore interface.
 func (s *SQLiteFocusedStore) BatchLedgerStore() BatchLedgerStore {
+	return s.Store
+}
+
+// AuthStore returns the focused AuthStore interface.
+func (s *SQLiteFocusedStore) AuthStore() AuthStore {
 	return s.Store
 }
 

@@ -207,6 +207,9 @@ func (f *FakeMetadataStore) APIKeyStore() metadata.APIKeyStore { return f }
 // BatchLedgerStore returns the focused BatchLedgerStore interface.
 func (f *FakeMetadataStore) BatchLedgerStore() metadata.BatchLedgerStore { return f }
 
+// AuthStore returns the focused AuthStore interface.
+func (f *FakeMetadataStore) AuthStore() metadata.AuthStore { return f }
+
 // ---- Tests ----
 
 func TestGenerate(t *testing.T) {
