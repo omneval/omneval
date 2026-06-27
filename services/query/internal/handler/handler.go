@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -18,14 +16,6 @@ type (
 	SessionStore = routes.SessionStore
 )
 
-// DBHandle is the subset of database/sql.DB used by handlers.
-// Deprecated: moved to spansegment.DBHandle. Kept for ScoreHandler compatibility.
-type DBHandle interface {
-	Query(query string, args ...any) (*sql.Rows, error)
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-	QueryRow(query string, args ...any) *sql.Row
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}
 
 // writeJSONError writes a JSON error response with the given status code.
 func writeJSONError(w http.ResponseWriter, message string, status int) {
