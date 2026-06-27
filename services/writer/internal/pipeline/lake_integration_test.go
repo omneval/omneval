@@ -63,12 +63,9 @@ func TestLakeIntegration_PostgresCatalogMinIO(t *testing.T) {
 	}
 	makeBucket(t, ctx, minioEndpoint, storage.Bucket)
 
-	lakeCfg := laketest.NewLocalConfig(t)
-	lakeCfg.DataPath = "s3://" + storage.Bucket + "/lake"
-	lakeCfg.Storage = storage
-	lk := laketest.NewPostgresWithConfig(t, catalogDSN, func(cfg *lake.Config) {
-		cfg.DataPath = lakeCfg.DataPath
-		cfg.Storage = lakeCfg.Storage
+	lk, pgCfg := laketest.NewPostgresWithConfig(t, catalogDSN, func(cfg *lake.Config) {
+		cfg.DataPath = "s3://" + storage.Bucket + "/lake"
+		cfg.Storage = storage
 	})
 
 	p := New(nil, testPricing, nil, nil, nil, nil).WithLake(lk)
@@ -102,7 +99,7 @@ func TestLakeIntegration_PostgresCatalogMinIO(t *testing.T) {
 
 	// Read back through a completely fresh DuckDB instance attached
 	// read-only — the Query API's view of the Lake.
-	roCfg := lakeCfg
+	roCfg := pgCfg
 	roCfg.ReadOnly = true
 	ro, err := lake.Open(ctx, roCfg)
 	if err != nil {
