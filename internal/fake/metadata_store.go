@@ -726,6 +726,10 @@ func (f *FakeMetadataStore) ProjectStore() metadata.ProjectStore { return f }
 // need prompt operations.
 func (f *FakeMetadataStore) PromptStore() metadata.PromptStore { return f }
 
+// DatasetStore returns a focused DatasetStore interface for callers that only
+// need dataset operations.
+func (f *FakeMetadataStore) DatasetStore() metadata.DatasetStore { return f }
+
 // CheckPassword compares plaintext password against stored hash (uses bcrypt).
 func (f *FakeMetadataStore) CheckPassword(hashed, plaintext string) error {
 	return bcrypt.CompareHashAndPassword([]byte(hashed), []byte(plaintext))
