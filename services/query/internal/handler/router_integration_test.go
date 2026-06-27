@@ -12,6 +12,7 @@ import (
 	"github.com/omneval/omneval/internal/config"
 	"github.com/omneval/omneval/internal/fake"
 	"github.com/omneval/omneval/services/query/internal/auth"
+	"github.com/omneval/omneval/services/query/internal/spansegment"
 )
 
 // sanitizePath returns a URL-safe version of a path for use in test names.
@@ -48,7 +49,7 @@ func TestRouteGroupIntegration(t *testing.T) {
 		Cfg:             &config.Config{},
 		Store:           store,
 		Auth:            authH,
-		Span:            &SpanHandler{SessionStore: authH, ProjectResolver: authH, Lake: lakeHandle},
+		Span:            &spansegment.SpanHandler{SessionStore: authH, ProjectResolver: authH, Lake: lakeHandle},
 		Bookmark:        &BookmarkHandler{BookmarkStore: store, SessionStore: authH, ProjectResolver: authH},
 		Conversation:    &ConversationHandler{SessionStore: authH, ProjectResolver: authH},
 		Prompt:          &PromptHandler{PromptStore: store.PromptStore(), Cache: nil, SessionStore: authH, ProjectResolver: authH, Validator: nil},
@@ -218,7 +219,7 @@ func TestRouteGroupRoutesConsistency(t *testing.T) {
 		Cfg:        &config.Config{},
 		Store:      store,
 		Auth:       authH,
-		Span:       &SpanHandler{SessionStore: authH, ProjectResolver: authH, Lake: lakeHandle},
+		Span:       &spansegment.SpanHandler{SessionStore: authH, ProjectResolver: authH, Lake: lakeHandle},
 		Bookmark:   &BookmarkHandler{BookmarkStore: store, SessionStore: authH, ProjectResolver: authH},
 		Conversation: &ConversationHandler{SessionStore: authH, ProjectResolver: authH},
 		Prompt:     &PromptHandler{PromptStore: store.PromptStore(), Cache: nil, SessionStore: authH, ProjectResolver: authH},

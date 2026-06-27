@@ -3,9 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"path/filepath"
 
 	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/omneval/omneval/internal/config"
