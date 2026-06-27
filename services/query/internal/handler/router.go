@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	internalauth "github.com/omneval/omneval/internal/auth"
@@ -28,10 +29,27 @@ const (
 	AuthPolicyAdmin      = routes.AuthPolicyAdmin
 )
 
-// playgroundHandler is the interface for the playground endpoint.
-// Defined here to avoid importing the playground package (which imports handler).
-type playgroundHandler interface {
-	HandleRun(http.ResponseWriter, *http.Request)
+// RouteGroup is the interface that each handler type implements to expose its
+// routes. The Router holds a []RouteGroup slice and delegates route
+// registration entirely to its groups.
+//
+// Routes returns the route entries that the group owns. Each entry includes
+// the handler, HTTP method, path pattern, and auth policy.
+type RouteGroup interface {
+	Routes() []AuthRoute
+}
+
+// routeGroupAdapter wraps a Routes() function so that any function returning
+// []AuthRoute can satisfy the RouteGroup interface.
+type routeGroupAdapter struct {
+	routesFunc func() []AuthRoute
+}
+
+func (g *routeGroupAdapter) Routes() []AuthRoute {
+	if g.routesFunc != nil {
+		return g.routesFunc()
+	}
+	return nil
 }
 
 // RouterDeps collects the dependencies the Router needs. The server package
@@ -49,11 +67,24 @@ type RouterDeps struct {
 	Admin           *AdminHandler
 	Dataset         *DatasetHandler
 	DatasetRun      *DatasetRunHandler
-	Playground      playgroundHandler
+	Playground      *PlaygroundRouterGroup
 	Models          *ModelsHandler
 	AdminLake       *lake.Lake
 	SessionTTL      time.Duration
 	APIKeyValidator internalauth.Validator
+}
+
+// PlaygroundRouterGroup wraps a playground HandleRun function as a RouteGroup.
+// This avoids importing the playground package directly while still giving
+// the Router a RouteGroup for the playground endpoint.
+type PlaygroundRouterGroup struct {
+	HandleRun func(http.ResponseWriter, *http.Request)
+}
+
+func (g *PlaygroundRouterGroup) Routes() []AuthRoute {
+	return []AuthRoute{
+		{Method: http.MethodPost, Path: "/api/v1/playground/run", Handler: http.HandlerFunc(g.HandleRun), Policy: AuthPolicySession},
+	}
 }
 
 // authPolicyLookup maps a registered mux pattern ("METHOD /path/{param}", the
@@ -83,53 +114,76 @@ func (l *authPolicyLookup) lookup(pattern string) AuthPolicy {
 
 // Router is the deep interface for the query service HTTP layer. It owns all
 // route registration, auth middleware application, project ID resolution, and
-// response serialization. Domain handlers (spansegment.Segment,
-// ConversationHandler, DatasetHandler, etc.) become thin adapters at a clean
-// seam — they contain only domain logic and SQL, while the Router manages how
-// they are composed and dispatched.
+// response serialization. Instead of embedding individual handler types, the
+// Router holds a []RouteGroup slice — each group owns its own routes, policies,
+// and registration, making the Router a thin composer.
 //
 // Use [NewRouter] to construct one from router deps, then call
 // [Router.RegisterRoutes] to wire a [http.ServeMux] and obtain the fully
 // authenticated top-level handler.
 type Router struct {
-	cfg          *config.Config
-	store        metadata.Store
-	auth         *auth.Handler
-	span         spansegment.Segment
-	bookmark     *BookmarkHandler
-	conversation *ConversationHandler
-	prompt       *PromptHandler
-	evalRule     *EvalRuleHandler
-	admin        *AdminHandler
-	dataset      *DatasetHandler
-	datasetRun   *DatasetRunHandler
-	playground   playgroundHandler
-	models       *ModelsHandler
-	adminLake    *lake.Lake
-	sessionTTL   time.Duration
+	cfg         *config.Config
+	store       metadata.Store
+	auth        *auth.Handler
+	routeGroups []RouteGroup // all registered route groups
+	routes      []AuthRoute  // flattened routes from all groups
+	sessionTTL  time.Duration
 	apiValidator internalauth.Validator
-	routes       []AuthRoute // all registered routes with their policies
 }
 
 // NewRouter creates a Router from the provided dependencies. All handlers use
-// the shared auth module for project ID extraction.
+// the shared auth module for project ID extraction. The router composes its
+// route groups from the provided deps, delegating registration entirely to them.
 func NewRouter(deps *RouterDeps) *Router {
+	routeGroups := make([]RouteGroup, 0, 15)
+
+	// Auth route group (auth.Handler is in a separate package).
+	routeGroups = append(routeGroups, newAuthRouteGroup(deps.Auth))
+
+	// Span route group.
+	routeGroups = append(routeGroups, &routeGroupAdapter{routesFunc: deps.Span.Routes})
+
+	// Bookmark route group.
+	routeGroups = append(routeGroups, &routeGroupAdapter{routesFunc: deps.Bookmark.Routes})
+
+	// Conversation route group.
+	routeGroups = append(routeGroups, &routeGroupAdapter{routesFunc: deps.Conversation.Routes})
+
+	// Prompt route group.
+	routeGroups = append(routeGroups, &routeGroupAdapter{routesFunc: deps.Prompt.Routes})
+
+	// EvalRule route group.
+	routeGroups = append(routeGroups, &routeGroupAdapter{routesFunc: deps.EvalRule.Routes})
+
+	// Dataset route group.
+	routeGroups = append(routeGroups, &routeGroupAdapter{routesFunc: deps.Dataset.Routes})
+
+	// DatasetRun route group.
+	routeGroups = append(routeGroups, &datasetRunRouteGroup{handler: deps.DatasetRun})
+
+	// Admin route group (routes now use Routes() instead of AdminRoutes()).
+	routeGroups = append(routeGroups, &routeGroupAdapter{routesFunc: deps.Admin.Routes})
+
+	// Playground route group.
+	if deps.Playground != nil {
+		routeGroups = append(routeGroups, deps.Playground)
+	}
+
+	// Models route group.
+	routeGroups = append(routeGroups, &routeGroupAdapter{routesFunc: deps.Models.Routes})
+
+	// Score route group (constructed inline, public).
+	routeGroups = append(routeGroups, newScoreRouteGroup(deps.AdminLake))
+
+	// Prometheus metrics route group (public).
+	routeGroups = append(routeGroups, newPrometheusRouteGroup())
+
 	return &Router{
-		cfg:          deps.Cfg,
-		store:        deps.Store,
-		auth:         deps.Auth,
-		span:         deps.Span,
-		bookmark:     deps.Bookmark,
-		conversation: deps.Conversation,
-		prompt:       deps.Prompt,
-		evalRule:     deps.EvalRule,
-		admin:        deps.Admin,
-		dataset:      deps.Dataset,
-		datasetRun:   deps.DatasetRun,
-		playground:   deps.Playground,
-		models:       deps.Models,
-		adminLake:    deps.AdminLake,
-		sessionTTL:   deps.SessionTTL,
+		cfg:         deps.Cfg,
+		store:       deps.Store,
+		auth:        deps.Auth,
+		routeGroups: routeGroups,
+		sessionTTL:  deps.SessionTTL,
 		apiValidator: deps.APIKeyValidator,
 	}
 }
@@ -139,86 +193,20 @@ func NewRouter(deps *RouterDeps) *Router {
 // applies the auth middleware stack: public routes pass through, prompts and
 // eval-rules accept session or API-key auth, and all other API routes require
 // session auth.
+//
+// The Router delegates entirely to its RouteGroups: each group owns its routes,
+// policies, and registration. The Router is a thin composer that collects
+// everything and wires it up.
 func (rt *Router) RegisterRoutes(mux *http.ServeMux) http.Handler {
-	// Collect all route entries from handlers that implement the Routes() method.
-	// Auth routes are defined inline because the auth handler lives in a
-	// separate package (internal/auth) that cannot import this handler package.
+	// Collect all route entries from route groups.
+	// Each group owns its routes, auth policies, and registration.
 	routes := make([]AuthRoute, 0, 80)
 
-	// --- Auth routes (defined inline — auth.Handler is in a separate package) ---
-	routes = append(routes, []AuthRoute{
-		{Method: http.MethodGet, Path: "/api/v1/me", Handler: http.HandlerFunc(rt.auth.HandleMe), Policy: AuthPolicySession},
-		{Method: http.MethodPost, Path: "/login", Handler: http.HandlerFunc(rt.auth.Login), Policy: AuthPolicyPublic},
-		{Method: http.MethodPost, Path: "/logout", Handler: http.HandlerFunc(rt.auth.Logout), Policy: AuthPolicyPublic},
-		{Method: http.MethodPost, Path: "/api/v1/users/invite", Handler: http.HandlerFunc(rt.auth.Invite), Policy: AuthPolicySession},
-		{Method: http.MethodPost, Path: "/api/v1/users/reset-password", Handler: http.HandlerFunc(rt.auth.ResetPassword), Policy: AuthPolicySession},
-		{Method: http.MethodPut, Path: "/api/v1/users/me/password", Handler: http.HandlerFunc(rt.auth.ChangePassword), Policy: AuthPolicySession},
-		{Method: http.MethodPost, Path: "/api/v1/projects", Handler: http.HandlerFunc(rt.auth.HandleCreateProject), Policy: AuthPolicySession},
-		{Method: http.MethodPost, Path: "/api/v1/projects/{id}/api-keys", Handler: http.HandlerFunc(rt.auth.HandleGenerateAPIKey), Policy: AuthPolicySession},
-		{Method: http.MethodGet, Path: "/api/v1/projects/{id}/api-keys", Handler: http.HandlerFunc(rt.auth.HandleListAPIKeys), Policy: AuthPolicySession},
-		{Method: http.MethodDelete, Path: "/api/v1/projects/{id}/api-keys/{keyId}", Handler: http.HandlerFunc(rt.auth.HandleRevokeAPIKey), Policy: AuthPolicySession},
-	}...)
-
-	// --- Admin routes (require admin session) ---
-	routes = append(routes, rt.admin.AdminRoutes()...)
-
-	// --- Span / project routes ---
-	routes = append(routes, rt.span.Routes()...)
-
-	// --- Bookmark routes ---
-	routes = append(routes, rt.bookmark.Routes()...)
-
-	// --- Conversation routes ---
-	routes = append(routes, rt.conversation.Routes()...)
-
-	// --- Prompt routes ---
-	routes = append(routes, rt.prompt.Routes()...)
-
-	// --- Eval rule routes ---
-	routes = append(routes, rt.evalRule.Routes()...)
-
-	// --- Dataset routes ---
-	routes = append(routes, rt.dataset.Routes()...)
-
-	// --- Dataset run routes (POST requires judge LLM config) ---
-	for _, r := range rt.datasetRun.Routes() {
-		if r.Path != "/api/v1/datasets/{id}/runs" || rt.datasetRun.JudgeClient != nil {
-			routes = append(routes, r)
-		}
+	// Delegate registration: each RouteGroup registers its own routes and
+	// policy mappings through the group interface.
+	for _, group := range rt.routeGroups {
+		routes = append(routes, group.Routes()...)
 	}
-
-	// --- Playground route ---
-	routes = append(routes, AuthRoute{
-		Method: http.MethodPost, Path: "/api/v1/playground/run",
-		Handler: http.HandlerFunc(rt.playground.HandleRun),
-		Policy:  AuthPolicySession,
-	})
-
-	// --- Models route (public — returns known model list) ---
-	routes = append(routes, AuthRoute{
-		Method:  http.MethodGet,
-		Path:    "/api/v1/models",
-		Handler: http.HandlerFunc(rt.models.HandleModels),
-		Policy:  AuthPolicyPublic,
-	})
-
-	// --- Score route (public — used by eval worker) ---
-	scoreHandler := NewScoreHandler(rt.adminLake, rt.adminLake)
-	routes = append(routes, AuthRoute{
-		Method:  http.MethodPost,
-		Path:    "/api/v1/scores",
-		Handler: func(w http.ResponseWriter, req *http.Request) { scoreHandler.ServeHTTP(w, req) },
-		Policy:  AuthPolicyPublic,
-	})
-
-	// --- Prometheus metrics (public) ---
-	metricsHandler := promhttp.Handler()
-	routes = append(routes, AuthRoute{
-		Method:  http.MethodGet,
-		Path:    "/metrics",
-		Handler: metricsHandler.ServeHTTP,
-		Policy:  AuthPolicyPublic,
-	})
 
 	// Store routes on the router so buildMiddleware can look them up.
 	rt.routes = routes
@@ -279,4 +267,123 @@ func (rt *Router) buildMiddleware(mux *http.ServeMux) http.Handler {
 			sessionMw(mux).ServeHTTP(w, req)
 		}
 	})
+}
+
+// publicPaths is the single canonical source of truth for public (unauthenticated)
+// API paths. It is referenced by both the router middleware dispatcher and the
+// server package's health-check probe logic.
+var publicPaths = map[string]struct{}{
+	"/login":         {},
+	"/logout":        {},
+	"/healthz":       {},
+	"/readyz":        {},
+	"/metrics":       {},
+	"/api/v1/scores": {},
+}
+
+// IsPublicPath reports whether the given path is a public API route
+// that does not require authentication.
+func IsPublicPath(path string) bool {
+	if _, ok := publicPaths[path]; ok {
+		return true
+	}
+	if strings.HasPrefix(path, "/healthz") || strings.HasPrefix(path, "/readyz") {
+		return true
+	}
+	return false
+}
+
+// isPublicPath reports whether the given path is a public API route
+// that does not require authentication. Mirrors the logic in server.go.
+func isPublicPath(path string) bool {
+	return IsPublicPath(path)
+}
+
+// --- Special route groups ---
+
+// authRouteGroup wraps the auth.Handler to expose its routes as a RouteGroup.
+// The auth handler lives in a separate package (internal/auth) that cannot
+// import this handler package, so we define the routes here.
+type authRouteGroup struct {
+	auth *auth.Handler
+}
+
+func newAuthRouteGroup(a *auth.Handler) *authRouteGroup {
+	return &authRouteGroup{auth: a}
+}
+
+func (g *authRouteGroup) Routes() []AuthRoute {
+	return []AuthRoute{
+		{Method: http.MethodGet, Path: "/api/v1/me", Handler: http.HandlerFunc(g.auth.HandleMe), Policy: AuthPolicySession},
+		{Method: http.MethodPost, Path: "/login", Handler: http.HandlerFunc(g.auth.Login), Policy: AuthPolicyPublic},
+		{Method: http.MethodPost, Path: "/logout", Handler: http.HandlerFunc(g.auth.Logout), Policy: AuthPolicyPublic},
+		{Method: http.MethodPost, Path: "/api/v1/users/invite", Handler: http.HandlerFunc(g.auth.Invite), Policy: AuthPolicySession},
+		{Method: http.MethodPost, Path: "/api/v1/users/reset-password", Handler: http.HandlerFunc(g.auth.ResetPassword), Policy: AuthPolicySession},
+		{Method: http.MethodPut, Path: "/api/v1/users/me/password", Handler: http.HandlerFunc(g.auth.ChangePassword), Policy: AuthPolicySession},
+		{Method: http.MethodPost, Path: "/api/v1/projects", Handler: http.HandlerFunc(g.auth.HandleCreateProject), Policy: AuthPolicySession},
+		{Method: http.MethodPost, Path: "/api/v1/projects/{id}/api-keys", Handler: http.HandlerFunc(g.auth.HandleGenerateAPIKey), Policy: AuthPolicySession},
+		{Method: http.MethodGet, Path: "/api/v1/projects/{id}/api-keys", Handler: http.HandlerFunc(g.auth.HandleListAPIKeys), Policy: AuthPolicySession},
+		{Method: http.MethodDelete, Path: "/api/v1/projects/{id}/api-keys/{keyId}", Handler: http.HandlerFunc(g.auth.HandleRevokeAPIKey), Policy: AuthPolicySession},
+	}
+}
+
+// datasetRunRouteGroup wraps the DatasetRunHandler with the conditional route
+// logic: the POST /api/v1/datasets/{id}/runs route is excluded when the
+// handler has no JudgeClient configured (the run endpoint needs a judge LLM).
+type datasetRunRouteGroup struct {
+	handler *DatasetRunHandler
+}
+
+func (g *datasetRunRouteGroup) Routes() []AuthRoute {
+	var routes []AuthRoute
+	for _, r := range g.handler.Routes() {
+		if r.Path != "/api/v1/datasets/{id}/runs" || g.handler.JudgeClient != nil {
+			routes = append(routes, r)
+		}
+	}
+	return routes
+}
+
+// scoreRouteGroup wraps a newly constructed ScoreHandler as a RouteGroup.
+// ScoreHandler is constructed inline here because it depends on the Lake
+// attachment, which varies by deployment.
+type scoreRouteGroup struct {
+	lakeRW *lake.Lake
+}
+
+func newScoreRouteGroup(lakeRW *lake.Lake) *scoreRouteGroup {
+	return &scoreRouteGroup{lakeRW: lakeRW}
+}
+
+func (g *scoreRouteGroup) Routes() []AuthRoute {
+	return []AuthRoute{
+		{Method: http.MethodPost, Path: "/api/v1/scores", Handler: NewScoreHandler(g.lakeRW, g.lakeRW).ServeHTTP, Policy: AuthPolicyPublic},
+	}
+}
+
+// prometheusRouteGroup provides the /metrics endpoint backed by Prometheus.
+type prometheusRouteGroup struct{}
+
+func newPrometheusRouteGroup() *prometheusRouteGroup {
+	return &prometheusRouteGroup{}
+}
+
+func (g *prometheusRouteGroup) Routes() []AuthRoute {
+	metricsHandler := promhttp.Handler()
+	return []AuthRoute{
+		{Method: http.MethodGet, Path: "/metrics", Handler: metricsHandler.ServeHTTP, Policy: AuthPolicyPublic},
+	}
+}
+
+// serveUI is the embedded UI server, injected by the server package at init.
+// By default it returns 404 — the real handler is wired via InitServeUI.
+var serveUI func(http.ResponseWriter, *http.Request) = func(w http.ResponseWriter, req *http.Request) {
+	writeJSONError(w, "not found", http.StatusNotFound)
+}
+
+// InitServeUI injects the real UI server function that serves static files from
+// the embedded UI dist directory. Call this once during server startup to replace
+// the default no-op handler.
+func InitServeUI(fn func(http.ResponseWriter, *http.Request)) {
+	serveUI = fn
 }

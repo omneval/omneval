@@ -69,6 +69,7 @@ type WiredDeps struct {
 	Dataset         *handler.DatasetHandler
 	DatasetRun      *handler.DatasetRunHandler
 	Playground      *playground.PlaygroundHandler
+	Models          *handler.ModelsHandler
 
 	// Pricing table used by the models endpoint and cost calculations.
 	Pricing *pricing.Table
@@ -239,6 +240,9 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	} else {
 		deps.Pricing = pricingTable
 	}
+
+	// Models handler — reads from the pricing table.
+	deps.Models = &handler.ModelsHandler{Pricing: pricingTable}
 
 	// Health and readiness probes.
 	p := probe.New()

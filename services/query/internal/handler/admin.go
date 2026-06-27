@@ -275,8 +275,16 @@ func (h *AdminHandler) HandleAdminOps(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(metrics)
 }
 
+// Routes returns the admin endpoints as AuthRoute entries with
+// AuthPolicyAdmin so the Router can use them for policy-based auth dispatch.
+// Implements the RouteGroup interface.
+func (h *AdminHandler) Routes() []AuthRoute {
+	return h.AdminRoutes()
+}
+
 // AdminRoutes returns the admin endpoints as AuthRoute entries with
 // AuthPolicyAdmin so the Router can use them for policy-based auth dispatch.
+// Kept for backward compatibility.
 func (h *AdminHandler) AdminRoutes() []AuthRoute {
 	return []AuthRoute{
 		{Method: http.MethodGet, Path: "/api/v1/admin/api-keys", Handler: http.HandlerFunc(h.HandleAdminAPIKeysList), Policy: AuthPolicyAdmin},
