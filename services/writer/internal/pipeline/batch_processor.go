@@ -21,7 +21,7 @@ import (
 type BatchProcessor struct {
 	reliable    queue.ReliableIngestQueue
 	fetcher     BatchFetcher
-	ledger      BatchLedger
+	ledger      metadata.BatchLedgerStore
 	lake        SpanLakeWriter
 	pricing     *pricing.Table
 	evalRuleStore metadata.EvalRuleStore
@@ -36,7 +36,7 @@ type BatchProcessor struct {
 func NewBatchProcessor(
 	reliable queue.ReliableIngestQueue,
 	fetcher BatchFetcher,
-	ledger BatchLedger,
+	ledger metadata.BatchLedgerStore,
 	lake SpanLakeWriter,
 	pricing *pricing.Table,
 	evalRuleStore metadata.EvalRuleStore,

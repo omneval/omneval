@@ -46,6 +46,11 @@ func (s *PostgresFocusedStore) APIKeyStore() APIKeyStore {
 	return s.Store
 }
 
+// BatchLedgerStore returns the focused BatchLedgerStore interface.
+func (s *PostgresFocusedStore) BatchLedgerStore() BatchLedgerStore {
+	return s.Store
+}
+
 // Compile-time check: PostgresFocusedStore satisfies metadata.Store.
 var _ Store = (*PostgresFocusedStore)(nil)
 
@@ -84,6 +89,11 @@ func (s *SQLiteFocusedStore) EvalRuleStore() EvalRuleStore {
 
 // APIKeyStore returns the focused APIKeyStore interface.
 func (s *SQLiteFocusedStore) APIKeyStore() APIKeyStore {
+	return s.Store
+}
+
+// BatchLedgerStore returns the focused BatchLedgerStore interface.
+func (s *SQLiteFocusedStore) BatchLedgerStore() BatchLedgerStore {
 	return s.Store
 }
 

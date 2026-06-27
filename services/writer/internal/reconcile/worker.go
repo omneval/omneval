@@ -18,6 +18,7 @@ import (
 
 	"github.com/omneval/omneval/internal/buffer"
 	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/queue"
 	s3pkg "github.com/omneval/omneval/internal/storage/s3"
 )
@@ -26,13 +27,6 @@ import (
 type Store interface {
 	ListObjectsOlderThan(ctx context.Context, prefix string, cutoff time.Time) ([]s3pkg.ObjectInfo, error)
 	DeleteObjectsBatch(ctx context.Context, bucket string, keys []string) error
-}
-
-// Ledger is the Batch Ledger lookup the sweep uses to tell recovered
-// batches apart from ones already committed to the Lake. Satisfied by
-// metadata.Store.
-type Ledger interface {
-	IsBatchCommitted(ctx context.Context, batchID string) (bool, error)
 }
 
 // RefEnqueuer pushes recovered Batch ID references back onto the ingest
@@ -60,7 +54,7 @@ type Result struct {
 // Worker runs the Ingest Buffer reconciliation sweep.
 type Worker struct {
 	store   Store
-	ledger  Ledger
+	ledger  metadata.BatchLedgerStore
 	refs    RefEnqueuer
 	metrics Metrics
 	cfg     *config.ReconciliationConfig
@@ -71,7 +65,7 @@ type Worker struct {
 
 // New creates a reconciliation Worker. Returns nil if reconciliation is
 // disabled in cfg. metrics may be nil.
-func New(store Store, ledger Ledger, refs RefEnqueuer, metrics Metrics, cfg *config.ReconciliationConfig) *Worker {
+func New(store Store, ledger metadata.BatchLedgerStore, refs RefEnqueuer, metrics Metrics, cfg *config.ReconciliationConfig) *Worker {
 	if !cfg.Enabled {
 		return nil
 	}

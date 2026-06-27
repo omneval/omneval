@@ -858,6 +858,19 @@ func (s *Store) APIKeyStore() APIKeyStore {
 	return s
 }
 
+// BatchLedgerStore is the domain interface for batch commit dedupe operations,
+// defined locally to avoid circular imports.
+type BatchLedgerStore interface {
+	MarkBatchCommitted(ctx context.Context, batchID string, committedAt time.Time) error
+	IsBatchCommitted(ctx context.Context, batchID string) (bool, error)
+}
+
+// BatchLedgerStore returns a focused BatchLedgerStore interface for callers
+// that only need batch commit dedupe operations.
+func (s *Store) BatchLedgerStore() BatchLedgerStore {
+	return s
+}
+
 // ---- Eval Rules ----
 
 func (s *Store) CreateEvalRule(ctx context.Context, rule *domain.EvalRule) error {

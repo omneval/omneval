@@ -66,4 +66,9 @@ type Store interface {
 	// only the API key methods, enabling callers to depend on the
 	// narrower type rather than the god interface.
 	APIKeyStore() APIKeyStore
+
+	// BatchLedgerStore returns a focused BatchLedgerStore interface that
+	// exposes only the batch commit dedupe methods, enabling callers to
+	// depend on the narrower type rather than the god interface.
+	BatchLedgerStore() BatchLedgerStore
 }
