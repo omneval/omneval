@@ -1,6 +1,7 @@
 package normalizer_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -945,6 +946,142 @@ func TestNormalizeOTLP_ConversationIDOmnevalFallback(t *testing.T) {
 	}
 	if spans[0].ConversationID != "conv-omneval-123" {
 		t.Errorf("conversation_id: got %q, want %q", spans[0].ConversationID, "conv-omneval-123")
+	}
+}
+
+// TestNormalizeOTLP_SpanEventsCaptured verifies that when an OTLP span carries
+// SpanEvents with gen_ai.prompt.message and gen_ai.completion.message attributes,
+// the normalizer extracts their role/content pairs into the domain span's Input
+// and Output fields.
+func TestNormalizeOTLP_SpanEventsCaptured(t *testing.T) {
+	rss := []*tracev1.ResourceSpans{
+		{
+			ScopeSpans: []*tracev1.ScopeSpans{
+				{
+					Spans: []*tracev1.Span{
+						{
+							TraceId:   []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+							SpanId:    []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+							Name:      "litellm.completion",
+							StartTimeUnixNano: uint64(time.Now().UnixNano()),
+							EndTimeUnixNano:   uint64(time.Now().UnixNano()),
+							// No gen_ai.prompt / gen_ai.completion numbered attributes.
+							// Content lives ONLY in SpanEvents.
+							Events: []*tracev1.Span_Event{
+								{
+									Name:         "gen_ai.prompt.message",
+									TimeUnixNano: uint64(time.Now().Add(-1 * time.Second).UnixNano()),
+									Attributes: []*commonv1.KeyValue{
+										{Key: "gen_ai.prompt.message.role", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "user"}}},
+										{Key: "gen_ai.prompt.message.content", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "What is the weather?"}}},
+									},
+								},
+								{
+									Name:         "gen_ai.completion.message",
+									TimeUnixNano: uint64(time.Now().UnixNano()),
+									Attributes: []*commonv1.KeyValue{
+										{Key: "gen_ai.completion.message.role", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "assistant"}}},
+										{Key: "gen_ai.completion.message.content", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "The weather is sunny."}}},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	n := normalizer.New()
+	spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
+	if err != nil {
+		t.Fatalf("NormalizeOTLP error: %v", err)
+	}
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	// Input should contain the user message from the prompt event.
+	if !strings.Contains(spans[0].Input, `"role":"user"`) || !strings.Contains(spans[0].Input, `"content":"What is the weather?"`) {
+		t.Errorf("input: got %q (expected user message from Span Events)", spans[0].Input)
+	}
+	// Output should contain the assistant message from the completion event.
+	if !strings.Contains(spans[0].Output, `"role":"assistant"`) || !strings.Contains(spans[0].Output, `"content":"The weather is sunny."`) {
+		t.Errorf("output: got %q (expected assistant message from Span Events)", spans[0].Output)
+	}
+}
+
+// TestNormalizeOTLP_AttributesPriorityOverEvents verifies that when both
+// span attributes (e.g. gen_ai.input.messages) and span events carry content,
+// the attribute path wins and the event content is ignored.
+func TestNormalizeOTLP_AttributesPriorityOverEvents(t *testing.T) {
+	rss := []*tracev1.ResourceSpans{
+		{
+			ScopeSpans: []*tracev1.ScopeSpans{
+				{
+					Spans: []*tracev1.Span{
+						{
+							TraceId:   []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+							SpanId:    []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+							Name:      "litellm.completion",
+							StartTimeUnixNano: uint64(time.Now().UnixNano()),
+							EndTimeUnixNano:   uint64(time.Now().UnixNano()),
+							Attributes: []*commonv1.KeyValue{
+								{Key: "gen_ai.input.messages", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{
+									StringValue: `[{"role":"user","content":"Attribute content"}]`,
+								}}},
+								{Key: "gen_ai.output.messages", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{
+									StringValue: `[{"role":"assistant","content":"Attribute output"}]`,
+								}}},
+							},
+							Events: []*tracev1.Span_Event{
+								{
+									Name:         "gen_ai.prompt.message",
+									TimeUnixNano: uint64(time.Now().Add(-1 * time.Second).UnixNano()),
+									Attributes: []*commonv1.KeyValue{
+										{Key: "gen_ai.prompt.message.role", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "user"}}},
+										{Key: "gen_ai.prompt.message.content", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "Event content"}}},
+									},
+								},
+								{
+									Name:         "gen_ai.completion.message",
+									TimeUnixNano: uint64(time.Now().UnixNano()),
+									Attributes: []*commonv1.KeyValue{
+										{Key: "gen_ai.completion.message.role", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "assistant"}}},
+										{Key: "gen_ai.completion.message.content", Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: "Event output"}}},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	n := normalizer.New()
+	spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
+	if err != nil {
+		t.Fatalf("NormalizeOTLP error: %v", err)
+	}
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	// Input should come from attributes, not events.
+	if !strings.Contains(spans[0].Input, "Attribute content") {
+		t.Errorf("input should contain 'Attribute content', got: %q", spans[0].Input)
+	}
+	if strings.Contains(spans[0].Input, "Event content") {
+		t.Errorf("input should NOT contain 'Event content' (attributes should win), got: %q", spans[0].Input)
+	}
+
+	// Output should come from attributes, not events.
+	if !strings.Contains(spans[0].Output, "Attribute output") {
+		t.Errorf("output should contain 'Attribute output', got: %q", spans[0].Output)
+	}
+	if strings.Contains(spans[0].Output, "Event output") {
+		t.Errorf("output should NOT contain 'Event output' (attributes should win), got: %q", spans[0].Output)
 	}
 }
 

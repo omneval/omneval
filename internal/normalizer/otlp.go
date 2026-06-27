@@ -90,6 +90,10 @@ func otlpSpanToRawMap(projectID string, resourceAttrs map[string]any, serviceNam
 	if input == "" {
 		input = extractAttributeString(attrs, "omneval.input")
 	}
+	if input == "" {
+		input = buildMessagesFromEvents(span.GetEvents(),
+			"gen_ai.prompt.message", "gen_ai.prompt.message.role", "gen_ai.prompt.message.content")
+	}
 
 	output := buildMessageArray(attrs, "gen_ai.completion")
 	if output == "" {
@@ -103,6 +107,10 @@ func otlpSpanToRawMap(projectID string, resourceAttrs map[string]any, serviceNam
 	}
 	if output == "" {
 		output = extractAttributeString(attrs, "omneval.output")
+	}
+	if output == "" {
+		output = buildMessagesFromEvents(span.GetEvents(),
+			"gen_ai.completion.message", "gen_ai.completion.message.role", "gen_ai.completion.message.content")
 	}
 
 	kind := deriveKind(attrs, span.GetName())
@@ -546,4 +554,34 @@ func resolvePromptInfo(attrs map[string]any) (string, int64) {
 		promptVersion = extractAttributeInt64(attrs, "omneval.prompt.version")
 	}
 	return promptName, promptVersion
+}
+
+// buildMessagesFromEvents scans OTLP span events for events matching the
+// given name and collects their role/content attributes into a JSON-serialized
+// message array.  Events are appended in the order they appear in the span.
+func buildMessagesFromEvents(events []*tracev1.Span_Event, eventPattern, roleKey, contentKey string) string {
+	var messages []map[string]any
+	for _, evt := range events {
+		if evt.GetName() != eventPattern {
+			continue
+		}
+		attrs := spanAttrMap(evt.GetAttributes())
+		role := extractAttributeString(attrs, roleKey)
+		content := extractAttributeString(attrs, contentKey)
+		if role == "" && content == "" {
+			continue
+		}
+		messages = append(messages, map[string]any{
+			"role":    role,
+			"content": content,
+		})
+	}
+	if len(messages) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(messages)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
