@@ -179,3 +179,13 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 
 	return deps, nil
 }
+
+// openMetadataStore opens the configured metadata store via the shared
+// metadata.Open factory.
+func openMetadataStore(cfg *config.Config) (metadata.Store, error) {
+	dsn := cfg.Database.DSN
+	if dsn == "" && (cfg.Database.Driver == "" || cfg.Database.Driver == "sqlite") {
+		dsn = "omneval_meta.db"
+	}
+	return metadata.Open(cfg.Database.Driver, dsn)
+}

@@ -3,15 +3,11 @@ package server
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
 	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/harness"
 	_ "github.com/omneval/omneval/internal/duckdbfix"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/services/query/internal/handler"
@@ -29,88 +25,41 @@ func IsPublicAPIPath(path string) bool {
 // metadata store, bootstraps the admin user, and serves auth, span,
 // analytics, prompt, and metrics endpoints.
 func Run() error {
-	// Load config.
-	cfgPath := ""
-	if p := os.Getenv("OMNEVAL_CONFIG"); p != "" {
-		cfgPath = p
-	}
-	cfg, err := config.Load(cfgPath)
+	h, err := harness.New("")
 	if err != nil {
-		return fmt.Errorf("query: load config: %w", err)
+		return fmt.Errorf("create harness: %w", err)
 	}
 
-	deps, err := WireDeps(cfg)
-	if err != nil {
-		return err
-	}
-	return RunWired(deps)
-}
+	return h.Run(context.Background(), func(ctx *harness.HarnessContext) (string, http.Handler, harness.ShutdownFunc, harness.ShutdownFunc, error) {
+		cfg := ctx.Cfg
 
-// RunWired runs the Query API with pre-constructed dependencies: it wires
-// routes, starts the snapshot poller, handles signals, and shuts down
-// gracefully.
-func RunWired(deps *WiredDeps) error {
-	cfg := deps.Cfg
-	defer deps.Store.Close()
-	defer deps.Lake.Close()
-	defer deps.ProbeLake.Close()
-
-	router := buildRouter(deps)
-
-	// Combine the main router with probe routes.
-	combined := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
-			deps.Prober.Router().ServeHTTP(w, r)
-		} else {
-			router.ServeHTTP(w, r)
+		deps, err := WireDeps(cfg)
+		if err != nil {
+			return "", nil, nil, nil, fmt.Errorf("wire deps: %w", err)
 		}
+
+		router := buildRouter(deps)
+
+		// Pre-HTTP-shutdown: tell the Lake first so any reconnect() already
+		// in flight (or queued behind one) aborts immediately instead of
+		// running its own ~10s budget, which otherwise stacks across queued
+		// callers and can exceed the shutdown drain timeout below (production
+		// incident: query pod logged "shutting down..." and then kept retrying
+		// "reconnected to quack server" until kubelet's SIGKILL, because
+		// reconnect() ignored shutdown and ran to completion regardless).
+		preShutdown := func() {
+			deps.Lake.Shutdown()
+		}
+
+		// Teardown called after HTTP server has drained.
+		teardown := func() {
+			deps.Store.Close()
+			deps.Lake.Close()
+			deps.ProbeLake.Close()
+		}
+
+		return ctx.Cfg.Query.Addr, router, preShutdown, teardown, nil
 	})
-
-	// Graceful shutdown on SIGINT/SIGTERM.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	// Start the dedicated Prometheus metrics server on cfg.Metrics.Addr (:9090).
-	if err := StartMetricsServer(ctx, cfg.Metrics.Addr); err != nil {
-		return fmt.Errorf("query: start metrics server: %w", err)
-	}
-
-	// Parse query listen address.
-	addr := cfg.Query.Addr
-	if addr == "" {
-		addr = ":8002"
-	}
-	srv := &http.Server{Addr: addr, Handler: combined}
-	go func() {
-		slog.Info("query: listening", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("query: server error", "error", err)
-		}
-	}()
-
-	<-ctx.Done()
-	slog.Info("query: shutting down...")
-
-	// Tell the Lake first: any reconnect() already in flight (or queued
-	// behind one) aborts immediately instead of running its own ~10s budget,
-	// which otherwise stacks across queued callers and can exceed the
-	// shutdown drain timeout below (production incident: query pod logged
-	// "shutting down..." and then kept retrying "reconnected to quack
-	// server" until kubelet's SIGKILL, because reconnect() ignored shutdown
-	// and ran to completion regardless).
-	deps.Lake.Shutdown()
-
-	// Graceful shutdown with a drain timeout kept below the pod's default
-	// terminationGracePeriodSeconds (30s): with no margin, any slow drain
-	// races kubelet's SIGKILL instead of returning cleanly first.
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer shutdownCancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("query: shutdown: %w", err)
-	}
-
-	slog.Info("query: stopped")
-	return nil
 }
 
 // buildRouter wires every route against the handlers in deps and wraps them
