@@ -17,8 +17,7 @@ import (
 	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/omneval/omneval/internal/domain"
 	_ "github.com/omneval/omneval/internal/duckdbfix"
-	"github.com/omneval/omneval/internal/lake"
-	"github.com/omneval/omneval/internal/lake/lakeservertest"
+	"github.com/omneval/omneval/internal/laketest"
 	"github.com/omneval/omneval/services/query/internal/auth"
 	"github.com/omneval/omneval/services/query/internal/cursor"
 	"github.com/omneval/omneval/services/query/internal/query"
@@ -2396,13 +2395,7 @@ func TestHandleTraceDetail_DedupeOnLake(t *testing.T) {
 	ctx := context.Background()
 
 	// Set up a real Lake with partitioned spans table.
-	cfg, _ := lakeservertest.NewLocal(t)
-
-	lk, err := lake.Open(ctx, cfg)
-	if err != nil {
-		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
-	}
-	defer lk.Close()
+	lk := laketest.NewLocal(t)
 
 	// Insert the same span twice (simulating Batch Ledger residual duplicates).
 	baseTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
@@ -2462,14 +2455,7 @@ func TestHandleTraceDetail_DedupeOnLake(t *testing.T) {
 // executed query (not just the SQL string).
 func TestHandleTraceDetail_LimitedSpans(t *testing.T) {
 	ctx := context.Background()
-
-	cfg, _ := lakeservertest.NewLocal(t)
-
-	lk, err := lake.Open(ctx, cfg)
-	if err != nil {
-		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
-	}
-	defer lk.Close()
+	lk := laketest.NewLocal(t)
 
 	baseTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	numSpans := 150
@@ -2534,14 +2520,7 @@ func TestHandleTraceDetail_LimitedSpans(t *testing.T) {
 // end-to-end against an in-process Lake, not just the SQL string.
 func TestLakeSQL_Integration(t *testing.T) {
 	ctx := context.Background()
-
-	cfg, _ := lakeservertest.NewLocal(t)
-
-	lk, err := lake.Open(ctx, cfg)
-	if err != nil {
-		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
-	}
-	defer lk.Close()
+	lk := laketest.NewLocal(t)
 
 	// Insert two traces with known span counts and costs.
 	// Trace "A": 2 spans, cost 0.05 + 0.10 = 0.15

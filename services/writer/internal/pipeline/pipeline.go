@@ -11,6 +11,7 @@ import (
 
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/idgen"
+	"github.com/omneval/omneval/internal/lakeclient"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/pricing"
 	"github.com/omneval/omneval/internal/queue"
@@ -21,12 +22,6 @@ const (
 	batchFlushInterval = 5 * time.Second
 	batchMaxBytes      = 16 * 1024 * 1024
 )
-
-// SpanLakeWriter commits span batches to the Lake (ADR-0004). Implemented
-// by *lake.Lake; an interface so tests can fake lake failures.
-type SpanLakeWriter interface {
-	InsertSpans(ctx context.Context, spans []*domain.Span) error
-}
 
 // BatchFetcher reads staged batches from the Ingest Buffer (ADR-0004).
 // Implemented by *buffer.Buffer.
@@ -50,7 +45,7 @@ type Pipeline struct {
 	batchLedger   metadata.BatchLedgerStore
 	evalQ         queue.EvalQueue
 	metrics       *metrics.WriterMetrics
-	lake          SpanLakeWriter
+	lake          lakeclient.Client
 	// processor owns the S3-first ingest loop. Set via WithBuffer.
 	processor *BatchProcessor
 	// writeErr, if set, causes commitLake to return this error (test only).
@@ -79,7 +74,7 @@ func New(
 // WithLake sets the Lake write path. If a BatchProcessor is already
 // configured, the change is propagated so tests can swap the lake (e.g.
 // to a failingLake) after wiring.
-func (p *Pipeline) WithLake(l SpanLakeWriter) *Pipeline {
+func (p *Pipeline) WithLake(l lakeclient.Client) *Pipeline {
 	p.lake = l
 	if p.processor != nil {
 		p.processor.lake = l

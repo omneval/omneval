@@ -9,6 +9,7 @@ import (
 	"github.com/omneval/omneval/internal/buffer"
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/idgen"
+	"github.com/omneval/omneval/internal/lakeclient"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/pricing"
 	"github.com/omneval/omneval/internal/queue"
@@ -22,7 +23,7 @@ type BatchProcessor struct {
 	reliable    queue.ReliableIngestQueue
 	fetcher     BatchFetcher
 	ledger      metadata.BatchLedgerStore
-	lake        SpanLakeWriter
+	lake        lakeclient.Client
 	pricing     *pricing.Table
 	evalRuleStore metadata.EvalRuleStore
 	evalQ       queue.EvalQueue
@@ -37,7 +38,7 @@ func NewBatchProcessor(
 	reliable queue.ReliableIngestQueue,
 	fetcher BatchFetcher,
 	ledger metadata.BatchLedgerStore,
-	lake SpanLakeWriter,
+	lake lakeclient.Client,
 	pricing *pricing.Table,
 	evalRuleStore metadata.EvalRuleStore,
 	evalQ queue.EvalQueue,

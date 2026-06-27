@@ -9,8 +9,7 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
-	"github.com/omneval/omneval/internal/lake"
-	"github.com/omneval/omneval/internal/lake/lakeservertest"
+	"github.com/omneval/omneval/internal/laketest"
 	"github.com/omneval/omneval/services/query/internal/cursor"
 )
 
@@ -1121,13 +1120,7 @@ func execLakeSQL(ctx context.Context, db *sql.DB, q *SpanQuery) ([]*domain.Span,
 // legacy path: every span appears exactly once, newest first.
 func TestLakeSQL_CursorPagination_Integration(t *testing.T) {
 	ctx := context.Background()
-
-	cfg, _ := lakeservertest.NewLocal(t)
-	lk, err := lake.Open(ctx, cfg)
-	if err != nil {
-		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
-	}
-	defer lk.Close()
+	lk := laketest.NewLocal(t)
 
 	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	var spans []*domain.Span
@@ -1188,13 +1181,7 @@ func TestLakeSQL_CursorPagination_Integration(t *testing.T) {
 // row per span (issue #136).
 func TestLakeSQL_OneRowPerTrace(t *testing.T) {
 	ctx := context.Background()
-
-	cfg, _ := lakeservertest.NewLocal(t)
-	lk, err := lake.Open(ctx, cfg)
-	if err != nil {
-		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
-	}
-	defer lk.Close()
+	lk := laketest.NewLocal(t)
 
 	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 
@@ -1392,13 +1379,7 @@ func TestMainSQL_RollupScopedToLimit(t *testing.T) {
 // results.
 func TestLakeSQL_RollupExecution(t *testing.T) {
 	ctx := context.Background()
-
-	cfg, _ := lakeservertest.NewLocal(t)
-	lk, err := lake.Open(ctx, cfg)
-	if err != nil {
-		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
-	}
-	defer lk.Close()
+	lk := laketest.NewLocal(t)
 
 	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 

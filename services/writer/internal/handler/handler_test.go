@@ -10,8 +10,7 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
-	"github.com/omneval/omneval/internal/lake"
-	"github.com/omneval/omneval/internal/lake/lakeservertest"
+	"github.com/omneval/omneval/internal/laketest"
 )
 
 const scoreBody = `{
@@ -38,13 +37,7 @@ func postScore(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
 // lake.spans (ADR-0002).
 func TestScoreWriteToLake(t *testing.T) {
 	ctx := context.Background()
-
-	cfg, _ := lakeservertest.NewLocal(t)
-	lk, err := lake.Open(ctx, cfg)
-	if err != nil {
-		t.Fatalf("open lake: %v", err)
-	}
-	defer lk.Close()
+	lk := laketest.NewLocal(t)
 
 	// The span the score annotates, already in the Lake.
 	spanStart := time.Date(2026, 6, 4, 11, 0, 0, 0, time.UTC)
@@ -61,6 +54,7 @@ func TestScoreWriteToLake(t *testing.T) {
 
 	var gotSpanStart time.Time
 	var gotValue float64
+	var err error
 	err = lk.DB().QueryRowContext(ctx,
 		"SELECT span_start_time, value FROM lake.scores WHERE score_id = 'score-1'",
 	).Scan(&gotSpanStart, &gotValue)
@@ -85,13 +79,7 @@ func TestScoreWriteToLake(t *testing.T) {
 // cutover validation.
 func TestScoreWithoutScoreID_GeneratesOne(t *testing.T) {
 	ctx := context.Background()
-
-	cfg, _ := lakeservertest.NewLocal(t)
-	lk, err := lake.Open(ctx, cfg)
-	if err != nil {
-		t.Fatalf("open lake: %v", err)
-	}
-	defer lk.Close()
+	lk := laketest.NewLocal(t)
 
 	if err := lk.InsertSpans(ctx, []*domain.Span{{
 		SpanID: "s2", TraceID: "t2", ProjectID: "p1", StartTime: time.Now(),
@@ -115,6 +103,7 @@ func TestScoreWithoutScoreID_GeneratesOne(t *testing.T) {
 	}
 
 	var gotScoreID string
+	var err error
 	err = lk.DB().QueryRowContext(ctx,
 		"SELECT score_id FROM lake.scores WHERE trace_id = 't2' AND span_id = 's2'",
 	).Scan(&gotScoreID)
@@ -129,6 +118,26 @@ func TestScoreWithoutScoreID_GeneratesOne(t *testing.T) {
 type failingScoreLake struct{}
 
 func (failingScoreLake) InsertScores(context.Context, []*domain.Score) error {
+	return errors.New("lake unavailable")
+}
+
+func (failingScoreLake) InsertSpans(context.Context, []*domain.Span) error {
+	return errors.New("lake unavailable")
+}
+
+func (failingScoreLake) SpanStartTime(context.Context, string, string) (time.Time, error) {
+	return time.Time{}, errors.New("lake unavailable")
+}
+
+func (failingScoreLake) Ping(context.Context) error {
+	return errors.New("lake unavailable")
+}
+
+func (failingScoreLake) DeleteProject(context.Context, string) error {
+	return errors.New("lake unavailable")
+}
+
+func (failingScoreLake) FlushInlinedData(context.Context) error {
 	return errors.New("lake unavailable")
 }
 

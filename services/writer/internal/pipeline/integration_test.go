@@ -15,7 +15,7 @@ import (
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/handlers"
 	"github.com/omneval/omneval/internal/lake"
-	"github.com/omneval/omneval/internal/lake/lakeservertest"
+	"github.com/omneval/omneval/internal/laketest"
 	qredis "github.com/omneval/omneval/internal/queue/redis"
 	"github.com/omneval/omneval/services/writer/internal/pipeline"
 	redisgo "github.com/redis/go-redis/v9"
@@ -32,13 +32,7 @@ import (
 // skipping if the DuckLake extension is unavailable.
 func openTestLake(t *testing.T, ctx context.Context) *lake.Lake {
 	t.Helper()
-	cfg, _ := lakeservertest.NewLocal(t)
-	lk, err := lake.Open(ctx, cfg)
-	if err != nil {
-		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
-	}
-	t.Cleanup(func() { lk.Close() })
-	return lk
+	return laketest.NewLocal(t)
 }
 
 // TestOTLP_EndToEndProto verifies the full pipeline:

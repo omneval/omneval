@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/config"
-	"github.com/omneval/omneval/internal/lake/lakeservertest"
+	"github.com/omneval/omneval/internal/laketest"
 	"github.com/omneval/omneval/internal/metadata/sqlite"
 	_ "modernc.org/sqlite"
 )
@@ -24,7 +24,7 @@ func wireTestConfig(t *testing.T) *config.Config {
 	cfg.Database.Driver = "sqlite"
 	cfg.Database.DSN = filepath.Join(tmp, "meta.db")
 
-	lc, _ := lakeservertest.NewLocal(t)
+	lc := laketest.NewLocalConfig(t)
 	cfg.Quack.Client.URL = "quack://" + lc.QuackAddr
 	cfg.Quack.Client.Token = lc.QuackToken
 	cfg.Quack.Client.DataPath = lc.DataPath

@@ -10,21 +10,13 @@ import (
 
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/lake"
-	"github.com/omneval/omneval/internal/lake/lakeservertest"
+	"github.com/omneval/omneval/internal/laketest"
 )
 
 // openErrTestLake opens an embedded local Lake for the pipeline error
 // tests, skipping if the DuckLake extension is unavailable.
 func openErrTestLake(t *testing.T) *lake.Lake {
-	t.Helper()
-	ctx := context.Background()
-	cfg, _ := lakeservertest.NewLocal(t)
-	lk, err := lake.Open(ctx, cfg)
-	if err != nil {
-		t.Skipf("lake.Open: %v (ducklake extension unavailable)", err)
-	}
-	t.Cleanup(func() { lk.Close() })
-	return lk
+	return laketest.NewLocal(t)
 }
 
 func lakeSpanCountFor(t *testing.T, lk *lake.Lake, projectID string) int {

@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -10,27 +9,15 @@ import (
 
 	"github.com/omneval/omneval/internal/domain"
 	"github.com/omneval/omneval/internal/idgen"
+	"github.com/omneval/omneval/internal/lakeclient"
 	"github.com/omneval/omneval/services/writer/internal/metrics"
 )
-
-// ScoreLakeWriter commits scores to the Lake (ADR-0004). Implemented by
-// *lake.Lake; an interface so tests can fake lake failures.
-type ScoreLakeWriter interface {
-	InsertScores(ctx context.Context, scores []*domain.Score) error
-}
-
-// SpanStartTimeLookup resolves the start_time of the span a score annotates,
-// so the score lands in the correct lake.scores partition (ADR-0002).
-// Implemented by *lake.Lake.
-type SpanStartTimeLookup interface {
-	SpanStartTime(ctx context.Context, traceID, spanID string) (time.Time, error)
-}
 
 // ScoreMux handles POST /internal/v1/scores — the internal-only endpoint
 // called by Eval Workers to write completed scores back to the Lake.
 // Not exposed outside the cluster.
 type ScoreMux struct {
-	lake ScoreLakeWriter
+	lake lakeclient.Client
 }
 
 // ScoreRequest is the JSON body for POST /internal/v1/scores.
@@ -50,7 +37,7 @@ type ScoreRequest struct {
 // New creates a new ScoreMux that handles POST /internal/v1/scores. lake is
 // required (writer.lake.enabled defaults true); a nil lake is treated as a
 // misconfiguration and every request returns 503.
-func New(lake ScoreLakeWriter) http.Handler {
+func New(lake lakeclient.Client) http.Handler {
 	h := &ScoreMux{lake: lake}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /internal/v1/scores", h.HandleScores)
@@ -97,14 +84,12 @@ func (h *ScoreMux) HandleScores(w http.ResponseWriter, r *http.Request) {
 	// The score partitions by its span's start_time (ADR-0002). Look it up
 	// from the Lake; if the span isn't found (or the lookup fails),
 	// InsertScores falls back to score.CreatedAt.
-	if lookup, ok := h.lake.(SpanStartTimeLookup); ok {
-		spanStart, err := lookup.SpanStartTime(r.Context(), score.TraceID, score.SpanID)
-		if err != nil {
-			slog.WarnContext(r.Context(), "span start time lookup failed, falling back to created_at",
-				"score_id", score.ScoreID, "err", err)
-		} else if !spanStart.IsZero() {
-			score.SpanStartTime = spanStart
-		}
+	spanStart, err := h.lake.SpanStartTime(r.Context(), score.TraceID, score.SpanID)
+	if err != nil {
+		slog.WarnContext(r.Context(), "span start time lookup failed, falling back to created_at",
+			"score_id", score.ScoreID, "err", err)
+	} else if !spanStart.IsZero() {
+		score.SpanStartTime = spanStart
 	}
 
 	ctx := r.Context()

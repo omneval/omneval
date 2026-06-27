@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/domain"
-	"github.com/omneval/omneval/internal/lake"
+	"github.com/omneval/omneval/internal/lakeclient"
 	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/queue"
 	"github.com/omneval/omneval/services/query/internal/auth"
@@ -55,7 +55,7 @@ type AdminHandler struct {
 
 	// LakeRW is a read-write Lake attachment used for durable admin deletes
 	// (ADR-0004 / #91). Always set in Lake mode (the only mode now).
-	LakeRW *lake.Lake
+	LakeRW lakeclient.Client
 }
 
 // HandleAdminAPIKeysList handles GET /api/v1/admin/api-keys.
