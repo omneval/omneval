@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -310,73 +309,34 @@ type MetricsConfig struct {
 	DisableProjectLabels bool `mapstructure:"disable_project_labels"`
 }
 
+// AllLoaders returns the complete set of section loaders in a stable order.
+func AllLoaders() []SectionLoader {
+	return []SectionLoader{
+		NewDatabaseLoader(),
+		NewLogLevelLoader(),
+		NewRedisLoader(),
+		NewAuthLoader(),
+		NewIngestLoader(),
+		NewWriterLoader(),
+		NewQueryLoader(),
+		NewEvalLoader(),
+		NewPricingLoader(),
+		NewMetricsLoader(),
+		NewQuackServerLoader(),
+		NewQuackClientLoader(),
+		NewStorageLoader(),
+	}
+}
+
 // Load reads omneval.yaml and applies environment variable overrides.
 // Environment variables use the OMNEVAL_ prefix with _ as the key separator.
 func Load(path string) (*Config, error) {
 	v := viper.New()
 
-	// database
-	v.SetDefault("database.driver", "")
-	v.SetDefault("database.dsn", "")
-	// redis
-	v.SetDefault("redis.addr", "localhost:6379")
-	v.SetDefault("redis.password", "")
-	v.SetDefault("redis.db", 0)
-	// storage
-	v.SetDefault("storage.endpoint", "")
-	v.SetDefault("storage.bucket", "")
-	v.SetDefault("storage.region", "")
-	v.SetDefault("storage.access_key", "")
-	v.SetDefault("storage.secret_key", "")
-	// auth
-	v.SetDefault("auth.session_ttl", "168h")
-	v.SetDefault("auth.secure_cookie", false)
-	v.SetDefault("auth.admin_email", "")
-	v.SetDefault("auth.admin_password", "")
-	v.SetDefault("log_level", "info")
-	// ingest
-	v.SetDefault("ingest.addr", ":8000")
-	v.SetDefault("ingest.log_system_prompt", true)
-	v.SetDefault("ingest.cors_allowed_origins", []string{"*"})
-	v.SetDefault("ingest.buffer.enabled", false)
-	// writer
-	v.SetDefault("writer.addr", ":8001")
-	// writer reconciliation (ingest buffer sweep, #88)
-	v.SetDefault("writer.reconciliation.enabled", false)
-	v.SetDefault("writer.reconciliation.interval_minutes", 5)
-	v.SetDefault("writer.reconciliation.grace_period_minutes", 10)
-	v.SetDefault("writer.reconciliation.retention_hours", 168)
-	// query
-	v.SetDefault("query.addr", ":8002")
-	v.SetDefault("query.lake.enabled", true)
-	v.SetDefault("query.playground_llm_base_url", "")
-	v.SetDefault("query.playground_llm_api_key", "")
-	// eval
-	v.SetDefault("eval.addr", ":8003")
-	v.SetDefault("eval.concurrency", 4)
-	v.SetDefault("eval.llm_base_url", "")
-	v.SetDefault("eval.llm_model", "gpt-4")
-	v.SetDefault("eval.llm_api_key", "")
-	v.SetDefault("eval.judge_timeout", 90*time.Second)
-	v.SetDefault("eval.retry_count", 3)
-	// metrics
-	v.SetDefault("metrics.addr", ":9090")
-	v.SetDefault("metrics.disable_project_labels", false)
-	// quack server (services/quack only)
-	v.SetDefault("quack.server.listen_addr", ":9494")
-	v.SetDefault("quack.server.token", "")
-	v.SetDefault("quack.server.catalog_driver", "")
-	v.SetDefault("quack.server.catalog_dsn", "")
-	v.SetDefault("quack.server.data_path", "")
-	v.SetDefault("quack.server.retention.enabled", false)
-	v.SetDefault("quack.server.retention.max_age_days", 0)
-	// quack client (Writer, Query API, backfill tool, demo profile)
-	v.SetDefault("quack.client.url", "localhost:9494")
-	v.SetDefault("quack.client.token", "")
-	v.SetDefault("quack.client.data_path", "")
-	v.SetDefault("quack.client.max_open_conns", 0)
-	v.SetDefault("quack.client.memory_limit", "")
-	v.SetDefault("writer.lake.enabled", true)
+	// Phase 1: each section registers its defaults on viper.
+	for _, loader := range AllLoaders() {
+		loader.SetDefaults(v)
+	}
 
 	if path != "" {
 		v.SetConfigFile(path)
@@ -385,70 +345,19 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	var cfg Config
-	if err := v.Unmarshal(&cfg); err != nil {
+	cfg := &Config{}
+	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("unmarshalling config: %w", err)
 	}
 
-	// Apply OMNEVAL_* environment variable overrides directly.
+	// Phase 2: each section applies its own environment variable overrides.
 	// Viper's AutomaticEnv does not reliably propagate env vars into nested
 	// struct fields via Unmarshal — os.Getenv is the only guaranteed path.
-	envString(&cfg.LogLevel, "OMNEVAL_LOG_LEVEL")
-	envString(&cfg.Database.Driver, "OMNEVAL_DATABASE_DRIVER")
-	envString(&cfg.Database.DSN, "OMNEVAL_DATABASE_DSN")
-	envString(&cfg.Redis.Addr, "OMNEVAL_REDIS_ADDR")
-	envString(&cfg.Redis.Password, "OMNEVAL_REDIS_PASSWORD")
-	envInt(&cfg.Redis.DB, "OMNEVAL_REDIS_DB")
-	envString(&cfg.Storage.Endpoint, "OMNEVAL_STORAGE_ENDPOINT")
-	envString(&cfg.Storage.Bucket, "OMNEVAL_STORAGE_BUCKET")
-	envString(&cfg.Storage.Region, "OMNEVAL_STORAGE_REGION")
-	envString(&cfg.Storage.AccessKey, "OMNEVAL_STORAGE_ACCESS_KEY")
-	envString(&cfg.Storage.SecretKey, "OMNEVAL_STORAGE_SECRET_KEY")
-	envString(&cfg.Auth.SessionTTL, "OMNEVAL_AUTH_SESSION_TTL")
-	envBool(&cfg.Auth.SecureCookie, "OMNEVAL_AUTH_SECURE_COOKIE")
-	envString(&cfg.Auth.AdminEmail, "OMNEVAL_AUTH_ADMIN_EMAIL")
-	envString(&cfg.Auth.AdminPassword, "OMNEVAL_AUTH_ADMIN_PASSWORD")
-	envString(&cfg.Ingest.Addr, "OMNEVAL_INGEST_ADDR")
-	envBool(&cfg.Ingest.LogSystemPrompt, "OMNEVAL_INGEST_LOG_SYSTEM_PROMPT")
-	envBool(&cfg.Ingest.Buffer.Enabled, "OMNEVAL_INGEST_BUFFER_ENABLED")
-	if v := os.Getenv("OMNEVAL_INGEST_CORS_ALLOWED_ORIGINS"); v != "" {
-		cfg.Ingest.CORSAllowedOrigins = strings.Split(v, ",")
+	for _, loader := range AllLoaders() {
+		loader.ApplyEnvOverrides(cfg)
 	}
-	envString(&cfg.Writer.Addr, "OMNEVAL_WRITER_ADDR")
-	envBool(&cfg.Writer.Reconciliation.Enabled, "OMNEVAL_WRITER_RECONCILIATION_ENABLED")
-	envInt(&cfg.Writer.Reconciliation.IntervalMinutes, "OMNEVAL_WRITER_RECONCILIATION_INTERVAL_MINUTES")
-	envInt(&cfg.Writer.Reconciliation.GracePeriodMinutes, "OMNEVAL_WRITER_RECONCILIATION_GRACE_PERIOD_MINUTES")
-	envInt(&cfg.Writer.Reconciliation.RetentionHours, "OMNEVAL_WRITER_RECONCILIATION_RETENTION_HOURS")
-	envString(&cfg.Query.Addr, "OMNEVAL_QUERY_ADDR")
-	envBool(&cfg.Query.Lake.Enabled, "OMNEVAL_QUERY_LAKE_ENABLED")
-	envString(&cfg.Query.PlaygroundLLMBaseURL, "OMNEVAL_QUERY_PLAYGROUND_LLM_BASE_URL")
-	envString(&cfg.Query.PlaygroundLLMAPIKey, "OMNEVAL_QUERY_PLAYGROUND_LLM_API_KEY")
-	envString(&cfg.Query.JudgeLLMBaseURL, "OMNEVAL_QUERY_JUDGE_LLM_BASE_URL")
-	envString(&cfg.Query.JudgeLLMAPIKey, "OMNEVAL_QUERY_JUDGE_LLM_API_KEY")
-	envString(&cfg.Eval.Addr, "OMNEVAL_EVAL_ADDR")
-	envInt(&cfg.Eval.Concurrency, "OMNEVAL_EVAL_CONCURRENCY")
-	envString(&cfg.Eval.LLMBaseURL, "OMNEVAL_EVAL_LLM_BASE_URL")
-	envString(&cfg.Eval.LLMModel, "OMNEVAL_EVAL_LLM_MODEL")
-	envString(&cfg.Eval.LLMAPIKey, "OMNEVAL_EVAL_LLM_API_KEY")
-	envInt(&cfg.Eval.RetryCount, "OMNEVAL_EVAL_RETRY_COUNT")
-	envString(&cfg.Metrics.Addr, "OMNEVAL_METRICS_ADDR")
-	envBool(&cfg.Metrics.DisableProjectLabels, "OMNEVAL_METRICS_DISABLE_PROJECT_LABELS")
-	envString(&cfg.Quack.Server.ListenAddr, "OMNEVAL_QUACK_SERVER_LISTEN_ADDR")
-	envString(&cfg.Quack.Server.Token, "OMNEVAL_QUACK_SERVER_TOKEN")
-	envString(&cfg.Quack.Server.CatalogDriver, "OMNEVAL_QUACK_SERVER_CATALOG_DRIVER")
-	envString(&cfg.Quack.Server.CatalogDSN, "OMNEVAL_QUACK_SERVER_CATALOG_DSN")
-	envString(&cfg.Quack.Server.DataPath, "OMNEVAL_QUACK_SERVER_DATA_PATH")
-	envString(&cfg.Quack.Server.MemoryLimit, "OMNEVAL_QUACK_SERVER_MEMORY_LIMIT")
-	envInt(&cfg.Quack.Server.Threads, "OMNEVAL_QUACK_SERVER_THREADS")
-	envString(&cfg.Quack.Client.URL, "OMNEVAL_QUACK_CLIENT_URL")
-	envString(&cfg.Quack.Client.Token, "OMNEVAL_QUACK_CLIENT_TOKEN")
-	envString(&cfg.Quack.Client.DataPath, "OMNEVAL_QUACK_CLIENT_DATA_PATH")
-	envInt(&cfg.Quack.Client.MaxOpenConns, "OMNEVAL_QUACK_CLIENT_MAX_OPEN_CONNS")
-	envString(&cfg.Quack.Client.MemoryLimit, "OMNEVAL_QUACK_CLIENT_MEMORY_LIMIT")
-	envInt(&cfg.Quack.Client.Threads, "OMNEVAL_QUACK_CLIENT_THREADS")
-	envBool(&cfg.Writer.Lake.Enabled, "OMNEVAL_WRITER_LAKE_ENABLED")
 
-	return &cfg, nil
+	return cfg, nil
 }
 
 func envString(dst *string, key string) {

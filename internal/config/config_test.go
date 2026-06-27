@@ -222,4 +222,3 @@ log_level: debug
 		t.Errorf("log_level: got %q, want %q", cfg.LogLevel, "debug")
 	}
 }
-
