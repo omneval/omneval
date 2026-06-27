@@ -22,6 +22,7 @@ import (
 	"github.com/omneval/omneval/services/query/internal/cursor"
 	"github.com/omneval/omneval/services/query/internal/query"
 	"github.com/omneval/omneval/services/query/internal/querybuild"
+	"github.com/omneval/omneval/services/query/internal/spansegment"
 )
 
 const spansTableDDL = `
@@ -75,7 +76,7 @@ func TestHandleSpansQuery_AuthRequired(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{},
 	}
 
@@ -90,7 +91,7 @@ func TestHandleSpansQuery_MissingBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", nil)
 	w := httptest.NewRecorder()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -105,7 +106,7 @@ func TestHandleSpansQuery_MethodNotAllowed(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/spans/query", nil)
 	w := httptest.NewRecorder()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -125,7 +126,7 @@ func TestHandleSpansQuery_InvalidCursor(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
 	w := httptest.NewRecorder()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		QueryBuilder: &querybuild.QueryBuilder{},
 	}
@@ -171,7 +172,7 @@ func TestHandleSpansQuery_FieldDecodingErrors(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
 			w := httptest.NewRecorder()
 
-			h := &SpanHandler{
+			h := &spansegment.SpanHandler{
 				SessionStore: &FakeSessionStore{projectID: "test-proj"},
 			}
 
@@ -262,7 +263,7 @@ func TestHandleSpansQuery_WithDatabase(t *testing.T) {
 	}
 
 	// Create handler with real DB and QueryBuilder.
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:         db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
@@ -346,7 +347,7 @@ func TestHandleSpansQuery_StatusCodeFilter(t *testing.T) {
 	insert("span-unset", "trace-unset", "UNSET")
 	insert("span-null", "trace-null", nil)
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:         db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
@@ -466,7 +467,7 @@ func TestHandleSpansQuery_NoTimeRange_DefaultsTo30Days(t *testing.T) {
 		t.Fatalf("insert old span: %v", err)
 	}
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:         db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
@@ -545,7 +546,7 @@ func TestHandleAnalyticsSpans_NoTimeRange_DefaultsTo30Days(t *testing.T) {
 		t.Fatalf("insert old span: %v", err)
 	}
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
@@ -597,7 +598,7 @@ func TestHandleAnalyticsSpans_FromAfterTo_Returns400(t *testing.T) {
 	}
 	defer db.Close()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		QueryBuilder:   &querybuild.QueryBuilder{Lake: db},
@@ -629,7 +630,7 @@ func TestHandleAnalyticsSpans_FromAfterTo_Returns400(t *testing.T) {
 
 // serveTraceDetail is a test helper that routes a request through ServeMux
 // so that path parameters are properly resolved.
-func serveTraceDetail(h *SpanHandler, method, url string, body io.Reader) *httptest.ResponseRecorder {
+func serveTraceDetail(h *spansegment.SpanHandler, method, url string, body io.Reader) *httptest.ResponseRecorder {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/traces/{traceId}", h.HandleTraceDetail)
 	w := httptest.NewRecorder()
@@ -640,7 +641,7 @@ func serveTraceDetail(h *SpanHandler, method, url string, body io.Reader) *httpt
 
 func TestHandleTraceDetail_MissingTraceID(t *testing.T) {
 	// When path doesn't match /api/v1/traces/{traceId}, ServeMux returns 404.
-	w := serveTraceDetail(&SpanHandler{
+	w := serveTraceDetail(&spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}, http.MethodGet, "/api/v1/traces/", nil)
 
@@ -650,7 +651,7 @@ func TestHandleTraceDetail_MissingTraceID(t *testing.T) {
 }
 
 func TestHandleTraceDetail_MethodNotAllowed(t *testing.T) {
-	w := serveTraceDetail(&SpanHandler{
+	w := serveTraceDetail(&spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}, http.MethodPost, "/api/v1/traces/abc123", strings.NewReader(`{}`))
 
@@ -661,7 +662,7 @@ func TestHandleTraceDetail_MethodNotAllowed(t *testing.T) {
 
 // callHandlerDirect invokes the handler directly (bypassing ServeMux)
 // so we can test the handler's own error paths (method, missing ID, etc.).
-func callHandlerDirect(h *SpanHandler, method, url string, body io.Reader) *httptest.ResponseRecorder {
+func callHandlerDirect(h *spansegment.SpanHandler, method, url string, body io.Reader) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(method, url, body)
 	h.HandleTraceDetail(w, req)
@@ -670,7 +671,7 @@ func callHandlerDirect(h *SpanHandler, method, url string, body io.Reader) *http
 
 func TestHandleTraceDetail_HandlerReturnsJSON(t *testing.T) {
 	// Test that the handler itself (not ServeMux) returns JSON for error cases.
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -725,7 +726,7 @@ func TestHandleTraceDetail_NotFound(t *testing.T) {
 		t.Fatalf("create table: %v", err)
 	}
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -778,7 +779,7 @@ func TestHandleTraceDetail_SingleSpan(t *testing.T) {
 		t.Fatalf("insert span: %v", err)
 	}
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -850,7 +851,7 @@ func TestHandleTraceDetail_MultiLevelTree(t *testing.T) {
 		t.Fatalf("insert grandchild: %v", err)
 	}
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -938,7 +939,7 @@ func TestHandleTraceDetail_TokenRollup(t *testing.T) {
 		t.Fatalf("insert llm span 2: %v", err)
 	}
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:         db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -1014,7 +1015,7 @@ func TestHandleTraceDetail_SiblingChildren(t *testing.T) {
 		t.Fatalf("insert child-b: %v", err)
 	}
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -1083,7 +1084,7 @@ func TestHandleTraceDetail_NoParentFallback(t *testing.T) {
 		t.Fatalf("insert span-b: %v", err)
 	}
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -1146,7 +1147,7 @@ func TestHandleTraceDetail_ScoresAttached(t *testing.T) {
 		t.Fatalf("insert score: %v", err)
 	}
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -1223,7 +1224,7 @@ func TestHandleTraceDetail_ProjectIsolation(t *testing.T) {
 	}
 
 	// Query as proj-a — should only see proj-a's span.
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "proj-a"},
 	}
@@ -1286,7 +1287,7 @@ func TestHandleTraceDetail_ExplicitProjectID(t *testing.T) {
 
 	// The user has both proj-a and proj-b (e.g. multi-project org).
 	// proj-a is the session default, but the UI explicitly requests proj-b.
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake: db,
 		SessionStore: &FakeSessionStore{
 			projectID: "proj-a",
@@ -1319,112 +1320,6 @@ func TestHandleTraceDetail_ExplicitProjectID(t *testing.T) {
 	}
 }
 
-func TestBuildTraceTree_EmptySpans(t *testing.T) {
-	trace := buildTraceTree([]*domain.Span{}, nil, "", "", "scores")
-	if trace.TraceID != "" {
-		t.Errorf("trace_id: got %q, want empty", trace.TraceID)
-	}
-	if trace.RootSpan != nil {
-		t.Error("root_span should be nil for empty spans")
-	}
-}
-
-func TestBuildTraceTree_SingleSpan(t *testing.T) {
-	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
-	spans := []*domain.Span{
-		{SpanID: "span-001", TraceID: "trace-1", ParentID: "", Name: "root", StartTime: baseTime},
-	}
-
-	trace := buildTraceTree(spans, nil, "", "", "scores")
-
-	if trace.TraceID != "trace-1" {
-		t.Errorf("trace_id: got %q, want %q", trace.TraceID, "trace-1")
-	}
-	if trace.RootSpan == nil {
-		t.Fatal("root_span is nil")
-	}
-	if trace.RootSpan.SpanID != "span-001" {
-		t.Errorf("root span_id: got %q, want %q", trace.RootSpan.SpanID, "span-001")
-	}
-	if len(trace.RootSpan.Children) != 0 {
-		t.Errorf("root.children: got %d, want 0", len(trace.RootSpan.Children))
-	}
-}
-
-func TestBuildTraceTree_NestedChildren(t *testing.T) {
-	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
-	spans := []*domain.Span{
-		{SpanID: "root", TraceID: "trace-1", ParentID: "", Name: "root", StartTime: baseTime},
-		{SpanID: "child1", TraceID: "trace-1", ParentID: "root", Name: "child1", StartTime: baseTime.Add(time.Second)},
-		{SpanID: "child2", TraceID: "trace-1", ParentID: "root", Name: "child2", StartTime: baseTime.Add(2 * time.Second)},
-		{SpanID: "grandchild", TraceID: "trace-1", ParentID: "child1", Name: "grandchild", StartTime: baseTime.Add(3 * time.Second)},
-	}
-
-	trace := buildTraceTree(spans, nil, "", "", "scores")
-
-	if trace.RootSpan == nil {
-		t.Fatal("root_span is nil")
-	}
-	if trace.RootSpan.SpanID != "root" {
-		t.Errorf("root span_id: got %q, want %q", trace.RootSpan.SpanID, "root")
-	}
-	if len(trace.RootSpan.Children) != 2 {
-		t.Errorf("root.children: got %d, want 2", len(trace.RootSpan.Children))
-	}
-
-	// Find child1 and verify grandchild is its child.
-	var child1 *domain.Span
-	for _, c := range trace.RootSpan.Children {
-		if c.SpanID == "child1" {
-			child1 = c
-			break
-		}
-	}
-	if child1 == nil {
-		t.Fatal("child1 not found in root.children")
-	}
-	if len(child1.Children) != 1 {
-		t.Errorf("child1.children: got %d, want 1", len(child1.Children))
-	}
-	if len(child1.Children) > 0 && child1.Children[0].SpanID != "grandchild" {
-		t.Errorf("grandchild span_id: got %q, want %q", child1.Children[0].SpanID, "grandchild")
-	}
-
-	// Verify child2 has no children.
-	var child2 *domain.Span
-	for _, c := range trace.RootSpan.Children {
-		if c.SpanID == "child2" {
-			child2 = c
-			break
-		}
-	}
-	if child2 == nil {
-		t.Fatal("child2 not found in root.children")
-	}
-	if len(child2.Children) != 0 {
-		t.Errorf("child2.children: got %d, want 0", len(child2.Children))
-	}
-}
-
-func TestBuildTraceTree_AllMissingParents(t *testing.T) {
-	// All spans have non-empty parent_id pointing to spans outside the set.
-	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
-	spans := []*domain.Span{
-		{SpanID: "span-a", TraceID: "trace-1", ParentID: "missing-1", Name: "a", StartTime: baseTime},
-		{SpanID: "span-b", TraceID: "trace-1", ParentID: "missing-2", Name: "b", StartTime: baseTime.Add(time.Second)},
-	}
-
-	trace := buildTraceTree(spans, nil, "", "", "scores")
-
-	// With no valid root, the first span should be used as root.
-	if trace.RootSpan == nil {
-		t.Fatal("root_span is nil")
-	}
-	if trace.RootSpan.SpanID != "span-a" {
-		t.Errorf("root span_id: got %q, want %q", trace.RootSpan.SpanID, "span-a")
-	}
-}
-
 // treeSpan is a flattened version of domain.Span for JSON unmarshaling in tests.
 type treeSpan struct {
 	SpanID   string      `json:"span_id"`
@@ -1447,7 +1342,7 @@ func TestHandleSpansQuery_FiltersAsObject(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
 	w := httptest.NewRecorder()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -1485,7 +1380,7 @@ func TestHandleSpansQuery_UnknownField(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
 	w := httptest.NewRecorder()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		QueryBuilder: &querybuild.QueryBuilder{},
 	}
@@ -1527,7 +1422,7 @@ func TestHandleSpansQuery_UnknownOp(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
 	w := httptest.NewRecorder()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		QueryBuilder: &querybuild.QueryBuilder{},
 	}
@@ -1565,7 +1460,7 @@ func TestHandleSpansQuery_FiltersAsNumber(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
 	w := httptest.NewRecorder()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -1589,7 +1484,7 @@ func TestHandleSpansQuery_FiltersAsString(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/query", body)
 	w := httptest.NewRecorder()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -1614,7 +1509,7 @@ func TestHandleAnalyticsSpans_AuthRequired(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/spans", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{},
 	}
 
@@ -1629,7 +1524,7 @@ func TestHandleAnalyticsSpans_MethodNotAllowed(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/analytics/spans", nil)
 	w := httptest.NewRecorder()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 
@@ -1666,7 +1561,7 @@ func TestHandleAnalyticsSpans_WithDatabase_ProjectFromSession(t *testing.T) {
 		t.Fatalf("insert span: %v", err)
 	}
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
@@ -1750,7 +1645,7 @@ func TestHandleAnalyticsSpans_ProjectIDOverride(t *testing.T) {
 	}
 
 	// Session returns proj-a, but the request overrides to proj-b.
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:         db,
 		SessionStore: &FakeSessionStore{
 			projectID:    "proj-a",
@@ -1812,7 +1707,7 @@ func TestHandleAnalyticsSpans_ProjectIDForbidden(t *testing.T) {
 	}
 	defer db.Close()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:         db,
 		SessionStore: &FakeSessionStore{
 			projectID: "proj-a",
@@ -1873,7 +1768,7 @@ func TestHandleSpansQuery_ContainsFilter(t *testing.T) {
 		t.Fatalf("insert prod span: %v", err)
 	}
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:         db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
@@ -1955,7 +1850,7 @@ func TestHandleAnalyticsSpans_TimeBucketHour(t *testing.T) {
 		}
 	}
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:         db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		QueryBuilder: &querybuild.QueryBuilder{Lake: db},
@@ -2034,7 +1929,7 @@ func TestHandleAnalyticsSpans_TimeBucketInvalidInterval(t *testing.T) {
 	}
 	defer db.Close()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:           db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 		QueryBuilder:   &querybuild.QueryBuilder{Lake: db},
@@ -2099,7 +1994,7 @@ func TestHandleSpansQuery_ProjectIDOverride(t *testing.T) {
 	}
 
 	// Session default is proj-a, but the request selects proj-b.
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:         db,
 		SessionStore: &FakeSessionStore{
 			projectID:    "proj-a",
@@ -2156,7 +2051,7 @@ func TestHandleSpansQuery_ProjectIDForbidden(t *testing.T) {
 		t.Fatalf("create table: %v", err)
 	}
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:         db,
 		SessionStore: &FakeSessionStore{
 			projectID:    "proj-a",
@@ -2237,7 +2132,7 @@ func TestHandleProjects_ReturnsSnakeCaseJSON(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
 	w := httptest.NewRecorder()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj-123"},
 	}
 
@@ -2294,7 +2189,7 @@ func TestHandleSpansQuery_AuthenticatedButNoProject(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), auth.UserIDContextKey, &auth.CurrentUser{UserID: "user-1"}))
 	w := httptest.NewRecorder()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		// FakeSessionStore with no projectID returns ("", false).
 		SessionStore: &FakeSessionStore{},
 	}
@@ -2321,7 +2216,7 @@ func TestHandleSpansQuery_UnauthenticatedStill401(t *testing.T) {
 	// No user in context.
 	w := httptest.NewRecorder()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{},
 	}
 
@@ -2336,7 +2231,7 @@ func TestHandleSpansQuery_UnauthenticatedStill401(t *testing.T) {
 // user whose org has no projects receives 400 (not 401) from trace detail.
 func TestHandleTraceDetail_AuthenticatedButNoProject(t *testing.T) {
 	mux := http.NewServeMux()
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{},
 	}
 	mux.HandleFunc("GET /api/v1/traces/{traceId}", h.HandleTraceDetail)
@@ -2367,7 +2262,7 @@ func TestHandleAnalyticsSpans_AuthenticatedButNoProject(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), auth.UserIDContextKey, &auth.CurrentUser{UserID: "user-1"}))
 	w := httptest.NewRecorder()
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{},
 	}
 
@@ -2383,70 +2278,6 @@ func TestHandleAnalyticsSpans_AuthenticatedButNoProject(t *testing.T) {
 	}
 	if !strings.Contains(resp["error"], "no project found") {
 		t.Errorf("error message should contain 'no project found', got: %q", resp["error"])
-	}
-}
-
-// ── Issue #85: Trace detail dedupes duplicate span rows ──
-
-// TestHandleTraceDetail_DedupeOnLake proves that when the Lake path is used,
-// ingesting the same span twice results in only one row in the waterfall
-// (per ADR-0004 Batch Ledger residual-duplicate policy).
-func TestHandleTraceDetail_DedupeOnLake(t *testing.T) {
-	ctx := context.Background()
-
-	// Set up a real Lake with partitioned spans table.
-	lk := laketest.NewLocal(t)
-
-	// Insert the same span twice (simulating Batch Ledger residual duplicates).
-	baseTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	span := &domain.Span{
-		SpanID:      "span-001",
-		TraceID:     "trace-dedupe",
-		ProjectID:   "proj-dedupe",
-		ServiceName: "svc",
-		Name:        "llm-call",
-		Kind:        domain.SpanKind("llm"),
-		StartTime:   baseTime,
-		EndTime:     baseTime.Add(time.Second),
-		Model:       "gpt-4o",
-	}
-	if err := lk.InsertSpans(ctx, []*domain.Span{span}); err != nil {
-		t.Fatalf("insert span (1st): %v", err)
-	}
-	// Insert the same span again (duplicate).
-	if err := lk.InsertSpans(ctx, []*domain.Span{span}); err != nil {
-		t.Fatalf("insert span (2nd): %v", err)
-	}
-
-	// Verify raw Lake has 2 rows.
-	var rawCount int
-	if err := lk.DB().QueryRowContext(ctx, "SELECT count(*) FROM lake.spans WHERE span_id = ?", "span-001").Scan(&rawCount); err != nil {
-		t.Fatalf("count raw spans: %v", err)
-	}
-	if rawCount != 2 {
-		t.Fatalf("raw Lake should have 2 duplicate rows, got %d", rawCount)
-	}
-
-	// Set up handler with Lake attached.
-	h := &SpanHandler{
-		Lake:         lk.DB(),
-		SessionStore: &FakeSessionStore{projectID: "proj-dedupe"},
-	}
-
-	// Query the trace detail via LakeTraceSpansSQL with dedupe=true.
-	spans, err := h.querySpansForTrace("proj-dedupe", "trace-dedupe")
-	if err != nil {
-		t.Fatalf("querySpansForTrace: %v", err)
-	}
-
-	// After dedup, only 1 row should appear in the waterfall.
-	if len(spans) != 1 {
-		t.Fatalf("trace detail span count: got %d, want 1 (dedupe should remove duplicate)", len(spans))
-	}
-
-	// Verify the returned span has the correct ID.
-	if spans[0].SpanID != "span-001" {
-		t.Errorf("span_id: got %q, want %q", spans[0].SpanID, "span-001")
 	}
 }
 
@@ -2619,7 +2450,7 @@ func TestLakeSQL_Integration(t *testing.T) {
 // ── HandleSpansBatch tests ──────────────────────────────────────────
 
 func TestHandleSpansBatch_MissingBody(t *testing.T) {
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/batch", nil)
@@ -2631,7 +2462,7 @@ func TestHandleSpansBatch_MissingBody(t *testing.T) {
 }
 
 func TestHandleSpansBatch_EmptySpanIDs(t *testing.T) {
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/batch", strings.NewReader(`{"span_ids": []}`))
@@ -2643,7 +2474,7 @@ func TestHandleSpansBatch_EmptySpanIDs(t *testing.T) {
 }
 
 func TestHandleSpansBatch_MethodNotAllowed(t *testing.T) {
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/spans/batch", nil)
@@ -2655,7 +2486,7 @@ func TestHandleSpansBatch_MethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleSpansBatch_AuthRequired(t *testing.T) {
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		SessionStore: &FakeSessionStore{},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/spans/batch", strings.NewReader(`{"span_ids": ["span-1"]}`))
@@ -2709,7 +2540,7 @@ func TestHandleSpansBatch_Success(t *testing.T) {
 		t.Fatalf("insert span-2: %v", err)
 	}
 
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:         db,
 		SessionStore: &FakeSessionStore{projectID: "test-proj"},
 	}
@@ -2800,7 +2631,7 @@ func TestHandleSpansBatch_ScopesByProjectID(t *testing.T) {
 	}
 
 	// Authenticated for project A, but requests both span-a and project B's span-b.
-	h := &SpanHandler{
+	h := &spansegment.SpanHandler{
 		Lake:         db,
 		SessionStore: &FakeSessionStore{projectID: "project-a"},
 	}
