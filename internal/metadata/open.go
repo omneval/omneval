@@ -17,8 +17,10 @@ var (
 
 // Compile-time checks that each concrete type satisfies the focused interfaces.
 var (
-	_ ProjectStore     = (*sqlite.Store)(nil)
-	_ ProjectStore     = (*postgres.Store)(nil)
+	_ ProjectStore       = (*sqlite.Store)(nil)
+	_ ProjectStore       = (*postgres.Store)(nil)
+	_ ProjectStore       = (*sqlite.ProjectStore)(nil)
+	_ ProjectStore       = (*postgres.ProjectStore)(nil)
 	_ PromptStore      = (*sqlite.Store)(nil)
 	_ PromptStore      = (*postgres.Store)(nil)
 	_ BookmarkStore    = (*sqlite.Store)(nil)

@@ -6,11 +6,11 @@ import (
 )
 
 // PostgresFocusedStore wraps *postgres.Store so that callers can depend on
-// the narrower focused interfaces (PromptStore, EvalRuleStore, ...) instead
-// of the full god Store. Embedding the concrete store promotes all domain
-// methods; the focused Store methods below override the embedded store's
-// package-local methods so they return this package's focused interface types
-// instead.
+// the narrower focused interfaces (ProjectStore, PromptStore, EvalRuleStore, ...)
+// instead of the full god Store. Embedding the concrete store promotes all domain
+// methods; the ProjectStore()/PromptStore()/EvalRuleStore() methods below
+// override the embedded store's package-local methods so they return this
+// package's focused interface types instead.
 type PostgresFocusedStore struct {
 	*postgres.Store
 }
@@ -23,6 +23,12 @@ func (s *PostgresFocusedStore) SessionStore() SessionStore {
 // BookmarkStore returns the focused BookmarkStore interface.
 func (s *PostgresFocusedStore) BookmarkStore() BookmarkStore {
 	return s.Store
+}
+
+// ProjectStore returns the focused PostgresProjectStore receiver that exposes
+// only the ProjectStore interface methods.
+func (s *PostgresFocusedStore) ProjectStore() ProjectStore {
+	return s.Store.ProjectStore()
 }
 
 // PromptStore returns the focused PromptStore interface.
@@ -39,7 +45,8 @@ func (s *PostgresFocusedStore) EvalRuleStore() EvalRuleStore {
 var _ Store = (*PostgresFocusedStore)(nil)
 
 // SQLiteFocusedStore wraps *sqlite.Store so that callers can depend on the
-// narrower focused interfaces instead of the full god Store.
+// narrower focused interfaces (ProjectStore, PromptStore, EvalRuleStore, ...)
+// instead of the full god Store.
 type SQLiteFocusedStore struct {
 	*sqlite.Store
 }
@@ -52,6 +59,12 @@ func (s *SQLiteFocusedStore) SessionStore() SessionStore {
 // BookmarkStore returns the focused BookmarkStore interface.
 func (s *SQLiteFocusedStore) BookmarkStore() BookmarkStore {
 	return s.Store
+}
+
+// ProjectStore returns the focused SQLiteProjectStore receiver that exposes
+// only the ProjectStore interface methods.
+func (s *SQLiteFocusedStore) ProjectStore() ProjectStore {
+	return s.Store.ProjectStore()
 }
 
 // PromptStore returns the focused PromptStore interface.

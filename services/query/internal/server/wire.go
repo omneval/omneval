@@ -193,7 +193,7 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	deps.Admin = &handler.AdminHandler{
 		APIKeyStore:   store,
 		BookmarkStore: store.BookmarkStore(),
-		ProjectStore:  store,
+		ProjectStore:  store.ProjectStore(),
 		SessionStore:  h,
 	}
 	// Wire Redis as the ingest queue depth source for the ops endpoint.

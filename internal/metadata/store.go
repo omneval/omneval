@@ -47,6 +47,11 @@ type Store interface {
 	// narrower type rather than the god interface.
 	BookmarkStore() BookmarkStore
 
+	// ProjectStore returns a focused ProjectStore interface that exposes
+	// only the project CRUD methods, enabling callers to depend on the
+	// narrower type rather than the god interface.
+	ProjectStore() ProjectStore
+
 	// PromptStore returns a focused PromptStore interface that exposes
 	// only the prompt registry methods, enabling callers to depend on the
 	// narrower type rather than the god interface.
