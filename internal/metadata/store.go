@@ -61,4 +61,9 @@ type Store interface {
 	// only the evaluation-rule methods, enabling callers to depend on the
 	// narrower type rather than the god interface.
 	EvalRuleStore() EvalRuleStore
+
+	// APIKeyStore returns a focused APIKeyStore interface that exposes
+	// only the API key methods, enabling callers to depend on the
+	// narrower type rather than the god interface.
+	APIKeyStore() APIKeyStore
 }

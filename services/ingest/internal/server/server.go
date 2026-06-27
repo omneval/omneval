@@ -101,7 +101,7 @@ func Run() error {
 	}
 
 	// Initialize validator
-	validator := auth.NewCachingValidator(store)
+	validator := auth.NewCachingValidator(store.APIKeyStore())
 
 	// Initialize native REST handler with CORS middleware and metrics.
 	nativeH := handler.NewNativeHandler(spanQ, validator, cfg.Ingest.CORSAllowedOrigins, metricsHelper)
