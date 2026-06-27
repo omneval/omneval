@@ -34,13 +34,6 @@ type BatchFetcher interface {
 	Fetch(ctx context.Context, batchID string) ([]*domain.Span, error)
 }
 
-// BatchLedger is the Batch Ledger (committed_batches): the dedupe record
-// that makes queue redelivery idempotent. Satisfied by metadata.Store.
-type BatchLedger interface {
-	MarkBatchCommitted(ctx context.Context, batchID string, committedAt time.Time) error
-	IsBatchCommitted(ctx context.Context, batchID string) (bool, error)
-}
-
 // Pipeline drains the Redis ingest queue, computes cost, and commits
 // batches to the Lake (ADR-0004) â the sole storage tier.
 //
@@ -54,7 +47,7 @@ type Pipeline struct {
 	ingest        queue.IngestQueue
 	pricing       *pricing.Table
 	evalRuleStore metadata.EvalRuleStore
-	batchLedger   BatchLedger
+	batchLedger   metadata.BatchLedgerStore
 	evalQ         queue.EvalQueue
 	metrics       *metrics.WriterMetrics
 	lake          SpanLakeWriter
@@ -69,7 +62,7 @@ func New(
 	ingest queue.IngestQueue,
 	pricing *pricing.Table,
 	evalRuleStore metadata.EvalRuleStore,
-	batchLedger BatchLedger,
+	batchLedger metadata.BatchLedgerStore,
 	evalQ queue.EvalQueue,
 	m *metrics.WriterMetrics,
 ) *Pipeline {
@@ -98,7 +91,7 @@ func (p *Pipeline) WithLake(l SpanLakeWriter) *Pipeline {
 // entries are dequeued with explicit acknowledgement, Batch ID references
 // are resolved through the Ingest Buffer, and the Batch Ledger makes
 // redelivery idempotent. Returns the pipeline for chaining.
-func (p *Pipeline) WithBuffer(rq queue.ReliableIngestQueue, fetcher BatchFetcher, ledger BatchLedger) *Pipeline {
+func (p *Pipeline) WithBuffer(rq queue.ReliableIngestQueue, fetcher BatchFetcher, ledger metadata.BatchLedgerStore) *Pipeline {
 	p.processor = NewBatchProcessor(
 	rq, fetcher, ledger, p.lake, p.pricing,
 	p.evalRuleStore, p.evalQ, p.metrics,

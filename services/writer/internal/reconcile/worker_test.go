@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/omneval/omneval/internal/config"
+	"github.com/omneval/omneval/internal/metadata"
 	"github.com/omneval/omneval/internal/queue"
 	s3pkg "github.com/omneval/omneval/internal/storage/s3"
 )
@@ -31,7 +32,7 @@ func (m *mockStore) DeleteObjectsBatch(ctx context.Context, bucket string, keys 
 
 var _ Store = (*mockStore)(nil)
 
-// mockLedger implements Ledger for testing.
+// mockLedger implements metadata.BatchLedgerStore for testing.
 type mockLedger struct {
 	committed map[string]bool
 	err       error
@@ -44,7 +45,18 @@ func (m *mockLedger) IsBatchCommitted(_ context.Context, batchID string) (bool, 
 	return m.committed[batchID], nil
 }
 
-var _ Ledger = (*mockLedger)(nil)
+func (m *mockLedger) MarkBatchCommitted(_ context.Context, batchID string, _ time.Time) error {
+	if m.err != nil {
+		return m.err
+	}
+	if m.committed == nil {
+		m.committed = make(map[string]bool)
+	}
+	m.committed[batchID] = true
+	return nil
+}
+
+var _ metadata.BatchLedgerStore = (*mockLedger)(nil)
 
 // mockRefEnqueuer implements RefEnqueuer for testing.
 type mockRefEnqueuer struct {
@@ -258,7 +270,7 @@ func TestRun_LedgerErrorIsRecordedAndDoesNotAbortSweep(t *testing.T) {
 
 // failingOnceLedger errors for a specific batch ID and delegates otherwise.
 type failingOnceLedger struct {
-	inner       Ledger
+	inner       metadata.BatchLedgerStore
 	failBatchID string
 }
 
@@ -267,6 +279,10 @@ func (f *failingOnceLedger) IsBatchCommitted(ctx context.Context, batchID string
 		return false, errors.New("ledger unavailable")
 	}
 	return f.inner.IsBatchCommitted(ctx, batchID)
+}
+
+func (f *failingOnceLedger) MarkBatchCommitted(ctx context.Context, batchID string, t time.Time) error {
+	return f.inner.MarkBatchCommitted(ctx, batchID, t)
 }
 
 // TestRunLoop_EveryReplicaRunsSweep proves RunLoop runs the sweep on its own
