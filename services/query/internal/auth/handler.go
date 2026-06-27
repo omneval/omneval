@@ -126,17 +126,22 @@ type APIKeyInfo struct {
 
 // Handler handles authentication endpoints.
 type Handler struct {
-	store         metadata.Store
-	secure        bool
-	sessionTTL    time.Duration
-	adminEmail    string
+	store        metadata.Store
+	sessionStore metadata.SessionStore
+	secure       bool
+	sessionTTL   time.Duration
+	adminEmail   string
 	adminPassword string
 }
 
-// NewHandler creates a new auth handler.
+// NewHandler creates a new auth handler. The full store is needed for
+// non-session operations (user/project/API-key management); the focused
+// SessionStore is extracted so that session CRUD methods depend on the
+// narrower interface.
 func NewHandler(store metadata.Store, secure bool, sessionTTL time.Duration, adminEmail, adminPassword string) *Handler {
 	return &Handler{
 		store:         store,
+		sessionStore:  store.SessionStore(),
 		secure:        secure,
 		sessionTTL:    sessionTTL,
 		adminEmail:    adminEmail,
@@ -312,7 +317,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		UserID:    user.UserID,
 		ExpiresAt: expiresAt,
 	}
-	if err := h.store.CreateSession(r.Context(), session); err != nil {
+	if err := h.sessionStore.CreateSession(r.Context(), session); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create session"})
 		return
 	}
@@ -331,7 +336,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.store.DeleteSession(r.Context(), cookie.Value)
+	_ = h.sessionStore.DeleteSession(r.Context(), cookie.Value)
 	ClearSessionCookie(w, h.secure)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
@@ -341,15 +346,15 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 // as SessionStore to downstream handlers.
 
 func (h *Handler) CreateSession(ctx context.Context, session *domain.Session) error {
-	return h.store.CreateSession(ctx, session)
+	return h.sessionStore.CreateSession(ctx, session)
 }
 
 func (h *Handler) GetSession(ctx context.Context, sessionID string) (*domain.Session, error) {
-	return h.store.GetSession(ctx, sessionID)
+	return h.sessionStore.GetSession(ctx, sessionID)
 }
 
 func (h *Handler) DeleteSession(ctx context.Context, sessionID string) error {
-	return h.store.DeleteSession(ctx, sessionID)
+	return h.sessionStore.DeleteSession(ctx, sessionID)
 }
 
 // HandleCreateProject handles POST /api/v1/projects.

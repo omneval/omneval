@@ -190,6 +190,9 @@ func (f *FakeMetadataStore) CheckPassword(_ string, _ string) error { return nil
 // EvalRuleStore returns the focused EvalRuleStore interface.
 func (f *FakeMetadataStore) EvalRuleStore() metadata.EvalRuleStore { return f }
 
+// SessionStore returns the focused SessionStore interface.
+func (f *FakeMetadataStore) SessionStore() metadata.SessionStore { return f }
+
 // ---- Tests ----
 
 func TestGenerate(t *testing.T) {
