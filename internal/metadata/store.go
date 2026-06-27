@@ -76,4 +76,9 @@ type Store interface {
 	// only the user and organization methods, enabling callers to depend on
 	// the narrower type rather than the god interface.
 	AuthStore() AuthStore
+
+	// DatasetStore returns a focused DatasetStore interface that exposes
+	// only the dataset CRUD operations, enabling callers to depend on the
+	// narrower type rather than the god interface.
+	DatasetStore() DatasetStore
 }
