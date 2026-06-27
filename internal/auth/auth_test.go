@@ -64,6 +64,10 @@ func (f *FakeMetadataStore) ListAPIKeys(_ context.Context, projectID string) ([]
 	return result, nil
 }
 
+// BookmarkStore returns the focused BookmarkStore interface for callers that only
+// need bookmark operations.
+func (f *FakeMetadataStore) BookmarkStore() metadata.BookmarkStore { return f }
+
 // PromptStore returns a focused PromptStore interface for callers that only
 // need prompt operations.
 func (f *FakeMetadataStore) PromptStore() metadata.PromptStore { return f }

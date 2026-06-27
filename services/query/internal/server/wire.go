@@ -157,7 +157,7 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	// Create handlers.
 	deps.QueryBuilder = &querybuild.QueryBuilder{
 		Lake:          deps.Lake,
-		BookmarkStore: store,
+		BookmarkStore: store.BookmarkStore(),
 	}
 	deps.Span = &handler.SpanHandler{
 		SessionStore:    h,
@@ -165,7 +165,7 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		Lake:            deps.Lake,
 		QueryBuilder:    deps.QueryBuilder,
 	}
-	deps.Bookmark = &handler.BookmarkHandler{BookmarkStore: store, SessionStore: h, ProjectResolver: h}
+	deps.Bookmark = &handler.BookmarkHandler{BookmarkStore: store.BookmarkStore(), SessionStore: h, ProjectResolver: h}
 	deps.Conversation = &handler.ConversationHandler{SessionStore: h, ProjectResolver: h}
 
 	// Prompt registry handler. A CachingValidator is wired in so that SDK
@@ -192,7 +192,7 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 
 	deps.Admin = &handler.AdminHandler{
 		APIKeyStore:   store,
-		BookmarkStore: store,
+		BookmarkStore: store.BookmarkStore(),
 		ProjectStore:  store,
 		SessionStore:  h,
 	}
@@ -278,7 +278,7 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	}
 	deps.Lake = lk
 	deps.Span.Lake = lk
-	deps.Span.QueryBuilder = &querybuild.QueryBuilder{Lake: lk, BookmarkStore: store}
+	deps.Span.QueryBuilder = &querybuild.QueryBuilder{Lake: lk, BookmarkStore: store.BookmarkStore()}
 	deps.Conversation.Lake = lk
 	// Eval-rule preview reads `spans` unqualified; the views
 	// openLakeDB creates resolve that against the Lake.
