@@ -34,6 +34,9 @@ func (f *fakeIngestQueue) Enqueue(_ context.Context, spans []*domain.Span) error
 	return nil
 }
 
+// Compile-time interface check: fakeIngestQueue must implement handlers.SpanQueue.
+var _ handlers.SpanQueue = (*fakeIngestQueue)(nil)
+
 // fakeValidator is a minimal Validator for testing.
 type fakeValidator struct{}
 
@@ -45,6 +48,9 @@ func (f *fakeValidator) Validate(_ context.Context, rawKey string) (*auth.Valida
 	}
 	return nil, fmt.Errorf("invalid API key")
 }
+
+// Compile-time interface check: fakeValidator must implement handlers.Validator.
+var _ handlers.Validator = (*fakeValidator)(nil)
 
 // --- Tests ---
 

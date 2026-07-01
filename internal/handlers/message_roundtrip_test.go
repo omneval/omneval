@@ -2,9 +2,7 @@ package handlers_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,7 +13,6 @@ import (
 	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
 	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
 
-	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/handlers"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -271,16 +268,6 @@ func TestOTLPMessageContentJSONEncoding(t *testing.T) {
 	if !strings.Contains(s.Output, "JSON-encoded completion") {
 		t.Errorf("output: got %q, expected 'JSON-encoded completion'", s.Output)
 	}
-}
-
-// fakeValidatorJSON is a minimal Validator for JSON-encoded OTLP tests.
-type fakeValidatorJSON struct{}
-
-func (f *fakeValidatorJSON) Validate(_ context.Context, rawKey string) (*auth.ValidatedKey, error) {
-	if rawKey == "valid_project_key" {
-		return &auth.ValidatedKey{ProjectID: "proj-1"}, nil
-	}
-	return nil, fmt.Errorf("invalid API key")
 }
 
 // TestNativeMultipleMessagesIngestRoundTrip verifies that multiple input and
