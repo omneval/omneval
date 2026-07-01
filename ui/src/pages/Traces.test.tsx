@@ -2290,3 +2290,108 @@ describe("Span Kind icons in Traces list (issue #277)", () => {
     expect(mainStyle).not.toBe(leafStyle);
   });
 });
+
+// ── Issue #340: load states (pending / empty / filtered-empty / error) ──
+
+describe("issue #340: traces list load states", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("never shows the onboarding empty state while the query is pending", async () => {
+    // A fetch that never settles — the query is permanently in flight.
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise(() => {}));
+
+    renderTracesPage();
+
+    // Loading skeleton is visible; onboarding is not.
+    await waitFor(() => {
+      expect(document.querySelector(".animate-pulse")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("No traces yet")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Get started/)).not.toBeInTheDocument();
+  });
+
+  it("shows onboarding only on a confirmed empty result for an unfiltered default query", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ spans: [], next: "", limit: 25 }),
+    } as Response);
+
+    renderTracesPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("No traces yet")).toBeInTheDocument();
+    });
+  });
+
+  it("shows a filtered-empty message instead of onboarding when a narrow time range is active", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ spans: [], next: "", limit: 25 }),
+    } as Response);
+
+    renderTracesPage({ timeRange: "1h" });
+
+    await waitFor(() => {
+      expect(screen.getByText(/No traces match/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText("No traces yet")).not.toBeInTheDocument();
+  });
+
+  it("surfaces an error state with a working Retry when the query fails", async () => {
+    let call = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      call++;
+      if (call === 1) throw new TypeError("network down");
+      return {
+        ok: true,
+        json: () => Promise.resolve({ spans: mockSpans, next: "", limit: 25 }),
+      } as Response;
+    });
+
+    renderTracesPage();
+
+    // Error state, not onboarding.
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("No traces yet")).not.toBeInTheDocument();
+
+    // Retry refetches and renders the data.
+    fireEvent.click(screen.getByRole("button", { name: /Retry/ }));
+    await waitFor(() => {
+      expect(screen.getByText("main-trace")).toBeInTheDocument();
+    });
+  });
+
+  it("aborts a hung query after the 30s client timeout and shows the error state", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(globalThis, "fetch").mockImplementation((_url, options) => {
+        return new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("aborted", "AbortError"));
+          });
+        });
+      });
+
+      renderTracesPage();
+
+      // Just before the timeout: still loading, no error.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(29_000);
+      });
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+      // Past the timeout: the request is aborted and the error state shows.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+      expect(screen.queryByText("No traces yet")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
