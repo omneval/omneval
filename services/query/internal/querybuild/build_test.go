@@ -866,7 +866,10 @@ func TestQueryBuilder_LakeServerIntegration(t *testing.T) {
 	ctx := context.Background()
 	lk := testLakeServer(t)
 
-	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	// Relative to now so the spans always fall inside the query's default
+	// time window (a fixed date rots out of the window as the calendar
+	// advances). Truncated to seconds to avoid timestamp-precision drift.
+	base := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
 	spans := []*domain.Span{
 		{
 			SpanID: "span-001", TraceID: "trace-001", ProjectID: "proj-lake",
