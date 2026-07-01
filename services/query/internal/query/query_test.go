@@ -1122,10 +1122,7 @@ func TestLakeSQL_CursorPagination_Integration(t *testing.T) {
 	ctx := context.Background()
 	lk := laketest.NewLocal(t)
 
-	// Relative to now so the spans always fall inside the query's default
-	// time window (a fixed date rots out of the window as the calendar
-	// advances). Truncated to seconds to avoid timestamp-precision drift.
-	base := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
+	base := time.Now().UTC()
 	var spans []*domain.Span
 	for i := 0; i < 5; i++ {
 		spans = append(spans, &domain.Span{
@@ -1144,7 +1141,12 @@ func TestLakeSQL_CursorPagination_Integration(t *testing.T) {
 	var seen []string
 	cursorStr := ""
 	for page := 0; page < 10; page++ {
-		req := SpanQueryRequest{Limit: 2, Cursor: cursorStr}
+		req := SpanQueryRequest{
+			Limit: 2,
+			From:  base.Add(-time.Minute),
+			To:    base.Add(10 * time.Minute),
+			Cursor: cursorStr,
+		}
 		q, err := NewSpanQuery("proj-page", req)
 		if err != nil {
 			t.Fatalf("NewSpanQuery: %v", err)
@@ -1186,10 +1188,7 @@ func TestLakeSQL_OneRowPerTrace(t *testing.T) {
 	ctx := context.Background()
 	lk := laketest.NewLocal(t)
 
-	// Relative to now so the spans always fall inside the query's default
-	// time window (a fixed date rots out of the window as the calendar
-	// advances). Truncated to seconds to avoid timestamp-precision drift.
-	base := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
+	base := time.Now().UTC()
 
 	// A single trace with a root span and three child spans.
 	root := &domain.Span{
@@ -1271,7 +1270,11 @@ func TestLakeSQL_OneRowPerTrace(t *testing.T) {
 		t.Fatalf("insert spans: %v", err)
 	}
 
-	req := SpanQueryRequest{Limit: 10}
+	req := SpanQueryRequest{
+		Limit: 10,
+		From:  base.Add(-2 * time.Minute),
+		To:    base.Add(10 * time.Second),
+	}
 	q, err := NewSpanQuery("proj-rollup", req)
 	if err != nil {
 		t.Fatalf("NewSpanQuery: %v", err)
@@ -1309,8 +1312,8 @@ func TestLakeSQL_OneRowPerTrace(t *testing.T) {
 	// Trace end_time must be the max end_time across all spans (child-3's,
 	// 15s after base), not just the root span's own end_time (10s).
 	wantEnd := base.Add(15 * time.Second)
-	if !got.EndTime.Equal(wantEnd) {
-		t.Errorf("trace end_time: got %v, want %v", got.EndTime, wantEnd)
+	if got.EndTime.Sub(wantEnd) > 10*time.Millisecond || wantEnd.Sub(got.EndTime) > 10*time.Millisecond {
+		t.Errorf("trace end_time: got %v, want ~%v (DuckDB may truncate nanoseconds)", got.EndTime, wantEnd)
 	}
 	// Overall status must reflect the worst status across spans — child-3
 	// errored, so the trace-level status must be "error" even though the
