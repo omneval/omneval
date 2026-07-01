@@ -520,6 +520,13 @@ func NextCursor(spans []*domain.Span, limit int) string {
 
 // strVal extracts a string from a column value, handling both []byte and string.
 // DuckDB returns VARCHAR as string, not []byte.
+//
+// ROOT CAUSE (issue #336): When a DuckDB column is declared JSON, the Go driver
+// returns it as a []interface{} (parsed map), not as the original JSON string.
+// fmt.Sprintf("%v", ...) on a map produces "[map[content:X role:Y]]", which is
+// useless in the UI. This fix (CAST input/output AS VARCHAR in
+// LakeTraceSpansSQL and LakeTraceDetailSQL) forces DuckDB to return the raw
+// JSON string so strVal gets a plain string that passes through unchanged.
 func strVal(v any) string {
 	switch s := v.(type) {
 	case []byte:
@@ -843,7 +850,9 @@ func (q *SpanQuery) MainSQL(traceIDs []string) (sql string, args []any, err erro
 	sb.WriteString("  r.span_id, r.trace_id, r.parent_id, r.conversation_id, r.project_id,\n")
 	sb.WriteString("  r.service_name, r.name, r.kind, r.start_time,\n")
 	sb.WriteString("  ru.trace_end_time AS end_time,\n")
-	sb.WriteString("  r.model, r.input, r.output,\n")
+	// CAST input/output to VARCHAR so DuckDB returns raw JSON strings rather
+	// than parsed []interface{} maps (see strVal root cause comment).
+	sb.WriteString("  r.model, CAST(r.input AS VARCHAR) AS input, CAST(r.output AS VARCHAR) AS output,\n")
 	sb.WriteString("  ru.total_input_tokens AS input_tokens,\n")
 	sb.WriteString("  ru.total_output_tokens AS output_tokens,\n")
 	sb.WriteString("  ru.total_cost_usd AS cost_usd,\n")
@@ -913,9 +922,12 @@ func (q *SpanQuery) LakeTraceSpansSQL(traceID string) (sql string, args []any) {
 		limit = MaxTraceSpansLimit
 	}
 
+	// CAST input/output to VARCHAR so DuckDB returns them as raw JSON strings
+	// rather than parsed []interface{} maps (which strVal renders as
+	// "[map[content:X role:Y]]"). This matches the batch endpoint's behavior.
 	sql = "SELECT span_id, trace_id, parent_id, conversation_id, project_id, service_name, name, kind, " +
-		"start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, " +
-		"prompt_name, prompt_version, status_code, status_message, attributes FROM (" +
+		"start_time, end_time, model, CAST(input AS VARCHAR), CAST(output AS VARCHAR), " +
+		"input_tokens, output_tokens, cost_usd, prompt_name, prompt_version, status_code, status_message, attributes FROM (" +
 		"SELECT *, ROW_NUMBER() OVER (PARTITION BY trace_id, span_id ORDER BY start_time DESC) AS rn" +
 		" FROM lake.spans WHERE trace_id = ? AND project_id = ?" +
 		" AND start_time >= ? AND start_time <= ?" +

@@ -1189,6 +1189,108 @@ func TestHandleTraceDetail_ScoresAttached(t *testing.T) {
 	}
 }
 
+// TestHandleTraceDetail_LLMMessageContentRoundTrip verifies that LLM span
+// message content stored in the input/output JSON columns survives the full
+// ingest → lake → query pipeline and is returned intact in the trace detail
+// API response. This tests the OTLP → writer → lake path (message content is
+// JSON-serialized in the spans table, then returned verbatim by the query API).
+func TestHandleTraceDetail_LLMMessageContentRoundTrip(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omneval-trace-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := tmpDir + "/test.duckdb"
+
+	db, err := sql.Open("duckdb", tmpPath)
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), spansTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	baseTime := time.Now().Add(-2 * time.Hour)
+
+	// Insert an LLM span with realistic message content — the shape that
+	// results from the OTLP normalizer's buildMessagesFromEvents fallback.
+	// The input contains a user message and the output an assistant message.
+	inputContent := `[{"role":"user","content":"Hello, world!"}]`
+	outputContent := `[{"role":"assistant","content":"Hi there! How can I help?"}]`
+	_, err = db.ExecContext(context.Background(),
+		`INSERT INTO spans (span_id, trace_id, parent_id, project_id, name, model, start_time, end_time, input, output, input_tokens, output_tokens, cost_usd, status_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"span-llm-001", "trace-llm-msg", "", "test-proj", "llm.call", "gpt-4o",
+		baseTime, baseTime.Add(5*time.Second),
+		inputContent, outputContent, 150, 75, 0.001, "OK")
+	if err != nil {
+		t.Fatalf("insert span: %v", err)
+	}
+
+	h := &spansegment.SpanHandler{
+		Lake:           db,
+		SessionStore: &FakeSessionStore{projectID: "test-proj"},
+	}
+
+	w := serveTraceDetail(h, http.MethodGet, "/api/v1/traces/trace-llm-msg", nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var trace struct {
+		TraceID  string    `json:"trace_id"`
+		RootSpan *treeSpan `json:"root_span"`
+		Spans    []*treeSpan `json:"spans"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&trace); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if trace.TraceID != "trace-llm-msg" {
+		t.Errorf("trace_id: got %q, want %q", trace.TraceID, "trace-llm-msg")
+	}
+
+	// Verify the root span's input and output fields are non-empty and
+	// contain the expected message content — exactly the acceptance
+	// criterion for issue #336.
+	if trace.RootSpan == nil {
+		t.Fatal("root_span is nil")
+	}
+	if trace.RootSpan.Input == "" {
+		t.Error("root_span.input: expected non-empty (message content round-trip from lake to API), got empty")
+	}
+	if trace.RootSpan.Output == "" {
+		t.Error("root_span.output: expected non-empty (message content round-trip from lake to API), got empty")
+	}
+	if !strings.Contains(trace.RootSpan.Input, `"role":"user"`) {
+		t.Errorf("root_span.input: got %q, expected user message", trace.RootSpan.Input)
+	}
+	if !strings.Contains(trace.RootSpan.Input, `"content":"Hello, world!"`) {
+		t.Errorf("root_span.input: got %q, expected content 'Hello, world!'", trace.RootSpan.Input)
+	}
+	if !strings.Contains(trace.RootSpan.Output, `"role":"assistant"`) {
+		t.Errorf("root_span.output: got %q, expected assistant message", trace.RootSpan.Output)
+	}
+	if !strings.Contains(trace.RootSpan.Output, `"content":"Hi there! How can I help?"`) {
+		t.Errorf("root_span.output: got %q, expected content 'Hi there! How can I help?'", trace.RootSpan.Output)
+	}
+
+	// Also verify all spans in the response have their input/output.
+	if len(trace.Spans) < 1 {
+		t.Fatalf("spans: got %d, want at least 1", len(trace.Spans))
+	}
+	for i, s := range trace.Spans {
+		if s.Input == "" {
+			t.Errorf("spans[%d].input: expected non-empty", i)
+		}
+		if s.Output == "" {
+			t.Errorf("spans[%d].output: expected non-empty", i)
+		}
+	}
+}
+
 func TestHandleTraceDetail_ProjectIsolation(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "omneval-trace-test")
 	if err != nil {
@@ -1324,6 +1426,8 @@ func TestHandleTraceDetail_ExplicitProjectID(t *testing.T) {
 type treeSpan struct {
 	SpanID   string      `json:"span_id"`
 	Name     string      `json:"name"`
+	Input    string      `json:"input"`
+	Output   string      `json:"output"`
 	Children []treeSpan  `json:"children"`
 	Scores   []spanScore `json:"scores"`
 }
