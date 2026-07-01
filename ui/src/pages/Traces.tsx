@@ -6,7 +6,8 @@ import { EmptyState } from "@/components/EmptyState";
 import { SpanKindIcon, getSpanKindColor, SpanKind } from "@/modules/spanKindVisuals";
 import {
   formatTimeWithYear,
-  formatDuration,
+  formatDurationMs,
+  formatCost,
   formatJsonPreview,
   totalTokens,
 } from "@/utils/formatters";
@@ -37,6 +38,8 @@ interface Span {
   model?: string;
   start_time: string;
   end_time: string;
+  /** Duration of the span in milliseconds (computed by the query service). */
+  duration_ms: number;
   cost_usd: number;
   input_tokens: number;
   output_tokens: number;
@@ -49,6 +52,10 @@ interface Span {
   /** Per-kind span counts across the trace (e.g. {"llm": 2, "tool": 1}),
    *  used to render the Levels column without a flat span list. */
   kind_counts?: Record<string, number>;
+  /** Whether the model is known but priced at $0 (self-hosted).
+   *  False when the model is unknown/unpriced — the UI should show
+   *  an unpriced badge instead of a dollar amount. */
+  model_unpriced: boolean;
 }
 
 interface SpanQueryResponse {
@@ -670,7 +677,7 @@ function TableCellRenderer({
     case "latency":
       return (
         <span key={col.key} className="text-omneval-text-muted">
-          {formatDuration(span.start_time, span.end_time)}
+          {formatDurationMs(span.duration_ms)}
         </span>
       );
     case "tokens": {
@@ -690,9 +697,13 @@ function TableCellRenderer({
         <span
           key={col.key}
           className="font-medium"
-          style={{ color: colors.accents.emberFlare }}
+          title={
+            span.model_unpriced
+              ? "Model is unpriced — cost cannot be determined"
+              : undefined
+          }
         >
-          ${span.cost_usd.toFixed(4)}
+          {formatCost(span.cost_usd, span.model_unpriced)}
         </span>
       );
     default:

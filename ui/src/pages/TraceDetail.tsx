@@ -13,7 +13,7 @@ import { colors } from "@/theme";
 import JsonCodeBlock from "@/components/JsonCodeBlock";
 import { Skeleton } from "@/components/Skeleton";
 import { EmptyState, LoadingState } from "@/components/EmptyState";
-import { formatTime, formatDuration, formatMs, totalTokens, parseChatTurns, getToolSummary } from "@/utils/formatters";
+import { formatTimeWithYear, formatDurationMs, formatCost, formatMs, totalTokens, parseChatTurns, getToolSummary } from "@/utils/formatters";
 import { useToast } from "@/components/Toast";
 import SaveToDatasetModal from "@/components/SaveToDatasetModal";
 import { extractSpanMessages } from "@/utils/spanMessages";
@@ -465,9 +465,9 @@ function SlideInDetailPanel({
             })()}
             </div>
             <div className="flex items-center gap-3 text-xs text-omneval-text-muted mt-1">
-              <span>{formatDuration(span.start_time, span.end_time)}</span>
+              <span>{formatDurationMs(span.duration_ms ?? 0)}</span>
               <span>{totalTokens(span).toLocaleString()} tokens</span>
-              <span style={{ color: colors.accents.emberFlare }}>${span.cost_usd.toFixed(4)}</span>
+              <span>{formatCost(span.cost_usd, span.model_unpriced)}</span>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -802,7 +802,7 @@ function SpanRow({
 
         {/* Duration */}
         <span className="text-xs text-omneval-text-muted flex-shrink-0">
-          {formatDuration(span.start_time, span.end_time)}
+          {formatDurationMs(span.duration_ms ?? 0)}
         </span>
 
         {/* Rollup token count */}
@@ -812,8 +812,8 @@ function SpanRow({
         </span>
 
         {/* Rollup cost */}
-        <span className="text-xs flex-shrink-0 hidden sm:block" style={{ color: colors.accents.emberFlare }}>
-          ${(span.rollup_cost_usd ?? 0).toFixed(4)}
+        <span className="text-xs flex-shrink-0 hidden sm:block">
+          {formatCost(span.rollup_cost_usd ?? 0, span.model_unpriced)}
         </span>
 
         {/* Save to dataset button */}
@@ -1246,19 +1246,15 @@ export function SlideInTraceDetail({
                     )}
                   </div>
                   <div className="flex items-center gap-4 text-xs text-omneval-text-muted">
-                    <span>{formatTime(trace.start_time)}</span>
-                    <span>{formatDuration(trace.start_time, trace.end_time)}</span>
+                    <span>{formatTimeWithYear(trace.start_time)}</span>
+                    <span>{formatDurationMs(trace.duration_ms ?? 0)}</span>
                     <span>
                       {(
                         (traceRollup?.inputTokens ?? 0) + (traceRollup?.outputTokens ?? 0)
                       ).toLocaleString()}{" "}
                       tokens
                     </span>
-                    {(traceRollup?.costUsd ?? 0) > 0 && (
-                      <span style={{ color: colors.accents.emberFlare }}>
-                        ${(traceRollup?.costUsd ?? 0).toFixed(4)}
-                      </span>
-                    )}
+                    <span>{formatCost(traceRollup?.costUsd ?? 0, trace?.model_unpriced)}</span>
                   </div>
                 </div>
 

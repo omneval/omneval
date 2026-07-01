@@ -244,6 +244,10 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 	// Models handler — reads from the pricing table.
 	deps.Models = &handler.ModelsHandler{Pricing: pricingTable}
 
+	// Wire the pricing table into the span handler so that spans returned
+	// by the query and trace-detail endpoints carry the model_unpriced flag.
+	deps.Span.Pricing = pricingTable
+
 	// Health and readiness probes.
 	p := probe.New()
 

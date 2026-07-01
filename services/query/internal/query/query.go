@@ -589,11 +589,12 @@ func parseKindCounts(v any) (map[string]int64, error) {
 // Expected column order: span_id, trace_id, parent_id, conversation_id, project_id,
 // service_name, name, kind, start_time, end_time, model, input, output,
 // input_tokens, output_tokens, cost_usd, prompt_name, prompt_version,
-// status_code, status_message
+// status_code, status_message, ...
 //
-// Column 21 varies by query and is disambiguated by type at scan time:
-//   - LakeSQL (trace list): int64 span_count, then string kind_counts at column 22.
-//   - LakeTraceSpansSQL (trace detail): string attributes JSON at column 21.
+// Column positions after the base 20 vary by query:
+//   - MainSQL (trace list): column 20=span_count (int64), 21=kind_counts (string/json),
+//     22=duration_ms (float64/number), 23=model_unpriced (int64 0/1).
+//   - LakeTraceSpansSQL (trace detail): column 20=attributes JSON (string).
 func ScanRows(rows [][]any) ([]*domain.Span, error) {
 	spans := make([]*domain.Span, len(rows))
 	for i, row := range rows {
@@ -636,7 +637,8 @@ func ScanRows(rows [][]any) ([]*domain.Span, error) {
 		if len(row) >= 21 {
 			switch v := row[20].(type) {
 			case int64:
-				// LakeSQL: span_count at column 21, kind_counts at column 22.
+				// LakeSQL/MainSQL: span_count at column 21, kind_counts at 22,
+				// duration_ms at 23, model_unpriced at 24.
 				s.SpanCount = v
 				if len(row) >= 22 {
 					if kc, err := parseKindCounts(row[21]); err != nil {
@@ -645,19 +647,53 @@ func ScanRows(rows [][]any) ([]*domain.Span, error) {
 						s.KindCounts = kc
 					}
 				}
+				// duration_ms at column 23
+				if len(row) >= 23 {
+					switch dm := row[22].(type) {
+					case int64:
+						s.DurationMs = dm
+					case float64:
+						s.DurationMs = int64(dm)
+					}
+				}
+				// model_unpriced at column 24
+				if len(row) >= 24 {
+					if mu, ok := row[23].(int64); ok {
+						s.ModelUnpriced = mu == 1
+					}
+				}
 			case string:
-				// LakeTraceSpansSQL: attributes JSON at column 21.
+				// LakeTraceSpansSQL: attributes JSON at column 21,
+				// duration_ms at column 22.
 				if v != "" {
 					attrs := make(map[string]any)
 					if json.Unmarshal([]byte(v), &attrs) == nil {
 						s.Attributes = attrs
 					}
 				}
+				if len(row) >= 22 {
+					switch dm := row[21].(type) {
+					case int64:
+						s.DurationMs = dm
+					case float64:
+						s.DurationMs = int64(dm)
+					}
+				}
 			case []byte:
+				// LakeTraceSpansSQL (bytes): attributes at column 21,
+				// duration_ms at column 22.
 				if len(v) > 0 {
 					attrs := make(map[string]any)
 					if json.Unmarshal(v, &attrs) == nil {
 						s.Attributes = attrs
+					}
+				}
+				if len(row) >= 22 {
+					switch dm := row[21].(type) {
+					case int64:
+						s.DurationMs = dm
+					case float64:
+						s.DurationMs = int64(dm)
 					}
 				}
 			}
@@ -851,7 +887,9 @@ func (q *SpanQuery) MainSQL(traceIDs []string) (sql string, args []any, err erro
 	sb.WriteString("  CASE WHEN ru.has_error = 1 THEN 'error' ELSE r.status_code END AS status_code,\n")
 	sb.WriteString("  r.status_message,\n")
 	sb.WriteString("  ru.span_count,\n")
-	sb.WriteString("  kr.kind_counts\n")
+	sb.WriteString("  kr.kind_counts,\n")
+	sb.WriteString("  " + durationMsExpr() + " AS duration_ms,\n")
+	sb.WriteString("  0 AS model_unpriced\n")
 	// ranked: inline subquery with ROW_NUMBER for root-span selection, scoped
 	// to the resolved traceIDs via a literal IN-list (not a subquery) so
 	// DuckDB pushes projection through the filter and only materializes the
@@ -897,7 +935,8 @@ func (q *SpanQuery) MainSQL(traceIDs []string) (sql string, args []any, err erro
 // trace from the Lake table, deduplicated on (trace_id, span_id) keeping one
 // row per pair — the read-time residual-duplicate policy from ADR-0004
 // (duplicates survive only a crash between Lake commit and ledger insert).
-// Returns 21 columns: the 20 base columns plus attributes at column 21.
+// Returns 22 columns: the 20 base columns plus attributes at column 21 and
+// duration_ms at column 22.
 //
 // A LIMIT clause (ADR-0004/#152) is appended to the query so that traces with
 // an unbounded number of spans (e.g. long-running agent loops) cannot exhaust
@@ -915,7 +954,8 @@ func (q *SpanQuery) LakeTraceSpansSQL(traceID string) (sql string, args []any) {
 
 	sql = "SELECT span_id, trace_id, parent_id, conversation_id, project_id, service_name, name, kind, " +
 		"start_time, end_time, model, input, output, input_tokens, output_tokens, cost_usd, " +
-		"prompt_name, prompt_version, status_code, status_message, attributes FROM (" +
+		"prompt_name, prompt_version, status_code, status_message, attributes, " +
+		durationMsExpr() + " AS duration_ms FROM (" +
 		"SELECT *, ROW_NUMBER() OVER (PARTITION BY trace_id, span_id ORDER BY start_time DESC) AS rn" +
 		" FROM lake.spans WHERE trace_id = ? AND project_id = ?" +
 		" AND start_time >= ? AND start_time <= ?" +

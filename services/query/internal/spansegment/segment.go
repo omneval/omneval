@@ -14,6 +14,7 @@ import (
 
 	"github.com/omneval/omneval/internal/auth"
 	"github.com/omneval/omneval/internal/domain"
+	"github.com/omneval/omneval/internal/pricing"
 	"github.com/omneval/omneval/services/query/internal/dsl"
 	"github.com/omneval/omneval/services/query/internal/metrics"
 	"github.com/omneval/omneval/services/query/internal/query"
@@ -61,6 +62,9 @@ type SpanHandler struct {
 	// for span and analytics queries. It owns the Lake connection, query
 	// compilation, row scanning, and cursor computation.
 	QueryBuilder *querybuild.QueryBuilder
+	// Pricing is the pricing table used to annotate spans with the
+	// model_unpriced flag (whether pricing data is missing for a model).
+	Pricing *pricing.Table
 }
 
 // Routes returns the span-related API routes as AuthRoute entries with
@@ -197,6 +201,8 @@ func (h *SpanHandler) HandleSpansQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.annotateModelUnpriced(result.Spans)
+
 	resp := &query.SpanResponse{
 		Spans: result.Spans,
 		Next:  result.Next,
@@ -260,6 +266,9 @@ func (h *SpanHandler) HandleTraceDetail(w http.ResponseWriter, r *http.Request) 
 
 	// Build the trace tree (includes score loading from lake.scores).
 	trace := buildTraceTree(spans, h.Lake, traceID, projectID, "lake.scores")
+
+	// Annotate model_unpriced for each span before responding.
+	h.annotateModelUnpriced(trace.Spans)
 
 	// Compute trace-level rollups (sum across all spans) so the UI header
 	// pill reflects total usage rather than just the root span's own
@@ -628,4 +637,20 @@ func (h *SpanHandler) resolveProjectID() auth.ProjectResolver {
 		return auth.NewSessionStoreResolver(h.SessionStore)
 	}
 	return h.ProjectResolver
+}
+
+// --- model_unpriced annotation ---
+
+// annotateModelUnpriced sets span.ModelUnpriced based on whether the pricing
+// table has data for the span's model.  When the model is known but has no
+// pricing entry the UI shows an "unpriced" badge instead of a dollar amount.
+// When pricing is nil the flag stays false (caller did not configure pricing).
+func (h *SpanHandler) annotateModelUnpriced(spans []*domain.Span) {
+	p := h.Pricing
+	if p == nil {
+		return
+	}
+	for _, s := range spans {
+		s.ModelUnpriced = s.CostUSD == 0 && s.Model != "" && !p.HasModel(pricing.NormalizeModel(s.Model))
+	}
 }

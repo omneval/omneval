@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/Skeleton";
 import { EmptyState, LoadingState } from "@/components/EmptyState";
 import {
   formatNumber,
-  formatMs,
+  formatDurationMs,
   timeRangeLabel,
 } from "@/utils/formatters";
 
@@ -293,7 +293,7 @@ function KPITiles({ data, loading }: { data: KPIValue | null; loading: boolean }
       />
       <KPITile
         label="Average Latency"
-        value={formatMs(data.avgLatencyMs)}
+        value={formatDurationMs(data.avgLatencyMs)}
         subtitle="avg duration_ms"
         color={colors.chartColors.series[2]}
         icon={KPISVGIcons.latency}

@@ -19,6 +19,8 @@ describe("annotateSpanTree — flat single-leaf case", () => {
       cost_usd: 0.05,
       start_time: "2024-01-01T00:00:00Z",
       end_time: "2024-01-01T00:00:01Z",
+      duration_ms: 1000,
+      model_unpriced: false,
     };
 
     const root: Span = {
@@ -33,6 +35,8 @@ describe("annotateSpanTree — flat single-leaf case", () => {
       cost_usd: 0,
       start_time: "2024-01-01T00:00:00Z",
       end_time: "2024-01-01T00:00:01Z",
+      duration_ms: 1000,
+      model_unpriced: false,
       children: [child],
     };
 
@@ -68,6 +72,8 @@ describe("annotateSpanTree — multi-branch case", () => {
       cost_usd: 0.10,
       start_time: "2024-01-01T00:00:00Z",
       end_time: "2024-01-01T00:00:01Z",
+      duration_ms: 1000,
+      model_unpriced: false,
     };
 
     const child2: Span = {
@@ -82,6 +88,8 @@ describe("annotateSpanTree — multi-branch case", () => {
       cost_usd: 0.04,
       start_time: "2024-01-01T00:00:00Z",
       end_time: "2024-01-01T00:00:01Z",
+      duration_ms: 1000,
+      model_unpriced: false,
     };
 
     const root: Span = {
@@ -96,6 +104,8 @@ describe("annotateSpanTree — multi-branch case", () => {
       cost_usd: 0,
       start_time: "2024-01-01T00:00:00Z",
       end_time: "2024-01-01T00:00:01Z",
+      duration_ms: 1000,
+      model_unpriced: false,
       children: [child1, child2],
     };
 
@@ -133,6 +143,8 @@ describe("annotateSpanTree — non-leaf span with nonzero values", () => {
       cost_usd: 0.25,
       start_time: "2024-01-01T00:00:00Z",
       end_time: "2024-01-01T00:00:01Z",
+      duration_ms: 1000,
+      model_unpriced: false,
     };
 
     // Parent is itself an LLM-like span (e.g. a proxy or aggregator) with its own usage.
@@ -148,6 +160,8 @@ describe("annotateSpanTree — non-leaf span with nonzero values", () => {
       cost_usd: 0.05,
       start_time: "2024-01-01T00:00:00Z",
       end_time: "2024-01-01T00:00:01Z",
+      duration_ms: 1000,
+      model_unpriced: false,
       children: [llm],
     };
 

@@ -314,6 +314,99 @@ export function formatMs(ms: number): string {
 }
 
 /**
+ * Format a duration in milliseconds to a human-friendly string.
+ *
+ * Uses the same algorithm as Langfuse:
+ * - `< 1ms` / `Xms` (< 1 s)
+ * - `Xs` / `X.Xs` (1–59 s, decimal only when non-zero)
+ * - `Xm Ys` (1–59 min)
+ * - `Xh Ym` / `Xh Ym Zs` (≥ 1 h, seconds only when non-zero)
+ *
+ * This ensures no raw seconds > 120 or raw milliseconds > 10 000
+ * appear in the UI.
+ */
+export function formatDurationMs(ms: number): string {
+  if (ms < 0) return "0ms";
+  if (ms < 1) return "< 1ms";
+
+  // Milliseconds: < 1 s
+  if (ms < 1000) return `${ms}ms`;
+
+  // Seconds: 1–59 s
+  if (ms < 60000) {
+    const seconds = ms / 1000;
+    if (seconds % 1 === 0) {
+      // e.g. 2s, 30s — clean numbers, no decimal
+      return `${Math.round(seconds)}s`;
+    }
+    // e.g. 4.6s, 12.3s — one decimal
+    return `${seconds.toFixed(1)}s`;
+  }
+
+  // Minutes: 1–59 min
+  if (ms < 3600000) {
+    const totalMinutes = ms / 60000;
+    const minutes = Math.floor(totalMinutes);
+    const seconds = Math.round((totalMinutes - minutes) * 60);
+    return `${minutes}m ${seconds}s`;
+  }
+
+  // Hours: ≥ 1 h
+  const hours = Math.floor(ms / 3600000);
+  const remainingAfterHours = ms - hours * 3600000;
+  const minutes = Math.floor(remainingAfterHours / 60000);
+  const seconds = Math.round((remainingAfterHours - minutes * 60000) / 1000);
+
+  // Always show hours + minutes; add seconds only when non-zero.
+  // This gives "1h 0m", "1h 1m", or "1h 1m 40s".
+  const parts: string[] = [`${hours}h`, `${minutes}m`];
+  if (seconds > 0) {
+    parts.push(`${seconds}s`);
+  }
+
+  return parts.join(" ");
+}
+
+// ── Cost formatting ────────────────────────────────────────────────
+
+/**
+ * Format a USD cost with sensible precision:
+ * - `$0.00` for zero (a legitimate value, not an error)
+ * - `$X.XXX` for sub-dollar values (< $1) with 3 significant decimals
+ * - `$X.XX` for values ≥ $1 with up to 2 significant decimals,
+ *   trailing zeros stripped (so $2.50 → `$2.5`)
+ *
+ * Pass `isUnpriced` to mark the value as "model is known but has no
+ * pricing record" — renders as the plain word "unpriced" instead of a
+ * dollar amount.  The caller (Query API) sets this flag; the client
+ * must NOT guess it client-side.
+ */
+export function formatCost(usd: number, isUnpriced?: boolean): string {
+  if (isUnpriced) return "unpriced";
+  if (usd === 0) return "$0.00";
+
+  // Sub-dollar values: up to 4 significant decimals, strip trailing zeros
+  // but keep at least 2 (e.g. $0.031, $0.01, $0.001)
+  if (usd < 1) {
+    let str = usd.toFixed(4); // "0.0031", "0.0000", "0.5000"
+    // Strip trailing zeros but keep at least 2 decimals
+    str = str.replace(/0+$/, "");
+    if (str.endsWith(".")) str = str.slice(0, -1);
+    // Ensure at least 2 decimal places
+    if (!str.includes(".") || str.split(".")[1].length < 2) {
+      str = usd.toFixed(2);
+    }
+    return `$${str}`;
+  }
+
+  // Dollar range: up to 2 significant decimals, strip trailing zeros
+  return `$${usd.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+/**
  * Derive a human-readable time-range label from a start timestamp.
  */
 export function timeRangeLabel(from: string): string {
