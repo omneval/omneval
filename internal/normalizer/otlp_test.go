@@ -1085,6 +1085,82 @@ func TestNormalizeOTLP_AttributesPriorityOverEvents(t *testing.T) {
 	}
 }
 
+// TestNormalizeOTLP_SessionIDMapping verifies that session-id attributes from
+// OTLP instrumentation map into the domain conversation id, with SDK
+// conversation-id attributes taking precedence over session-id forms:
+// gen_ai.conversation.id > omneval.conversation.id > session.id >
+// lanr.association.properties.session_id.
+func TestNormalizeOTLP_SessionIDMapping(t *testing.T) {
+	strAttr := func(key, val string) *commonv1.KeyValue {
+		return &commonv1.KeyValue{Key: key, Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: val}}}
+	}
+
+	cases := []struct {
+		name  string
+		attrs []*commonv1.KeyValue
+		want  string
+	}{
+		{
+			name:  "session.id maps to conversation id",
+			attrs: []*commonv1.KeyValue{strAttr("session.id", "sess-otel-1")},
+			want:  "sess-otel-1",
+		},
+		{
+			name:  "lanr association properties session_id maps to conversation id",
+			attrs: []*commonv1.KeyValue{strAttr("lanr.association.properties.session_id", "sess-lanr-1")},
+			want:  "sess-lanr-1",
+		},
+		{
+			name: "gen_ai.conversation.id wins over session.id",
+			attrs: []*commonv1.KeyValue{
+				strAttr("session.id", "sess-otel-1"),
+				strAttr("gen_ai.conversation.id", "conv-sdk-1"),
+			},
+			want: "conv-sdk-1",
+		},
+		{
+			name: "session.id wins over lanr association form",
+			attrs: []*commonv1.KeyValue{
+				strAttr("lanr.association.properties.session_id", "sess-lanr-1"),
+				strAttr("session.id", "sess-otel-1"),
+			},
+			want: "sess-otel-1",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rss := []*tracev1.ResourceSpans{
+				{
+					ScopeSpans: []*tracev1.ScopeSpans{
+						{
+							Spans: []*tracev1.Span{
+								{
+									TraceId:           []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+									SpanId:            []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+									Name:              "session-span",
+									StartTimeUnixNano: uint64(time.Now().UnixNano()),
+									EndTimeUnixNano:   uint64(time.Now().UnixNano()),
+									Attributes:        tc.attrs,
+								},
+							},
+						},
+					},
+				},
+			}
+
+			n := normalizer.New()
+			spans, err := normalizer.NormalizeOTLP(nil, "proj-1", rss, normalizer.Options{}, n)
+			if err != nil {
+				t.Fatalf("NormalizeOTLP error: %v", err)
+			}
+			if spans[0].ConversationID != tc.want {
+				t.Errorf("conversation_id: got %q, want %q", spans[0].ConversationID, tc.want)
+			}
+		})
+	}
+}
+
 // TestNormalizeOTLP_ZeroTimeSpan verifies that a span with zero start/end times
 // does not set start_time / end_time fields (time.Time{} should be absent).
 func TestNormalizeOTLP_ZeroTimeSpan(t *testing.T) {

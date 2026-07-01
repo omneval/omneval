@@ -119,10 +119,7 @@ func otlpSpanToRawMap(projectID string, resourceAttrs map[string]any, serviceNam
 
 	promptName, promptVersion := resolvePromptInfo(attrs)
 
-	conversationID := extractAttributeString(attrs, "gen_ai.conversation.id")
-	if conversationID == "" {
-		conversationID = extractAttributeString(attrs, "omneval.conversation.id")
-	}
+	conversationID := extractConversationID(attrs)
 
 	raw := map[string]any{
 		"span_id":        hexEncode(span.GetSpanId()),
@@ -526,11 +523,10 @@ func buildOverflowAttributes(attrs map[string]any, model string, inputTokens, ou
 		remove["service.name"] = true
 	}
 
-	if _, hasConvID := attrs["gen_ai.conversation.id"]; hasConvID {
-		remove["gen_ai.conversation.id"] = true
-	}
-	if _, hasOmnevalConvID := attrs["omneval.conversation.id"]; hasOmnevalConvID {
-		remove["omneval.conversation.id"] = true
+	for _, key := range conversationIDAttributes {
+		if _, ok := attrs[key]; ok {
+			remove[key] = true
+		}
 	}
 
 	overflow := make(map[string]any, len(attrs)-len(remove))
@@ -540,6 +536,28 @@ func buildOverflowAttributes(attrs map[string]any, model string, inputTokens, ou
 		}
 	}
 	return overflow
+}
+
+// conversationIDAttributes lists the span attributes that carry a
+// conversation/session identifier, in precedence order: the SDK's GenAI
+// semconv attribute, the omneval-specific form, the OTLP session semconv,
+// and the lanr association form observed in production OTLP traffic.
+var conversationIDAttributes = []string{
+	"gen_ai.conversation.id",
+	"omneval.conversation.id",
+	"session.id",
+	"lanr.association.properties.session_id",
+}
+
+// extractConversationID resolves the domain conversation id from span
+// attributes, trying each known attribute in precedence order.
+func extractConversationID(attrs map[string]any) string {
+	for _, key := range conversationIDAttributes {
+		if id := extractAttributeString(attrs, key); id != "" {
+			return id
+		}
+	}
+	return ""
 }
 
 func resolvePromptInfo(attrs map[string]any) (string, int64) {
