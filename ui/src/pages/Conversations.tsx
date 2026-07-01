@@ -5,6 +5,7 @@ import { EmptyState } from "@/components/EmptyState";
 import {
   formatTimeWithYear,
   formatDuration,
+  formatCost,
 } from "@/utils/formatters";
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -172,7 +173,7 @@ export default function ConversationsPage({
                         className="px-3 py-2.5 whitespace-nowrap font-medium text-xs"
                         style={{ color: colors.accents.emberFlare }}
                       >
-                        ${c.total_cost_usd.toFixed(4)}
+                        {formatCost(c.total_cost_usd)}
                       </td>
                       <td className="px-3 py-2.5 whitespace-nowrap text-omneval-text-muted font-mono text-xs">
                         {(c.total_input_tokens + c.total_output_tokens).toLocaleString()}

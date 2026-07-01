@@ -157,9 +157,9 @@ describe("DashboardPage", () => {
     });
   });
 
-  // ── Issue #233: Unpriced indicator ─────────────────────────────────
+  // ── Issues #233 / #337: Unpriced indicator (API-driven) ────────────
 
-  it("#233: shows 'Unpriced' for models with tokens but $0 cost", async () => {
+  it("#337: shows 'Unpriced' only for models the Query API reports as unpriced", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       if (url === "/api/v1/analytics/spans") {
         return resolveAnalyticsResponse({
@@ -170,8 +170,17 @@ describe("DashboardPage", () => {
               output_tokens: 500,
               total_cost: 0,
             },
+            {
+              model: "local-llama",
+              input_tokens: 2000,
+              output_tokens: 900,
+              total_cost: 0,
+            },
           ],
         });
+      }
+      if (typeof url === "string" && url.startsWith("/api/v1/models/priced")) {
+        return resolveAnalyticsResponse({ "unknown-model": false, "local-llama": true });
       }
       return rejectAnalyticsResponse();
     });
@@ -179,8 +188,18 @@ describe("DashboardPage", () => {
     renderWithToast(<DashboardPage activeProject="proj-1" />);
 
     await waitFor(() => {
-      // Model with tokens but zero cost should show "Unpriced" not "$0.0000"
-      expect(screen.getByText("Unpriced")).toBeInTheDocument();
+      // The unpriced model's row shows the badge…
+      const unknownRows = screen.getAllByText("unknown-model").map((el) => el.closest("tr")!);
+      expect(unknownRows.length).toBeGreaterThan(0);
+      expect(unknownRows.some((row) => within(row).queryByText("Unpriced"))).toBe(true);
+
+      // …while the $0-priced (self-hosted) model's row shows a plain $0.00.
+      const pricedRows = screen.getAllByText("local-llama").map((el) => el.closest("tr")!);
+      expect(pricedRows.length).toBeGreaterThan(0);
+      for (const row of pricedRows) {
+        expect(within(row).queryByText("Unpriced")).toBeNull();
+      }
+      expect(pricedRows.some((row) => within(row).queryByText("$0.00"))).toBe(true);
     });
   });
 
@@ -926,8 +945,8 @@ describe("DashboardPage", () => {
     });
 
     await waitFor(() => {
-      // Average Latency: 234.5ms
-      expect(screen.getByText("234.5ms")).toBeInTheDocument();
+      // Average Latency: 234.5ms humanized to whole milliseconds
+      expect(screen.getByText("235ms")).toBeInTheDocument();
     });
   });
 

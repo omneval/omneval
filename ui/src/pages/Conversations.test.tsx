@@ -118,7 +118,7 @@ describe("ConversationsPage", () => {
     expect(screen.getByText("my-agent")).toBeInTheDocument();
     expect(screen.getByText("5")).toBeInTheDocument(); // trace_count
     expect(screen.getByText("23")).toBeInTheDocument(); // span_count
-    expect(screen.getByText("$0.0420")).toBeInTheDocument();
+    expect(screen.getByText("$0.042")).toBeInTheDocument();
     expect(screen.getByText("15,600")).toBeInTheDocument(); // total tokens
   });
 

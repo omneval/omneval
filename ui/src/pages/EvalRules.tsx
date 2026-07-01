@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { colors } from "@/theme";
 import { EmptyState } from "@/components/EmptyState";
-import { formatTime } from "@/utils/formatters";
-import { truncate } from "@/utils/formatters";
+import { formatTime, formatCost, truncate } from "@/utils/formatters";
 import { useToast } from "@/components/Toast";
 import { FilterGroup, createEmptyFilter, EvalFilter } from "@/components/FilterGroup";
 
@@ -821,7 +820,7 @@ export default function EvalRulesPage({ activeProject }: EvalRulesPageProps) {
                           </span>
                           <span className="text-omneval-text-muted">model: <span className="text-omneval-text-pure">{span.model}</span></span>
                           <span className="text-omneval-text-muted">kind: <span className="text-omneval-text-pure">{span.kind}</span></span>
-                          <span className="text-omneval-text-muted">cost: <span className="text-omneval-text-pure">${span.cost_usd.toFixed(4)}</span></span>
+                          <span className="text-omneval-text-muted">cost: <span className="text-omneval-text-pure">{formatCost(span.cost_usd)}</span></span>
                           <span className="text-omneval-text-muted flex-1 text-right truncate" title={span.start_time}>
                             {new Date(span.start_time).toLocaleString()}
                           </span>
