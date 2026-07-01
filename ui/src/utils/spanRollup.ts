@@ -12,6 +12,8 @@ export interface Span {
   model?: string;
   start_time: string;
   end_time: string;
+  /** Duration of the span in milliseconds. */
+  duration_ms: number;
   cost_usd: number;
   input_tokens: number;
   output_tokens: number;
@@ -21,6 +23,9 @@ export interface Span {
   status_code?: string;
   scores?: { eval_name: string; value: number }[];
   attributes?: Record<string, unknown>;
+  /** Whether the model is known but priced at $0 (self-hosted).
+   *  False when the model is unknown/unpriced. */
+  model_unpriced: boolean;
 }
 
 /**

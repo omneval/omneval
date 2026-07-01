@@ -7,6 +7,7 @@ import { EmptyState, LoadingState } from "@/components/EmptyState";
 import {
   formatTime,
   formatDuration,
+  formatCost,
   parseChatTurns,
 } from "@/utils/formatters";
 import { getSpanKindColor } from "@/modules/spanKindVisuals";
@@ -225,7 +226,7 @@ export default function ConversationDetailPage({
           )}
           {totalCost > 0 && (
             <span className="text-xs" style={{ color: colors.accents.emberFlare }}>
-              ${totalCost.toFixed(4)}
+              {formatCost(totalCost)}
             </span>
           )}
           {firstStart && (
@@ -326,7 +327,7 @@ function TraceRow({
         </span>
         {trace.cost_usd > 0 && (
           <span className="text-xs flex-shrink-0" style={{ color: colors.accents.emberFlare }}>
-            ${trace.cost_usd.toFixed(4)}
+            {formatCost(trace.cost_usd)}
           </span>
         )}
         <span className="text-xs text-omneval-text-muted flex-shrink-0">

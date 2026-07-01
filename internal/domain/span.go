@@ -51,6 +51,16 @@ type Span struct {
 	StatusCode    string `json:"status_code"`
 	StatusMessage string `json:"status_message"`
 
+	// DurationMs is the span duration in milliseconds (computed as
+	// end_time - start_time). Populated by the query service; zero when
+	// the span-level read (LakeTraceSpansSQL) does not include it.
+	DurationMs int64 `json:"duration_ms,omitempty"`
+
+	// ModelUnpriced is true when the model is known but has no pricing
+	// record — cost is stored as 0 because pricing is unavailable, not
+	// because the model is priced at $0.  Drives the "unpriced" UI badge.
+	ModelUnpriced bool `json:"model_unpriced,omitempty"`
+
 	// SpanCount is the number of spans in this span's trace. Populated only
 	// on trace-rollup rows (the Traces list, LakeSQL) — zero for span-level
 	// reads such as trace detail.

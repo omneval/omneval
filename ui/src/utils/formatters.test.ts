@@ -3,6 +3,8 @@ import {
   formatTime,
   formatTimeWithYear,
   formatDuration,
+  formatDurationMs,
+  formatCost,
   safeExtractInputOutput,
   formatJsonPreview,
   truncate,
@@ -239,6 +241,171 @@ describe("formatDuration", () => {
     const start = "2025-01-15T10:00:00.000Z";
     const end = "2025-01-15T10:00:01.234Z";
     expect(formatDuration(start, end)).toBe("1.2s");
+  });
+});
+
+// ── formatCost ────────────────────────────────────────────────────
+
+describe("formatCost", () => {
+  it("formats $0.00 for zero cost", () => {
+    expect(formatCost(0)).toBe("$0.00");
+  });
+
+  it("formats cents with two decimals", () => {
+    expect(formatCost(0.01)).toBe("$0.01");
+    expect(formatCost(0.99)).toBe("$0.99");
+  });
+
+  it("formats sub-penny values with three significant decimals", () => {
+    expect(formatCost(0.003)).toBe("$0.003");
+    expect(formatCost(0.009)).toBe("$0.009");
+  });
+
+  it("formats pennies-to-dollars with three significant decimals below $1", () => {
+    expect(formatCost(0.031)).toBe("$0.031");
+    expect(formatCost(0.123)).toBe("$0.123");
+  });
+
+  it("drops trailing zeros above $1", () => {
+    expect(formatCost(1.50)).toBe("$1.5");
+    expect(formatCost(10.00)).toBe("$10");
+    expect(formatCost(100.50)).toBe("$100.5");
+  });
+
+  it("formats larger values sensibly", () => {
+    expect(formatCost(2.505)).toBe("$2.51");
+    expect(formatCost(100)).toBe("$100");
+    expect(formatCost(12.3456)).toBe("$12.35");
+  });
+
+  it("returns 'unpriced' when isUnpriced is true", () => {
+    expect(formatCost(0, true)).toBe("unpriced");
+    expect(formatCost(5, true)).toBe("unpriced");
+  });
+
+  it("handles very small costs with up to 4 decimals", () => {
+    expect(formatCost(0.0001)).toBe("$0.0001");
+    expect(formatCost(0.0005)).toBe("$0.0005");
+    // Values below 0.00005 round to $0.00 (below our precision)
+    expect(formatCost(0.00001)).toBe("$0.00");
+    expect(formatCost(0.000015)).toBe("$0.00");
+  });
+
+  it("handles large costs", () => {
+    expect(formatCost(999.999)).toBe("$1,000");
+    expect(formatCost(999.50)).toBe("$999.5");
+    expect(formatCost(5000)).toBe("$5,000");
+  });
+
+  it("formats with commas for thousands", () => {
+    expect(formatCost(1500.50)).toBe("$1,500.5");
+  });
+});
+
+// ── formatDurationMs ──────────────────────────────────────────────
+
+describe("formatDurationMs (human-friendly duration with minutes/hours)", () => {
+  it("returns '< 1ms' for zero", () => {
+    expect(formatDurationMs(0)).toBe("< 1ms");
+  });
+
+  it("returns 'Xms' for 1–999ms", () => {
+    expect(formatDurationMs(1)).toBe("1ms");
+    expect(formatDurationMs(847)).toBe("847ms");
+    expect(formatDurationMs(999)).toBe("999ms");
+  });
+
+  it("rounds 999.5ms to 1000ms → '1s'", () => {
+    expect(formatDurationMs(999)).toBe("999ms");
+  });
+
+  it("shows 'Xs' (no decimal) for clean seconds", () => {
+    expect(formatDurationMs(1000)).toBe("1s");
+    expect(formatDurationMs(2000)).toBe("2s");
+  });
+
+  it("shows 'X.Xs' (with decimal) for non-integer seconds in 1000–59999ms", () => {
+    expect(formatDurationMs(4600)).toBe("4.6s");
+    expect(formatDurationMs(12345)).toBe("12.3s");
+  });
+
+  it("shows 'Xs' (no decimal) for clean seconds in 1000–59999ms", () => {
+    expect(formatDurationMs(2000)).toBe("2s");
+    expect(formatDurationMs(30000)).toBe("30s");
+  });
+
+  it("returns '1m' for 60000ms", () => {
+    expect(formatDurationMs(60000)).toBe("1m 0s");
+  });
+
+  it("returns 'Xm Ys' for 1–59 minutes with seconds", () => {
+    expect(formatDurationMs(61000)).toBe("1m 1s");
+    expect(formatDurationMs(120000)).toBe("2m 0s");
+    expect(formatDurationMs(847000)).toBe("14m 7s");
+  });
+
+  it("returns 'Xh Ym' for exactly-on-the-minute hours", () => {
+    expect(formatDurationMs(3600000)).toBe("1h 0m");
+    expect(formatDurationMs(3660000)).toBe("1h 1m");
+    expect(formatDurationMs(7200000)).toBe("2h 0m");
+  });
+
+  it("returns 'Xh Ym Zs' when seconds are non-zero with hours", () => {
+    // 3661000ms = 3661s = 1h 1m 1s
+    expect(formatDurationMs(3661000)).toBe("1h 1m 1s");
+    // 3725000ms = 3725s = 1h 2m 5s
+    expect(formatDurationMs(3725000)).toBe("1h 2m 5s");
+  });
+
+  it("handles the Langfuse example: 81s → '1m 21s'", () => {
+    expect(formatDurationMs(81000)).toBe("1m 21s");
+  });
+
+  it("handles the issue example: 3699.5s → '1h 1m 40s'", () => {
+    // 3699500ms = 3699.5s = 1h 1m 39.5s → rounds to 1h 1m 40s
+    expect(formatDurationMs(3699500)).toBe("1h 1m 40s");
+  });
+
+  it("handles negative durations gracefully", () => {
+    expect(formatDurationMs(-100)).toBe("0ms");
+  });
+
+  // ── Boundary tests for the issue ─────────────────────────────────
+  it("converts 59.9s → '59.9s' not '1m' (boundary at 60s)", () => {
+    // 59 900ms is 59.9s — still in the seconds bucket
+    expect(formatDurationMs(59900)).toBe("59.9s");
+  });
+
+  it("converts 60s → '1m 0s' (enters minutes bucket)", () => {
+    expect(formatDurationMs(60000)).toBe("1m 0s");
+  });
+
+  it("ensures no raw seconds > 120 appear (121s → '2m 1s')", () => {
+    expect(formatDurationMs(121000)).toBe("2m 1s");
+  });
+
+  it("ensures no raw seconds > 120 appear (180s → '3m 0s')", () => {
+    expect(formatDurationMs(180000)).toBe("3m 0s");
+  });
+
+  it("ensures no raw milliseconds > 10 000 appear (10000ms → '10s')", () => {
+    expect(formatDurationMs(10000)).toBe("10s");
+  });
+
+  it("ensures no raw milliseconds > 10 000 appear (60000ms → '1m 0s')", () => {
+    expect(formatDurationMs(60000)).toBe("1m 0s");
+  });
+
+  it("formats 0.5s → '500ms' (sub-second)", () => {
+    expect(formatDurationMs(500)).toBe("500ms");
+  });
+
+  it("formats 100000ms → '1m 40s'", () => {
+    expect(formatDurationMs(100000)).toBe("1m 40s");
+  });
+
+  it("formats 36000000ms → '10h 0m' (large duration)", () => {
+    expect(formatDurationMs(36000000)).toBe("10h 0m");
   });
 });
 
