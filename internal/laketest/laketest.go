@@ -59,13 +59,15 @@ func NewPostgres(t *testing.T, catalogDSN string) *lake.Lake {
 // catalog DSN and returns a connected *lake.Lake ready for integration tests.
 // The caller may modify the lake.Config before the server starts by providing
 // a non-nil modifyFn. The server is closed automatically via t.Cleanup.
-func NewPostgresWithConfig(t *testing.T, catalogDSN string, modifyFn func(*lake.Config)) *lake.Lake {
+// The config used to open the lake is also returned so callers can derive
+// read-only clients (e.g. roCfg := cfg; roCfg.ReadOnly = true).
+func NewPostgresWithConfig(t *testing.T, catalogDSN string, modifyFn func(*lake.Config)) (*lake.Lake, lake.Config) {
 	t.Helper()
 	cfg := lakeservertest.NewPostgres(t, catalogDSN)
 	if modifyFn != nil {
 		modifyFn(&cfg)
 	}
-	return newLake(t, cfg)
+	return newLake(t, cfg), cfg
 }
 
 // NewLocalWithStorage is like NewLocal but allows customising the DataPath and
