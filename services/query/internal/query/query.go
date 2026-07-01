@@ -663,18 +663,37 @@ func ScanRows(rows [][]any) ([]*domain.Span, error) {
 					}
 				}
 			case string:
-				// LakeTraceSpansSQL: attributes JSON at column 21.
+				// LakeTraceSpansSQL: attributes JSON at column 21,
+				// duration_ms at column 22.
 				if v != "" {
 					attrs := make(map[string]any)
 					if json.Unmarshal([]byte(v), &attrs) == nil {
 						s.Attributes = attrs
 					}
 				}
+				if len(row) >= 22 {
+					switch dm := row[21].(type) {
+					case int64:
+						s.DurationMs = dm
+					case float64:
+						s.DurationMs = int64(dm)
+					}
+				}
 			case []byte:
+				// LakeTraceSpansSQL (bytes): attributes at column 21,
+				// duration_ms at column 22.
 				if len(v) > 0 {
 					attrs := make(map[string]any)
 					if json.Unmarshal(v, &attrs) == nil {
 						s.Attributes = attrs
+					}
+				}
+				if len(row) >= 22 {
+					switch dm := row[21].(type) {
+					case int64:
+						s.DurationMs = dm
+					case float64:
+						s.DurationMs = int64(dm)
 					}
 				}
 			}
