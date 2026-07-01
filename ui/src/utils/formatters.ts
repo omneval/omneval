@@ -329,8 +329,6 @@ export function formatDurationMs(ms: number): string {
   if (ms < 0) return "0ms";
   if (ms < 1) return "< 1ms";
 
-  const totalSeconds = ms / 1000;
-
   // Milliseconds: < 1 s
   if (ms < 1000) return `${ms}ms`;
 
