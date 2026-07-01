@@ -1122,7 +1122,10 @@ func TestLakeSQL_CursorPagination_Integration(t *testing.T) {
 	ctx := context.Background()
 	lk := laketest.NewLocal(t)
 
-	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	// Relative to now so the spans always fall inside the query's default
+	// time window (a fixed date rots out of the window as the calendar
+	// advances). Truncated to seconds to avoid timestamp-precision drift.
+	base := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
 	var spans []*domain.Span
 	for i := 0; i < 5; i++ {
 		spans = append(spans, &domain.Span{
@@ -1183,7 +1186,10 @@ func TestLakeSQL_OneRowPerTrace(t *testing.T) {
 	ctx := context.Background()
 	lk := laketest.NewLocal(t)
 
-	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	// Relative to now so the spans always fall inside the query's default
+	// time window (a fixed date rots out of the window as the calendar
+	// advances). Truncated to seconds to avoid timestamp-precision drift.
+	base := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
 
 	// A single trace with a root span and three child spans.
 	root := &domain.Span{
