@@ -18,6 +18,7 @@ import { EmptyState, LoadingState } from "@/components/EmptyState";
 import {
   formatNumber,
   formatMs,
+  formatCost,
   timeRangeLabel,
 } from "@/utils/formatters";
 
@@ -272,7 +273,7 @@ function KPITiles({ data, loading }: { data: KPIValue | null; loading: boolean }
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
       <KPITile
         label="Total Cost"
-        value={`$${data.totalCost.toFixed(2)}`}
+        value={formatCost(data.totalCost)}
         subtitle="sum of cost_usd"
         color={colors.accents.violet}
         icon={KPISVGIcons.dollar}
@@ -611,6 +612,37 @@ interface CostData {
   totalCost: number;
 }
 
+/**
+ * Fetch priced-status for a list of model names from the Query API
+ * (GET /api/v1/models/priced). Returns a map of model → priced, or null
+ * while loading / on error. This is the source of truth for the
+ * "Unpriced" badge — never guessed client-side from a $0 cost, because
+ * self-hosted models are legitimately priced at $0.
+ */
+function usePricedModels(models: string[]): Record<string, boolean> | null {
+  const [priced, setPriced] = useState<Record<string, boolean> | null>(null);
+  const seqRef = useRef(0);
+  const key = models.join(",");
+
+  useEffect(() => {
+    if (!key) {
+      setPriced(null);
+      return;
+    }
+    const seq = ++seqRef.current;
+    fetch(`/api/v1/models/priced?models=${encodeURIComponent(key)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: Record<string, boolean> | null) => {
+        if (seqRef.current === seq) setPriced(data);
+      })
+      .catch(() => {
+        if (seqRef.current === seq) setPriced(null);
+      });
+  }, [key]);
+
+  return priced;
+}
+
 function ModelCostsTable({
   data,
   loading,
@@ -624,6 +656,13 @@ function ModelCostsTable({
     () => [...data].sort((a, b) => b.totalCost - a.totalCost),
     [data],
   );
+
+  // Only look up priced status when rows are actual model names.
+  const models = useMemo(
+    () => (labelHeader === "Model" ? sorted.map((r) => r.model) : []),
+    [labelHeader, sorted],
+  );
+  const priced = usePricedModels(models);
 
   if (loading && data.length === 0) {
     return <LoadingState rows={5} rowHeight="1.5rem" />;
@@ -692,11 +731,15 @@ function ModelCostsTable({
               </td>
               <td
                 className="py-2 px-3 text-right font-medium"
-                style={{ color: row.totalCost === 0 && (row.inputTokens + row.outputTokens) > 0 ? colors.accents.amberWarning : colors.accents.violet }}
+                style={{ color: priced?.[row.model] === false ? colors.accents.amberWarning : colors.accents.violet }}
               >
-                {row.totalCost === 0 && (row.inputTokens + row.outputTokens) > 0
-                  ? "Unpriced"
-                  : `$${row.totalCost.toFixed(4)}`}
+                {priced?.[row.model] === false ? (
+                  <span title="No pricing is known for this model; costs are not computed.">
+                    Unpriced
+                  </span>
+                ) : (
+                  formatCost(row.totalCost)
+                )}
               </td>
             </tr>
           ))}

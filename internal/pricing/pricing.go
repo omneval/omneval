@@ -136,16 +136,14 @@ func fetchRemote() (*Table, error) {
 }
 
 // ApplyOverrides merges per-model price overrides into the table.
+// A model's presence in the override map marks it as priced even when its
+// prices are $0 (self-hosted models), so it is never reported as unpriced.
 func (t *Table) ApplyOverrides(overrides map[string]ModelOverride) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for model, ov := range overrides {
-		if ov.InputPerMillion > 0 {
-			t.inputCost[model] = ov.InputPerMillion / 1e6
-		}
-		if ov.OutputPerMillion > 0 {
-			t.outputCost[model] = ov.OutputPerMillion / 1e6
-		}
+		t.inputCost[model] = ov.InputPerMillion / 1e6
+		t.outputCost[model] = ov.OutputPerMillion / 1e6
 	}
 }
 

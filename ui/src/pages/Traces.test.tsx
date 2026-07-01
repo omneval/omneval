@@ -1120,7 +1120,7 @@ describe("pagination", () => {
 // ── Span rendering tests ─────────────────────────────────────────
 
 describe("span rendering", () => {
-  it("renders cost with four decimal places", async () => {
+  it("renders small costs with humanized precision", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       json: () =>
@@ -1144,8 +1144,8 @@ describe("span rendering", () => {
       expect(screen.getByText("main-trace")).toBeInTheDocument();
     });
 
-    // cost_usd.toFixed(4) produces "$0.0123"
-    expect(screen.getByText("$0.0123")).toBeInTheDocument();
+    // formatCost(0.01234) produces "$0.012"
+    expect(screen.getByText("$0.012")).toBeInTheDocument();
   });
 });
 
