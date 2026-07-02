@@ -204,12 +204,13 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		deps.Admin.IngestQueueDB = deps.Redis
 	}
 
-	deps.Dataset = &handler.DatasetHandler{DatasetStore: store, SessionStore: h, ProjectResolver: h}
+	datasetStore := store.DatasetStore()
+	deps.Dataset = &handler.DatasetHandler{DatasetStore: datasetStore, SessionStore: h, ProjectResolver: h}
 
 	// Dataset run handler — read endpoints are always available; POST
 	// (create run) additionally requires the judge LLM client (see routes).
 	deps.DatasetRun = &handler.DatasetRunHandler{
-		DatasetStore:    store,
+		DatasetStore:    datasetStore,
 		EvalRuleStore:   store,
 		SessionStore:    h,
 		ProjectResolver: h,

@@ -58,6 +58,94 @@ type PromptStore interface {
 	SetPromptLabel(ctx context.Context, label *domain.PromptLabel) error
 }
 
+// DatasetStore is the focused interface for dataset CRUD and dataset run
+// operations. It is implemented by *Store but also exposed via its own receiver
+// type so callers can depend on the narrow interface rather than the full god
+// Store type.
+type DatasetStore struct {
+	*Store
+}
+
+// CreateDataset inserts a new dataset record.
+func (ds *DatasetStore) CreateDataset(ctx context.Context, d *domain.Dataset) error {
+	return ds.Store.CreateDataset(ctx, d)
+}
+
+// ListDatasets lists all datasets for a project.
+func (ds *DatasetStore) ListDatasets(ctx context.Context, projectID string) ([]*domain.Dataset, error) {
+	return ds.Store.ListDatasets(ctx, projectID)
+}
+
+// GetDataset retrieves a dataset by its ID.
+func (ds *DatasetStore) GetDataset(ctx context.Context, datasetID string) (*domain.Dataset, error) {
+	return ds.Store.GetDataset(ctx, datasetID)
+}
+
+// DeleteDataset deletes a dataset and its items by dataset ID.
+func (ds *DatasetStore) DeleteDataset(ctx context.Context, datasetID string) error {
+	return ds.Store.DeleteDataset(ctx, datasetID)
+}
+
+// CreateDatasetItem inserts a new dataset item.
+func (ds *DatasetStore) CreateDatasetItem(ctx context.Context, item *domain.DatasetItem) error {
+	return ds.Store.CreateDatasetItem(ctx, item)
+}
+
+// CreateDatasetItemsBatch inserts all items in a single transaction.
+func (ds *DatasetStore) CreateDatasetItemsBatch(ctx context.Context, items []*domain.DatasetItem) error {
+	return ds.Store.CreateDatasetItemsBatch(ctx, items)
+}
+
+// ListDatasetItems lists all items for a dataset.
+func (ds *DatasetStore) ListDatasetItems(ctx context.Context, datasetID string) ([]*domain.DatasetItem, error) {
+	return ds.Store.ListDatasetItems(ctx, datasetID)
+}
+
+// ListDatasetItemsPaginated lists items with keyset cursor pagination.
+func (ds *DatasetStore) ListDatasetItemsPaginated(ctx context.Context, datasetID, cursor string, limit int) ([]*domain.DatasetItem, string, error) {
+	return ds.Store.ListDatasetItemsPaginated(ctx, datasetID, cursor, limit)
+}
+
+// CreateDatasetRun inserts a new dataset run record.
+func (ds *DatasetStore) CreateDatasetRun(ctx context.Context, run *domain.DatasetRun) error {
+	return ds.Store.CreateDatasetRun(ctx, run)
+}
+
+// GetDatasetRun retrieves a dataset run by its ID.
+func (ds *DatasetStore) GetDatasetRun(ctx context.Context, runID string) (*domain.DatasetRun, error) {
+	return ds.Store.GetDatasetRun(ctx, runID)
+}
+
+// UpdateDatasetRun updates an existing dataset run.
+func (ds *DatasetStore) UpdateDatasetRun(ctx context.Context, run *domain.DatasetRun) error {
+	return ds.Store.UpdateDatasetRun(ctx, run)
+}
+
+// ListDatasetRuns lists all runs for a dataset.
+func (ds *DatasetStore) ListDatasetRuns(ctx context.Context, datasetID string) ([]*domain.DatasetRun, error) {
+	return ds.Store.ListDatasetRuns(ctx, datasetID)
+}
+
+// CreateDatasetRunItem inserts a new dataset run item.
+func (ds *DatasetStore) CreateDatasetRunItem(ctx context.Context, item *domain.DatasetRunItem) error {
+	return ds.Store.CreateDatasetRunItem(ctx, item)
+}
+
+// GetDatasetRunItem retrieves a dataset run item by its ID.
+func (ds *DatasetStore) GetDatasetRunItem(ctx context.Context, id string) (*domain.DatasetRunItem, error) {
+	return ds.Store.GetDatasetRunItem(ctx, id)
+}
+
+// UpdateDatasetRunItem updates an existing dataset run item.
+func (ds *DatasetStore) UpdateDatasetRunItem(ctx context.Context, item *domain.DatasetRunItem) error {
+	return ds.Store.UpdateDatasetRunItem(ctx, item)
+}
+
+// ListDatasetRunItems lists all items for a dataset run.
+func (ds *DatasetStore) ListDatasetRunItems(ctx context.Context, runID string) ([]*domain.DatasetRunItem, error) {
+	return ds.Store.ListDatasetRunItems(ctx, runID)
+}
+
 //go:embed migrations/0001_init.up.sql
 var migrationSQL string
 
@@ -768,6 +856,14 @@ type AuthStore interface {
 // user and organization operations.
 func (s *Store) AuthStore() AuthStore {
 	return s
+}
+
+// DatasetStore returns a focused DatasetStore receiver for callers that only
+// need dataset operations. The Store itself already implements the focused
+// methods, so this wraps the receiver to expose the narrower type at the
+// package boundary.
+func (s *Store) DatasetStore() *DatasetStore {
+	return &DatasetStore{Store: s}
 }
 
 // ---- Eval Rules ----
