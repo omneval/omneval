@@ -13,7 +13,7 @@ import { colors } from "@/theme";
 import JsonCodeBlock from "@/components/JsonCodeBlock";
 import { Skeleton } from "@/components/Skeleton";
 import { EmptyState, LoadingState } from "@/components/EmptyState";
-import { formatTime, formatDuration, formatMs, totalTokens, parseChatTurns, getToolSummary } from "@/utils/formatters";
+import { formatTime, formatDuration, formatMs, formatCost, totalTokens, parseChatTurns, getToolSummary } from "@/utils/formatters";
 import { useToast } from "@/components/Toast";
 import SaveToDatasetModal from "@/components/SaveToDatasetModal";
 import { extractSpanMessages } from "@/utils/spanMessages";
@@ -467,7 +467,7 @@ function SlideInDetailPanel({
             <div className="flex items-center gap-3 text-xs text-omneval-text-muted mt-1">
               <span>{formatDuration(span.start_time, span.end_time)}</span>
               <span>{totalTokens(span).toLocaleString()} tokens</span>
-              <span style={{ color: colors.accents.emberFlare }}>${span.cost_usd.toFixed(4)}</span>
+              <span style={{ color: colors.accents.emberFlare }}>{formatCost(span.cost_usd)}</span>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -813,7 +813,7 @@ function SpanRow({
 
         {/* Rollup cost */}
         <span className="text-xs flex-shrink-0 hidden sm:block" style={{ color: colors.accents.emberFlare }}>
-          ${(span.rollup_cost_usd ?? 0).toFixed(4)}
+          {formatCost(span.rollup_cost_usd)}
         </span>
 
         {/* Save to dataset button */}
@@ -1256,7 +1256,7 @@ export function SlideInTraceDetail({
                     </span>
                     {(traceRollup?.costUsd ?? 0) > 0 && (
                       <span style={{ color: colors.accents.emberFlare }}>
-                        ${(traceRollup?.costUsd ?? 0).toFixed(4)}
+                        {formatCost(traceRollup?.costUsd)}
                       </span>
                     )}
                   </div>

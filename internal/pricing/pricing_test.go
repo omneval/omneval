@@ -181,3 +181,20 @@ func TestApplyOverrides(t *testing.T) {
 		t.Errorf("cost after override: got %f, want %f", got, want)
 	}
 }
+
+func TestApplyOverrides_ZeroPriceRegistersModelAsPriced(t *testing.T) {
+	tbl := NewTableFromBytes([]byte(`{}`))
+
+	// A self-hosted model listed in overrides with $0 prices is priced-at-zero,
+	// not unknown: HasModel must report true and Cost must be 0.
+	tbl.ApplyOverrides(map[string]ModelOverride{
+		"llama-3.1-70b-local": {InputPerMillion: 0, OutputPerMillion: 0},
+	})
+
+	if !tbl.HasModel("llama-3.1-70b-local") {
+		t.Errorf("HasModel: got false, want true for $0-priced override model")
+	}
+	if got := tbl.Cost("llama-3.1-70b-local", 1000, 1000); got != 0 {
+		t.Errorf("cost: got %f, want 0 for $0-priced model", got)
+	}
+}

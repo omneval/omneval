@@ -84,6 +84,59 @@ func TestHandleModels_PopulatedPricingReturnsModels(t *testing.T) {
 	}
 }
 
+func TestHandleModelsPriced_ReportsPricedStatusPerModel(t *testing.T) {
+	pricingTable := pricing.NewTableFromBytes([]byte(`{
+		"gpt-4o": {
+			"input_cost_per_token": 0.0000025,
+			"output_cost_per_token": 0.000010
+		}
+	}`))
+	h := &ModelsHandler{Pricing: pricingTable}
+
+	// Provider prefixes and case must be normalized before lookup; response keys
+	// echo the models exactly as the client sent them.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/priced?models=openai/GPT-4o,my-local-llama", nil)
+	w := httptest.NewRecorder()
+
+	h.HandleModelsPriced(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp map[string]bool
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if got, ok := resp["openai/GPT-4o"]; !ok || !got {
+		t.Errorf("openai/GPT-4o: got %v (present=%v), want true", got, ok)
+	}
+	if got, ok := resp["my-local-llama"]; !ok || got {
+		t.Errorf("my-local-llama: got %v (present=%v), want false", got, ok)
+	}
+}
+
+func TestHandleModelsPriced_NilPricingReportsAllUnpriced(t *testing.T) {
+	h := &ModelsHandler{Pricing: nil}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/priced?models=gpt-4o", nil)
+	w := httptest.NewRecorder()
+
+	h.HandleModelsPriced(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+	var resp map[string]bool
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["gpt-4o"] {
+		t.Errorf("gpt-4o: got true, want false with nil pricing table")
+	}
+}
+
 func TestHandleModels_MethodNotAllowed(t *testing.T) {
 	pricingTable := pricing.NewTableFromBytes([]byte(`{}`))
 	h := &ModelsHandler{Pricing: pricingTable}

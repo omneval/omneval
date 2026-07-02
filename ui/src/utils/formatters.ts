@@ -3,18 +3,12 @@
  */
 
 /**
- * Format an ISO timestamp to a human-readable locale string (compact, no year).
- * For dates from the current calendar year, omits the year.
+ * Format an ISO timestamp to a human-readable locale string.
+ * Dates from the current calendar year omit the year for compactness;
+ * dates from other years include it.
  */
 export function formatTime(iso: string): string {
-  if (!iso) return "N/A";
-  const d = new Date(iso);
-  return d.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatTimeWithYear(iso);
 }
 
 /**
@@ -36,17 +30,56 @@ export function formatTimeWithYear(iso: string): string {
 }
 
 /**
- * Format a duration from two ISO timestamps.
- * Returns `< 1ms` for sub-millisecond durations, `Xms` for
- * millisecond ranges, and `X.Xs` for second ranges.
+ * Format a duration in milliseconds to a human-readable string:
+ * `< 1ms`, `847ms`, `4.6s`, `1m 21s`, `1h 2m`. Raw seconds are never
+ * shown at or above one minute, raw milliseconds never at or above
+ * one second.
+ */
+export function formatDurationMs(ms: number): string {
+  if (ms <= 0) return "0ms";
+  if (ms < 1) return "< 1ms";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) {
+    const rendered = (ms / 1000).toFixed(1);
+    if (rendered !== "60.0") return `${rendered}s`;
+    // 59.95s+ rounds up to 60.0 — fall through to the minute form.
+  }
+  if (ms < 3_600_000) {
+    let minutes = Math.floor(ms / 60_000);
+    let seconds = Math.round((ms % 60_000) / 1000);
+    if (seconds === 60) {
+      minutes += 1;
+      seconds = 0;
+    }
+    if (minutes === 60) return "1h";
+    return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+  }
+  const hours = Math.floor(ms / 3_600_000);
+  const minutes = Math.floor((ms % 3_600_000) / 60_000);
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+}
+
+/**
+ * Format a duration from two ISO timestamps (see formatDurationMs).
  */
 export function formatDuration(start: string, end: string): string {
   if (!start || !end) return "N/A";
-  const ms = new Date(end).getTime() - new Date(start).getTime();
-  if (ms < 0) return "0ms";
-  if (ms < 1) return "< 1ms";
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
+  return formatDurationMs(new Date(end).getTime() - new Date(start).getTime());
+}
+
+/**
+ * Format a USD cost for display. Zero is a legitimate value (self-hosted
+ * models priced at $0) and renders plainly as `$0.00`. Small costs keep
+ * three decimals (`$0.031`), dollar-plus costs two (`$12.35`), and dust
+ * below a tenth of a cent renders as `< $0.001`.
+ */
+export function formatCost(cost: number | null | undefined): string {
+  if (cost == null || isNaN(cost) || cost <= 0) return "$0.00";
+  if (cost >= 1) return `$${cost.toFixed(2)}`;
+  if (cost < 0.001) return "< $0.001";
+  const rendered = cost.toFixed(3);
+  // Trim a trailing zero but keep at least two decimals ($0.50, $0.031).
+  return `$${rendered.endsWith("0") ? rendered.slice(0, -1) : rendered}`;
 }
 
 /**
@@ -306,11 +339,10 @@ export function getToolSummary(
 }
 
 /**
- * Format milliseconds to a human-readable string ("Xms" or "X.Xs").
+ * Format milliseconds to a human-readable string (see formatDurationMs).
  */
 export function formatMs(ms: number): string {
-  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${ms}ms`;
+  return formatDurationMs(ms);
 }
 
 /**

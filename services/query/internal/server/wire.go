@@ -232,9 +232,18 @@ func WireDeps(cfg *config.Config) (*WiredDeps, error) {
 		SessionStore: h,
 	}
 
-	// Load pricing table for the models endpoint (live fetch, bundled fallback).
+	// Load pricing table for the models endpoints (live fetch, bundled
+	// fallback). Config overrides are applied so models priced at $0
+	// (self-hosted) are reported as priced, matching the Writer's table.
 	pricing.InitBundledPricing()
-	pricingTable, err := pricing.Fetch(nil)
+	overrides := make(map[string]pricing.ModelOverride)
+	for model, ov := range cfg.Pricing.ModelOverrides {
+		overrides[model] = pricing.ModelOverride{
+			InputPerMillion:  ov.InputPerMillion,
+			OutputPerMillion: ov.OutputPerMillion,
+		}
+	}
+	pricingTable, err := pricing.Fetch(overrides)
 	if err != nil {
 		slog.Warn("query: pricing unavailable, models endpoint will return empty list", "error", err)
 	} else {

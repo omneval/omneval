@@ -152,11 +152,9 @@ func toRawMap(projectID string, resource Resource, span Span, opts Options) map[
 	// Extract prompt linkage.
 	promptName, promptVersion := resolvePromptInfo(span.Attributes)
 
-	// Extract conversation_id.
-	conversationID := extractAttributeString(span.Attributes, "gen_ai.conversation.id")
-	if conversationID == "" {
-		conversationID = extractAttributeString(span.Attributes, "omneval.conversation.id")
-	}
+	// Extract conversation_id (SDK conversation-id attributes, then
+	// session-id forms).
+	conversationID := extractConversationID(span.Attributes)
 
 	raw := map[string]any{
 		"span_id":        span.SpanID,
@@ -203,6 +201,28 @@ func totalSpanCount(rss []ResourceSpans) int {
 		total += len(rs.Spans)
 	}
 	return total
+}
+
+// conversationIDAttributes lists the span attributes that carry a
+// conversation/session identifier, in precedence order: the SDK's GenAI
+// semconv attribute, the omneval-specific form, the OTLP session semconv,
+// and the lanr association form observed in production OTLP traffic.
+var conversationIDAttributes = []string{
+	"gen_ai.conversation.id",
+	"omneval.conversation.id",
+	"session.id",
+	"lanr.association.properties.session_id",
+}
+
+// extractConversationID resolves the domain conversation id from span
+// attributes, trying each known attribute in precedence order.
+func extractConversationID(attrs map[string]any) string {
+	for _, key := range conversationIDAttributes {
+		if id := extractAttributeString(attrs, key); id != "" {
+			return id
+		}
+	}
+	return ""
 }
 
 // resolvePromptInfo extracts prompt linkage from omneval.* attributes.
@@ -549,12 +569,11 @@ func buildOverflowAttributes(attrs map[string]any, model string, inputTokens, ou
 		remove["service.name"] = true
 	}
 
-	// Conversation ID — remove both gen_ai and omneval variants.
-	if _, hasConvID := attrs["gen_ai.conversation.id"]; hasConvID {
-		remove["gen_ai.conversation.id"] = true
-	}
-	if _, hasOmnevalConvID := attrs["omneval.conversation.id"]; hasOmnevalConvID {
-		remove["omneval.conversation.id"] = true
+	// Conversation/session ID attributes already mapped to conversation_id.
+	for _, key := range conversationIDAttributes {
+		if _, ok := attrs[key]; ok {
+			remove[key] = true
+		}
 	}
 
 	// Build overflow without removed keys.

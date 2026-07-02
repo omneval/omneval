@@ -9,6 +9,7 @@ import {
   formatTimeWithYear,
   formatDuration,
   formatJsonPreview,
+  formatCost,
   totalTokens,
 } from "@/utils/formatters";
 import { presetToFromTo } from "@/utils/timeRange";
@@ -700,7 +701,7 @@ function TableCellRenderer({
           className="font-medium"
           style={{ color: colors.accents.emberFlare }}
         >
-          ${span.cost_usd.toFixed(4)}
+          {formatCost(span.cost_usd)}
         </span>
       );
     default:
