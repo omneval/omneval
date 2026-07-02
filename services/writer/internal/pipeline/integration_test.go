@@ -481,8 +481,8 @@ func TestNativeRestTraceDetailQueryRoundTrip(t *testing.T) {
 	// Ingest via native REST with message content.
 	nativeBody := []byte(`{
 		"spans": [{
-			"trace_id": "tr-native-query",
-			"span_id":  "span-native-q-1",
+			"trace_id": "aabbccddee112233aabbccddee112234",
+			"span_id":  "aabbccddee112234",
 			"name":     "agent.step",
 			"kind":     "agent",
 			"model":    "gpt-4o",
