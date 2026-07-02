@@ -866,10 +866,7 @@ func TestQueryBuilder_LakeServerIntegration(t *testing.T) {
 	ctx := context.Background()
 	lk := testLakeServer(t)
 
-	// Relative to now so the spans always fall inside the query's default
-	// time window (a fixed date rots out of the window as the calendar
-	// advances). Truncated to seconds to avoid timestamp-precision drift.
-	base := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
+	base := time.Now().UTC()
 	spans := []*domain.Span{
 		{
 			SpanID: "span-001", TraceID: "trace-001", ProjectID: "proj-lake",
@@ -896,9 +893,11 @@ func TestQueryBuilder_LakeServerIntegration(t *testing.T) {
 
 	qb := &QueryBuilder{Lake: lk}
 
-	// Execute a span query with a filter.
+	// Execute a span query with a filter (explicit time bounds to cover all spans).
 	resp, err := qb.ExecuteSpan(ctx, query.SpanQueryRequest{
 		Limit: 10,
+		From:  base.Add(-time.Minute),
+		To:    base.Add(10 * time.Second),
 		Filters: []query.SpanQueryFilter{
 			{Field: "status_code", Op: "eq", Value: "ok"},
 		},
