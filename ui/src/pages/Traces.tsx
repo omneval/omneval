@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { colors } from "@/theme";
 import { OnboardingEmptyState } from "@/components/OnboardingEmptyState";
+import { ErrorBanner } from "@/components/ErrorBanner";
 import { Skeleton } from "@/components/Skeleton";
 import { EmptyState } from "@/components/EmptyState";
 import { SpanKindIcon, getSpanKindColor, SpanKind } from "@/modules/spanKindVisuals";
@@ -8,6 +9,7 @@ import {
   formatTimeWithYear,
   formatDuration,
   formatJsonPreview,
+  formatCost,
   totalTokens,
 } from "@/utils/formatters";
 import { presetToFromTo } from "@/utils/timeRange";
@@ -213,6 +215,13 @@ const filterSectionConfig: Record<
   tokens: { field: "input_tokens", op: "gte", isRange: true },
   cost: { field: "cost_usd", op: "gte", isRange: true },
 };
+
+/** Client-side timeout for the spans list query (issue #340). */
+const QUERY_TIMEOUT_MS = 30_000;
+
+/** Time-range presets narrow enough that an empty result usually means
+ *  "nothing in this window", not "no traces at all". */
+const NARROW_TIME_RANGES = new Set(["1h", "6h", "1d"]);
 
 function isRangeFilter(val: unknown): val is RangeFilter {
   return (
@@ -692,7 +701,7 @@ function TableCellRenderer({
           className="font-medium"
           style={{ color: colors.accents.emberFlare }}
         >
-          ${span.cost_usd.toFixed(4)}
+          {formatCost(span.cost_usd)}
         </span>
       );
     default:
@@ -784,6 +793,10 @@ export default function TracesPage({
   const [spans, setSpans] = useState<Span[]>([]);
   const [nextCursor, setNextCursor] = useState("");
   const [loading, setLoading] = useState(false);
+  // Lifecycle of the current list query. "pending" until the first response
+  // arrives, so the onboarding empty state can never render while a query
+  // is still in flight; "error" surfaces a banner with Retry.
+  const [queryState, setQueryState] = useState<"pending" | "resolved" | "error">("pending");
   const [pageSize, setPageSize] = useState(25);
   const [searchQuery, setSearchQuery] = useState("");
   // Debounced copy of the search query — fetches are driven by this value
@@ -819,6 +832,10 @@ export default function TracesPage({
     trace_name: true,
   });
   const [filterState, setFilterState] = useState<FilterState>(DEFAULT_FILTERS);
+  // Distinguish "truly no traces" (onboarding) from "nothing matches the
+  // current filters / narrow time range" (lighter empty state).
+  const hasActiveFilters = buildFiltersFromState(filterState).length > 0;
+  const isNarrowTimeRange = NARROW_TIME_RANGES.has(timeRange ?? "");
   const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
 
@@ -886,6 +903,11 @@ export default function TracesPage({
     async (cursor: string, append = false) => {
       const seq = ++requestSeq.current;
       setLoading(true);
+      if (!append) setQueryState("pending");
+      // A hung query must not spin forever: abort after 30s so the user
+      // gets an error state with Retry instead of an endless skeleton.
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), QUERY_TIMEOUT_MS);
       try {
         const { from, to } = presetToFromTo(timeRange);
         const body: SpanQueryRequest = {
@@ -919,8 +941,12 @@ export default function TracesPage({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
+            signal: controller.signal,
           });
         } catch {
+          // Network failure or 30s timeout. For a fresh (non-append) load,
+          // surface the error state; for Load More, keep the current rows.
+          if (seq === requestSeq.current && !append) setQueryState("error");
           return;
         }
 
@@ -937,14 +963,17 @@ export default function TracesPage({
             setSpans(data.spans ?? []);
           }
           setNextCursor(data.next ?? "");
+          setQueryState("resolved");
         } else if (!append) {
           // The query failed for the current parameters (e.g. after a
           // project switch). Showing the previous results would attribute
-          // them to the wrong project — clear instead.
+          // them to the wrong project — clear and surface the error.
           setSpans([]);
           setNextCursor("");
+          setQueryState("error");
         }
       } finally {
+        clearTimeout(timeoutId);
         if (seq === requestSeq.current) setLoading(false);
       }
     },
@@ -1214,7 +1243,14 @@ export default function TracesPage({
 
         {/* Table */}
         <div className="flex-1 overflow-auto">
-          {spans.length === 0 && !loading ? (
+          {queryState === "error" && spans.length === 0 ? (
+            <div className="p-4">
+              <ErrorBanner
+                message="Failed to load traces. The query timed out or the server returned an error."
+                onRetry={() => fetchSpans("")}
+              />
+            </div>
+          ) : spans.length === 0 && queryState === "resolved" ? (
             searchQuery ? (
               <EmptyState
                 variant="search"
@@ -1223,10 +1259,16 @@ export default function TracesPage({
                 actionLabel="Clear Search"
                 onAction={() => setSearchQuery("")}
               />
+            ) : hasActiveFilters || isNarrowTimeRange ? (
+              <EmptyState
+                variant="search"
+                title="No matching traces"
+                description="No traces match your filters or time range"
+              />
             ) : (
               <OnboardingEmptyState />
             )
-          ) : loading && spans.length === 0 ? (
+          ) : spans.length === 0 ? (
             <div className="flex flex-col gap-2 p-4">
               {Array.from({ length: 8 }).map((_, i) => (
                 <Skeleton

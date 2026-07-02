@@ -29,13 +29,17 @@ describe("formatTime", () => {
     expect(result.length).toBeGreaterThan(3);
   });
 
-  it("formats timestamps from previous year WITHOUT year", () => {
-    // Jan 15, 2025 — if we run this test in 2026, this is a previous-year date
+  it("includes the year for timestamps from a previous year", () => {
     const iso = "2025-01-15T14:30:00Z";
     const result = formatTime(iso);
     expect(result).not.toBe("N/A");
-    // Old formatTime does NOT include year
-    expect(result).not.toMatch(/\d{4}/);
+    expect(result).toContain("2025");
+  });
+
+  it("omits the year for current-year timestamps", () => {
+    const now = new Date();
+    const result = formatTime(now.toISOString());
+    expect(result).not.toContain(now.getFullYear().toString());
   });
 });
 
@@ -183,15 +187,15 @@ describe("totalTokens", () => {
 // ── formatDuration ─────────────────────────────────────────────────
 
 describe("formatDuration", () => {
-  it("returns < 1ms for identical start and end times (0ms)", () => {
+  it("returns 0ms for identical start and end times", () => {
     const iso = "2025-01-15T10:00:00.000Z";
-    expect(formatDuration(iso, iso)).toBe("< 1ms");
+    expect(formatDuration(iso, iso)).toBe("0ms");
   });
 
-  it("returns < 1ms for sub-millisecond durations (999µs)", () => {
+  it("returns 0ms for sub-millisecond durations (JS Date truncates to whole ms)", () => {
     const start = "2025-01-15T10:00:00.000Z";
     const end = "2025-01-15T10:00:00.000999Z";
-    expect(formatDuration(start, end)).toBe("< 1ms");
+    expect(formatDuration(start, end)).toBe("0ms");
   });
 
   it("returns Xms for durations >= 1ms and < 1000ms", () => {
@@ -239,6 +243,104 @@ describe("formatDuration", () => {
     const start = "2025-01-15T10:00:00.000Z";
     const end = "2025-01-15T10:00:01.234Z";
     expect(formatDuration(start, end)).toBe("1.2s");
+  });
+});
+
+// ── formatDurationMs ───────────────────────────────────────────────
+
+import { formatDurationMs } from "@/utils/formatters";
+
+describe("formatDurationMs", () => {
+  it("renders exact zero as 0ms (chart axis origin)", () => {
+    expect(formatDurationMs(0)).toBe("0ms");
+  });
+
+  it("renders sub-millisecond durations as < 1ms", () => {
+    expect(formatDurationMs(0.4)).toBe("< 1ms");
+  });
+
+  it("renders whole milliseconds below one second", () => {
+    expect(formatDurationMs(847)).toBe("847ms");
+    expect(formatDurationMs(999)).toBe("999ms");
+  });
+
+  it("crosses the 1s boundary at 1000ms", () => {
+    expect(formatDurationMs(1000)).toBe("1.0s");
+  });
+
+  it("renders seconds with one decimal below one minute", () => {
+    expect(formatDurationMs(4600)).toBe("4.6s");
+    expect(formatDurationMs(59_900)).toBe("59.9s");
+  });
+
+  it("crosses the 1m boundary just below 60s (59.96s → 1m)", () => {
+    expect(formatDurationMs(59_960)).toBe("1m");
+  });
+
+  it("renders minutes and seconds below one hour", () => {
+    expect(formatDurationMs(81_000)).toBe("1m 21s");
+    expect(formatDurationMs(3_599_000)).toBe("59m 59s");
+  });
+
+  it("drops zero seconds in the minute range", () => {
+    expect(formatDurationMs(120_000)).toBe("2m");
+  });
+
+  it("renders hours and minutes at one hour and above", () => {
+    expect(formatDurationMs(3_600_000)).toBe("1h");
+    expect(formatDurationMs(3_720_000)).toBe("1h 2m");
+  });
+
+  it("renders the issue's 3699.5s example as hours + minutes, never raw seconds", () => {
+    expect(formatDurationMs(3_699_500)).toBe("1h 1m");
+  });
+
+  it("clamps negative durations to 0ms", () => {
+    expect(formatDurationMs(-5)).toBe("0ms");
+  });
+});
+
+// ── formatDuration (minute+ ranges) ────────────────────────────────
+
+describe("formatDuration above one minute", () => {
+  it("never renders raw seconds above 60s", () => {
+    const start = "2025-01-15T10:00:00.000Z";
+    const end = "2025-01-15T11:01:39.500Z"; // 3699.5s
+    expect(formatDuration(start, end)).toBe("1h 1m");
+  });
+});
+
+// ── formatCost ─────────────────────────────────────────────────────
+
+import { formatCost } from "@/utils/formatters";
+
+describe("formatCost", () => {
+  it("renders zero plainly as $0.00 (priced-at-zero is a legitimate value)", () => {
+    expect(formatCost(0)).toBe("$0.00");
+  });
+
+  it("renders small costs with enough precision", () => {
+    expect(formatCost(0.031)).toBe("$0.031");
+    expect(formatCost(0.0123)).toBe("$0.012");
+  });
+
+  it("trims trailing zeros but keeps at least two decimals", () => {
+    expect(formatCost(0.5)).toBe("$0.50");
+  });
+
+  it("renders costs of a dollar or more with two decimals", () => {
+    expect(formatCost(12.3456)).toBe("$12.35");
+    expect(formatCost(1)).toBe("$1.00");
+  });
+
+  it("renders dust amounts as a floor", () => {
+    expect(formatCost(0.0004)).toBe("< $0.001");
+  });
+
+  it("handles null/undefined/NaN gracefully", () => {
+    expect(formatCost(undefined)).toBe("$0.00");
+    expect(formatCost(null)).toBe("$0.00");
+    expect(formatCost(NaN)).toBe("$0.00");
   });
 });
 

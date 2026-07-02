@@ -30,7 +30,9 @@ describe("formatMs (milliseconds display)", () => {
     [1500, "1.5s"],
     [5000, "5.0s"],
     [12345, "12.3s"],
-    [60000, "60.0s"],
+    [60000, "1m"],
+    [81000, "1m 21s"],
+    [3720000, "1h 2m"],
   ];
 
   it.each(testCases)("formats %d ms as '%s'", (ms, expected) => {
