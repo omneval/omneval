@@ -375,3 +375,14 @@ export function totalTokens(span: HasTokenCounts): number {
   const output = Math.max(0, span.output_tokens);
   return input + output;
 }
+
+/**
+ * Format an OTLP span status code for display. UNSET means "no status was
+ * reported" per OTLP semantics, so it renders as "No status" rather than
+ * the raw enum; empty renders as an em dash; other codes pass through.
+ */
+export function formatStatus(code: string | undefined): string {
+  if (!code) return "—";
+  if (code.toUpperCase() === "UNSET") return "No status";
+  return code;
+}

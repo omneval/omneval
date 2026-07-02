@@ -1167,3 +1167,53 @@ func TestCompileLake_PartitionPruningPreserved(t *testing.T) {
 		t.Errorf("expected at least 1 row from proj-a partition, got count=%d", count)
 	}
 }
+
+// TestCompileLake_ErrorCountExcludesUnsetAndOK verifies the error-rate
+// definition used by the Dashboard (issue #341): only STATUS_ERROR spans
+// count as errors. UNSET and OK are non-errors per OTLP semantics, so an
+// error count filtered as `status_code in ("ERROR","error")` must exclude
+// them (a `neq OK` filter would wrongly count UNSET spans).
+func TestCompileLake_ErrorCountExcludesUnsetAndOK(t *testing.T) {
+	ctx := context.Background()
+	l := laketest.NewLocal(t)
+
+	base := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
+	statuses := []string{"UNSET", "OK", "ERROR", "error", ""}
+	spans := make([]*domain.Span, 0, len(statuses))
+	for i, status := range statuses {
+		spans = append(spans, &domain.Span{
+			SpanID:     fmt.Sprintf("s-%d", i),
+			TraceID:    fmt.Sprintf("t-%d", i),
+			ProjectID:  "proj-status",
+			StartTime:  base.Add(time.Duration(i) * time.Second),
+			EndTime:    base.Add(time.Duration(i)*time.Second + time.Second),
+			StatusCode: status,
+		})
+	}
+	if err := l.InsertSpans(ctx, spans); err != nil {
+		t.Fatalf("insert spans: %v", err)
+	}
+
+	q := Query{
+		From: base.Add(-time.Minute),
+		To:   base.Add(time.Minute),
+		Filters: []Filter{
+			{Field: "status_code", Op: OpIn, Value: []any{"ERROR", "error"}},
+		},
+		Aggregations: []Aggregation{
+			{Function: AggCount, Field: "*", Alias: "error_count"},
+		},
+	}
+	sql, args, err := CompileLake("proj-status", q)
+	if err != nil {
+		t.Fatalf("CompileLake: %v", err)
+	}
+
+	var errorCount int64
+	if err := l.DB().QueryRowContext(ctx, sql, args...).Scan(&errorCount); err != nil {
+		t.Fatalf("execute error-count query: %v", err)
+	}
+	if errorCount != 2 {
+		t.Errorf("error_count: got %d, want 2 (only ERROR/error spans; UNSET, OK and empty must not count)", errorCount)
+	}
+}

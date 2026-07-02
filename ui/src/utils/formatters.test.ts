@@ -438,3 +438,25 @@ describe("getToolSummary", () => {
     expect(summary!.detail).toContain("plain text output");
   });
 });
+
+// ── formatStatus ───────────────────────────────────────────────────
+
+import { formatStatus } from "@/utils/formatters";
+
+describe("formatStatus", () => {
+  it("renders UNSET as 'No status', not the raw enum", () => {
+    expect(formatStatus("UNSET")).toBe("No status");
+    expect(formatStatus("unset")).toBe("No status");
+  });
+
+  it("passes through other statuses unchanged", () => {
+    expect(formatStatus("OK")).toBe("OK");
+    expect(formatStatus("ERROR")).toBe("ERROR");
+    expect(formatStatus("error")).toBe("error");
+  });
+
+  it("renders empty/undefined as an em dash", () => {
+    expect(formatStatus("")).toBe("—");
+    expect(formatStatus(undefined)).toBe("—");
+  });
+});

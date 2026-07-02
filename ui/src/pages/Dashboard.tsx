@@ -115,6 +115,20 @@ export function formatTraceTimeTick(val: number, presetKey: string): string {
 
 const DASHBOARD_DATE_RANGE_DAYS = 7;
 
+/**
+ * The single definition of "error" shared by the Error Rate KPI and the
+ * Error Rate chart, so they can never disagree. Per OTLP semantics only
+ * STATUS_ERROR is an error — UNSET and OK are non-errors, so filtering
+ * `status_code neq OK` (which counts UNSET spans) is wrong. Both case
+ * variants are matched because OTLP ingestion stores "ERROR" while the
+ * native SDK path stores "error".
+ */
+export const ERROR_STATUS_FILTER = {
+  field: "status_code",
+  op: "in",
+  value: ["ERROR", "error"],
+} as const;
+
 /** Map from Header time-range preset values to human-readable labels. */
 const TIME_RANGE_LABELS: Record<string, string> = {
   "1h": "Past 1 hour",
@@ -1235,9 +1249,7 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
       const kpiErrorCountReq: AnalyticsRequest = {
         ...body,
         group_by: [],
-        filters: [
-          { field: "status_code", op: "neq", value: "OK" },
-        ],
+        filters: [ERROR_STATUS_FILTER],
         aggregations: [
           { function: "count", field: "*", alias: "error_count" },
         ],
@@ -1273,9 +1285,7 @@ export default function DashboardPage({ activeProject, timeRange }: DashboardPag
 
       const errorRateErrorReq: AnalyticsRequest = {
         ...body,
-        filters: [
-          { field: "status_code", op: "neq", value: "OK" },
-        ],
+        filters: [ERROR_STATUS_FILTER],
         group_by: [
           { field: "time_bucket", interval: "1h" },
         ],

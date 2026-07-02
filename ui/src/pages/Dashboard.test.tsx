@@ -950,6 +950,43 @@ describe("DashboardPage", () => {
     });
   });
 
+  // ── Issue #341: STATUS_UNSET must not count as error ────────────────
+
+  it("#341: error-count requests filter to explicit error statuses, never 'neq OK'", async () => {
+    const errorCountBodies: AnalyticsRequest[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (url === "/api/v1/analytics/spans" && options?.body) {
+        const body = JSON.parse(options.body as string) as AnalyticsRequest;
+        if (body.aggregations?.some((a: { alias: string }) => a.alias === "error_count")) {
+          errorCountBodies.push(body);
+        }
+        return resolveAnalyticsResponse({ rows: [] });
+      }
+      return rejectAnalyticsResponse();
+    });
+
+    renderWithToast(<DashboardPage activeProject="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    });
+
+    // Both the KPI error-count and the chart error-count requests exist.
+    expect(errorCountBodies.length).toBeGreaterThanOrEqual(2);
+
+    for (const body of errorCountBodies) {
+      const statusFilters = body.filters.filter((f) => f.field === "status_code");
+      expect(statusFilters.length).toBeGreaterThan(0);
+      for (const f of statusFilters) {
+        // OTLP semantics: only STATUS_ERROR is an error. UNSET and OK are
+        // non-errors, so 'status_code neq OK' (which counts UNSET) is wrong.
+        expect(f.op).toBe("in");
+        expect(f.value).toEqual(["ERROR", "error"]);
+      }
+    }
+  });
+
   // ── Issue #239: Latency-percentile chart ────────────────────────────
 
   it("#239: latency-percentile chart renders when API returns percentile data", async () => {
@@ -1123,7 +1160,7 @@ describe("DashboardPage", () => {
     // Must have a separate error-count request with status_code filter
     expect(errorBodies.length).toBe(1);
     const errBody = errorBodies[0];
-    expect(errBody.filters.some((f: { field: string; op: string }) => f.field === "status_code" && f.op === "neq")).toBe(true);
+    expect(errBody.filters.some((f: { field: string; op: string }) => f.field === "status_code" && f.op === "in")).toBe(true);
 
     // Must have a separate total-count request without the status_code filter
     expect(totalBodies.length).toBe(1);

@@ -13,7 +13,8 @@ import { colors } from "@/theme";
 import JsonCodeBlock from "@/components/JsonCodeBlock";
 import { Skeleton } from "@/components/Skeleton";
 import { EmptyState, LoadingState } from "@/components/EmptyState";
-import { formatTime, formatDuration, formatMs, formatCost, totalTokens, parseChatTurns, getToolSummary } from "@/utils/formatters";
+import { formatTime, formatDuration, formatMs, formatStatus, totalTokens, parseChatTurns, getToolSummary } from "@/utils/formatters";
+
 import { useToast } from "@/components/Toast";
 import SaveToDatasetModal from "@/components/SaveToDatasetModal";
 import { extractSpanMessages } from "@/utils/spanMessages";
@@ -572,7 +573,7 @@ function SlideInDetailPanel({
             {span.status_code && (
               <div>
                 <span className="text-omneval-text-muted">Status</span>
-                <div className="text-omneval-text-pure mt-0.5">{span.status_code}</div>
+                <div className="text-omneval-text-pure mt-0.5">{formatStatus(span.status_code)}</div>
               </div>
             )}
           </div>
